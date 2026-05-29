@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     boxShadow:
-      '0 14px 26px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.72), inset 0 -10px 18px rgba(91, 200, 232, 0.08)',
+      '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   blockCompact: {
     gap: spacing.xs,
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(252, 252, 255, 0.74)',
     boxShadow:
-      '0 8px 14px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.84), inset 0 -8px 14px rgba(91, 200, 232, 0.12)',
+      '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   keyAction: {
     backgroundColor: colors.glass.textBacking,

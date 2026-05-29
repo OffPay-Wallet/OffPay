@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
-    boxShadow: `0 12px 24px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.72)`,
+    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   rowHeader: {
     flexDirection: 'row',

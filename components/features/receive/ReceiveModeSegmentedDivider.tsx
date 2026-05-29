@@ -1,12 +1,11 @@
 import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
-  Easing,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
-  withTiming,
+  withSpring,
+  type WithSpringConfig,
 } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
@@ -22,10 +21,11 @@ import { fontFamily } from '@/constants/typography';
  *     that drives the thumb position on the UI thread. We never store
  *     it in React state, so `onChangeMode` does not trigger a layout
  *     pass on every selection.
- *   - The thumb position is derived from `selectedIndex` and
- *     `trackWidth` shared values together, so the React tree does
- *     nothing on tap beyond firing the `onChangeMode` callback. The
- *     animation runs entirely on the UI thread.
+ *   - The thumb slides the instant the user taps: the press handler
+ *     writes `selectedIndex` directly (UI thread), so the slide is
+ *     decoupled from the parent's (potentially heavy) re-render. The
+ *     prop-driven effect only reconciles external mode changes (e.g.
+ *     auto-switch to Private on a pending claim).
  *   - Each segment row is memoised so re-rendering the parent does
  *     not re-render the labels / badge / icons.
  */
@@ -50,7 +50,13 @@ const MODES: readonly ModeDescriptor[] = [
 ];
 const TRACK_PADDING = 4;
 const SEGMENT_GAP = 0;
-const TRACK_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) };
+// Snappy spring — the thumb slides with a tight, smooth motion and a
+// barely-perceptible settle. Runs entirely on the UI thread.
+const THUMB_SPRING: WithSpringConfig = {
+  damping: 22,
+  stiffness: 320,
+  mass: 0.7,
+};
 
 function modeIndex(mode: ReceiveMode): number {
   for (let i = 0; i < MODES.length; i += 1) {
@@ -75,11 +81,23 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
   const trackWidth = useSharedValue(0);
   const selectedIndex = useSharedValue(modeIndex(selectedMode));
 
-  // Drive `selectedIndex` from a worklet so the thumb starts moving the
-  // moment the user taps, without waiting on React's render commit.
-  React.useLayoutEffect(() => {
-    selectedIndex.value = withTiming(modeIndex(selectedMode), TRACK_TIMING);
+  // Reconcile the thumb with the prop for *external* mode changes only.
+  // Taps already moved the thumb in the press handler, so when the prop
+  // later catches up this resolves to the same target (a no-op).
+  React.useEffect(() => {
+    selectedIndex.value = withSpring(modeIndex(selectedMode), THUMB_SPRING);
   }, [selectedIndex, selectedMode]);
+
+  // Slide the thumb immediately on tap, on the UI thread, without
+  // waiting for the parent's state commit. The parent still updates its
+  // mode via `onChangeMode`; this just unblocks the visual.
+  const handleSelect = useCallback(
+    (mode: ReceiveMode) => {
+      selectedIndex.value = withSpring(modeIndex(mode), THUMB_SPRING);
+      onChangeMode(mode);
+    },
+    [onChangeMode, selectedIndex],
+  );
 
   // Compute thumb width and position purely on the UI thread.
   const segmentWidth = useDerivedValue(() => {
@@ -114,13 +132,7 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
 
   return (
     <View style={[styles.wrapper, compact && styles.wrapperCompact]}>
-      <LinearGradient
-        colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.track, { height: trackHeight }]}
-        onLayout={handleLayout}
-      >
+      <View style={[styles.track, { height: trackHeight }]} onLayout={handleLayout}>
         <Animated.View pointerEvents="none" style={[styles.thumb, thumbStyle]} />
         <View style={styles.segmentRow}>
           {MODES.map((mode) => (
@@ -132,11 +144,11 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
               labelFontSize={labelFontSize}
               labelLineHeight={labelLineHeight}
               badge={mode.id === 'private' ? privateModeBadge : undefined}
-              onPress={onChangeMode}
+              onPress={handleSelect}
             />
           ))}
         </View>
-      </LinearGradient>
+      </View>
     </View>
   );
 });
@@ -210,7 +222,7 @@ const ReceiveModeSegment = memo(function ReceiveModeSegment({
           >
             <Text
               variant="caption"
-              color={selected ? colors.text.primary : colors.text.onAccent}
+              color={colors.text.onAccent}
               style={styles.badgeText}
               numberOfLines={1}
               maxFontSizeMultiplier={1}
@@ -231,26 +243,21 @@ const styles = StyleSheet.create({
   wrapperCompact: {
     marginBottom: spacing.sm,
   },
+  // Container-less segmented control — no track background, border, or
+  // shadow (matches the home Portfolio/Shielded toggle). Only the
+  // active segment carries a subtle frosted shade; inactive is muted
+  // text.
   track: {
     width: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.clearFill,
     padding: TRACK_PADDING,
-    boxShadow: `0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.1)`,
   },
   thumb: {
     position: 'absolute',
     top: TRACK_PADDING,
     left: TRACK_PADDING,
-    backgroundColor: colors.brand.azureCyan,
-    boxShadow: `0 8px 16px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78)`,
+    backgroundColor: colors.glass.strongFill,
   },
   segmentRow: {
     flex: 1,
@@ -292,7 +299,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeOnSelected: {
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.brand.azureCyan,
   },
   badgeOnUnselected: {
     backgroundColor: colors.brand.azureCyan,

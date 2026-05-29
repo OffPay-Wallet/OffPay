@@ -42,6 +42,7 @@ import { TokenHoldingsCard } from '@/components/features/home/TokenHoldingsCard'
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { OFFLINE_PAYMENT_SLOT_DEFAULT } from '@/constants/offline-payment-slots';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -1064,7 +1065,7 @@ export function HomeScreenContent(): React.JSX.Element {
               />
             </Animated.View>
 
-            <Animated.View style={tokensStyle}>
+            <StaggerRevealItem index={0} trigger={homeBalanceMode} style={tokensStyle}>
               <TokenHoldingsCard
                 holdings={previewHoldings}
                 onTokenPress={handleTokenPress}
@@ -1076,9 +1077,9 @@ export function HomeScreenContent(): React.JSX.Element {
                 valuations={portfolioValuationQuery.data?.tokenValues}
                 loading={holdingsLoading}
               />
-            </Animated.View>
+            </StaggerRevealItem>
 
-            <Animated.View style={tokensStyle}>
+            <StaggerRevealItem index={1} trigger={homeBalanceMode} style={tokensStyle}>
               <RecentActivityCard
                 transactions={recentActivity}
                 onTransactionPress={handleActivityPress}
@@ -1090,7 +1091,7 @@ export function HomeScreenContent(): React.JSX.Element {
                 loading={activityLoading}
                 tokenLogos={tokenLogoMap}
               />
-            </Animated.View>
+            </StaggerRevealItem>
           </Animated.View>
         )}
       </ScrollView>

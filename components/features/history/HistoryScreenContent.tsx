@@ -14,6 +14,7 @@ import { PuffyRefreshIcon } from '@/components/ui/icons/PuffyRefreshIcon';
 import { Text } from '@/components/ui/Text';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { GradientBackground } from '@/components/ui/GradientBackground';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { HistoryList } from '@/components/features/history/HistoryList';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -286,13 +287,13 @@ export function HistoryScreenContent(): React.JSX.Element {
         </Animated.View>
       </View>
 
-      <Animated.View entering={FadeIn.duration(180)} style={styles.listLayer}>
+      <StaggerRevealItem index={0} style={styles.listLayer}>
         <HistoryList
           transactionsQuery={transactionsQuery}
           localReceipts={localReceipts}
           onTransactionPress={handleTransactionPress}
         />
-      </Animated.View>
+      </StaggerRevealItem>
     </View>
   );
 }

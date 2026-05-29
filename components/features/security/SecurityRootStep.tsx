@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
     width: layout.iconSizeNav,
     height: layout.iconSizeNav,
     borderRadius: radii.full,
-    boxShadow: '0 6px 12px rgba(14, 42, 53, 0.14)',
+    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   toggleKnobOn: { backgroundColor: colors.brand.azureCyan },
   toggleKnobOff: { backgroundColor: colors.glass.strongFill },

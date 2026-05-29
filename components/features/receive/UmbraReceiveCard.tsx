@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -62,6 +63,12 @@ interface UmbraReceiveCardProps {
   historyLimit?: number;
   /** Tap handler for the "View all" CTA. Hidden when omitted. */
   onViewAllHistory?: () => void;
+  /**
+   * Replays the staggered entrance of the inner cards whenever this
+   * value changes (e.g. when the receive screen switches to the
+   * private tab). Omit for a one-shot reveal on mount.
+   */
+  revealKey?: string | number | boolean;
 }
 
 function statusToneColor(tone: StatusTone | undefined): string {
@@ -94,7 +101,7 @@ interface SetupSectionProps {
 }
 
 const SetupSection = memo(function SetupSection({
-  title: _title,
+  title,
   buttonLabel,
   loadingLabel,
   onPress,
@@ -111,6 +118,17 @@ const SetupSection = memo(function SetupSection({
         end={{ x: 1, y: 1 }}
         style={styles.bodyCard}
       >
+        <Text
+          variant="bodyBold"
+          color={colors.text.primary}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+          maxFontSizeMultiplier={1.1}
+          style={styles.cardHeading}
+        >
+          {title}
+        </Text>
         <View style={styles.setupRow}>
           {/* Left column — STATUS box. */}
           <View style={styles.setupCell}>
@@ -460,6 +478,7 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
   history,
   historyLimit = 3,
   onViewAllHistory,
+  revealKey,
 }: UmbraReceiveCardProps): React.JSX.Element {
   const trimmedHistory = useMemo(() => {
     if (history == null || history.length === 0) return [];
@@ -473,21 +492,6 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
       layout={LinearTransition.duration(200)}
     >
       <View style={styles.container}>
-        {/* Header — centered solid-blue badge. */}
-        <View style={styles.headerBadgeWrap}>
-          <View style={styles.headerBadge}>
-            <Text
-              variant="bodyBold"
-              color={colors.text.inverse}
-              numberOfLines={1}
-              maxFontSizeMultiplier={1.1}
-              style={styles.headerBadgeText}
-            >
-              Umbra Claims
-            </Text>
-          </View>
-        </View>
-
         {/* Unavailable */}
         {unavailableMessage != null ? (
           <Animated.View entering={FadeIn.duration(180)}>
@@ -521,40 +525,41 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
 
         {/* Setup */}
         {unavailableMessage == null && setupPanel != null ? (
-          <SetupSection
-            title={setupPanel.title}
-            buttonLabel={setupPanel.buttonLabel}
-            loadingLabel={setupPanel.loadingLabel}
-            onPress={setupPanel.onPress}
-            disabled={setupPanel.disabled}
-            loading={setupPanel.loading}
-            accessibilityLabel={setupPanel.accessibilityLabel}
-            completed={setupPanel.completed === true}
-          />
+          <StaggerRevealItem index={0} trigger={revealKey}>
+            <SetupSection
+              title={setupPanel.title}
+              buttonLabel={setupPanel.buttonLabel}
+              loadingLabel={setupPanel.loadingLabel}
+              onPress={setupPanel.onPress}
+              disabled={setupPanel.disabled}
+              loading={setupPanel.loading}
+              accessibilityLabel={setupPanel.accessibilityLabel}
+              completed={setupPanel.completed === true}
+            />
+          </StaggerRevealItem>
         ) : null}
 
         {/* Claim */}
         {unavailableMessage == null && pendingClaimPanel != null ? (
-          <ClaimSection
-            status={pendingClaimPanel.status}
-            statusTone={pendingClaimPanel.statusTone}
-            buttonLabel={pendingClaimPanel.buttonLabel}
-            loadingLabel={pendingClaimPanel.loadingLabel}
-            onPress={pendingClaimPanel.onPress}
-            onViewAllPress={pendingClaimPanel.onViewAllPress}
-            disabled={pendingClaimPanel.disabled}
-            loading={pendingClaimPanel.loading}
-            accessibilityLabel={pendingClaimPanel.accessibilityLabel}
-            pendingCount={pendingClaimPanel.pendingCount}
-          />
+          <StaggerRevealItem index={1} trigger={revealKey}>
+            <ClaimSection
+              status={pendingClaimPanel.status}
+              statusTone={pendingClaimPanel.statusTone}
+              buttonLabel={pendingClaimPanel.buttonLabel}
+              loadingLabel={pendingClaimPanel.loadingLabel}
+              onPress={pendingClaimPanel.onPress}
+              onViewAllPress={pendingClaimPanel.onViewAllPress}
+              disabled={pendingClaimPanel.disabled}
+              loading={pendingClaimPanel.loading}
+              accessibilityLabel={pendingClaimPanel.accessibilityLabel}
+              pendingCount={pendingClaimPanel.pendingCount}
+            />
+          </StaggerRevealItem>
         ) : null}
 
         {/* History */}
         {trimmedHistory.length > 0 ? (
-          <Animated.View
-            entering={FadeIn.duration(220).delay(80)}
-            layout={LinearTransition.duration(200)}
-          >
+          <StaggerRevealItem index={2} trigger={revealKey}>
             <LinearGradient
               colors={[...PRIVATE_CARD_COLORS]}
               start={{ x: 0.04, y: 0 }}
@@ -605,7 +610,7 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
                 ))}
               </View>
             </LinearGradient>
-          </Animated.View>
+          </StaggerRevealItem>
         ) : null}
       </View>
     </Animated.View>
@@ -637,34 +642,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
   },
+  // Card heading — left-aligned title inside the first (setup) card,
+  // replacing the old floating "Umbra Claims" badge.
+  cardHeading: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
+    letterSpacing: -0.2,
+    textAlign: 'left',
+  },
   descriptionText: {
     lineHeight: 18,
-  },
-
-  // Header badge — centered solid-blue pill (no card).
-  headerBadgeWrap: {
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerBadge: {
-    minHeight: 36,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.xs,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    backgroundColor: colors.brand.azureBlue,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    maxWidth: '100%',
-  },
-  headerBadgeText: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: 15,
-    lineHeight: 20,
-    letterSpacing: -0.1,
-    textAlign: 'center',
   },
 
   // Body card (used by setup / claim / history / unavailable).
@@ -675,7 +663,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
-    boxShadow: `0 12px 24px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.72)`,
+    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
 
   // Setup row — equal-width left/right columns. Each cell flexes

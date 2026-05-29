@@ -19,6 +19,7 @@ import { SettingsRow } from '@/components/features/settings/SettingsRow';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { WalletCard } from '@/components/features/settings/WalletCard';
 import { useAppToast } from '@/components/ui/AppToast';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
 import { PuffyInfoCircleIcon } from '@/components/ui/icons/PuffyInfoCircleIcon';
 import { PuffyShieldIcon } from '@/components/ui/icons/PuffyShieldIcon';
@@ -126,78 +127,90 @@ export function SettingsScreenContent({
         keyboardShouldPersistTaps="handled"
       >
         <View style={[styles.contentFrame, { width: contentFrameWidth, gap: sectionGap }]}>
-          <WalletCard compact={compact} dense={dense} />
+          <StaggerRevealItem index={0}>
+            <WalletCard compact={compact} dense={dense} />
+          </StaggerRevealItem>
 
           <View style={[styles.sections, { gap: sectionGap }]}>
-            <SettingsSectionCard>
-              <SettingsRow
-                iconNode={
-                  <PuffySlidersIcon size={rowIconSize} color={colors.text.primary} focused />
-                }
-                label="Preferences"
-                subtitle="Wallet mode, offline payments, network"
-                compact={compact}
-                dense={dense}
-                onPress={() => router.push('/preferences')}
-              />
-            </SettingsSectionCard>
+            <StaggerRevealItem index={1}>
+              <SettingsSectionCard>
+                <SettingsRow
+                  iconNode={
+                    <PuffySlidersIcon size={rowIconSize} color={colors.text.primary} focused />
+                  }
+                  label="Preferences"
+                  subtitle="Wallet mode, offline payments, network"
+                  compact={compact}
+                  dense={dense}
+                  onPress={() => router.push('/preferences')}
+                />
+              </SettingsSectionCard>
+            </StaggerRevealItem>
 
-            <SettingsSectionCard>
-              <SettingsRow
-                iconNode={
-                  <PuffyShieldIcon size={rowIconSize} color={colors.text.primary} focused />
-                }
-                label="Security"
-                subtitle="Fingerprint, passcode, wallet keys"
-                compact={compact}
-                dense={dense}
-                onPress={() => router.push('/security')}
-              />
-            </SettingsSectionCard>
+            <StaggerRevealItem index={2}>
+              <SettingsSectionCard>
+                <SettingsRow
+                  iconNode={
+                    <PuffyShieldIcon size={rowIconSize} color={colors.text.primary} focused />
+                  }
+                  label="Security"
+                  subtitle="Fingerprint, passcode, wallet keys"
+                  compact={compact}
+                  dense={dense}
+                  onPress={() => router.push('/security')}
+                />
+              </SettingsSectionCard>
+            </StaggerRevealItem>
 
-            <SettingsSectionCard>
-              <SettingsRow
-                iconNode={
-                  <PuffySupportIcon size={rowIconSize} color={colors.text.primary} focused />
-                }
-                label="Support"
-                subtitle={SUPPORT_EMAIL}
-                isExternal
-                compact={compact}
-                dense={dense}
-                onPress={() => {
-                  void Linking.openURL(SUPPORT_EMAIL_URL);
-                }}
-              />
-            </SettingsSectionCard>
+            <StaggerRevealItem index={3}>
+              <SettingsSectionCard>
+                <SettingsRow
+                  iconNode={
+                    <PuffySupportIcon size={rowIconSize} color={colors.text.primary} focused />
+                  }
+                  label="Support"
+                  subtitle={SUPPORT_EMAIL}
+                  isExternal
+                  compact={compact}
+                  dense={dense}
+                  onPress={() => {
+                    void Linking.openURL(SUPPORT_EMAIL_URL);
+                  }}
+                />
+              </SettingsSectionCard>
+            </StaggerRevealItem>
 
-            <SettingsSectionCard>
-              <SettingsRow
-                iconNode={
-                  <PuffyTwitterXIcon size={rowIconSize} color={colors.text.primary} focused />
-                }
-                label="X (Twitter)"
-                subtitle={X_HANDLE}
-                isExternal
-                compact={compact}
-                dense={dense}
-                onPress={() => {
-                  void Linking.openURL(X_PROFILE_URL);
-                }}
-              />
-            </SettingsSectionCard>
+            <StaggerRevealItem index={4}>
+              <SettingsSectionCard>
+                <SettingsRow
+                  iconNode={
+                    <PuffyTwitterXIcon size={rowIconSize} color={colors.text.primary} focused />
+                  }
+                  label="X (Twitter)"
+                  subtitle={X_HANDLE}
+                  isExternal
+                  compact={compact}
+                  dense={dense}
+                  onPress={() => {
+                    void Linking.openURL(X_PROFILE_URL);
+                  }}
+                />
+              </SettingsSectionCard>
+            </StaggerRevealItem>
 
-            <SettingsSectionCard>
-              <SettingsRow
-                iconNode={
-                  <PuffyInfoCircleIcon size={rowIconSize} color={colors.text.primary} focused />
-                }
-                label="About"
-                subtitle={aboutSubtitle}
-                compact={compact}
-                dense={dense}
-              />
-            </SettingsSectionCard>
+            <StaggerRevealItem index={5}>
+              <SettingsSectionCard>
+                <SettingsRow
+                  iconNode={
+                    <PuffyInfoCircleIcon size={rowIconSize} color={colors.text.primary} focused />
+                  }
+                  label="About"
+                  subtitle={aboutSubtitle}
+                  compact={compact}
+                  dense={dense}
+                />
+              </SettingsSectionCard>
+            </StaggerRevealItem>
 
             {/* Danger zone — single centered Reset button. Tap opens
                 the confirmation modal so a single press can never wipe
@@ -425,7 +438,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     padding: spacing.xl,
     gap: spacing.md,
-    boxShadow: `0 22px 44px rgba(14, 42, 53, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.88), inset 0 -14px 24px rgba(91, 200, 232, 0.12)`,
+    boxShadow: `0 8px 24px rgba(14, 42, 53, 0.18)`,
   },
   confirmTitle: {
     textAlign: 'center',

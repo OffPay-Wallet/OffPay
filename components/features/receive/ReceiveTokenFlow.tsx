@@ -12,7 +12,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   runOnJS,
@@ -22,7 +21,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { DottedQRCode } from '@/components/ui/DottedQRCode';
-import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from '@/components/features/swap/swapGlass';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import {
   ReceiveModeSegmentedDivider,
   type ReceiveMode,
@@ -75,16 +74,13 @@ const RECEIVE_QR_LOGO = require('../../../assets/appIcons/android/playstore-icon
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_ROUTE_MINT = 'native-sol';
 const RECEIVE_CONTENT_MAX_WIDTH = 430;
-// Crossfade timings for the standard / private content swap. Out is
-// quick (the user has already committed to the new mode); in is a
-// shade longer so the new content settles smoothly.
+// Fade-out timing for the standard / private content swap. The
+// outgoing content fades quickly (the user has already committed to
+// the new mode); the incoming content is revealed by the per-component
+// StaggerReveal rather than a container fade-in.
 const MODE_CONTENT_FADE_OUT = {
   duration: 140,
   easing: Easing.in(Easing.cubic),
-} as const;
-const MODE_CONTENT_FADE_IN = {
-  duration: 220,
-  easing: Easing.out(Easing.cubic),
 } as const;
 
 function formatNetworkLabel(network: string | null): string {
@@ -118,18 +114,9 @@ function HeaderIconButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={active ? { selected: true } : undefined}
     >
-      <LinearGradient
-        colors={[
-          colors.glass.strongFill,
-          active ? colors.glass.cyanWash : colors.glass.frostFill,
-          colors.glass.clearFill,
-        ]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerIconSurface}
-      >
+      <View style={[styles.headerIconSurface, active ? styles.headerIconSurfaceActive : null]}>
         {children}
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -383,11 +370,13 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const isUmbraSurfaceVisible =
     renderedReceiveMode === 'private' && (canShowUmbraReceiveRoute || pendingClaimCount > 0);
 
-  // Crossfade the content area on mode change. The fade-out runs
-  // first; once it lands we commit the new mode and then fade back to
-  // 1. Both subtrees stay mounted (display: none) so swapping back is
-  // free — the QR component never has to rebuild its 700+ SVG nodes,
-  // and the Umbra hooks keep their warm React Query cache.
+  // Crossfade the content area out on mode change. The fade-out runs
+  // first; once it lands we commit the new mode, then snap the
+  // container back to full opacity and let the per-component
+  // StaggerReveal handle the smooth entrance of the new content. Both
+  // subtrees stay mounted (display: none) so swapping back is free —
+  // the QR component never rebuilds its 700+ SVG nodes, and the Umbra
+  // hooks keep their warm React Query cache.
   useEffect(() => {
     if (renderedReceiveMode === receiveMode) return;
     modeContentOpacity.value = withTiming(0, MODE_CONTENT_FADE_OUT, (finished) => {
@@ -397,7 +386,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   }, [modeContentOpacity, receiveMode, renderedReceiveMode]);
 
   useEffect(() => {
-    modeContentOpacity.value = withTiming(1, MODE_CONTENT_FADE_IN);
+    // Snap the container opaque immediately — the staggered reveal of
+    // the individual components is now the visible entrance.
+    modeContentOpacity.value = 1;
   }, [modeContentOpacity, renderedReceiveMode]);
 
   const modeContentStyle = useAnimatedStyle(() => ({
@@ -925,16 +916,18 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               }
             >
               {latestReceivedReceipt != null ? (
-                <View style={styles.receivedPill}>
-                  <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
-                  <Text variant="captionBold" color={colors.text.primary} numberOfLines={1}>
-                    Received{' '}
-                    {latestReceivedReceipt.amountLabel?.replace(/^\+/, '') ?? 'payment'}
-                  </Text>
-                </View>
+                <StaggerRevealItem index={0} trigger={renderedReceiveMode}>
+                  <View style={styles.receivedPill}>
+                    <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
+                    <Text variant="captionBold" color={colors.text.primary} numberOfLines={1}>
+                      Received{' '}
+                      {latestReceivedReceipt.amountLabel?.replace(/^\+/, '') ?? 'payment'}
+                    </Text>
+                  </View>
+                </StaggerRevealItem>
               ) : null}
 
-              <View style={styles.identityBlock}>
+              <StaggerRevealItem index={1} trigger={renderedReceiveMode} style={styles.identityBlock}>
                 <Text
                   variant="bodyBold"
                   color={colors.text.primary}
@@ -955,39 +948,43 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 >
                   {truncatedWalletAddress ?? 'Unlock a wallet first'}
                 </Text>
-              </View>
+              </StaggerRevealItem>
 
-              <View style={[styles.qrCard, denseReceive && styles.qrCardDense]}>
-                {qrResult.value != null ? (
-                  <DottedQRCode
-                    value={qrResult.value}
-                    size={qrSize}
-                    color={colors.brand.deepShadow}
-                    backgroundColor={colors.brand.whiteStream}
-                    logo={RECEIVE_QR_LOGO}
-                    logoSize={Math.max(42, qrSize * 0.12)}
-                  />
-                ) : (
-                  <View style={[styles.qrEmpty, { width: qrSize, height: qrSize }]}>
-                    <PuffyQRIcon size={layout.avatarLg} color={colors.text.tertiary} />
-                    <Text variant="small" color={colors.text.secondary} align="center">
-                      QR unavailable
-                    </Text>
-                  </View>
-                )}
-              </View>
+              <StaggerRevealItem index={2} trigger={renderedReceiveMode}>
+                <View style={[styles.qrCard, denseReceive && styles.qrCardDense]}>
+                  {qrResult.value != null ? (
+                    <DottedQRCode
+                      value={qrResult.value}
+                      size={qrSize}
+                      color={colors.brand.deepShadow}
+                      backgroundColor={colors.brand.whiteStream}
+                      logo={RECEIVE_QR_LOGO}
+                      logoSize={Math.max(42, qrSize * 0.12)}
+                    />
+                  ) : (
+                    <View style={[styles.qrEmpty, { width: qrSize, height: qrSize }]}>
+                      <PuffyQRIcon size={layout.avatarLg} color={colors.text.tertiary} />
+                      <Text variant="small" color={colors.text.secondary} align="center">
+                        QR unavailable
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </StaggerRevealItem>
 
-              <View style={styles.networkChip}>
-                <View style={styles.networkChipDot} />
-                <Text
-                  variant="captionBold"
-                  color={colors.text.primary}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={1}
-                >
-                  {`Solana ${networkLabel}`}
-                </Text>
-              </View>
+              <StaggerRevealItem index={3} trigger={renderedReceiveMode}>
+                <View style={styles.networkChip}>
+                  <View style={styles.networkChipDot} />
+                  <Text
+                    variant="captionBold"
+                    color={colors.text.primary}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                  >
+                    {`Solana ${networkLabel}`}
+                  </Text>
+                </View>
+              </StaggerRevealItem>
 
               {qrResult.error != null ? (
                 <Text
@@ -1001,7 +998,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 </Text>
               ) : null}
 
-              <View style={styles.addressActionRow}>
+              <StaggerRevealItem index={4} trigger={renderedReceiveMode} style={styles.addressActionRow}>
                 <Pressable
                   onPress={handleCopyAddress}
                   disabled={walletAddress == null}
@@ -1052,7 +1049,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                     Share
                   </Text>
                 </Pressable>
-              </View>
+              </StaggerRevealItem>
             </View>
             <View
               key="receive-mode-private"
@@ -1070,7 +1067,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               setupPanel={
                 canUseUmbraReceiveRoute
                   ? {
-                      title: 'Setup',
+                      title: 'Umbra Claims',
                       buttonLabel: 'Set up',
                       loadingLabel: 'Setting up',
                       onPress: handleSetupUmbraPrivateP2P,
@@ -1117,6 +1114,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               onViewAllHistory={
                 umbraHistoryForCurrentNetwork.length > 0 ? handleOpenHistoryTab : undefined
               }
+              revealKey={renderedReceiveMode}
             />
             </View>
           </Animated.View>
@@ -1161,19 +1159,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.brand.whiteStream,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    boxShadow: SWAP_CONTROL_SHADOW,
+    backgroundColor: colors.glass.clearFill,
   },
   headerIconSurface: {
     width: '100%',
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerIconSurfaceActive: {
+    backgroundColor: colors.glass.cyanWash,
   },
   headerTitle: {
     flex: 1,
@@ -1212,9 +1207,9 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.glass.strongFill,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     flexDirection: 'row',
@@ -1247,7 +1242,6 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: SWAP_PANEL_SHADOW,
   },
   qrCardDense: {
     padding: spacing.md,
@@ -1270,12 +1264,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.badgeFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    backgroundColor: colors.glass.strongFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
   },
   networkChipDot: {
     width: 7,
@@ -1299,12 +1290,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.badgeFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    backgroundColor: colors.glass.strongFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
   },
   addressActionChipDisabled: {
     opacity: 0.48,

@@ -395,6 +395,80 @@ describe('offpay-wallet-data', () => {
     });
   });
 
+  it('renders lowercase unknown rows when they contain on-chain payment fields', () => {
+    const stealthSender = 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3';
+    const rows = buildWalletHistoryGroups({
+      transactions: [
+        buildTransaction({
+          type: 'unknown',
+          description: null,
+          amount: '5',
+          rawAmount: '5000000',
+          direction: 'receive',
+          sender: stealthSender,
+          recipient: 'CBbAfDh79oEhNn2ZouMi97Ek3y1vQYKuH5VbZqx3okMk',
+          tokenMint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          tokenSymbol: 'USDC',
+          tokenName: 'USD Coin',
+          tokenLogo: 'https://example.com/usdc.png',
+          tokenDecimals: 6,
+          counterparties: [],
+        }),
+      ],
+    }).flatMap((group) => group.data);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: signature,
+      title: 'Received',
+      subtitle: `From ${shortenWalletAddress(stealthSender)}`,
+      amountLabel: '+5 USDC',
+      amountTone: 'positive',
+      tokenSymbol: 'USDC',
+    });
+  });
+
+  it('filters unenriched unknown rows instead of rendering syncing placeholders', () => {
+    const transferSignature = `${signature}transfer`;
+    const transactions = [
+      buildTransaction({
+        signature: `${signature}unknown`,
+        type: 'unknown',
+        description: null,
+        amount: null,
+        rawAmount: null,
+        direction: null,
+        sender: null,
+        recipient: null,
+        tokenMint: null,
+        tokenSymbol: null,
+        tokenName: null,
+        tokenLogo: null,
+        tokenDecimals: null,
+        counterparties: [],
+      }),
+      buildTransaction({
+        signature: transferSignature,
+        type: 'TOKEN_TRANSFER',
+        description: 'Sent 1 USDC',
+      }),
+    ];
+
+    const historyRows = buildWalletHistoryGroups({ transactions }).flatMap((group) => group.data);
+    const recentRows = buildWalletRecentActivityItems({ transactions });
+
+    expect(historyRows.map((row) => row.id)).toEqual([transferSignature]);
+    expect(recentRows.map((row) => row.id)).toEqual([transferSignature]);
+    expect(historyRows).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Activity',
+          subtitle: 'Syncing details...',
+        }),
+      ]),
+    );
+  });
+
   it('keeps offline p2p receipt enrichment but ignores online local receipts', () => {
     const stealthSender = 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3';
     const transactions = [

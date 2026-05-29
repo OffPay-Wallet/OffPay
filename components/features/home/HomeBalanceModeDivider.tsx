@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
-  Easing,
   FadeIn,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
+  withSpring,
+  type WithSpringConfig,
 } from 'react-native-reanimated';
 
 import { SkeletonBlock } from '@/components/ui/Skeleton';
@@ -35,7 +35,14 @@ const MODES: { id: HomeBalanceMode; label: string; accessibilityLabel: string }[
 ];
 const TRACK_PADDING = 4;
 const SEGMENT_GAP = 4;
-const TRACK_ANIMATION = { duration: 240, easing: Easing.out(Easing.cubic) };
+
+// Snappy spring — the thumb slides with a tight, smooth motion and a
+// barely-perceptible settle. Runs entirely on the UI thread.
+const THUMB_SPRING: WithSpringConfig = {
+  damping: 22,
+  stiffness: 320,
+  mass: 0.7,
+};
 
 export function HomeBalanceModeDivider({
   selectedMode,
@@ -59,10 +66,31 @@ export function HomeBalanceModeDivider({
     [selectedMode],
   );
   const thumbOffset = useSharedValue(0);
+  // Per-segment stride (width + gap) mirrored into a shared value so
+  // the press handler can move the thumb on the UI thread without
+  // reading React state inside a worklet.
+  const segmentStride = useSharedValue(0);
 
   useEffect(() => {
-    thumbOffset.value = withTiming(selectedIndex * (segmentWidth + SEGMENT_GAP), TRACK_ANIMATION);
+    segmentStride.value = segmentWidth + SEGMENT_GAP;
+  }, [segmentStride, segmentWidth]);
+
+  // Reconcile the thumb with the prop for *external* mode changes only.
+  // Taps already moved the thumb in the press handler, so when the prop
+  // later catches up this resolves to the same target (a no-op).
+  useEffect(() => {
+    thumbOffset.value = withSpring(selectedIndex * (segmentWidth + SEGMENT_GAP), THUMB_SPRING);
   }, [selectedIndex, segmentWidth, thumbOffset]);
+
+  // Slide the thumb immediately on tap, on the UI thread, decoupled
+  // from the parent's (heavy) Portfolio/Shielded content swap.
+  const handleSelect = useCallback(
+    (mode: HomeBalanceMode, index: number) => {
+      thumbOffset.value = withSpring(index * segmentStride.value, THUMB_SPRING);
+      onChangeMode(mode);
+    },
+    [onChangeMode, segmentStride, thumbOffset],
+  );
 
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: thumbOffset.value }],
@@ -111,7 +139,7 @@ export function HomeBalanceModeDivider({
                   <SkeletonBlock width="100%" height={segmentHeight} radius={segmentHeight / 2} />
                 </View>
               ))
-            : MODES.map((mode) => {
+            : MODES.map((mode, index) => {
                 const selected = selectedMode === mode.id;
                 const handlePressIn =
                   mode.id === 'shielded' ? onShieldedPressIn : undefined;
@@ -123,7 +151,7 @@ export function HomeBalanceModeDivider({
                     accessibilityLabel={mode.accessibilityLabel}
                     onPressIn={handlePressIn}
                     onPress={() => {
-                      if (!selected) onChangeMode(mode.id);
+                      if (!selected) handleSelect(mode.id, index);
                     }}
                     hitSlop={6}
                     style={({ pressed }) => [

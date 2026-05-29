@@ -275,7 +275,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 18px 42px ${colors.glass.depthShadow}, inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -14px 28px rgba(91, 200, 232, 0.12)`,
+    boxShadow: `0 8px 24px rgba(14, 42, 53, 0.14)`,
   },
   copyBlock: {
     gap: spacing.sm,
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 12px 24px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.72)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   buttonPressed: {
     opacity: 0.72,
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 8px 16px rgba(14, 42, 53, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.78)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   buttonText: {
     textAlign: 'center',

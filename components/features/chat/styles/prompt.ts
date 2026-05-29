@@ -22,7 +22,7 @@ export const promptStyles = StyleSheet.create({
     gap: spacing.xs,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '0 18px 36px rgba(14, 42, 53, 0.16), 0 4px 10px rgba(14, 42, 53, 0.10)',
+    boxShadow: '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   promptInput: {
     flex: 1,

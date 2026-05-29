@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.whiteStream,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 18px 42px ${colors.glass.depthShadow}, inset 0 1px 1px rgba(255, 255, 255, 0.74)`,
+    boxShadow: `0 8px 24px rgba(14, 42, 53, 0.14)`,
     gap: spacing.md,
     overflow: 'hidden',
   },

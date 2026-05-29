@@ -16,6 +16,7 @@ import {
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { Text } from '@/components/ui/Text';
+import { StaggerRevealGroup } from '@/components/ui/StaggerReveal';
 import { PuffyQRIcon } from '@/components/ui/icons/PuffyQRIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -443,7 +444,6 @@ export function ScannerScreen(): React.JSX.Element {
         </Animated.View>
       ) : (
         <Animated.View
-          entering={FadeIn.duration(180)}
           exiting={FadeOut.duration(140)}
           style={[styles.permissionFallback, { paddingHorizontal: horizontalPadding }]}
         >
@@ -453,37 +453,39 @@ export function ScannerScreen(): React.JSX.Element {
             end={{ x: 1, y: 1 }}
             style={[styles.permissionCard, { maxWidth: contentMaxWidth }]}
           >
-            <View style={styles.permissionIcon}>
-              <PuffyQRIcon size={layout.iconSizeTab} color={colors.brand.azureCyan} />
-            </View>
-            <Text variant="bodyBold" color={colors.text.primary} align="center">
-              Camera ready
-            </Text>
-            <Text
-              variant="caption"
-              color={colors.text.secondary}
-              align="center"
-              style={styles.permissionText}
-            >
-              {helperText}
-            </Text>
-            <Pressable
-              style={({ pressed }) => [styles.permissionButton, pressed && styles.pressed]}
-              onPress={handleOpenCamera}
-              accessibilityRole="button"
-              accessibilityLabel="Open camera scanner"
-            >
-              <LinearGradient
-                colors={[colors.brand.azureCyan, colors.glass.azureCyanHalf, colors.glass.cyanWash]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.permissionButtonSurface}
+            <StaggerRevealGroup>
+              <View style={styles.permissionIcon}>
+                <PuffyQRIcon size={layout.iconSizeTab} color={colors.brand.azureCyan} />
+              </View>
+              <Text variant="bodyBold" color={colors.text.primary} align="center">
+                Camera ready
+              </Text>
+              <Text
+                variant="caption"
+                color={colors.text.secondary}
+                align="center"
+                style={styles.permissionText}
               >
-                <Text variant="button" color={colors.text.primary}>
-                  Open Scanner
-                </Text>
-              </LinearGradient>
-            </Pressable>
+                {helperText}
+              </Text>
+              <Pressable
+                style={({ pressed }) => [styles.permissionButton, pressed && styles.pressed]}
+                onPress={handleOpenCamera}
+                accessibilityRole="button"
+                accessibilityLabel="Open camera scanner"
+              >
+                <LinearGradient
+                  colors={[colors.brand.azureCyan, colors.glass.azureCyanHalf, colors.glass.cyanWash]}
+                  start={{ x: 0.04, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.permissionButtonSurface}
+                >
+                  <Text variant="button" color={colors.text.primary}>
+                    Open Scanner
+                  </Text>
+                </LinearGradient>
+              </Pressable>
+            </StaggerRevealGroup>
           </LinearGradient>
         </Animated.View>
       )}

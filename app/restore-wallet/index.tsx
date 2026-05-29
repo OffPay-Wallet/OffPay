@@ -179,12 +179,12 @@ const styles = StyleSheet.create({
   optionCardActive: {
     backgroundColor: colors.glass.azureCyanHalf,
     borderColor: colors.glass.rim,
-    boxShadow: `0 12px 24px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -12px 22px rgba(91, 200, 232, 0.16)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   optionCardIdle: {
     backgroundColor: colors.glass.clearFill,
     borderColor: colors.glass.rim,
-    boxShadow: `0 10px 20px rgba(14, 42, 53, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.78)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   iconCircle: {
     width: layout.avatarMd,

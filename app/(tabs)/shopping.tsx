@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { PuffyShoppingIcon } from '@/components/ui/icons/PuffyShoppingIcon';
+import { StaggerRevealGroup } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
@@ -25,7 +26,7 @@ export default function ShoppingScreen(): React.JSX.Element {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <GradientBackground />
-      <View
+      <StaggerRevealGroup
         style={[
           styles.content,
           { paddingHorizontal: horizontalPadding, paddingBottom: bottomPadding },
@@ -55,7 +56,7 @@ export default function ShoppingScreen(): React.JSX.Element {
           Pay merchants and browse partner stores. This space is reserved for the upcoming shopping
           experience.
         </Text>
-      </View>
+      </StaggerRevealGroup>
     </View>
   );
 }

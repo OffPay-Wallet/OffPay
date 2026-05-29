@@ -38,6 +38,7 @@ import {
   type ProcessResultVariant,
 } from '@/components/ui/ProcessResultScreen';
 import { Text } from '@/components/ui/Text';
+import { StaggerRevealGroup } from '@/components/ui/StaggerReveal';
 import { PuffySettingsIcon } from '@/components/ui/icons/PuffySettingsIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -1914,89 +1915,88 @@ export function SwapScreen(): React.JSX.Element {
               </HeaderIconButton>
             </Animated.View>
 
-            <Animated.View entering={FadeIn.duration(400).delay(200)} style={styles.contentFrame}>
-              <SwapCard
-                payToken={payToken}
-                receiveToken={receiveToken}
-                payAmount={payAmount}
-                receiveAmount={receiveAmount}
-                onPayAmountChange={swapInputActions.setUserAmount}
-                onFlip={handleFlip}
-                onSelectToken={(type) => {
-                  setSelectingFor(type);
-                  setModalVisible(true);
-                }}
-              />
-            </Animated.View>
-
-            <Animated.View entering={FadeIn.duration(220).delay(240)} style={styles.contentFrame}>
-              <PrivateSwapToggle
-                enabled={privateSwapMode}
-                available={privateSwapAvailable}
-                setupLabel={privateSwapSetupLabel}
-                policyLabel={privateSwapPolicyLabel}
-                onToggle={handleTogglePrivateSwapMode}
-              />
-            </Animated.View>
-
-            {showLiveSwapDetails ? (
-              <Animated.View entering={FadeIn.duration(120)} style={styles.contentFrame}>
-                <SwapDetailsCard
-                  rateLabel={liveDetailsRateLabel}
-                  priceImpactLabel={liveDetailsPriceImpactLabel}
-                  feeLabel={liveDetailsFeeLabel}
-                  routeLabel={liveDetailsRouteLabel}
-                  slippageLabel={liveDetailsSlippageLabel}
+            <StaggerRevealGroup>
+              <Animated.View style={styles.contentFrame}>
+                <SwapCard
+                  payToken={payToken}
+                  receiveToken={receiveToken}
+                  payAmount={payAmount}
+                  receiveAmount={receiveAmount}
+                  onPayAmountChange={swapInputActions.setUserAmount}
+                  onFlip={handleFlip}
+                  onSelectToken={(type) => {
+                    setSelectingFor(type);
+                    setModalVisible(true);
+                  }}
                 />
               </Animated.View>
-            ) : null}
 
-            {lastSwapResult != null && network != null ? (
-              <Animated.View entering={FadeIn.duration(400).delay(325)} style={styles.contentFrame}>
-                <SwapExecutionStatusCard
-                  signature={lastSwapResult.signature}
-                  network={network}
-                  refreshedQuote={lastSwapResult.refreshedQuote}
+              <Animated.View style={styles.contentFrame}>
+                <PrivateSwapToggle
+                  enabled={privateSwapMode}
+                  available={privateSwapAvailable}
+                  setupLabel={privateSwapSetupLabel}
+                  policyLabel={privateSwapPolicyLabel}
+                  onToggle={handleTogglePrivateSwapMode}
                 />
               </Animated.View>
-            ) : null}
 
-            {visibleSwapStatusMessage != null ? (
-              <Animated.View
-                entering={FadeIn.duration(400).delay(350)}
-                style={[styles.contentFrame, styles.statusWrap]}
-              >
-                <Text variant="small" color={colors.text.tertiary} align="center">
-                  {visibleSwapStatusMessage}
-                </Text>
+              {showLiveSwapDetails ? (
+                <Animated.View style={styles.contentFrame}>
+                  <SwapDetailsCard
+                    rateLabel={liveDetailsRateLabel}
+                    priceImpactLabel={liveDetailsPriceImpactLabel}
+                    feeLabel={liveDetailsFeeLabel}
+                    routeLabel={liveDetailsRouteLabel}
+                    slippageLabel={liveDetailsSlippageLabel}
+                  />
+                </Animated.View>
+              ) : null}
+
+              {lastSwapResult != null && network != null ? (
+                <Animated.View style={styles.contentFrame}>
+                  <SwapExecutionStatusCard
+                    signature={lastSwapResult.signature}
+                    network={network}
+                    refreshedQuote={lastSwapResult.refreshedQuote}
+                  />
+                </Animated.View>
+              ) : null}
+
+              {visibleSwapStatusMessage != null ? (
+                <Animated.View style={[styles.contentFrame, styles.statusWrap]}>
+                  <Text variant="small" color={colors.text.tertiary} align="center">
+                    {visibleSwapStatusMessage}
+                  </Text>
+                </Animated.View>
+              ) : null}
+
+              <Animated.View style={styles.contentFrame}>
+                <SwapConfirmationButton
+                  disabled={reviewButtonDisabled}
+                  feedbackLabel={activeSwapButtonFeedback?.label}
+                  feedbackTone={activeSwapButtonFeedback?.tone}
+                  holdOnComplete
+                  resetSignal={sliderResetSignal}
+                  label={
+                    privateSwapMode
+                      ? privateSwapMutation.isPending
+                        ? 'Submitting Private Swap'
+                        : 'Review Private Swap'
+                      : executeSwapMutation.isPending
+                        ? 'Submitting Swap'
+                        : swapActionRefreshAvailable
+                          ? 'Refresh Quote'
+                          : quoteRetryAvailable
+                            ? 'Retry Quote'
+                            : quoteExpired
+                              ? 'Refresh Quote'
+                              : 'Review Swap'
+                  }
+                  onPress={handleReviewSwap}
+                />
               </Animated.View>
-            ) : null}
-
-            <Animated.View entering={FadeIn.duration(400).delay(400)} style={styles.contentFrame}>
-              <SwapConfirmationButton
-                disabled={reviewButtonDisabled}
-                feedbackLabel={activeSwapButtonFeedback?.label}
-                feedbackTone={activeSwapButtonFeedback?.tone}
-                holdOnComplete
-                resetSignal={sliderResetSignal}
-                label={
-                  privateSwapMode
-                    ? privateSwapMutation.isPending
-                      ? 'Submitting Private Swap'
-                      : 'Review Private Swap'
-                    : executeSwapMutation.isPending
-                      ? 'Submitting Swap'
-                      : swapActionRefreshAvailable
-                        ? 'Refresh Quote'
-                        : quoteRetryAvailable
-                          ? 'Retry Quote'
-                          : quoteExpired
-                            ? 'Refresh Quote'
-                            : 'Review Swap'
-                }
-                onPress={handleReviewSwap}
-              />
-            </Animated.View>
+            </StaggerRevealGroup>
           </ScrollView>
         </KeyboardAvoidingView>
 
@@ -2071,7 +2071,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.1)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   headerIconPressed: {
     opacity: 0.72,
@@ -2101,7 +2101,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 10px 22px rgba(14, 42, 53, 0.09), inset 0 1px 1px rgba(255, 255, 255, 0.72)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   privateTogglePressableActive: {
     borderColor: colors.brand.azureCyan,

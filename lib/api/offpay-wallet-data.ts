@@ -852,60 +852,18 @@ function mergeLocalReceiptData<T extends OffpayRecentActivityView | OffpayHistor
   };
 }
 
-/**
- * Backend marker emitted when on-chain enrichment for a signature
- * couldn't be fetched (timeout, rate-limit, transient upstream error).
- * The data layer treats these rows as neutral "Syncing" placeholders
- * instead of letting them fall through to a default `Sent` tone.
- */
 const UNENRICHED_TRANSACTION_TYPE = 'unknown';
 
 function isUnenrichedWalletTransaction(
   transaction: WalletTransactionsResponse['transactions'][number],
 ): boolean {
-  return transaction.type === UNENRICHED_TRANSACTION_TYPE;
-}
-
-function buildUnenrichedTransactionView(
-  transaction: WalletTransactionsResponse['transactions'][number],
-  localReceipt?: OffpayLocalReceiptViewInput | null,
-): OffpayHistoryTransactionView {
-  const failed = transaction.status === 'failed';
-  return mergeLocalReceiptData(
-    {
-      id: transaction.signature,
-      // We pick `receive` here as the most neutral icon (an arrow
-      // glyph rather than a paper-plane) — combined with the
-      // pending status the row tone is grey, not green/red.
-      type: 'receive',
-      title: failed ? 'Failed' : 'Activity',
-      subtitle: failed
-        ? `Tx ${shortenWalletAddress(transaction.signature, 4)}`
-        : 'Syncing details…',
-      sourceLabel: null,
-      amountLabel: null,
-      secondaryAmountLabel: failed
-        ? null
-        : `Tx ${shortenWalletAddress(transaction.signature, 4)}`,
-      amountTone: failed ? 'failed' : 'neutral',
-      tokenMint: null,
-      tokenSymbol: null,
-      tokenName: null,
-      tokenLogo: null,
-      status: failed ? 'failed' : 'pending',
-    },
-    localReceipt,
-  );
+  return normalizeTransactionTypeLabel(transaction.type) === UNENRICHED_TRANSACTION_TYPE;
 }
 
 export function mapWalletTransactionForRecentActivity(
   transaction: WalletTransactionsResponse['transactions'][number],
   localReceipt?: OffpayLocalReceiptViewInput | null,
 ): OffpayRecentActivityView {
-  if (isUnenrichedWalletTransaction(transaction)) {
-    return buildUnenrichedTransactionView(transaction, localReceipt);
-  }
-
   const amounts = parseWalletTransactionAmounts(transaction);
   const counterparties = getWalletTransactionCounterparties(transaction);
   const type = normalizeWalletTransactionDisplayType(transaction, amounts, counterparties);
@@ -981,12 +939,6 @@ export function isWalletActivityIncomingP2pTransfer(event: WalletActivityEvent):
 export function isDisplayableWalletPaymentTransaction(
   transaction: WalletTransactionsResponse['transactions'][number],
 ): boolean {
-  // Always show unenriched rows — the UI renders them as a neutral
-  // "Activity / Syncing" placeholder so users see *something* even
-  // when getTransaction enrichment failed. Hiding them would make
-  // the history list go silent during transient RPC blips.
-  if (isUnenrichedWalletTransaction(transaction)) return true;
-
   const amounts = parseWalletTransactionAmounts(transaction);
   const rawType = normalizeTransactionTypeLabel(transaction.type);
   const hasPaymentSignal = Boolean(
@@ -1006,7 +958,12 @@ export function isDisplayableWalletPaymentTransaction(
     rawType.includes('payment'),
   );
 
-  if (!hasPaymentSignal) return !isInternalWalletTransactionType(transaction.type);
+  if (!hasPaymentSignal) {
+    return (
+      !isUnenrichedWalletTransaction(transaction) &&
+      !isInternalWalletTransactionType(transaction.type)
+    );
+  }
   if (isInternalWalletTransactionType(transaction.type) && amounts.length === 0) return false;
 
   const type = normalizeWalletTransactionDisplayType(
@@ -1063,10 +1020,6 @@ export function mapWalletTransactionForHistory(
   transaction: WalletTransactionsResponse['transactions'][number],
   localReceipt?: OffpayLocalReceiptViewInput | null,
 ): OffpayHistoryTransactionView {
-  if (isUnenrichedWalletTransaction(transaction)) {
-    return buildUnenrichedTransactionView(transaction, localReceipt);
-  }
-
   const amounts = parseWalletTransactionAmounts(transaction);
   const counterparties = getWalletTransactionCounterparties(transaction);
   const type = normalizeWalletTransactionDisplayType(transaction, amounts, counterparties);

@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     flexShrink: 0,
-    boxShadow: '0 10px 18px rgba(14, 42, 53, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.72)',
+    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   moreButtonPressed: {
     opacity: 0.72,

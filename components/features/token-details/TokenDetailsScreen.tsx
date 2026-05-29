@@ -13,6 +13,7 @@ import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { useAppToast } from '@/components/ui/AppToast';
 import { Text } from '@/components/ui/Text';
+import { StaggerRevealGroup, StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';

@@ -1299,7 +1299,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.1)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   headerIconPressed: {
     opacity: 0.72,
@@ -1339,7 +1339,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     padding: spacing.xs,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 10px 24px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.72)`,
+    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   segmentButton: {
     flex: 1,
@@ -1365,7 +1365,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.strongFill,
     padding: spacing.lg,
     gap: spacing.md,
-    boxShadow: `0 18px 42px rgba(14, 42, 53, 0.13), inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -18px 34px rgba(91, 200, 232, 0.12)`,
+    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   cardCompact: {
     padding: spacing.md,
@@ -1544,7 +1544,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
     padding: spacing.lg,
-    boxShadow: `0 12px 24px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.74)`,
+    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   receiptIcon: {
     minWidth: layout.avatarMd,
