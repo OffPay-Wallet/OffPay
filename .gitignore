@@ -1,0 +1,133 @@
+# ===========================================================================
+# OffPay .gitignore
+# Only source code and project-approved docs should be committed.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+.pnp/
+.pnp.js
+
+# ---------------------------------------------------------------------------
+# Expo / React Native
+# ---------------------------------------------------------------------------
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Generated native folders (created by prebuild / EAS)
+/ios/
+/android/
+
+# ---------------------------------------------------------------------------
+# Build & bundle output
+# ---------------------------------------------------------------------------
+*.hbc
+*.bundle
+*.map
+
+# Metro bundler
+.metro-health-check*
+
+# ---------------------------------------------------------------------------
+# Environment & secrets — NEVER commit these
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+workers/ai-proxy/.dev.vars
+workers/ai-proxy/.dev.vars.*
+!workers/ai-proxy/.dev.vars.example
+
+# Local planning docs
+documentation/agentic-payments-system-design.md
+
+# Signing keys & certificates
+*.jks
+*.p8
+*.p12
+*.p12
+*.key
+*.pem
+*.mobileprovision
+*.keystore
+
+# ---------------------------------------------------------------------------
+# Testing
+# ---------------------------------------------------------------------------
+coverage/
+
+# Test scripts directory
+scripts/*
+!scripts/verify-client-hardening.js
+!scripts/run-all-tests.js
+
+# ---------------------------------------------------------------------------
+# TypeScript
+# ---------------------------------------------------------------------------
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Debug logs
+# ---------------------------------------------------------------------------
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# ---------------------------------------------------------------------------
+# OS files
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# IDE / Editor
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ---------------------------------------------------------------------------
+# AI agent artifacts & configs (not part of app source)
+# ---------------------------------------------------------------------------
+.gemini/
+.cursor/
+.context/
+.agents/
+.cursorrules
+
+# ---------------------------------------------------------------------------
+# Project planning & specs (not part of app source)
+# ---------------------------------------------------------------------------
+.modules/
+.skills/
+plan.md
+client-module-status.md
+missing-ui-screens.md
+OffPay_PRD_v4_0-1.md
+OffPay_API_Hosting_PRD_v3.md
+backend-docs/
+client-docs/
+applications/superteam-agentic-engineering-grant.md
+
+# ---------------------------------------------------------------------------
+# Third-party reference code (cloned for comparison, not part of app source)
+# ---------------------------------------------------------------------------
+umbra-reference/
+
+# ---------------------------------------------------------------------------
+# Misc
+# ---------------------------------------------------------------------------
+app-example/
+.kotlin/
+*.orig.*
+.prettierignore

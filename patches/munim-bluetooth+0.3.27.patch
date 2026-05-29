@@ -1,0 +1,22 @@
+diff --git a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
+--- a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
++++ b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
+@@ -700,6 +700,18 @@ class HybridMunimBluetooth :
+                 if (responseNeeded) {
+                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
+                 }
++                eventEmitter.emit(
++                    "characteristicWriteRequest",
++                    mapOf(
++                        "deviceId" to device.address,
++                        "serviceUUID" to characteristic.service.uuid.toString(),
++                        "characteristicUUID" to characteristic.uuid.toString(),
++                        "value" to (value ?: byteArrayOf()).toHexString(),
++                        "offset" to offset,
++                        "preparedWrite" to preparedWrite,
++                        "responseNeeded" to responseNeeded
++                    )
++                )
+             }
+         }
+     }

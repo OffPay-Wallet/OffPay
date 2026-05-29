@@ -1,0 +1,98 @@
+diff --git a/node_modules/@umbra-privacy/rn-zk-prover/lib/module/index.js b/node_modules/@umbra-privacy/rn-zk-prover/lib/module/index.js
+index 6d9cff5..c4ecf00 100644
+--- a/node_modules/@umbra-privacy/rn-zk-prover/lib/module/index.js
++++ b/node_modules/@umbra-privacy/rn-zk-prover/lib/module/index.js
+@@ -7,10 +7,6 @@ import installer from "./NativeMoproFfi.js";
+ // - the boolean flag ensures this loads exactly once, even if the JS
+ //   code is reloaded (e.g. during development with metro).
+ let rustInstalled = false;
+-if (!rustInstalled) {
+-  installer.installRustCrate();
+-  rustInstalled = true;
+-}
+ 
+ // Export the generated bindings to the app.
+ export * from "./generated/mopro.js";
+@@ -24,16 +20,24 @@ import * as mopro from "./generated/mopro.js";
+ // - the boolean flag ensures this loads exactly once, even if the JS code
+ //   is reloaded (e.g. during development with metro).
+ let initialized = false;
+-if (!initialized) {
+-  mopro.default.initialize();
+-  initialized = true;
+-}
+ 
+ // This provides parity with the index.web.ts version of this file.
+-// The web version relies on an asynchronous fetch, which this doesn't
+-// need, so we just no-op.
++// Keep native initialization lazy so app code can catch unavailable or stale
++// native builds instead of crashing during module import.
+ export async function uniffiInitAsync() {
+-  // NOOP.
++  if (!rustInstalled) {
++    installer.installRustCrate();
++    rustInstalled = true;
++  }
++
++  if (globalThis.NativeMopro == null) {
++    throw new Error("MoproFfi native module installed without a NativeMopro JSI binding.");
++  }
++
++  if (!initialized) {
++    mopro.default.initialize();
++    initialized = true;
++  }
+ }
+ 
+ // Export the crates as individually namespaced objects.
+diff --git a/node_modules/@umbra-privacy/rn-zk-prover/src/index.tsx b/node_modules/@umbra-privacy/rn-zk-prover/src/index.tsx
+index bac8d4d..c1d48d6 100644
+--- a/node_modules/@umbra-privacy/rn-zk-prover/src/index.tsx
++++ b/node_modules/@umbra-privacy/rn-zk-prover/src/index.tsx
+@@ -5,10 +5,6 @@ import installer from './NativeMoproFfi';
+ // - the boolean flag ensures this loads exactly once, even if the JS
+ //   code is reloaded (e.g. during development with metro).
+ let rustInstalled = false;
+-if (!rustInstalled) {
+-  installer.installRustCrate();
+-  rustInstalled = true;
+-}
+ 
+ // Export the generated bindings to the app.
+ export * from './generated/mopro';
+@@ -22,20 +18,27 @@ import * as mopro from './generated/mopro';
+ // - the boolean flag ensures this loads exactly once, even if the JS code
+ //   is reloaded (e.g. during development with metro).
+ let initialized = false;
+-if (!initialized) {
+-  mopro.default.initialize();
+-  initialized = true;
+-}
+ 
+ // This provides parity with the index.web.ts version of this file.
+-// The web version relies on an asynchronous fetch, which this doesn't
+-// need, so we just no-op.
++// Keep native initialization lazy so app code can catch unavailable or stale
++// native builds instead of crashing during module import.
+ export async function uniffiInitAsync() {
+-  // NOOP.
++  if (!rustInstalled) {
++    installer.installRustCrate();
++    rustInstalled = true;
++  }
++
++  if ((globalThis as { NativeMopro?: unknown }).NativeMopro == null) {
++    throw new Error('MoproFfi native module installed without a NativeMopro JSI binding.');
++  }
++
++  if (!initialized) {
++    mopro.default.initialize();
++    initialized = true;
++  }
+ }
+ 
+ // Export the crates as individually namespaced objects.
+ export default {
+   mopro,
+ };
+-

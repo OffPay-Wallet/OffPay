@@ -1,0 +1,50 @@
+# Local Cloudflare Worker variables for `wrangler dev`.
+# Do not put these values in the Expo app `.env`.
+
+# Required for chat.
+GEMINI_API_KEY=REPLACE_WITH_GEMINI_API_KEY
+
+# Strict privacy gates.
+AI_PROXY_PRIVACY_MODE=strict
+AI_PROXY_GEMINI_PRIVACY_CONFIRMED=true
+AI_PROXY_ALLOW_GEMINI_UNPAID=false
+AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION=false
+
+# Required for Sarvam-primary voice.
+SARVAM_API_KEY=REPLACE_WITH_SARVAM_API_KEY
+
+# Optional ElevenLabs fallback.
+ELEVENLABS_API_KEY=REPLACE_WITH_ELEVENLABS_API_KEY
+ELEVENLABS_VOICE_ID=REPLACE_WITH_ELEVENLABS_VOICE_ID
+
+# Optional Worker config overrides.
+GEMINI_CHAT_MODEL=gemma-4-26b-a4b-it
+SARVAM_STT_MODEL=saaras:v3
+SARVAM_STT_MODE=transcribe
+SARVAM_TTS_MODEL=bulbul:v3
+SARVAM_TTS_SPEAKER=shubh
+SARVAM_TTS_LANGUAGE=en-IN
+SARVAM_TTS_CODEC=mp3
+ELEVENLABS_STT_MODEL=scribe_v2
+ELEVENLABS_TTS_MODEL=eleven_flash_v2_5
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+ELEVENLABS_ENABLE_LOGGING=false
+AI_PROXY_MAX_CHAT_BYTES=65536
+AI_PROXY_MAX_AUDIO_BYTES=8388608
+AI_PROXY_MAX_TTS_CHARS=900
+AI_PROXY_PROVIDER_TIMEOUT_MS=20000
+AI_PROXY_TTS_ENABLED=true
+AI_PROXY_RATE_LIMIT_WINDOW_MS=60000
+AI_PROXY_RATE_LIMIT_MAX=40
+
+# Session token gate. When `AI_PROXY_REQUIRE_SESSION_TOKEN=true` the
+# Worker rejects requests without a valid `x-offpay-ai-session` header
+# signed with `AI_PROXY_SESSION_SECRET`. Defaults to `false` for staged
+# rollouts so older app builds keep working until the secret is
+# distributed to every client.
+AI_PROXY_REQUIRE_SESSION_TOKEN=false
+AI_PROXY_SESSION_SECRET=REPLACE_WITH_HIGH_ENTROPY_SECRET
+
+# Set this to a comma-separated allowlist only for browser/web clients.
+# Example: AI_PROXY_ALLOWED_ORIGINS=https://app.offpay.app,exp://127.0.0.1:8081
+AI_PROXY_ALLOWED_ORIGINS=

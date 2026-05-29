@@ -1,0 +1,183 @@
+/**
+ * 3D pressable button — Apple-style tactile cap on a colored shelf.
+ *
+ * Visual recipe (matches the XP card reference):
+ *   ┌──────────────────────┐  ← cap (solid `surfaceColor`)
+ *   │      LABEL           │
+ *   ╰──────────────────────╯
+ *   ╰──────────────────────╯  ← shelf (solid `shelfColor`, peeks
+ *                                below the cap by `depth`dp)
+ *
+ * Micro-interaction:
+ *   - On press-in, the cap translates down by `depth`dp (spring),
+ *     so it "clicks into" the shelf. The shelf stays put, the cap
+ *     darkens via the optional `pressedSurfaceColor`.
+ *   - On press-out, the cap springs back to its rest position with
+ *     a small overshoot.
+ *
+ * The shelf is `position: absolute` underneath the cap — no extra
+ * layout space is consumed beyond `depth`dp at the bottom, which
+ * the wrapper view reserves explicitly so flex parents lay out
+ * predictably.
+ *
+ * No `boxShadow`, no `LinearGradient`, no `<Image>` — pure flat
+ * fills with a single transform on press. Renders identically on
+ * iOS and Android.
+ */
+import { Pressable, StyleSheet, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  type WithSpringConfig,
+} from 'react-native-reanimated';
+
+import { radii } from '@/constants/spacing';
+
+import type { ReactNode } from 'react';
+import type { GestureResponderEvent, ViewStyle, AccessibilityRole } from 'react-native';
+
+export interface ThreeDPressableProps {
+  /** Cap fill colour at rest. */
+  surfaceColor: string;
+  /** Shelf fill colour. Should be a darker shade of `surfaceColor`. */
+  shelfColor: string;
+  /** Optional cap fill while the press is held. Defaults to `surfaceColor`. */
+  pressedSurfaceColor?: string;
+  /** Pixels of shelf showing below the cap at rest. Default: 4. */
+  depth?: number;
+  /** Border radius of both cap and shelf. Default: full pill. */
+  borderRadius?: number;
+  /** Optional rim around the cap (e.g. for white-on-white parity). */
+  borderColor?: string;
+  borderWidth?: number;
+  /** Children rendered inside the cap. */
+  children: ReactNode;
+  /**
+   * Override the cap padding and minimum height. Most callers will
+   * leave these alone and let children dictate the size.
+   */
+  capStyle?: ViewStyle;
+  onPress?: (event: GestureResponderEvent) => void;
+  disabled?: boolean;
+  accessibilityRole?: AccessibilityRole;
+  accessibilityLabel?: string;
+  accessibilityState?: {
+    disabled?: boolean;
+    busy?: boolean;
+  };
+  style?: ViewStyle;
+}
+
+const PRESS_SPRING: WithSpringConfig = {
+  // Tuned so the cap snaps to the shelf in ~120ms with a barely-
+  // perceptible overshoot on release. Apple's UIButton press
+  // feedback uses a similar curve.
+  damping: 18,
+  stiffness: 320,
+  mass: 0.6,
+};
+
+export function ThreeDPressable({
+  surfaceColor,
+  shelfColor,
+  pressedSurfaceColor,
+  depth = 4,
+  borderRadius = radii.full,
+  borderColor,
+  borderWidth,
+  children,
+  capStyle,
+  onPress,
+  disabled = false,
+  accessibilityRole = 'button',
+  accessibilityLabel,
+  accessibilityState,
+  style,
+}: ThreeDPressableProps): React.JSX.Element {
+  const offset = useSharedValue(0);
+
+  const animatedCapStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: offset.value }],
+  }));
+
+  const handlePressIn = (): void => {
+    'worklet';
+    offset.value = withSpring(depth, PRESS_SPRING);
+  };
+
+  const handlePressOut = (): void => {
+    'worklet';
+    offset.value = withSpring(0, PRESS_SPRING);
+  };
+
+  return (
+    <View style={[styles.frame, { paddingBottom: depth }, style]}>
+      {/* Shelf — sits behind the cap, picks up the press feedback
+          colour automatically because the cap moves on top of it. */}
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            borderRadius,
+            backgroundColor: shelfColor,
+          },
+        ]}
+      />
+      {/* Cap — Pressable wrapped inside an Animated.View. We put the
+          press handlers on the inner Pressable so the View can host
+          the transform. */}
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          styles.cap,
+          {
+            borderRadius,
+            backgroundColor: surfaceColor,
+            borderColor,
+            borderWidth,
+          },
+          capStyle,
+          animatedCapStyle,
+        ]}
+      >
+        <Pressable
+          accessibilityRole={accessibilityRole}
+          accessibilityLabel={accessibilityLabel}
+          accessibilityState={{
+            disabled,
+            ...accessibilityState,
+          }}
+          disabled={disabled}
+          onPress={disabled ? undefined : onPress}
+          onPressIn={disabled ? undefined : handlePressIn}
+          onPressOut={disabled ? undefined : handlePressOut}
+          style={({ pressed }) => [
+            styles.capInner,
+            { borderRadius },
+            pressed && pressedSurfaceColor
+              ? { backgroundColor: pressedSurfaceColor }
+              : null,
+          ]}
+        >
+          {children}
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  frame: {
+    position: 'relative',
+  },
+  cap: {
+    overflow: 'hidden',
+  },
+  capInner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

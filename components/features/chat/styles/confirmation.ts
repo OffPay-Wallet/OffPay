@@ -1,0 +1,96 @@
+import { StyleSheet } from 'react-native';
+
+import { colors } from '@/constants/colors';
+import { radii, spacing } from '@/constants/spacing';
+import { fontFamily } from '@/constants/typography';
+
+export const confirmationStyles = StyleSheet.create({
+  confirmationCard: {
+    marginTop: spacing.xs,
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    backgroundColor: colors.brand.whiteStream,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  confirmationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  confirmationIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(46, 174, 210, 0.14)',
+  },
+  confirmationTitleStack: {
+    flex: 1,
+    minWidth: 0,
+  },
+  confirmationTitle: {
+    fontFamily: fontFamily.uiSemiBold,
+  },
+  confirmationRows: {
+    gap: spacing.xs,
+  },
+  confirmationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  confirmationRowLabel: {
+    minWidth: 64,
+  },
+  confirmationRowValue: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: fontFamily.uiSemiBold,
+  },
+  confirmationRowValueLink: {
+    textDecorationLine: 'underline',
+  },
+  confirmationRowLink: {
+    flex: 1,
+  },
+  confirmationRowLinkPressed: {
+    opacity: 0.6,
+  },
+  monoText: {
+    fontFamily: fontFamily.mono,
+  },
+  confirmationError: {
+    lineHeight: 16,
+  },
+  confirmationActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  primaryActionButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand.deepShadow,
+  },
+  secondaryActionButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(14, 42, 53, 0.06)',
+  },
+  actionButtonPressed: {
+    opacity: 0.78,
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
+  },
+});
