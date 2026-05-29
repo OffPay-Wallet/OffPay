@@ -19,8 +19,6 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
-  FadeInLeft,
-  FadeInRight,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -41,7 +39,6 @@ import { RecentActivityCard } from '@/components/features/home/RecentActivityCar
 import { TokenHoldingsCard } from '@/components/features/home/TokenHoldingsCard';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
-import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { OFFLINE_PAYMENT_SLOT_DEFAULT } from '@/constants/offline-payment-slots';
@@ -104,8 +101,6 @@ const UmbraVaultContent = lazy(UMBRA_VAULT_CONTENT_IMPORT);
 
 const MAX_HOME_ACTIVITY_ITEMS = 4;
 const MAX_HOME_HOLDINGS_ITEMS = 3;
-const MODE_CONTENT_TIMING_MS = 240;
-const MODE_CONTENT_EASING = Easing.out(Easing.cubic);
 const EMPTY_DISABLED_ACTION_IDS: readonly string[] = [];
 const OFFLINE_DISABLED_ACTION_IDS: readonly string[] = ['swap'];
 const HOME_DATA_STAGE_COUNT = 5;
@@ -119,34 +114,6 @@ const HOME_REFRESH_SPINNER_MIN_MS = 360;
  * the data warm in cache.
  */
 const completedHomeStageIdentities = new Set<string>();
-const portfolioModeEntering =
-  FadeInLeft.duration(MODE_CONTENT_TIMING_MS).easing(MODE_CONTENT_EASING);
-const shieldedModeEntering =
-  FadeInRight.duration(MODE_CONTENT_TIMING_MS).easing(MODE_CONTENT_EASING);
-
-function ShieldedSectionFallback(): React.JSX.Element {
-  // Layout-shape skeleton that mirrors the registered Umbra vault
-  // card. Stays in place during the lazy-import + first encrypted-
-  // balance probe so the toggle never feels hung.
-  return (
-    <View style={styles.shieldedFallback}>
-      <View style={styles.shieldedFallbackCard}>
-        <View style={styles.shieldedFallbackHeader}>
-          <SkeletonBlock width="40%" height={18} radius={9} />
-          <SkeletonBlock width={92} height={32} radius={radii.full} />
-        </View>
-        <SkeletonBlock width="58%" height={32} radius={10} />
-        <SkeletonBlock width="32%" height={14} radius={7} />
-        <View style={styles.shieldedFallbackTokenGrid}>
-          <SkeletonBlock width="100%" height={56} radius={radii.lg} />
-          <SkeletonBlock width="100%" height={56} radius={radii.lg} />
-          <SkeletonBlock width="100%" height={56} radius={radii.lg} />
-        </View>
-      </View>
-      <SkeletonBlock width="100%" height={150} radius={radii['2xl']} />
-    </View>
-  );
-}
 
 function getQueryErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -1021,19 +988,17 @@ export function HomeScreenContent(): React.JSX.Element {
         </View>
 
         {homeBalanceMode === 'shielded' ? (
-          <Animated.View
+          <View
             key="shielded-mode"
-            entering={shieldedModeEntering}
             style={[styles.homeContentFrame, styles.shieldedSection]}
           >
-            <Suspense fallback={<ShieldedSectionFallback />}>
+            <Suspense fallback={null}>
               <UmbraVaultContent showHeader={false} tokenLogoMap={tokenLogoMap} />
             </Suspense>
-          </Animated.View>
+          </View>
         ) : (
-          <Animated.View
+          <View
             key="portfolio-mode"
-            entering={portfolioModeEntering}
             style={[styles.homeContentFrame, styles.modeContent]}
           >
             <Animated.View
@@ -1092,7 +1057,7 @@ export function HomeScreenContent(): React.JSX.Element {
                 tokenLogos={tokenLogoMap}
               />
             </StaggerRevealItem>
-          </Animated.View>
+          </View>
         )}
       </ScrollView>
 
@@ -1143,29 +1108,5 @@ const styles = StyleSheet.create({
   },
   shieldedSection: {
     paddingBottom: spacing.md,
-  },
-  shieldedFallback: {
-    width: '100%',
-    gap: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  shieldedFallbackCard: {
-    width: '100%',
-    padding: spacing.xl,
-    gap: spacing.md,
-    borderRadius: radii['2xl'],
-    backgroundColor: colors.glass.strongFill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-  },
-  shieldedFallbackHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  shieldedFallbackTokenGrid: {
-    gap: spacing.sm,
-    marginTop: spacing.xs,
   },
 });

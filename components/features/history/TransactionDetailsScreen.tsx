@@ -20,6 +20,7 @@ import { PuffyReceiveArrowIcon } from '@/components/ui/icons/PuffyReceiveArrowIc
 import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
 import { Text } from '@/components/ui/Text';
+import { StaggerRevealGroup, StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -918,10 +919,7 @@ export function TransactionDetailsScreen(): React.JSX.Element {
         </Animated.View>
 
         {view == null ? (
-          <Animated.View
-            entering={FadeIn.duration(180)}
-            style={[styles.contentFrame, styles.emptyState]}
-          >
+          <StaggerRevealItem index={0} style={[styles.contentFrame, styles.emptyState]}>
             <Text variant="bodyBold" color={colors.text.primary} align="center">
               {showLoading ? 'Loading activity' : 'Transaction not found'}
             </Text>
@@ -933,13 +931,10 @@ export function TransactionDetailsScreen(): React.JSX.Element {
             >
               Open a transaction from the history list after the wallet activity has refreshed.
             </Text>
-          </Animated.View>
+          </StaggerRevealItem>
         ) : (
-          <>
-            <Animated.View
-              entering={FadeIn.duration(180)}
-              style={[styles.contentFrame, styles.summaryShell]}
-            >
+          <StaggerRevealGroup itemStyle={styles.contentFrame}>
+            <View style={styles.summaryShell}>
               <LinearGradient
                 colors={[...DETAIL_GLASS_COLORS]}
                 start={{ x: 0.04, y: 0 }}
@@ -1092,10 +1087,9 @@ export function TransactionDetailsScreen(): React.JSX.Element {
                   ) : null}
                 </View>
               </LinearGradient>
-            </Animated.View>
+            </View>
 
-            <Animated.View entering={FadeIn.duration(180).delay(50)} style={styles.contentFrame}>
-              <View style={styles.infoPanel}>
+            <View style={styles.infoPanel}>
                 <View style={styles.infoGrid}>
                   {infoTiles.map((tile) => {
                     const tileCopyValue = 'copyValue' in tile ? tile.copyValue : null;
@@ -1176,9 +1170,8 @@ export function TransactionDetailsScreen(): React.JSX.Element {
                     </Text>
                   </View>
                 ) : null}
-              </View>
-            </Animated.View>
-          </>
+            </View>
+          </StaggerRevealGroup>
         )}
       </ScrollView>
     </View>
@@ -1398,33 +1391,26 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     boxShadow: DETAIL_PANEL_SHADOW,
-    padding: spacing.sm,
-    gap: spacing.sm,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
   infoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.sm,
+    rowGap: spacing.lg,
+    columnGap: spacing.md,
   },
   infoTile: {
     flexGrow: 1,
-    flexBasis: '47%',
+    flexBasis: '44%',
     minWidth: 0,
-    minHeight: 50,
-    borderRadius: radii.lg,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    justifyContent: 'space-between',
+    gap: 2,
   },
   infoTileWide: {
     flexBasis: '100%',
   },
   infoTilePressed: {
-    backgroundColor: colors.holdingsCard.pressed,
+    opacity: 0.6,
   },
   infoTileLabel: {
     fontFamily: fontFamily.uiMedium,
@@ -1447,30 +1433,23 @@ const styles = StyleSheet.create({
   accountsBlock: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.holdingsCard.divider,
-    paddingTop: spacing.sm,
-    gap: spacing.xs,
+    paddingTop: spacing.md,
+    gap: spacing.sm,
   },
   accountsTitle: {
     fontFamily: fontFamily.uiMedium,
-    paddingHorizontal: spacing.xs,
   },
   accountsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.sm,
+    rowGap: spacing.lg,
+    columnGap: spacing.md,
   },
   accountPill: {
     flexGrow: 1,
-    flexBasis: '47%',
-    minHeight: 42,
+    flexBasis: '44%',
     minWidth: 0,
-    borderRadius: radii.lg,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    gap: 2,
     justifyContent: 'center',
   },
   accountLabel: {
@@ -1496,8 +1475,7 @@ const styles = StyleSheet.create({
   memoBlock: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.holdingsCard.divider,
-    paddingHorizontal: spacing.xs,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     gap: spacing.xs,
   },
   memoLabel: {

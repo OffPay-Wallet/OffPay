@@ -388,7 +388,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
         </View>
 
         {holding == null ? (
-          <View style={[styles.contentFrame, styles.emptyState]}>
+          <StaggerRevealItem index={0} style={[styles.contentFrame, styles.emptyState]}>
             <Text variant="bodyBold" color={colors.text.primary} align="center">
               {balanceQuery.isLoading || balanceQuery.isCapabilitiesPending
                 ? 'Loading token'
@@ -402,10 +402,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
             >
               Refresh holdings or open a token from the holdings list.
             </Text>
-          </View>
+          </StaggerRevealItem>
         ) : (
-          <>
-            <View style={[styles.contentFrame, styles.heroCard, { padding: heroPadding }]}>
+          <StaggerRevealGroup itemStyle={styles.contentFrame}>
+            <View style={[styles.heroCard, { padding: heroPadding }]}>
               <View style={styles.heroTopRow}>
                 <TokenIcon
                   symbol={holding.symbol}
@@ -456,7 +456,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
               </View>
             </View>
 
-            <View style={[styles.contentFrame, styles.actionsRow]}>
+            <View style={styles.actionsRow}>
               {TOKEN_DETAIL_ACTIONS.map((action) => (
                 <TokenActionButton
                   key={action.id}
@@ -467,7 +467,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
               ))}
             </View>
 
-            <View style={[styles.contentFrame, styles.section]}>
+            <View style={styles.section}>
               <Text variant="bodyBold" color={colors.text.primary} style={styles.sectionTitle}>
                 Details
               </Text>
@@ -484,7 +484,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
               </View>
             </View>
 
-            <View style={[styles.contentFrame, styles.section]}>
+            <View style={styles.section}>
               <Text variant="bodyBold" color={colors.text.primary} style={styles.sectionTitle}>
                 Recent Activity
               </Text>
@@ -526,7 +526,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
                 </View>
               )}
             </View>
-          </>
+          </StaggerRevealGroup>
         )}
       </ScrollView>
     </View>

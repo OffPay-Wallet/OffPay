@@ -83,6 +83,13 @@ export interface StaggerRevealGroupProps {
   baseDelayMs?: number;
   /** Style applied to the wrapping container. */
   style?: StyleProp<ViewStyle>;
+  /**
+   * Style applied to each per-child reveal wrapper. Use this to carry
+   * layout that the children depend on (e.g. a `width: '100%'` content
+   * frame), so wrapping them never collapses their width inside a
+   * center-aligned parent.
+   */
+  itemStyle?: StyleProp<ViewStyle>;
   children: ReactNode;
 }
 
@@ -95,6 +102,7 @@ export function StaggerRevealGroup({
   trigger,
   baseDelayMs = 0,
   style,
+  itemStyle,
   children,
 }: StaggerRevealGroupProps): React.JSX.Element {
   let visibleIndex = 0;
@@ -104,7 +112,12 @@ export function StaggerRevealGroup({
     const index = visibleIndex;
     visibleIndex += 1;
     return (
-      <StaggerRevealItem index={index} trigger={trigger} baseDelayMs={baseDelayMs}>
+      <StaggerRevealItem
+        index={index}
+        trigger={trigger}
+        baseDelayMs={baseDelayMs}
+        style={itemStyle}
+      >
         {child}
       </StaggerRevealItem>
     );

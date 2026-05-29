@@ -19,6 +19,7 @@ import { UmbraVaultActionPanel } from '@/components/features/umbra-vault/umbra-v
 import { UmbraVaultPortfolioCard } from '@/components/features/umbra-vault/umbra-vault-portfolio-card';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
+import { StaggerRevealGroup } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -90,17 +91,6 @@ function decimalBalanceToAtomic(value: string, decimals: number): bigint | null 
 function rawBalanceToAtomic(value: string | null | undefined): bigint | null {
   if (value == null || !/^\d+$/.test(value)) return null;
   return BigInt(value);
-}
-
-function getShieldedSourceAmountLabel(
-  balance: UmbraVaultBalance | null | undefined,
-): string | null {
-  if (balance?.displayBalance != null) return balance.displayBalance;
-  if (balance?.state === 'uninitialized' || balance?.state === 'non_existent') {
-    return '0';
-  }
-
-  return null;
 }
 
 function getUmbraSolFundingIssue(
@@ -1181,78 +1171,65 @@ function UmbraVaultContentBody({
         </Animated.View>
       ) : null}
 
-      <UmbraVaultPortfolioCard
-        balances={balances}
-        tokens={supportedTokens}
-        balanceLoadState={encryptedBalanceLoadState}
-        balanceStatusMessage={encryptedBalanceStatusMessage}
-        vaultRegistered={vaultRegistered}
-        loading={encryptedBalancesQuery.isFetching}
-        disabled={!canUseVault}
-        disabledMessage={disabledMessage}
-        networkLabel={networkLabel}
-        setupLoading={
-          registerMutation.isPending ||
-          setupInFlight ||
-          vaultSetupChecking ||
-          setupConfirmationPending
-        }
-        setupDisabled={vaultSetupChecking || setupConfirmationPending}
-        setupLabel={
-          setupConfirmationPending ? 'Confirming' : vaultSetupChecking ? 'Checking' : undefined
-        }
-        repairLoading={repairKeyMutation.isPending}
-        repairAvailable={hasUmbraKeyMismatch}
-        tokenLogos={tokenLogoMap}
-        onSetup={handleSetup}
-        onRepair={handleRepairVaultKey}
-        onRefresh={() => refreshBalances(false)}
-      />
+      <StaggerRevealGroup>
+        <UmbraVaultPortfolioCard
+          balances={balances}
+          tokens={supportedTokens}
+          balanceLoadState={encryptedBalanceLoadState}
+          balanceStatusMessage={encryptedBalanceStatusMessage}
+          vaultRegistered={vaultRegistered}
+          loading={encryptedBalancesQuery.isFetching}
+          disabled={!canUseVault}
+          disabledMessage={disabledMessage}
+          networkLabel={networkLabel}
+          setupLoading={
+            registerMutation.isPending ||
+            setupInFlight ||
+            vaultSetupChecking ||
+            setupConfirmationPending
+          }
+          setupDisabled={vaultSetupChecking || setupConfirmationPending}
+          setupLabel={
+            setupConfirmationPending ? 'Confirming' : vaultSetupChecking ? 'Checking' : undefined
+          }
+          repairLoading={repairKeyMutation.isPending}
+          repairAvailable={hasUmbraKeyMismatch}
+          tokenLogos={tokenLogoMap}
+          onSetup={handleSetup}
+          onRepair={handleRepairVaultKey}
+          onRefresh={() => refreshBalances(false)}
+        />
 
-      <UmbraVaultActionPanel
-        action={action}
-        token={token}
-        tokens={supportedTokens}
-        balances={balances}
-        balanceLoadState={encryptedBalanceLoadState}
-        subtitle={vaultActionSubtitle}
-        amount={amount}
-        loading={isActionSubmitting || fundsValidationPending}
-        loadingLabel={fundsValidationPending ? 'Checking funds' : 'Finalizing'}
-        disabled={actionSubmitDisabled}
-        feedbackLabel={actionFeedback.label}
-        feedbackTone={actionFeedback.tone}
-        disabledMessage={disabledMessage}
-        maxAmount={maxAmountValue}
-        sourceBalanceLabel={
-          action === 'withdraw'
-            ? getShieldedSourceAmountLabel(selectedVaultBalance)
-            : (selectedPublicToken?.balance ?? null)
-        }
-        onActionChange={(nextAction) => {
-          setAction(nextAction);
-        }}
-        onTokenChange={setToken}
-        onAmountChange={(nextAmount) => {
-          const decimals = selectedTokenConfig?.decimals ?? 9;
-          setAmount(sanitizeDecimalInput(nextAmount, decimals));
-        }}
-        onMaxPress={() => {
-          if (maxAmountValue == null) return;
-          setAmount(maxAmountValue);
-        }}
-        onSubmit={handleSubmitAction}
-      />
-
-      <Text
-        variant="small"
-        color={colors.text.secondary}
-        style={styles.poweredBy}
-        numberOfLines={1}
-        maxFontSizeMultiplier={1}
-      >
-        Powered by Umbra
-      </Text>
+        <UmbraVaultActionPanel
+          action={action}
+          token={token}
+          tokens={supportedTokens}
+          balances={balances}
+          balanceLoadState={encryptedBalanceLoadState}
+          subtitle={vaultActionSubtitle}
+          amount={amount}
+          loading={isActionSubmitting || fundsValidationPending}
+          loadingLabel={fundsValidationPending ? 'Checking funds' : 'Finalizing'}
+          disabled={actionSubmitDisabled}
+          feedbackLabel={actionFeedback.label}
+          feedbackTone={actionFeedback.tone}
+          disabledMessage={disabledMessage}
+          maxAmount={maxAmountValue}
+          onActionChange={(nextAction) => {
+            setAction(nextAction);
+          }}
+          onTokenChange={setToken}
+          onAmountChange={(nextAmount) => {
+            const decimals = selectedTokenConfig?.decimals ?? 9;
+            setAmount(sanitizeDecimalInput(nextAmount, decimals));
+          }}
+          onMaxPress={() => {
+            if (maxAmountValue == null) return;
+            setAmount(maxAmountValue);
+          }}
+          onSubmit={handleSubmitAction}
+        />
+      </StaggerRevealGroup>
     </View>
   );
 }
@@ -1349,11 +1326,5 @@ const styles = StyleSheet.create({
     minWidth: 0,
     textAlign: 'center',
     fontFamily: fontFamily.displaySemiBold,
-  },
-  poweredBy: {
-    alignSelf: 'center',
-    fontFamily: fontFamily.uiMedium,
-    textTransform: 'uppercase',
-    letterSpacing: 0,
   },
 });

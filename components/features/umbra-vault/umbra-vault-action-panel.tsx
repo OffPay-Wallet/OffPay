@@ -1,11 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, {
-  Easing,
-  FadeIn,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
+  withSpring,
+  type WithSpringConfig,
 } from 'react-native-reanimated';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
@@ -43,12 +42,6 @@ interface UmbraVaultActionPanelProps {
   feedbackTone: 'default' | 'danger';
   disabledMessage: string | null;
   maxAmount: string | null;
-  /**
-   * Display label for the balance the action will draw from.
-   * Shield → public wallet balance.
-   * Withdraw → shielded vault balance.
-   */
-  sourceBalanceLabel: string | null;
   onActionChange: (action: UmbraVaultAction) => void;
   onTokenChange: (token: UmbraVaultToken) => void;
   onAmountChange: (amount: string) => void;
@@ -62,7 +55,13 @@ const ACTIONS: { id: UmbraVaultAction; title: string }[] = [
 ];
 const ACTION_TRACK_PADDING = 4;
 const ACTION_SEGMENT_GAP = 4;
-const ACTION_TRACK_ANIMATION = { duration: 240, easing: Easing.out(Easing.cubic) };
+// Snappy spring — the segment thumb slides with a tight, smooth motion.
+// Runs entirely on the UI thread, decoupled from the parent re-render.
+const ACTION_THUMB_SPRING: WithSpringConfig = {
+  damping: 22,
+  stiffness: 320,
+  mass: 0.7,
+};
 
 function getButtonLabel(
   action: UmbraVaultAction,
@@ -88,7 +87,6 @@ export function UmbraVaultActionPanel({
   feedbackTone,
   disabledMessage,
   maxAmount,
-  sourceBalanceLabel,
   onActionChange,
   onTokenChange,
   onAmountChange,
@@ -114,6 +112,10 @@ export function UmbraVaultActionPanel({
     [action],
   );
   const actionThumbOffset = useSharedValue(0);
+  // Per-segment stride mirrored into a shared value so the press
+  // handler can move the thumb on the UI thread without reading React
+  // state inside a worklet.
+  const actionStride = useSharedValue(0);
   const selectedBalance = getVaultBalanceForToken(balances, token);
   const withdrawReadable = action !== 'withdraw' || canReadVaultBalance(selectedBalance);
   const submitBlocked = disabled || !withdrawReadable;
@@ -131,21 +133,35 @@ export function UmbraVaultActionPanel({
         : colors.text.onAccent;
 
   useEffect(() => {
-    actionThumbOffset.value = withTiming(
+    actionStride.value = actionSegmentWidth + ACTION_SEGMENT_GAP;
+  }, [actionStride, actionSegmentWidth]);
+
+  // Reconcile the thumb with the prop for external changes only. Taps
+  // already moved the thumb in the press handler, so this is a no-op
+  // when the prop catches up.
+  useEffect(() => {
+    actionThumbOffset.value = withSpring(
       selectedActionIndex * (actionSegmentWidth + ACTION_SEGMENT_GAP),
-      ACTION_TRACK_ANIMATION,
+      ACTION_THUMB_SPRING,
     );
   }, [actionSegmentWidth, actionThumbOffset, selectedActionIndex]);
+
+  // Slide the thumb immediately on tap, on the UI thread, decoupled
+  // from the parent's heavier re-render.
+  const handleActionSelect = useCallback(
+    (id: UmbraVaultAction, index: number) => {
+      actionThumbOffset.value = withSpring(index * actionStride.value, ACTION_THUMB_SPRING);
+      onActionChange(id);
+    },
+    [actionStride, actionThumbOffset, onActionChange],
+  );
 
   const actionThumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: actionThumbOffset.value }],
   }));
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(320).delay(100)}
-      style={[styles.card, compact && styles.cardCompact, dense && styles.cardDense]}
-    >
+    <View style={[styles.card, compact && styles.cardCompact, dense && styles.cardDense]}>
       <View style={styles.headerRow}>
         <View style={styles.titleGroup}>
           <Text
@@ -190,7 +206,7 @@ export function UmbraVaultActionPanel({
           />
         ) : null}
         <View style={styles.actionSegmentRow}>
-          {ACTIONS.map((item) => {
+          {ACTIONS.map((item, index) => {
             const selected = item.id === action;
             return (
               <Pressable
@@ -198,7 +214,7 @@ export function UmbraVaultActionPanel({
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
                 onPress={() => {
-                  if (!selected) onActionChange(item.id);
+                  if (!selected) handleActionSelect(item.id, index);
                 }}
                 hitSlop={6}
                 style={({ pressed }) => [
@@ -329,21 +345,6 @@ export function UmbraVaultActionPanel({
         </Pressable>
       </View>
 
-      {sourceBalanceLabel != null ? (
-        <Text
-          variant="small"
-          color={colors.text.secondary}
-          style={styles.balanceHint}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-          maxFontSizeMultiplier={1}
-        >
-          {action === 'withdraw'
-            ? `Shielded ${sourceBalanceLabel} ${token}`
-            : `Available ${sourceBalanceLabel} ${token}`}
-        </Text>
-      ) : null}
-
       {disabledMessage != null ? (
         <Text
           variant="small"
@@ -365,7 +366,7 @@ export function UmbraVaultActionPanel({
           Refresh before withdrawing this token.
         </Text>
       ) : null}
-    </Animated.View>
+    </View>
   );
 }
 
@@ -373,15 +374,11 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.brand.whiteStream,
     padding: spacing.lg,
     gap: spacing.md,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   cardCompact: {
     padding: spacing.md,
@@ -423,12 +420,6 @@ const styles = StyleSheet.create({
     top: ACTION_TRACK_PADDING,
     left: ACTION_TRACK_PADDING,
     backgroundColor: colors.brand.azureCyan,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   actionSegmentRow: {
     flex: 1,
@@ -596,10 +587,5 @@ const styles = StyleSheet.create({
   },
   helperText: {
     lineHeight: 18,
-  },
-  balanceHint: {
-    marginTop: -spacing.xs,
-    paddingHorizontal: spacing.xs,
-    fontVariant: ['tabular-nums'],
   },
 });

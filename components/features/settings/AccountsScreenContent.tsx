@@ -12,6 +12,7 @@ import {
 } from '@/components/features/settings/AccountActionDialog';
 import { AccountListCard } from '@/components/features/settings/AccountListCard';
 import { Text } from '@/components/ui/Text';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { useWalletStore } from '@/store/walletStore';
@@ -189,10 +190,9 @@ export function AccountsScreenContent(): React.JSX.Element {
               const actionsOpen = openActionWalletId === wallet.id;
 
               return (
-                <Animated.View
+                <StaggerRevealItem
                   key={wallet.id}
-                  entering={FadeIn.duration(260)}
-                  layout={WALLET_REORDER_TRANSITION}
+                  index={index}
                   style={[
                     styles.walletCardLayer,
                     {
@@ -200,20 +200,22 @@ export function AccountsScreenContent(): React.JSX.Element {
                     },
                   ]}
                 >
-                  <AccountListCard
-                    wallet={wallet}
-                    isPrimary={wallet.id === activeWalletId}
-                    isOnlyWallet={wallets.length === 1}
-                    compact={compact}
-                    dense={dense}
-                    actionsMenuOpen={actionsOpen}
-                    onActionsMenuOpenChange={(open) =>
-                      setOpenActionWalletId(open ? wallet.id : null)
-                    }
-                    onRequestExportKeys={handleRequestExportKeys}
-                    onRequestRemoveWallet={handleRequestRemoveWallet}
-                  />
-                </Animated.View>
+                  <Animated.View layout={WALLET_REORDER_TRANSITION}>
+                    <AccountListCard
+                      wallet={wallet}
+                      isPrimary={wallet.id === activeWalletId}
+                      isOnlyWallet={wallets.length === 1}
+                      compact={compact}
+                      dense={dense}
+                      actionsMenuOpen={actionsOpen}
+                      onActionsMenuOpenChange={(open) =>
+                        setOpenActionWalletId(open ? wallet.id : null)
+                      }
+                      onRequestExportKeys={handleRequestExportKeys}
+                      onRequestRemoveWallet={handleRequestRemoveWallet}
+                    />
+                  </Animated.View>
+                </StaggerRevealItem>
               );
             })
           ) : (

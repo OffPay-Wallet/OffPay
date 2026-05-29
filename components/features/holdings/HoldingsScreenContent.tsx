@@ -14,6 +14,7 @@ import {
 import { HoldingsHeader } from '@/components/features/holdings/HoldingsHeader';
 import { HoldingsSearchBar } from '@/components/features/holdings/HoldingsSearchBar';
 import { Text } from '@/components/ui/Text';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
@@ -294,17 +295,19 @@ export function HoldingsScreenContent({
             allocation cost is bounded by visible rows rather than the
             full holdings array. The list owns its own scroll surface
             and replaces the prior <ScrollView> + .map combo. */}
-        <FlashList<RowItem>
-          data={rowItems}
-          renderItem={renderItem}
-          keyExtractor={keyExtractor}
-          ListHeaderComponent={ListHeader}
-          ListEmptyComponent={ListEmpty}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          drawDistance={400}
-        />
+        <StaggerRevealItem index={0} style={styles.listReveal}>
+          <FlashList<RowItem>
+            data={rowItems}
+            renderItem={renderItem}
+            keyExtractor={keyExtractor}
+            ListHeaderComponent={ListHeader}
+            ListEmptyComponent={ListEmpty}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            drawDistance={400}
+          />
+        </StaggerRevealItem>
       </View>
     </View>
   );
@@ -330,6 +333,9 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: spacing['4xl'],
+  },
+  listReveal: {
+    flex: 1,
   },
   rowCardShell: {
     alignSelf: 'center',

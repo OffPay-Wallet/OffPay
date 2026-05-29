@@ -150,7 +150,7 @@ export function UmbraVaultPortfolioCard({
   const setupButtonLabel = setupLabel ?? (setupLoading ? 'Setting up' : 'Set Up');
 
   return (
-    <Animated.View entering={FadeIn.duration(320).delay(40)} style={styles.section}>
+    <View style={styles.section}>
       <View style={[styles.card, compact && styles.cardCompact, dense && styles.cardDense]}>
         <View style={styles.topRow}>
           <View style={styles.titleGroup}>
@@ -288,7 +288,7 @@ export function UmbraVaultPortfolioCard({
           </Text>
         ) : null}
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -300,13 +300,9 @@ const styles = StyleSheet.create({
     borderRadius: radii['2xl'],
     overflow: 'hidden',
     borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.brand.whiteStream,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   card: {
     borderRadius: radii['2xl'],
