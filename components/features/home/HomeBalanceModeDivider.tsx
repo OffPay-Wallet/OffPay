@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   FadeIn,
@@ -74,10 +73,7 @@ export function HomeBalanceModeDivider({
       entering={FadeIn.duration(180).delay(60)}
       style={[styles.wrapper, compact && styles.wrapperCompact]}
     >
-      <LinearGradient
-        colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
+      <View
         style={[styles.track, { height: trackHeight }]}
         onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
       >
@@ -160,7 +156,7 @@ export function HomeBalanceModeDivider({
                 );
               })}
         </View>
-      </LinearGradient>
+      </View>
     </Animated.View>
   );
 }
@@ -172,31 +168,20 @@ const styles = StyleSheet.create({
   wrapperCompact: {
     marginBottom: spacing.lg,
   },
+  // Container-less segmented control — no track background, border, or
+  // shadow. The active segment is a soft translucent pill floating on
+  // the bare gradient (reference behaviour); inactive is muted text.
   track: {
     width: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.clearFill,
     padding: TRACK_PADDING,
-    boxShadow: `0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.1)`,
   },
   thumb: {
     position: 'absolute',
     top: TRACK_PADDING,
     left: TRACK_PADDING,
-    backgroundColor: colors.brand.azureCyan,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    boxShadow: `0 10px 20px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.76)`,
+    backgroundColor: colors.glass.strongFill,
   },
   segmentRow: {
     flex: 1,

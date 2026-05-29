@@ -34,7 +34,7 @@ const GLASS_PANEL_COLORS = [
 ] as const;
 const CARD_MAX_WIDTH = 520;
 const CARD_SHADOW =
-  '0 24px 52px rgba(4, 28, 36, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -14px 26px rgba(91, 200, 232, 0.12)';
+  '0 8px 24px rgba(4, 28, 36, 0.16)';
 
 function getDialogCopy(dialog: AccountActionDialogState): {
   icon: IoniconName;

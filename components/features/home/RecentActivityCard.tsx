@@ -59,8 +59,10 @@ const HOME_GLASS_COLORS = [
   'rgba(238, 250, 252, 0.86)',
   'rgba(223, 247, 250, 0.78)',
 ] as const;
+// Flat card treatment — see BalanceCard. Soft ambient lift + 1px top
+// highlight only, dropping the previous heavy drop shadow + cyan glow.
 const HOME_CONTAINER_SHADOW =
-  '0 0 0 1px rgba(255, 255, 255, 0.9) inset, 0 12px 24px rgba(14, 42, 53, 0.14), 0 4px 10px rgba(91, 200, 232, 0.18)';
+  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
 
 // ---------------------------------------------------------------------------
 // Sub-components

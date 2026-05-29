@@ -33,6 +33,7 @@ import { PuffyRefreshIcon } from '@/components/ui/icons/PuffyRefreshIcon';
 import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
+import { ThreeDPressable, SNAPPY_PRESS_SPRING } from '@/components/ui/ThreeDPressable';
 import { SlotText } from '@/components/ui/SlotText';
 import { Text } from '@/components/ui/Text';
 import { CURRENCIES } from '@/constants/currencies';
@@ -63,19 +64,28 @@ const QUICK_ACTIONS: QuickAction[] = [
   { id: 'receive', label: 'Receive' },
   { id: 'swap', label: 'Swap' },
 ];
-const HEADER_CONTAINER_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
+// Single hero container gradient (Expo-UI style: one rounded container
+// holds the flat balance panel + the action row, all sharing this
+// gradient — no per-card elevation). Soft vertical arctic ramp from
+// existing palette: light frost at the top behind the white balance
+// panel, deepening into the arctic cyan field behind the action
+// buttons so they read as sitting "in" the card.
+const PORTFOLIO_HERO_GRADIENT = [
+  colors.brand.iceBlue,
+  colors.surface.backgroundAlt,
+  colors.brand.azureCyan,
 ] as const;
+// Flat card treatment — the reference dashboard uses clean glass cards
+// that sit on the gradient with only a faint ambient lift, not the
+// heavy puffy drop shadow + inner cyan bloom we had before. Keep a
+// single soft shadow for separation and a 1px top highlight so the
+// glass edge still catches light.
 const HEADER_CONTAINER_SHADOW =
-  '0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.12)';
+  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
 
 // ---------------------------------------------------------------------------
 // Helpers & Components
 // ---------------------------------------------------------------------------
-
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function ActionIcon({
   actionId,
@@ -103,25 +113,13 @@ function ActionButton({
   action,
   disabled,
   compact,
-  onPressIn,
-  onPressOut,
   onPress,
 }: {
   action: QuickAction;
   disabled: boolean;
   compact: boolean;
-  onPressIn?: (id: string) => void;
-  onPressOut?: (id: string) => void;
   onPress: (id: string) => void;
 }) {
-  const pressProgress = useSharedValue(0);
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: withTiming(pressProgress.value === 1 ? 0.72 : 1, {
-      duration: 100,
-      easing: Easing.out(Easing.cubic),
-    }),
-  }));
-
   const handlePress = () => {
     if (disabled) return;
     onPress(action.id);
@@ -129,44 +127,35 @@ function ActionButton({
   const iconSize = compact ? 20 : 22;
 
   return (
-    <AnimatedPressable
-      style={[styles.actionItem, compact && styles.actionItemCompact, animatedStyle]}
-      onPressIn={() => {
-        if (!disabled) onPressIn?.(action.id);
-        pressProgress.value = 1;
-      }}
-      onPressOut={() => {
-        pressProgress.value = 0;
-        if (!disabled) onPressOut?.(action.id);
-      }}
-      onPress={handlePress}
-      disabled={disabled}
-      accessibilityRole="button"
+    <ThreeDPressable
       accessibilityLabel={action.label}
       accessibilityState={{ disabled }}
+      onPress={handlePress}
+      disabled={disabled}
+      depth={compact ? 2 : 3}
+      borderRadius={radii['2xl']}
+      surfaceColor={colors.glass.strongFill}
+      shelfColor={colors.glass.cyanWash}
+      borderColor="rgba(255, 255, 255, 0.28)"
+      borderWidth={StyleSheet.hairlineWidth}
+      pressSpring={SNAPPY_PRESS_SPRING}
+      capStyle={compact ? styles.actionCapCompact : styles.actionCap}
     >
-      <LinearGradient
-        colors={[...HEADER_CONTAINER_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.actionGlass, compact && styles.actionGlassCompact]}
+      <View style={[styles.actionIconSlot, { width: iconSize, height: iconSize }]}>
+        <ActionIcon actionId={action.id} disabled={disabled} size={iconSize} />
+      </View>
+      <Text
+        variant="small"
+        color={disabled ? colors.text.tertiary : colors.brand.deepShadow}
+        style={styles.actionLabel}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.86}
+        maxFontSizeMultiplier={1}
       >
-        <View style={[styles.actionIconSlot, { width: iconSize, height: iconSize }]}>
-          <ActionIcon actionId={action.id} disabled={disabled} size={iconSize} />
-        </View>
-        <Text
-          variant="small"
-          color={disabled ? colors.text.tertiary : colors.brand.deepShadow}
-          style={styles.actionLabel}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.86}
-          maxFontSizeMultiplier={1}
-        >
-          {action.label}
-        </Text>
-      </LinearGradient>
-    </AnimatedPressable>
+        {action.label}
+      </Text>
+    </ThreeDPressable>
   );
 }
 
@@ -175,12 +164,7 @@ function ActionButtonSkeleton({ compact }: { compact: boolean }): React.JSX.Elem
 
   return (
     <View style={[styles.actionItem, compact && styles.actionItemCompact]}>
-      <LinearGradient
-        colors={[...HEADER_CONTAINER_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.actionGlass, compact && styles.actionGlassCompact]}
-      >
+      <View style={[styles.actionGlass, compact && styles.actionGlassCompact]}>
         <SkeletonBlock width={iconSize} height={iconSize} radius={radii.full} />
         <SkeletonBlock
           width={compact ? 42 : 48}
@@ -188,7 +172,7 @@ function ActionButtonSkeleton({ compact }: { compact: boolean }): React.JSX.Elem
           radius={radii.full}
           style={styles.actionSkeletonLabel}
         />
-      </LinearGradient>
+      </View>
     </View>
   );
 }
@@ -359,21 +343,27 @@ export function BalanceCard({
   const showActionSkeletons = loading || actionsLoading;
   return (
     <View style={[styles.outer, wideLayout && styles.outerWide]}>
-      {/* ── Balance area ── */}
-      <View style={[styles.imageWrap, { minHeight: portfolioCardMinHeight }]}>
-        <LinearGradient
-          colors={[...HEADER_CONTAINER_GLASS_COLORS]}
-          start={{ x: 0.04, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[
-            styles.content,
-            {
-              minHeight: portfolioCardMinHeight,
-              paddingHorizontal: cardHPadding,
-              paddingVertical: cardVPadding,
-            },
-          ]}
-        >
+      {/* ── Single hero container — gradient holds the balance panel
+          and the action row, Expo-UI style. No card elevation. ── */}
+      <LinearGradient
+        colors={[...PORTFOLIO_HERO_GRADIENT]}
+        locations={[0, 0.6, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={[styles.heroContainer, compact && styles.heroContainerCompact]}
+      >
+        {/* Flat white balance panel sitting on the gradient. */}
+        <View style={[styles.imageWrap, { minHeight: portfolioCardMinHeight }]}>
+          <View
+            style={[
+              styles.content,
+              {
+                minHeight: portfolioCardMinHeight,
+                paddingHorizontal: cardHPadding,
+                paddingVertical: cardVPadding,
+              },
+            ]}
+          >
           <View style={[styles.topRow, ultraCompact && styles.topRowCompact]}>
             {loading ? (
               <>
@@ -790,35 +780,36 @@ export function BalanceCard({
               </Pressable>
             </Pressable>
           </Modal>
-        </LinearGradient>
-      </View>
+          </View>
+        </View>
 
-      {/* ── Actions row (card surface) ── */}
-      <Animated.View
-        style={[styles.actionsRow, compact && styles.actionsRowCompact, actionsRowStyle]}
-      >
-        {visibleActions.map((action) =>
-          showActionSkeletons ? (
-            <View
-              key={`action-skeleton-${action.id}`}
-              style={styles.actionSlot}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-            >
-              <ActionButtonSkeleton compact={compact} />
-            </View>
-          ) : (
-            <Animated.View key={action.id} style={styles.actionSlot}>
-              <ActionButton
-                action={action}
-                disabled={false}
-                compact={compact}
-                onPress={handleAction}
-              />
-            </Animated.View>
-          ),
-        )}
-      </Animated.View>
+        {/* ── Actions row — shares the hero container gradient ── */}
+        <Animated.View
+          style={[styles.actionsRow, compact && styles.actionsRowCompact, actionsRowStyle]}
+        >
+          {visibleActions.map((action) =>
+            showActionSkeletons ? (
+              <View
+                key={`action-skeleton-${action.id}`}
+                style={styles.actionSlot}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                <ActionButtonSkeleton compact={compact} />
+              </View>
+            ) : (
+              <Animated.View key={action.id} style={styles.actionSlot}>
+                <ActionButton
+                  action={action}
+                  disabled={false}
+                  compact={compact}
+                  onPress={handleAction}
+                />
+              </Animated.View>
+            ),
+          )}
+        </Animated.View>
+      </LinearGradient>
     </View>
   );
 }
@@ -835,18 +826,30 @@ const styles = StyleSheet.create({
   outerWide: {
     maxWidth: 430,
   },
-  imageWrap: {
+  // Single hero container — holds the balance panel + action row and
+  // owns the gradient. No drop shadow / elevation per the reference;
+  // the rounded gradient alone defines the surface.
+  heroContainer: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
-    marginBottom: spacing.sm,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
-    boxShadow: HEADER_CONTAINER_SHADOW,
+    padding: spacing.md,
+    gap: spacing.lg,
+  },
+  heroContainerCompact: {
+    padding: spacing.sm,
+    gap: spacing.md,
+  },
+  // Frosted balance panel inside the hero container. Translucent fill
+  // so the gradient bleeds through (reads as part of the background,
+  // not a floating card). Hairline rim, no shadow.
+  imageWrap: {
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    backgroundColor: colors.glass.frostFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
   },
   content: {
     minWidth: 0,
@@ -1224,6 +1227,26 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  // Cap geometry for the Send/Receive/Swap ThreeDPressable buttons.
+  // The shelf + spring come from ThreeDPressable; these just size the
+  // cap face and lay out the icon + label.
+  actionCap: {
+    minHeight: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  actionCapCompact: {
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  // Flat skeleton shell — mirrors the cap footprint while loading.
   actionItem: {
     flex: 1,
     minWidth: 0,
@@ -1232,12 +1255,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderCurve: 'continuous',
     backgroundColor: colors.glass.strongFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: HEADER_CONTAINER_SHADOW,
   },
   actionGlass: {
     flex: 1,
@@ -1248,8 +1267,6 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
-    position: 'relative',
-    backgroundColor: colors.glass.strongFill,
   },
   actionGlassCompact: {
     minHeight: 52,

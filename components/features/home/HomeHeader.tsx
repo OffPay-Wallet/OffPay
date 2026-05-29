@@ -3,7 +3,6 @@
  */
 import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
 import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   interpolate,
@@ -157,12 +156,15 @@ function HomeHeaderComponent({
     transform: [{ translateX: toggleProgress.value * toggleTravel }],
   }));
 
-  // Animated track color — azure cyan when offline, glass frosted when online
+  // Animated track color — soft translucent white when online
+  // (connected), muted grey when offline so it separates from the cyan
+  // background instead of blending into it. The solid-white knob stays
+  // distinct against both.
   const trackStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(
       toggleProgress.value,
       [0, 1],
-      [colors.glass.clearFill, 'rgba(91, 200, 232, 0.68)'],
+      [colors.glass.clearFill, colors.text.tertiary],
     ),
   }));
 
@@ -182,10 +184,7 @@ function HomeHeaderComponent({
         importantForAccessibility="no-hide-descendants"
       >
         <View style={[styles.walletPressable, { marginRight: headerGap }]}>
-          <LinearGradient
-            colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <View
             style={[
               styles.walletGlass,
               {
@@ -211,15 +210,10 @@ function HomeHeaderComponent({
                 />
               ) : null}
             </View>
-          </LinearGradient>
+          </View>
         </View>
 
-        <LinearGradient
-          colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-          start={{ x: 0.04, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.actions, { gap: actionGap }]}
-        >
+        <View style={[styles.actions, { gap: actionGap }]}>
           <View style={styles.toggleContainer}>
             <View
               style={[
@@ -234,7 +228,7 @@ function HomeHeaderComponent({
             </View>
           </View>
           <SkeletonBlock width={actionButtonSize} height={actionButtonSize} radius={radii.full} />
-        </LinearGradient>
+        </View>
       </View>
     );
   }
@@ -252,10 +246,7 @@ function HomeHeaderComponent({
         accessibilityRole="button"
         accessibilityLabel="Open accounts"
       >
-        <LinearGradient
-          colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-          start={{ x: 0.04, y: 0 }}
-          end={{ x: 1, y: 1 }}
+        <View
           style={[
             styles.walletGlass,
             {
@@ -298,15 +289,10 @@ function HomeHeaderComponent({
               />
             ) : null}
           </View>
-        </LinearGradient>
+        </View>
       </Pressable>
 
-      <LinearGradient
-        colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.actions, { gap: actionGap }]}
-      >
+      <View style={[styles.actions, { gap: actionGap }]}>
         <View style={styles.toggleContainer}>
           <Pressable
             style={[
@@ -384,7 +370,7 @@ function HomeHeaderComponent({
             </View>
           ) : null}
         </Pressable>
-      </LinearGradient>
+      </View>
       <Suspense fallback={null}>
         {notificationsVisible ? (
           <NotificationCenterModal
@@ -431,12 +417,7 @@ const styles = StyleSheet.create({
     paddingRight: spacing.md,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    boxShadow: `0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.12)`,
+    backgroundColor: colors.glass.clearFill,
   },
   walletTextBlock: {
     flex: 1,
@@ -473,12 +454,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    boxShadow: `0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.1)`,
   },
 
   toggleContainer: {
@@ -494,21 +469,12 @@ const styles = StyleSheet.create({
   },
   toggleTrack: {
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: 'rgba(252, 252, 255, 0.42)',
-    boxShadow: `0 14px 28px rgba(14, 42, 53, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -10px 18px rgba(91, 200, 232, 0.14)`,
+    backgroundColor: colors.glass.clearFill,
   },
   toggleKnob: {
-    backgroundColor: 'rgba(252, 252, 255, 0.9)',
-    borderWidth: 1,
-    borderColor: colors.glass.rim,
+    backgroundColor: colors.brand.whiteStream,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: `0 8px 16px rgba(14, 42, 53, 0.18), inset 0 1px 1px rgba(255, 255, 255, 0.9)`,
   },
   toggleIconLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -519,13 +485,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.glass.strongFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    boxShadow: `0 8px 16px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.86), inset 0 -8px 14px rgba(91, 200, 232, 0.1)`,
+    backgroundColor: colors.glass.clearFill,
   },
   notificationBadge: {
     position: 'absolute',

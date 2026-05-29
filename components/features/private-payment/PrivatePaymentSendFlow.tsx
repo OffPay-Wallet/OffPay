@@ -111,7 +111,7 @@ const SEND_GLASS_COLORS = [
 const PRIVATE_SEND_TIMEOUT_MS = 120_000;
 const UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS = 300_000;
 const SEND_HEADER_SHADOW =
-  '0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.1)';
+  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
 const SEND_STEP_TRANSITION_DURATION_MS = 260;
 const SEND_STEP_ORDER: Record<SendStep, number> = {
   token: 0,

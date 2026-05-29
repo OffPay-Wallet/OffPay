@@ -51,6 +51,13 @@ export interface ThreeDPressableProps {
   /** Optional rim around the cap (e.g. for white-on-white parity). */
   borderColor?: string;
   borderWidth?: number;
+  /**
+   * Override the press spring. Defaults to the onboarding curve
+   * (`PRESS_SPRING`). Pass a snappier config for lower-latency
+   * surfaces like the home quick actions. Runs as a worklet on the
+   * UI thread either way, so the perf-first approach is preserved.
+   */
+  pressSpring?: WithSpringConfig;
   /** Children rendered inside the cap. */
   children: ReactNode;
   /**
@@ -78,6 +85,17 @@ const PRESS_SPRING: WithSpringConfig = {
   mass: 0.6,
 };
 
+/**
+ * Lower-latency press curve for high-frequency surfaces (home quick
+ * actions). Higher stiffness + lighter mass make the cap react almost
+ * instantly on touch while staying on the UI thread.
+ */
+export const SNAPPY_PRESS_SPRING: WithSpringConfig = {
+  damping: 20,
+  stiffness: 600,
+  mass: 0.4,
+};
+
 export function ThreeDPressable({
   surfaceColor,
   shelfColor,
@@ -86,6 +104,7 @@ export function ThreeDPressable({
   borderRadius = radii.full,
   borderColor,
   borderWidth,
+  pressSpring = PRESS_SPRING,
   children,
   capStyle,
   onPress,
@@ -103,12 +122,12 @@ export function ThreeDPressable({
 
   const handlePressIn = (): void => {
     'worklet';
-    offset.value = withSpring(depth, PRESS_SPRING);
+    offset.value = withSpring(depth, pressSpring);
   };
 
   const handlePressOut = (): void => {
     'worklet';
-    offset.value = withSpring(0, PRESS_SPRING);
+    offset.value = withSpring(0, pressSpring);
   };
 
   return (
@@ -125,9 +144,12 @@ export function ThreeDPressable({
           },
         ]}
       />
-      {/* Cap — Pressable wrapped inside an Animated.View. We put the
-          press handlers on the inner Pressable so the View can host
-          the transform. */}
+      {/* Cap — Pressable wrapped inside an Animated.View. The
+          Animated.View hosts the transform + visual fill; the
+          Pressable always stretches to fill it so the entire cap is
+          tappable (sizing/padding/centering from `capStyle` is
+          applied to the Pressable, never the cap, so a centered
+          content layout can't shrink the touch target). */}
       <Animated.View
         pointerEvents="box-none"
         style={[
@@ -138,7 +160,6 @@ export function ThreeDPressable({
             borderColor,
             borderWidth,
           },
-          capStyle,
           animatedCapStyle,
         ]}
       >
@@ -156,6 +177,7 @@ export function ThreeDPressable({
           style={({ pressed }) => [
             styles.capInner,
             { borderRadius },
+            capStyle,
             pressed && pressedSurfaceColor
               ? { backgroundColor: pressedSurfaceColor }
               : null,
@@ -176,7 +198,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   capInner: {
-    flex: 1,
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
   },

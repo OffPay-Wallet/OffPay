@@ -75,11 +75,11 @@ const DETAIL_GLASS_COLORS = [
   colors.glass.clearFill,
 ] as const;
 const DETAIL_PANEL_SHADOW =
-  '0 16px 30px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(91, 200, 232, 0.12)';
+  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
 const DETAIL_CONTROL_SHADOW =
-  '0 8px 16px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.86), inset 0 -8px 14px rgba(91, 200, 232, 0.1)';
+  '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
 const ACTION_BADGE_SHADOW =
-  '0 6px 12px rgba(14, 42, 53, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -6px 12px rgba(91, 200, 232, 0.1)';
+  '0 2px 5px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.82)';
 const TOKEN_SYMBOL_PATTERN = /(?:^|[\s+-])(?:\d[\d,.]*\s+)?([A-Za-z][A-Za-z0-9]{1,15})$/;
 
 const AMOUNT_COLORS: Record<OffpayDisplayTone, string> = {

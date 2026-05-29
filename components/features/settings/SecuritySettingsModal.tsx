@@ -88,7 +88,7 @@ const SHEET_GLASS_COLORS = [
   colors.glass.clearFill,
 ] as const;
 const SHEET_SHADOW =
-  '0 24px 42px rgba(14, 42, 53, 0.18), inset 0 1px 1px rgba(255, 255, 255, 0.78), inset 0 -18px 32px rgba(91, 200, 232, 0.12)';
+  '0 8px 24px rgba(14, 42, 53, 0.14)';
 const NAV_TIMING = { duration: 180, easing: Easing.out(Easing.cubic) } as const;
 const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
 
