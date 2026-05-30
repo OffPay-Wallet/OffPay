@@ -78,6 +78,12 @@ describe('buildPayrollConfirmationSummary', () => {
   it('does not require typed confirmation for small batches', () => {
     expect(buildSummary([makeRow('a', 'ready')]).requiresTypedConfirmation).toBe(false);
   });
+  it('defaults unprobed recipient count to zero and passes it through', () => {
+    expect(buildSummary([makeRow('a', 'ready')]).unprobedRecipientCount).toBe(0);
+    expect(
+      buildSummary([makeRow('a', 'ready')], { unprobedRecipientCount: 7 }).unprobedRecipientCount,
+    ).toBe(7);
+  });
 });
 
 describe('isTypedConfirmationValid', () => {

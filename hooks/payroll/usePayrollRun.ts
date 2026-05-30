@@ -83,7 +83,7 @@ export function usePayrollRun(params: UsePayrollRunParams): UsePayrollRunResult 
 
       const submitter = createPayrollRowSubmitter({
         walletAddress: current.walletAddress,
-        walletId,
+        walletId: current.walletId ?? walletId,
         network: current.network as OffpayNetwork,
         tokenSymbol: current.tokenSymbol ?? '',
       });

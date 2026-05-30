@@ -18,6 +18,7 @@ export interface StagePayrollInput {
   /** Raw file/paste text. */
   text: string;
   walletAddress: string;
+  walletId?: string | null;
   network: OffpayNetwork;
   token: PayrollTokenContext;
   routePolicy: PayrollRoutePolicy;
@@ -41,7 +42,18 @@ export type StagePayrollResult =
         exceedsBalance: boolean;
       };
     }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      /** When true, the file parsed but recipient/amount columns could not be
+       * detected. The caller should open manual mapping with `headers` and a
+       * small `sampleRows` preview, then re-stage with a `mappingOverride`. */
+      needsManualMapping: true;
+      message: string;
+      headers: string[];
+      sampleRows: Record<string, string>[];
+      suggestedMapping: PayrollColumnMapping;
+    }
+  | { ok: false; needsManualMapping?: false; message: string };
 
 function createRunId(): string {
   return `payroll-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,11 +85,16 @@ export async function stagePayroll(input: StagePayrollInput): Promise<StagePayro
   const mapping = input.mappingOverride ?? inference.mapping;
 
   // Without a recipient + amount column we cannot build rows; surface manual
-  // mapping rather than producing an all-invalid run.
+  // mapping (with headers + a small preview) rather than producing an
+  // all-invalid run or a dead-end error.
   if (mapping.recipient == null || mapping.amount == null) {
     return {
       ok: false,
+      needsManualMapping: true,
       message: 'Could not detect recipient and amount columns. Map them manually and retry.',
+      headers: parsed.table.headers,
+      sampleRows: parsed.table.records.slice(0, 3),
+      suggestedMapping: inference.mapping,
     };
   }
 
@@ -95,6 +112,7 @@ export async function stagePayroll(input: StagePayrollInput): Promise<StagePayro
   const run: PayrollRun = {
     id: runId,
     walletAddress: input.walletAddress,
+    walletId: input.walletId ?? null,
     network: input.network,
     status: validation.validCount > 0 ? 'ready' : 'draft',
     routePolicy: input.routePolicy,
@@ -104,6 +122,7 @@ export async function stagePayroll(input: StagePayrollInput): Promise<StagePayro
     sourceName: input.fileName,
     rowIds: validation.rows.map((row) => row.id),
     cursor: 0,
+    routesDirty: false,
     createdAt: now,
     updatedAt: now,
   };

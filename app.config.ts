@@ -35,6 +35,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
           'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',
         NSBluetoothPeripheralUsageDescription:
           'OffPay uses Bluetooth to receive offline payment receipts from nearby devices.',
+        NSMicrophoneUsageDescription:
+          'OffPay uses the microphone to let you speak commands to the Yuga assistant.',
       },
     },
     android: {
@@ -51,6 +53,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
         'android.permission.BLUETOOTH_CONNECT',
         'android.permission.BLUETOOTH_ADVERTISE',
         'android.permission.ACCESS_FINE_LOCATION',
+        // Microphone for the Yuga voice assistant (Sarvam STT).
+        'android.permission.RECORD_AUDIO',
         // Required by Privy passkey enrollment so Android Credential
         // Manager can bind a passkey to a biometric on supported
         // devices. Documented at
@@ -69,6 +73,13 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     },
     plugins: [
       'expo-router',
+      [
+        'expo-audio',
+        {
+          microphonePermission:
+            'OffPay uses the microphone to let you speak commands to the Yuga assistant.',
+        },
+      ],
       [
         'expo-font',
         {

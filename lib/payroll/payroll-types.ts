@@ -89,6 +89,11 @@ export interface PayrollRow {
 export interface PayrollRun {
   id: string;
   walletAddress: string;
+  /**
+   * Wallet record used to stage/sign this run. Older persisted runs may not
+   * have it, so execution falls back to the active wallet only when absent.
+   */
+  walletId?: string | null;
   network: OffpayNetwork;
   status: PayrollRunStatus;
   routePolicy: PayrollRoutePolicy;
@@ -100,6 +105,11 @@ export interface PayrollRun {
   rowIds: string[];
   /** Index of the next row to attempt during sequential execution. */
   cursor: number;
+  /**
+   * True when row-level edits (skip/restore) changed the set of payable rows
+   * and route assignment/confirmation summary must be refreshed before start.
+   */
+  routesDirty?: boolean;
   createdAt: number;
   updatedAt: number;
 }

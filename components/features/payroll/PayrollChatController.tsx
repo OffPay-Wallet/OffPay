@@ -5,8 +5,9 @@
  * this one component for the active run.
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Pressable, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { Text } from '@/components/ui/Text';
 import { usePayrollRun } from '@/hooks/payroll/usePayrollRun';
@@ -15,6 +16,7 @@ import { usePayrollStore } from '@/store/payrollStore';
 import { PayrollConfirmationCard } from './PayrollConfirmationCard';
 import { PayrollRowList } from './PayrollRowList';
 import { payrollStyles as styles } from './styles';
+import { buildPayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
 
@@ -23,6 +25,7 @@ interface PayrollChatControllerProps {
   walletId: string | null;
   summary: PayrollConfirmationSummary | null;
   onSetupUmbra?: () => void;
+  onRefreshRoutes?: () => Promise<void>;
   setupBusy?: boolean;
 }
 
@@ -41,6 +44,7 @@ export function PayrollChatController({
   walletId,
   summary,
   onSetupUmbra,
+  onRefreshRoutes,
   setupBusy = false,
 }: PayrollChatControllerProps): React.JSX.Element | null {
   const { run, isExecuting, execute, pause, retryFailed, cancel } = usePayrollRun({
@@ -48,6 +52,50 @@ export function PayrollChatController({
     walletId,
   });
   const rows = usePayrollStore((state) => state.rowsByRun[runId]);
+  const router = useRouter();
+  const routeRefreshInFlightRef = useRef(false);
+
+  const openDetails = useCallback(() => {
+    // `as never`: the typed-routes manifest regenerates on dev-server start;
+    // matches the repo convention for newly-added routes.
+    router.push({ pathname: '/payroll-review', params: { runId } } as never);
+  }, [router, runId]);
+
+  // Recompute row-derived summary fields (counts, total) from the LIVE store
+  // rows so skipping/restoring in the review screen is reflected on the card,
+  // while preserving the staged route-split / readiness fields.
+  const liveSummary = useMemo(() => {
+    if (summary == null || rows == null || run == null) return summary;
+    return buildPayrollConfirmationSummary({
+      walletAddress: summary.walletAddress,
+      network: summary.network,
+      tokenSymbol: summary.tokenSymbol,
+      tokenMint: summary.tokenMint,
+      tokenDecimals: run.tokenDecimals ?? 6,
+      rows,
+      routePolicy: summary.routePolicy,
+      split: summary.split,
+      requiresUmbraSetup: summary.requiresUmbraSetup,
+      unprobedRecipientCount: summary.unprobedRecipientCount,
+    });
+  }, [summary, rows, run]);
+
+  useEffect(() => {
+    if (
+      run == null ||
+      run.routesDirty !== true ||
+      (run.status !== 'ready' && run.status !== 'draft') ||
+      onRefreshRoutes == null ||
+      routeRefreshInFlightRef.current
+    ) {
+      return;
+    }
+
+    routeRefreshInFlightRef.current = true;
+    void onRefreshRoutes().finally(() => {
+      routeRefreshInFlightRef.current = false;
+    });
+  }, [onRefreshRoutes, run]);
 
   const progress = useMemo(() => {
     if (rows == null) return null;
@@ -78,12 +126,13 @@ export function PayrollChatController({
   const isRunning = RUNNING_STATUSES.has(status) || isExecuting;
 
   // Pre-execution: show the confirmation card.
-  if ((status === 'ready' || status === 'draft') && summary != null) {
+  if ((status === 'ready' || status === 'draft') && liveSummary != null) {
     return (
       <PayrollConfirmationCard
-        summary={summary}
-        busy={isExecuting}
+        summary={liveSummary}
+        busy={isExecuting || run.routesDirty === true}
         onStart={handleStart}
+        onOpenDetails={openDetails}
         onSetupUmbra={onSetupUmbra}
         setupBusy={setupBusy}
       />

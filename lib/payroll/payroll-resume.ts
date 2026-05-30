@@ -59,7 +59,7 @@ export function findResumableRuns(
   runs: Record<string, PayrollRun>,
   rowsByRun: Record<string, readonly PayrollRow[]>,
 ): ResumableRunSummary[] {
-  const resumable: Array<ResumableRunSummary & { updatedAt: number }> = [];
+  const resumable: (ResumableRunSummary & { updatedAt: number })[] = [];
   for (const run of Object.values(runs)) {
     if (run.status !== 'paused' && !isOrphanedRunningRun(run)) continue;
     const rows = rowsByRun[run.id] ?? [];

@@ -49,9 +49,11 @@ import { ChatSuggestions, type ChatSuggestion } from './ChatSuggestions';
 import { CHAT_DRAWER_MAX_WIDTH, PROMPT_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
 import { PayrollChatController } from '@/components/features/payroll/PayrollChatController';
+import { PayrollColumnMapSheet } from '@/components/features/payroll/PayrollColumnMapSheet';
 import { PayrollPasteSheet } from '@/components/features/payroll/PayrollPasteSheet';
 import { usePayrollChatIntake } from '@/hooks/payroll/usePayrollChatIntake';
 import { usePayrollResume } from '@/hooks/payroll/usePayrollResume';
+import { useAgenticVoice } from '@/hooks/agentic-chat/useAgenticVoice';
 
 export function ChatScreen(): React.JSX.Element {
   const router = useRouter();
@@ -273,6 +275,21 @@ export function ChatScreen(): React.JSX.Element {
     submit(trimmed);
   }, [agentBusy, prompt, submit]);
 
+  const voice = useAgenticVoice({
+    onTranscript: (transcript) => {
+      if (agentBusy) {
+        // Don't trample an in-flight turn; seed the input for the user.
+        setPrompt(transcript);
+        inputRef.current?.focus();
+        return;
+      }
+      submit(transcript);
+    },
+    onError: (message) => {
+      showToast({ title: 'Voice', message, variant: 'error' });
+    },
+  });
+
   const handlePickSuggestion = useCallback(
     (suggestion: ChatSuggestion) => {
       if (agentBusy) {
@@ -403,6 +420,9 @@ export function ChatScreen(): React.JSX.Element {
               walletId={activeWalletId}
               summary={payrollIntake.activeRunId != null ? payrollIntake.summary : null}
               onSetupUmbra={handleSetupUmbraForPayroll}
+              onRefreshRoutes={
+                payrollIntake.activeRunId != null ? payrollIntake.refreshRoutes : undefined
+              }
               setupBusy={mixerRegisterMutation.isPending}
             />
           </View>
@@ -444,6 +464,7 @@ export function ChatScreen(): React.JSX.Element {
         }}
         onUploadLongPress={() => setPayrollPasteOpen(true)}
         uploadBusy={payrollIntake.busy}
+        voice={{ state: voice.state, onPress: voice.toggle, onCancel: voice.cancel }}
       />
 
       <PayrollPasteSheet
@@ -455,6 +476,20 @@ export function ChatScreen(): React.JSX.Element {
           void payrollIntake.stageFromText(fileName, text);
         }}
       />
+
+      {payrollIntake.mappingRequest != null ? (
+        <PayrollColumnMapSheet
+          visible
+          busy={payrollIntake.busy}
+          headers={payrollIntake.mappingRequest.headers}
+          sampleRows={payrollIntake.mappingRequest.sampleRows}
+          suggestedMapping={payrollIntake.mappingRequest.suggestedMapping}
+          onClose={payrollIntake.cancelMapping}
+          onSubmit={(mapping) => {
+            void payrollIntake.stageWithMapping(mapping);
+          }}
+        />
+      ) : null}
 
       <ChatHistoryDrawer
         visible={chatDrawerOpen}

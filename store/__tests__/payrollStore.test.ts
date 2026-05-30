@@ -167,4 +167,40 @@ describe('payrollStore', () => {
     expect(usePayrollStore.getState().getRun('run-1')?.status).toBe('paused');
     expect(usePayrollStore.getState().getRows('run-1')[0].status).toBe('ready');
   });
+
+  describe('setRowSkipped', () => {
+    it('toggles a ready row to skipped and back', () => {
+      usePayrollStore.getState().createRun(makeRun(), [makeRow('run-1-row-2', { status: 'ready' })]);
+
+      expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-2', true)).toBe(true);
+      expect(usePayrollStore.getState().getRows('run-1')[0].status).toBe('skipped');
+      expect(usePayrollStore.getState().getRun('run-1')?.routesDirty).toBe(true);
+
+      expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-2', false)).toBe(true);
+      expect(usePayrollStore.getState().getRows('run-1')[0].status).toBe('ready');
+    });
+
+    it('can clear the route-dirty marker after routes refresh', () => {
+      usePayrollStore.getState().createRun(makeRun(), [makeRow('run-1-row-2', { status: 'ready' })]);
+
+      expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-2', true)).toBe(true);
+      expect(usePayrollStore.getState().getRun('run-1')?.routesDirty).toBe(true);
+
+      usePayrollStore.getState().setRunRoutesDirty('run-1', false);
+      expect(usePayrollStore.getState().getRun('run-1')?.routesDirty).toBe(false);
+    });
+
+    it('never skips settled or invalid rows', () => {
+      usePayrollStore.getState().createRun(makeRun(), [
+        makeRow('run-1-row-2', { status: 'submitted', signature: 'sig' }),
+        makeRow('run-1-row-3', { status: 'invalid', validationError: 'bad' }),
+      ]);
+
+      expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-2', true)).toBe(false);
+      expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-3', true)).toBe(false);
+      const rows = usePayrollStore.getState().getRows('run-1');
+      expect(rows[0].status).toBe('submitted');
+      expect(rows[1].status).toBe('invalid');
+    });
+  });
 });

@@ -21,6 +21,7 @@ export type ChatVoiceState = 'idle' | 'recording' | 'transcribing' | 'speaking';
 interface ChatVoiceControl {
   state: ChatVoiceState;
   onPress: () => void;
+  onCancel?: () => void;
 }
 
 interface ChatPromptDockProps {
@@ -45,6 +46,8 @@ function voiceIconName(state: ChatVoiceState): keyof typeof Ionicons.glyphMap {
   switch (state) {
     case 'recording':
       return 'stop-circle';
+    case 'transcribing':
+      return 'close-circle';
     case 'speaking':
       return 'volume-high';
     default:
@@ -67,6 +70,14 @@ export function ChatPromptDock({
   voice,
 }: ChatPromptDockProps): React.JSX.Element {
   const voiceActive = voice != null && voice.state !== 'idle';
+  const voicePress =
+    voice?.state === 'transcribing' && voice.onCancel != null ? voice.onCancel : voice?.onPress;
+  const voiceLabel =
+    voice?.state === 'recording'
+      ? 'Stop recording'
+      : voice?.state === 'transcribing'
+        ? 'Cancel transcription'
+        : 'Start voice input';
 
   return (
     <View
@@ -116,21 +127,17 @@ export function ChatPromptDock({
 
         {voice != null ? (
           <Pressable
-            onPress={voice.onPress}
+            onPress={voicePress}
             style={styles.promptAccessory}
             accessibilityRole="button"
-            accessibilityLabel={voice.state === 'recording' ? 'Stop recording' : 'Start voice input'}
+            accessibilityLabel={voiceLabel}
             hitSlop={8}
           >
-            {voice.state === 'transcribing' ? (
-              <ActivityIndicator size="small" color={colors.brand.deepShadow} />
-            ) : (
-              <Ionicons
-                name={voiceIconName(voice.state)}
-                size={22}
-                color={voiceActive ? colors.brand.azureBlue : colors.brand.deepShadow}
-              />
-            )}
+            <Ionicons
+              name={voiceIconName(voice.state)}
+              size={22}
+              color={voiceActive ? colors.brand.azureBlue : colors.brand.deepShadow}
+            />
           </Pressable>
         ) : null}
 

@@ -1,13 +1,13 @@
-jest.mock('@/lib/umbra/umbra-execution', () => ({
-  __esModule: true,
-  fetchUmbraRegistrationStatusForAddresses: jest.fn(),
-}));
-
 import {
   PAYROLL_RECIPIENT_PROBE_CAP,
   probeRecipientRegistration,
 } from '@/lib/payroll/payroll-recipient-registration';
 import { fetchUmbraRegistrationStatusForAddresses } from '@/lib/umbra/umbra-execution';
+
+jest.mock('@/lib/umbra/umbra-execution', () => ({
+  __esModule: true,
+  fetchUmbraRegistrationStatusForAddresses: jest.fn(),
+}));
 
 const mockLookup = fetchUmbraRegistrationStatusForAddresses as jest.Mock;
 

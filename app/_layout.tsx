@@ -248,6 +248,7 @@ export default function RootLayout(): React.JSX.Element | null {
             <Stack.Screen name="private-payment" options={privatePaymentScreenOptions} />
             <Stack.Screen name="receive-payment" />
             <Stack.Screen name="umbra-pending-claims" />
+            <Stack.Screen name="payroll-review" />
             <Stack.Screen name="nearby-wallet-scanner" />
             <Stack.Screen name="advanced-swap" options={advancedSwapScreenOptions} />
             <Stack.Screen name="umbra-privacy" />

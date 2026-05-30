@@ -28,8 +28,15 @@ interface PayrollState {
   replaceRows: (runId: string, rows: PayrollRow[]) => void;
   setRunStatus: (runId: string, status: PayrollRunStatus) => void;
   setRunPolicy: (runId: string, policy: PayrollRoutePolicy) => void;
+  setRunRoutesDirty: (runId: string, dirty: boolean) => void;
   setRunCursor: (runId: string, cursor: number) => void;
   updateRow: (runId: string, rowId: string, patch: Partial<Omit<PayrollRow, 'id'>>) => void;
+  /**
+   * Toggles a row between `skipped` and `ready`. Only ready/skipped rows are
+   * eligible — settled or invalid rows are not affected, preserving the
+   * double-pay and validation guarantees. Returns true when a change applied.
+   */
+  setRowSkipped: (runId: string, rowId: string, skipped: boolean) => boolean;
   /** Resets failed-without-artifact rows back to `ready` for a retry pass. */
   prepareRetryFailedRows: (runId: string) => number;
   /**
@@ -134,6 +141,13 @@ export const usePayrollStore = create<PayrollState>()(
           return { runs: { ...state.runs, [runId]: touchRun({ ...run, routePolicy: policy }) } };
         }),
 
+      setRunRoutesDirty: (runId, dirty) =>
+        set((state) => {
+          const run = state.runs[runId];
+          if (run == null || run.routesDirty === dirty) return state;
+          return { runs: { ...state.runs, [runId]: touchRun({ ...run, routesDirty: dirty }) } };
+        }),
+
       setRunCursor: (runId, cursor) =>
         set((state) => {
           const run = state.runs[runId];
@@ -150,6 +164,38 @@ export const usePayrollStore = create<PayrollState>()(
           );
           return { rowsByRun: { ...state.rowsByRun, [runId]: nextRows } };
         }),
+
+      setRowSkipped: (runId, rowId, skipped) => {
+        let changed = false;
+        set((state) => {
+          const rows = state.rowsByRun[runId];
+          if (rows == null) return state;
+          const nextRows = rows.map((row) => {
+            if (row.id !== rowId) return row;
+            // Only ready <-> skipped transitions are allowed. Never touch
+            // settled (submitted/queued/deposited) or validation-invalid rows.
+            if (skipped && row.status === 'ready') {
+              changed = true;
+              return { ...row, status: 'skipped' as PayrollRowStatus, updatedAt: Date.now() };
+            }
+            if (!skipped && row.status === 'skipped') {
+              changed = true;
+              return { ...row, status: 'ready' as PayrollRowStatus, updatedAt: Date.now() };
+            }
+            return row;
+          });
+          if (!changed) return state;
+          const run = state.runs[runId];
+          return {
+            rowsByRun: { ...state.rowsByRun, [runId]: nextRows },
+            runs:
+              run == null
+                ? state.runs
+                : { ...state.runs, [runId]: touchRun({ ...run, routesDirty: true }) },
+          };
+        });
+        return changed;
+      },
 
       prepareRetryFailedRows: (runId) => {
         let reset = 0;

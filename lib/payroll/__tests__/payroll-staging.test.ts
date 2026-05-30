@@ -19,6 +19,7 @@ describe('stagePayroll', () => {
       fileName: 'payroll.csv',
       text: `name,wallet,amount\nAlice,${ADDR_A},100\nBob,${ADDR_B},50`,
       walletAddress: SENDER,
+      walletId: 'wallet-1',
       network: 'mainnet',
       token: TOKEN,
       routePolicy: 'private_auto',
@@ -27,6 +28,8 @@ describe('stagePayroll', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.run.status).toBe('ready');
+    expect(result.run.walletId).toBe('wallet-1');
+    expect(result.run.routesDirty).toBe(false);
     expect(result.run.rowIds).toHaveLength(2);
     expect(result.summary.validCount).toBe(2);
     expect(result.summary.totalAtomic).toBe('150000000');
@@ -46,7 +49,7 @@ describe('stagePayroll', () => {
     expect(result.message).toMatch(/CSV or TSV/);
   });
 
-  it('asks for manual mapping when recipient/amount columns are absent', async () => {
+  it('asks for manual mapping with headers and a preview when columns are absent', async () => {
     const result = await stagePayroll({
       fileName: 'payroll.csv',
       text: 'col_a,col_b\nfoo,bar',
@@ -57,6 +60,10 @@ describe('stagePayroll', () => {
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
+    expect(result.needsManualMapping).toBe(true);
+    if (result.needsManualMapping !== true) return;
+    expect(result.headers).toEqual(['col_a', 'col_b']);
+    expect(result.sampleRows[0]).toMatchObject({ col_a: 'foo', col_b: 'bar' });
     expect(result.message).toMatch(/map them manually/i);
   });
 

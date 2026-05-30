@@ -104,6 +104,14 @@ export function PayrollConfirmationCard({
         </Text>
       ) : null}
 
+      {summary.unprobedRecipientCount > 0 ? (
+        <Text style={styles.claimNote}>
+          {summary.unprobedRecipientCount} recipient
+          {summary.unprobedRecipientCount === 1 ? ' was' : 's were'} not checked for the Umbra route
+          (large batch) and will use MagicBlock where allowed.
+        </Text>
+      ) : null}
+
       {summary.showLargeBatchWarning ? (
         <Text style={styles.warningText}>
           Large batch ({summary.recipientCount} recipients). Execution runs one at a time and may

@@ -59,6 +59,13 @@ export interface PayrollConfirmationSummary {
   requiresTypedConfirmation: boolean;
   /** Soft warning shown above 1,000 rows. */
   showLargeBatchWarning: boolean;
+  /**
+   * Recipients beyond the Umbra registration probe cap that were not checked
+   * for Umbra-readiness. They route via MagicBlock (shared-mint networks) or
+   * are blocked (devnet). Surfaced so the user knows some recipients were not
+   * evaluated for the Umbra route.
+   */
+  unprobedRecipientCount: number;
 }
 
 export interface BuildConfirmationParams {
@@ -71,6 +78,7 @@ export interface BuildConfirmationParams {
   routePolicy: PayrollRoutePolicy;
   split: PayrollRouteSplit;
   requiresUmbraSetup: boolean;
+  unprobedRecipientCount?: number;
 }
 
 export function buildPayrollConfirmationSummary(
@@ -108,6 +116,7 @@ export function buildPayrollConfirmationSummary(
     requiresUmbraSetup: params.requiresUmbraSetup,
     requiresTypedConfirmation: recipientCount >= PAYROLL_TYPED_CONFIRMATION_THRESHOLD,
     showLargeBatchWarning: recipientCount > PAYROLL_ROW_SOFT_WARNING,
+    unprobedRecipientCount: params.unprobedRecipientCount ?? 0,
   };
 }
 

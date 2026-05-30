@@ -10,7 +10,7 @@
  * (that lives in `usePayrollStore`).
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
@@ -32,6 +32,7 @@ import { stagePayroll } from '@/lib/payroll/payroll-staging';
 import { usePayrollStore } from '@/store/payrollStore';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import type { PayrollColumnMapping } from '@/lib/payroll/parsing/payroll-column-mapping';
 import type { PayrollRecipientFacts } from '@/lib/payroll/payroll-route-readiness';
 import type { PayrollRoutePolicy, PayrollRow, PayrollRun } from '@/lib/payroll/payroll-types';
 import type { PayrollTokenContext } from '@/lib/payroll/payroll-validation';
@@ -51,13 +52,27 @@ export interface UsePayrollChatIntakeParams {
   routePolicy?: PayrollRoutePolicy;
 }
 
+export interface PayrollMappingRequest {
+  fileName: string;
+  mimeType: string | null;
+  text: string;
+  headers: string[];
+  sampleRows: Record<string, string>[];
+  suggestedMapping: PayrollColumnMapping;
+}
+
 export interface UsePayrollChatIntakeResult {
   activeRunId: string | null;
   summary: PayrollConfirmationSummary | null;
   busy: boolean;
   error: string | null;
+  /** Set when the file parsed but columns need manual mapping. */
+  mappingRequest: PayrollMappingRequest | null;
   pickFile: () => Promise<void>;
   stageFromText: (fileName: string, text: string) => Promise<void>;
+  /** Re-stage the pending mapping-request file with a user-chosen mapping. */
+  stageWithMapping: (mapping: PayrollColumnMapping) => Promise<void>;
+  cancelMapping: () => void;
   refreshRoutes: () => Promise<void>;
   reset: () => void;
 }
@@ -105,6 +120,7 @@ export function usePayrollChatIntake(
 ): UsePayrollChatIntakeResult {
   const createRun = usePayrollStore((state) => state.createRun);
   const replaceRows = usePayrollStore((state) => state.replaceRows);
+  const setRunRoutesDirty = usePayrollStore((state) => state.setRunRoutesDirty);
   const getRun = usePayrollStore((state) => state.getRun);
   const getRows = usePayrollStore((state) => state.getRows);
 
@@ -112,12 +128,27 @@ export function usePayrollChatIntake(
   const [summary, setSummary] = useState<PayrollConfirmationSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mappingRequest, setMappingRequest] = useState<PayrollMappingRequest | null>(null);
   // Reused across stagings so re-probing the same recipients is cheap.
   const registrationCacheRef = useRef<Map<string, boolean>>(new Map());
 
   const tokenSymbol = params.tokenSymbol ?? 'USDC';
   const routePolicy = params.routePolicy ?? 'private_auto';
   const walletId = params.walletId;
+  const scopeKey = `${params.walletAddress ?? 'no-wallet'}:${walletId ?? 'no-wallet-id'}:${
+    params.network ?? 'no-network'
+  }`;
+  const previousScopeKeyRef = useRef(scopeKey);
+
+  useEffect(() => {
+    if (previousScopeKeyRef.current === scopeKey) return;
+    previousScopeKeyRef.current = scopeKey;
+    setActiveRunId(null);
+    setSummary(null);
+    setError(null);
+    setMappingRequest(null);
+    registrationCacheRef.current.clear();
+  }, [scopeKey]);
 
   const routeRows = useCallback(
     async (run: PayrollRun, rows: readonly PayrollRow[], token: PayrollTokenContext) => {
@@ -168,6 +199,7 @@ export function usePayrollChatIntake(
         .map((row) => row.recipient);
 
       let registeredByAddress: Record<string, boolean> = {};
+      let unprobedRecipientCount = 0;
       if (umbraEligible) {
         const probe = await probeRecipientRegistration({
           recipients: sendableRecipients,
@@ -178,6 +210,7 @@ export function usePayrollChatIntake(
           cache: registrationCacheRef.current,
         });
         registeredByAddress = probe.registeredByAddress;
+        unprobedRecipientCount = probe.unprobed.length;
       }
 
       for (const row of rowsForRouting) {
@@ -223,6 +256,7 @@ export function usePayrollChatIntake(
         routePolicy: run.routePolicy,
         split: assignment.split,
         requiresUmbraSetup,
+        unprobedRecipientCount,
       });
 
       return { rows: routedRows, summary };
@@ -237,7 +271,12 @@ export function usePayrollChatIntake(
   );
 
   const stage = useCallback(
-    async (fileName: string, mimeType: string | null, text: string) => {
+    async (
+      fileName: string,
+      mimeType: string | null,
+      text: string,
+      mappingOverride?: PayrollColumnMapping,
+    ) => {
       setError(null);
       if (params.walletAddress == null || params.network == null) {
         setError('Connect a wallet before staging payroll.');
@@ -257,16 +296,32 @@ export function usePayrollChatIntake(
           mimeType,
           text,
           walletAddress: params.walletAddress,
+          walletId,
           network: params.network,
           token,
           routePolicy,
+          mappingOverride,
         });
 
         if (!staged.ok) {
+          // Surface a manual-mapping prompt instead of a dead-end error when
+          // the file parsed but columns could not be detected.
+          if (staged.needsManualMapping === true) {
+            setMappingRequest({
+              fileName,
+              mimeType,
+              text,
+              headers: staged.headers,
+              sampleRows: staged.sampleRows,
+              suggestedMapping: staged.suggestedMapping,
+            });
+            return;
+          }
           setError(staged.message);
           return;
         }
 
+        setMappingRequest(null);
         const routed = await routeRows(staged.run, staged.rows, token);
 
         createRun(staged.run, routed.rows);
@@ -286,6 +341,7 @@ export function usePayrollChatIntake(
       params.balance,
       tokenSymbol,
       routePolicy,
+      walletId,
       createRun,
       replaceRows,
       routeRows,
@@ -310,6 +366,19 @@ export function usePayrollChatIntake(
     [stage],
   );
 
+  const stageWithMapping = useCallback(
+    async (mapping: PayrollColumnMapping) => {
+      const request = mappingRequest;
+      if (request == null) return;
+      await stage(request.fileName, request.mimeType, request.text, mapping);
+    },
+    [mappingRequest, stage],
+  );
+
+  const cancelMapping = useCallback(() => {
+    setMappingRequest(null);
+  }, []);
+
   const refreshRoutes = useCallback(async () => {
     setError(null);
     if (activeRunId == null) return;
@@ -325,6 +394,7 @@ export function usePayrollChatIntake(
     try {
       const routed = await routeRows(run, getRows(activeRunId), token);
       replaceRows(activeRunId, routed.rows);
+      setRunRoutesDirty(activeRunId, false);
       setSummary(routed.summary);
     } catch (caught) {
       if (isAbortError(caught)) return;
@@ -332,16 +402,41 @@ export function usePayrollChatIntake(
     } finally {
       setBusy(false);
     }
-  }, [activeRunId, getRun, getRows, params.balance, replaceRows, routeRows]);
+  }, [activeRunId, getRun, getRows, params.balance, replaceRows, routeRows, setRunRoutesDirty]);
 
   const reset = useCallback(() => {
     setActiveRunId(null);
     setSummary(null);
     setError(null);
+    setMappingRequest(null);
   }, []);
 
   return useMemo(
-    () => ({ activeRunId, summary, busy, error, pickFile, stageFromText, refreshRoutes, reset }),
-    [activeRunId, summary, busy, error, pickFile, stageFromText, refreshRoutes, reset],
+    () => ({
+      activeRunId,
+      summary,
+      busy,
+      error,
+      mappingRequest,
+      pickFile,
+      stageFromText,
+      stageWithMapping,
+      cancelMapping,
+      refreshRoutes,
+      reset,
+    }),
+    [
+      activeRunId,
+      summary,
+      busy,
+      error,
+      mappingRequest,
+      pickFile,
+      stageFromText,
+      stageWithMapping,
+      cancelMapping,
+      refreshRoutes,
+      reset,
+    ],
   );
 }

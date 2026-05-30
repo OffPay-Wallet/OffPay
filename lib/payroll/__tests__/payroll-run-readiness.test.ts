@@ -1,3 +1,10 @@
+import {
+  gatherPayrollRunReadiness,
+  PAYROLL_MIN_FEE_LAMPORTS,
+} from '@/lib/payroll/payroll-run-readiness';
+import { fetchUmbraVaultRegistrationStatus } from '@/lib/umbra/umbra-execution';
+import { verifyOffpayUmbraVaultFeeAccountReadiness } from '@/lib/umbra/umbra-offpay-providers';
+
 jest.mock('@/lib/umbra/umbra-execution', () => ({
   __esModule: true,
   fetchUmbraVaultRegistrationStatus: jest.fn(),
@@ -6,13 +13,6 @@ jest.mock('@/lib/umbra/umbra-offpay-providers', () => ({
   __esModule: true,
   verifyOffpayUmbraVaultFeeAccountReadiness: jest.fn(),
 }));
-
-import {
-  gatherPayrollRunReadiness,
-  PAYROLL_MIN_FEE_LAMPORTS,
-} from '@/lib/payroll/payroll-run-readiness';
-import { fetchUmbraVaultRegistrationStatus } from '@/lib/umbra/umbra-execution';
-import { verifyOffpayUmbraVaultFeeAccountReadiness } from '@/lib/umbra/umbra-offpay-providers';
 
 const mockRegistration = fetchUmbraVaultRegistrationStatus as jest.Mock;
 const mockVaultFee = verifyOffpayUmbraVaultFeeAccountReadiness as jest.Mock;
