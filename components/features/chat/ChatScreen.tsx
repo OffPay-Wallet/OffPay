@@ -31,6 +31,7 @@ import { useAgenticAgentSubmit } from '@/hooks/agentic-chat/useAgenticAgentSubmi
 import { useAgenticChatScope } from '@/hooks/agentic-chat/useAgenticChatScope';
 import { useAgenticConfirmSend } from '@/hooks/agentic-chat/useAgenticConfirmSend';
 import { useAgenticPendingSweep } from '@/hooks/agentic-chat/useAgenticPendingSweep';
+import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { buildAgentWalletBalanceResponse } from '@/lib/agentic-payments/safe-context';
 import {
   type AgenticConversation,
@@ -47,6 +48,10 @@ import { ChatPromptDock } from './ChatPromptDock';
 import { ChatSuggestions, type ChatSuggestion } from './ChatSuggestions';
 import { CHAT_DRAWER_MAX_WIDTH, PROMPT_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
+import { PayrollChatController } from '@/components/features/payroll/PayrollChatController';
+import { PayrollPasteSheet } from '@/components/features/payroll/PayrollPasteSheet';
+import { usePayrollChatIntake } from '@/hooks/payroll/usePayrollChatIntake';
+import { usePayrollResume } from '@/hooks/payroll/usePayrollResume';
 
 export function ChatScreen(): React.JSX.Element {
   const router = useRouter();
@@ -60,6 +65,7 @@ export function ChatScreen(): React.JSX.Element {
   const wallets = useWalletStore((s) => s.wallets);
 
   const { effectiveWalletMode, canUseNetwork } = useWalletModeState();
+  const { mixerRegisterMutation } = useUmbraExecution();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: false,
@@ -90,6 +96,10 @@ export function ChatScreen(): React.JSX.Element {
 
   const [prompt, setPrompt] = useState('');
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+  const [payrollPasteOpen, setPayrollPasteOpen] = useState(false);
+  // Declared early so the agent-submit callback can reach payroll intake
+  // without a declaration-order cycle; assigned once intake is created.
+  const payrollIntakeRef = useRef<ReturnType<typeof usePayrollChatIntake> | null>(null);
   const inputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -158,6 +168,13 @@ export function ChatScreen(): React.JSX.Element {
     balance: agentBalance,
     capabilities: capabilitiesQuery.capabilities,
     knownWallets,
+    onPayrollIntent: (source) => {
+      if (source === 'upload') {
+        void payrollIntakeRef.current?.pickFile();
+      } else {
+        setPayrollPasteOpen(true);
+      }
+    },
   });
 
   const { confirm: confirmPrivateSend, cancel: cancelPrivateSend } = useAgenticConfirmSend({
@@ -168,6 +185,63 @@ export function ChatScreen(): React.JSX.Element {
     capabilities: capabilitiesQuery.capabilities,
     knownWallets,
   });
+
+  const activeWalletId = useWalletStore((s) => s.activeWalletId);
+  const activeImportMethod = useMemo(() => {
+    const active = wallets.find((wallet) => wallet.publicKey === scope.walletAddress);
+    return active?.importMethod ?? null;
+  }, [wallets, scope.walletAddress]);
+
+  const payrollIntake = usePayrollChatIntake({
+    walletAddress: scope.walletAddress,
+    walletId: activeWalletId,
+    network: scope.network,
+    importMethod: activeImportMethod,
+    balance: balanceQuery.data,
+    capabilities: capabilitiesQuery.capabilities,
+    canUseNetwork,
+  });
+  // Ref so the agent-submit callback (declared earlier) can trigger intake
+  // without a declaration-order cycle.
+  payrollIntakeRef.current = payrollIntake;
+
+  const payrollResume = usePayrollResume({
+    walletAddress: scope.walletAddress,
+    network: scope.network,
+  });
+  // Prefer an actively-staged run; otherwise offer the most recent resumable
+  // run recovered from a prior session.
+  const activePayrollRunId = payrollIntake.activeRunId ?? payrollResume.resumableRunId;
+
+  const handleSetupUmbraForPayroll = useCallback(async () => {
+    if (scope.walletAddress == null || scope.network == null) {
+      Alert.alert('Connect a wallet', 'Connect a wallet before setting up Umbra payroll.');
+      return;
+    }
+    try {
+      await mixerRegisterMutation.mutateAsync({
+        walletAddress: scope.walletAddress,
+        walletId: activeWalletId,
+        network: scope.network,
+      });
+      await payrollIntake.refreshRoutes();
+      showToast({
+        title: 'Umbra setup complete',
+        message: 'Payroll routes were refreshed.',
+        variant: 'success',
+      });
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Umbra setup failed.';
+      Alert.alert('Umbra setup failed', message);
+    }
+  }, [
+    activeWalletId,
+    mixerRegisterMutation,
+    payrollIntake,
+    scope.network,
+    scope.walletAddress,
+    showToast,
+  ]);
 
   // Migrate legacy messages with a missing `conversationId` once.
   useEffect(() => {
@@ -322,6 +396,26 @@ export function ChatScreen(): React.JSX.Element {
           </View>
         </View>
 
+        {activePayrollRunId != null ? (
+          <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.lg }}>
+            <PayrollChatController
+              runId={activePayrollRunId}
+              walletId={activeWalletId}
+              summary={payrollIntake.activeRunId != null ? payrollIntake.summary : null}
+              onSetupUmbra={handleSetupUmbraForPayroll}
+              setupBusy={mixerRegisterMutation.isPending}
+            />
+          </View>
+        ) : null}
+
+        {payrollIntake.error != null ? (
+          <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.sm }}>
+            <Text variant="caption" color={colors.semantic.error}>
+              {payrollIntake.error}
+            </Text>
+          </View>
+        ) : null}
+
         {scopedMessages.length === 0 ? (
           <ChatSuggestions onPickSuggestion={handlePickSuggestion} />
         ) : (
@@ -345,6 +439,21 @@ export function ChatScreen(): React.JSX.Element {
         horizontalPadding={horizontalPadding}
         onChangeText={setPrompt}
         onSubmit={handleSubmit}
+        onUpload={() => {
+          void payrollIntake.pickFile();
+        }}
+        onUploadLongPress={() => setPayrollPasteOpen(true)}
+        uploadBusy={payrollIntake.busy}
+      />
+
+      <PayrollPasteSheet
+        visible={payrollPasteOpen}
+        busy={payrollIntake.busy}
+        onClose={() => setPayrollPasteOpen(false)}
+        onSubmit={(fileName, text) => {
+          setPayrollPasteOpen(false);
+          void payrollIntake.stageFromText(fileName, text);
+        }}
       />
 
       <ChatHistoryDrawer

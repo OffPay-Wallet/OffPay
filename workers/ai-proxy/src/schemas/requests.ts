@@ -1,4 +1,4 @@
-import { ProviderError, maxTtsChars } from '../http';
+import { ProviderError, lockedVoiceProvider, maxTtsChars } from '../http';
 import type { AgentChatRequest, AiProxyEnv, VoiceSpeechRequest } from '../types';
 
 export function validateChatRequest(body: AgentChatRequest): void {
@@ -64,5 +64,10 @@ export function validateVoiceSpeechRequest(body: VoiceSpeechRequest, env: AiProx
     body.preferredProvider !== 'elevenlabs'
   ) {
     throw new ProviderError('proxy', 400, 'Unsupported voice provider.');
+  }
+
+  const locked = lockedVoiceProvider(env);
+  if (locked != null && body.preferredProvider != null && body.preferredProvider !== locked) {
+    throw new ProviderError('proxy', 400, `Voice is locked to ${locked}.`);
   }
 }

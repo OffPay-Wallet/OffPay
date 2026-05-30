@@ -188,4 +188,24 @@ describe('runAgenticTools', () => {
     expect(run.drafts).toHaveLength(0);
     expect(run.results[0].error?.code).toBe('unknown_tool');
   });
+
+  it('emits a payroll intake intent without exposing payroll data', () => {
+    const run = runAgenticTools(
+      [{ id: 'call-7', name: 'stage_payroll', args: { source: 'upload' } }],
+      baseContext,
+    );
+
+    expect(run.payrollIntents).toEqual([{ toolCallId: 'call-7', source: 'upload' }]);
+    expect(run.results[0].result).toMatchObject({ status: 'opening_payroll_intake', source: 'upload' });
+    expect(run.drafts).toHaveLength(0);
+  });
+
+  it('defaults the payroll intake source to paste', () => {
+    const run = runAgenticTools(
+      [{ id: 'call-8', name: 'stage_payroll', args: {} }],
+      baseContext,
+    );
+
+    expect(run.payrollIntents[0].source).toBe('paste');
+  });
 });

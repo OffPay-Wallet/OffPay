@@ -93,7 +93,7 @@ describe('buildAgentSafeContext (privacy-narrowed)', () => {
       normalSend: true,
       privateSend: true,
     });
-    expect(context.supportedActions).toEqual(['draft_normal_send', 'draft_private_send']);
+    expect(context.supportedActions).toEqual(['draft_normal_send', 'draft_private_send', 'stage_payroll']);
     expect(context.tokenSymbols).toEqual(['SOL', 'USDC']);
   });
 

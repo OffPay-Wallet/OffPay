@@ -4,6 +4,7 @@ import {
   contentTypeForAudioCodec,
   fetchWithTimeout,
   isStrictPrivacy,
+  lockedVoiceProvider,
   providerErrorFromResponse,
   providerTimeoutMs,
 } from '../http';
@@ -41,6 +42,12 @@ export function shouldFallbackVoice(
   env: AiProxyEnv,
   fallbackProvider: VoiceProvider,
 ): boolean {
+  // A provider lock disables every cross-provider fallback that is not the
+  // locked provider. This is the single source of truth for "ElevenLabs is
+  // dormant" — it holds even when ELEVENLABS_API_KEY is set.
+  const locked = lockedVoiceProvider(env);
+  if (locked != null && fallbackProvider !== locked) return false;
+
   if (fallbackProvider === 'sarvam' && !env.SARVAM_API_KEY) return false;
   if (fallbackProvider === 'elevenlabs' && !env.ELEVENLABS_API_KEY) return false;
 
@@ -60,9 +67,26 @@ export function shouldFallbackVoice(
   return error.status === 403 || error.status === 429 || error.status >= 500;
 }
 
-export function orderedSpeechProviders(preferredProvider?: VoiceProvider): VoiceProvider[] {
+/**
+ * Resolves the provider attempt order for speech. Honors the deployment
+ * voice lock first, then an explicit per-request preference, then the
+ * default Sarvam-first order.
+ */
+export function orderedSpeechProviders(
+  env: AiProxyEnv,
+  preferredProvider?: VoiceProvider,
+): VoiceProvider[] {
+  const locked = lockedVoiceProvider(env);
+  if (locked != null) return [locked];
   if (preferredProvider === 'elevenlabs') return ['elevenlabs', 'sarvam'];
   return ['sarvam', 'elevenlabs'];
+}
+
+/**
+ * The provider that transcription should attempt first, honoring the lock.
+ */
+export function primaryTranscribeProvider(env: AiProxyEnv): VoiceProvider {
+  return lockedVoiceProvider(env) ?? 'sarvam';
 }
 
 async function transcribeWithSarvam(

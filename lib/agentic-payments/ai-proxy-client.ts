@@ -204,11 +204,11 @@ export async function transcribeAgentVoice(
 
 export async function speakAgentText(
   request: VoiceSpeechRequest,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; payrollMode?: boolean } = {},
 ): Promise<VoiceSpeechResult> {
   const safeRequest: VoiceSpeechRequest = {
     ...request,
-    text: sanitizeTextForCloudTts(request.text),
+    text: sanitizeTextForCloudTts(request.text, { payrollMode: options.payrollMode }),
   };
   const response = await proxyFetch('/api/ai/voice/speech', {
     method: 'POST',

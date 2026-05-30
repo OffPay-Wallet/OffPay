@@ -9,6 +9,7 @@ import {
 } from '../http';
 import {
   orderedSpeechProviders,
+  primaryTranscribeProvider,
   shouldFallbackVoice,
   speakWithProvider,
   transcribeWithProvider,
@@ -23,8 +24,8 @@ export async function handleVoiceTranscribe(
   cors: HeadersInit,
 ): Promise<Response> {
   const upload = await readAudioUpload(request, maxAudioBytes(env));
-  const firstProvider: VoiceProvider = 'sarvam';
-  const fallbackProvider: VoiceProvider = 'elevenlabs';
+  const firstProvider = primaryTranscribeProvider(env);
+  const fallbackProvider: VoiceProvider = firstProvider === 'sarvam' ? 'elevenlabs' : 'sarvam';
 
   try {
     const result = await transcribeWithProvider(firstProvider, upload, env);
@@ -65,7 +66,7 @@ export async function handleVoiceSpeech(
   };
   validateVoiceSpeechRequest(safeBody, env);
 
-  const providers = orderedSpeechProviders(safeBody.preferredProvider);
+  const providers = orderedSpeechProviders(env, safeBody.preferredProvider);
   let lastError: unknown;
 
   for (const provider of providers) {

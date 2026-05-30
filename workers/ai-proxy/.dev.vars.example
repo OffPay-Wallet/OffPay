@@ -13,7 +13,14 @@ AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION=false
 # Required for Sarvam-primary voice.
 SARVAM_API_KEY=REPLACE_WITH_SARVAM_API_KEY
 
-# Optional ElevenLabs fallback.
+# Pin voice to a single provider. When set to `sarvam`, both STT and TTS
+# use only Sarvam: ElevenLabs is never used as a fallback and an explicit
+# `preferredProvider: elevenlabs` is rejected, even if the ElevenLabs
+# secrets below are present. Leave unset for legacy Sarvam-first behavior
+# with ElevenLabs fallback.
+AI_PROXY_VOICE_PROVIDER_LOCK=sarvam
+
+# Optional ElevenLabs fallback (dormant while AI_PROXY_VOICE_PROVIDER_LOCK=sarvam).
 ELEVENLABS_API_KEY=REPLACE_WITH_ELEVENLABS_API_KEY
 ELEVENLABS_VOICE_ID=REPLACE_WITH_ELEVENLABS_VOICE_ID
 

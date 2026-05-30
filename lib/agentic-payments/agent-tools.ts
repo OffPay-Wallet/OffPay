@@ -44,7 +44,8 @@ export type AgenticToolName =
   | 'analyze_wallet'
   | 'check_private_send_ready'
   | 'draft_normal_send'
-  | 'draft_private_send';
+  | 'draft_private_send'
+  | 'stage_payroll';
 
 export const AGENTIC_TOOL_SCHEMAS: readonly AgentToolSchema[] = [
   {
@@ -99,6 +100,20 @@ export const AGENTIC_TOOL_SCHEMAS: readonly AgentToolSchema[] = [
       required: ['amount', 'token', 'recipient'],
     },
   },
+  {
+    name: 'stage_payroll',
+    description:
+      'Opens the payroll intake UI so the user can upload or paste a batch of recipients and amounts for private (Umbra/MagicBlock) payroll. The app handles parsing, validation, routing, and a single confirmation client-side. Never sends payroll rows to the AI. Call this when the user asks to run payroll, pay multiple people, or do a batch payout.',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'How the user wants to provide rows: "upload" (file) or "paste" (text). Defaults to paste.',
+        },
+      },
+    },
+  },
 ] as const;
 
 export interface AgenticToolRunnerContext {
@@ -126,6 +141,14 @@ export type AgenticToolDraft =
 export interface AgenticToolRun {
   results: AgentToolResult[];
   drafts: AgenticToolDraft[];
+  /** Client-side UI intents (e.g. open payroll intake). Never leave device. */
+  payrollIntents: PayrollStageIntent[];
+}
+
+/** Signals the chat UI to open payroll intake. Carries no payroll data. */
+export interface PayrollStageIntent {
+  toolCallId: string;
+  source: 'upload' | 'paste';
 }
 
 export function runAgenticTools(
@@ -134,6 +157,7 @@ export function runAgenticTools(
 ): AgenticToolRun {
   const results: AgentToolResult[] = [];
   const drafts: AgenticToolDraft[] = [];
+  const payrollIntents: PayrollStageIntent[] = [];
 
   for (const call of toolCalls) {
     const handler = TOOL_HANDLERS[call.name as AgenticToolName] ?? unknownToolHandler;
@@ -146,9 +170,12 @@ export function runAgenticTools(
     if (outcome.draft != null) {
       drafts.push(outcome.draft);
     }
+    if (outcome.payrollIntent != null) {
+      payrollIntents.push({ toolCallId: call.id, source: outcome.payrollIntent.source });
+    }
   }
 
-  return { results, drafts };
+  return { results, drafts, payrollIntents };
 }
 
 interface ToolHandlerOutcome {
@@ -159,6 +186,7 @@ interface ToolHandlerOutcome {
   result?: unknown;
   error?: { code: string };
   draft?: AgenticToolDraft;
+  payrollIntent?: { source: 'upload' | 'paste' };
 }
 
 type ToolHandler = (
@@ -229,7 +257,20 @@ const TOOL_HANDLERS: Record<AgenticToolName, ToolHandler> = {
   },
   draft_normal_send: (call, context) => buildPaymentDraft(call, context, 'normal'),
   draft_private_send: (call, context) => buildPaymentDraft(call, context, 'magicblock'),
+  stage_payroll: (call) => {
+    const source = readStringArg(call, 'source') === 'upload' ? 'upload' : 'paste';
+    return {
+      result: { status: 'opening_payroll_intake', source },
+      payrollIntent: { source },
+    };
+  },
 };
+
+function readStringArg(call: AgentToolCall, key: string): string | null {
+  const args = call.args as Record<string, unknown> | undefined;
+  const value = args?.[key];
+  return typeof value === 'string' ? value.trim() : null;
+}
 
 function buildPaymentDraft(
   call: AgentToolCall,

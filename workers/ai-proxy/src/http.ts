@@ -207,6 +207,16 @@ export function isStrictPrivacy(env: AiProxyEnv): boolean {
   return env.AI_PROXY_PRIVACY_MODE !== 'relaxed';
 }
 
+/**
+ * Returns the provider the deployment is pinned to, or null when voice is
+ * free to fall back across providers. Only `sarvam` is recognized today;
+ * any other value is treated as "no lock" so a typo cannot silently route
+ * to an unintended provider.
+ */
+export function lockedVoiceProvider(env: AiProxyEnv): 'sarvam' | null {
+  return env.AI_PROXY_VOICE_PROVIDER_LOCK?.trim().toLowerCase() === 'sarvam' ? 'sarvam' : null;
+}
+
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';

@@ -113,6 +113,14 @@ export type AiProxyEnv = {
   AI_PROXY_GEMINI_PRIVACY_CONFIRMED?: string;
   AI_PROXY_ALLOW_GEMINI_UNPAID?: string;
   AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION?: string;
+  /**
+   * Pins voice STT/TTS to a single provider. When set to `sarvam`, both
+   * transcription and speech use only Sarvam: ElevenLabs is never tried as
+   * a fallback and an explicit `preferredProvider: 'elevenlabs'` is
+   * rejected, even when `ELEVENLABS_API_KEY` is configured. Leave unset to
+   * keep the legacy Sarvam-first-with-ElevenLabs-fallback behavior.
+   */
+  AI_PROXY_VOICE_PROVIDER_LOCK?: string;
   SARVAM_API_KEY?: string;
   SARVAM_STT_MODEL?: string;
   SARVAM_STT_MODE?: string;

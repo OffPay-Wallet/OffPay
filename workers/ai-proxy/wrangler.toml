@@ -11,6 +11,11 @@ AI_PROXY_PRIVACY_MODE = "strict"
 AI_PROXY_GEMINI_PRIVACY_CONFIRMED = "true"
 AI_PROXY_ALLOW_GEMINI_UNPAID = "false"
 AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION = "false"
+# Pin voice to Sarvam for both STT and TTS. While this is "sarvam",
+# ElevenLabs is never used as a fallback and an explicit
+# preferredProvider=elevenlabs is rejected, even if ELEVENLABS_API_KEY is
+# set as a secret. Remove this var to restore Sarvam-first-with-ElevenLabs.
+AI_PROXY_VOICE_PROVIDER_LOCK = "sarvam"
 GEMINI_CHAT_MODEL = "gemma-4-26b-a4b-it"
 SARVAM_STT_MODEL = "saaras:v3"
 SARVAM_STT_MODE = "transcribe"
@@ -49,8 +54,10 @@ AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
 # Until then the Worker logs the failure but allows the request, so a
 # staged rollout doesn't break older app builds.
 #
-# Chat provider is Google Gemma 4 26B via the Gemini API. Voice uses
-# Sarvam (primary) and ElevenLabs (fallback) only.
+# Chat provider is Google Gemma 4 26B via the Gemini API. Voice is locked
+# to Sarvam for STT and TTS via AI_PROXY_VOICE_PROVIDER_LOCK="sarvam" in
+# [vars] above; ElevenLabs secrets remain supported but dormant until that
+# lock is removed.
 #
 # Set AI_PROXY_ALLOWED_ORIGINS only for browser/web clients. Native app
 # requests do not send Origin, so origin allowlists are not a substitute for

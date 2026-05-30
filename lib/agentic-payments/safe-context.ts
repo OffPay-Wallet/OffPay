@@ -51,7 +51,7 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
         isOffpayFeatureAvailable(capabilities, 'payment.privateSend') &&
         isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast'),
     },
-    supportedActions: ['draft_normal_send', 'draft_private_send'],
+    supportedActions: ['draft_normal_send', 'draft_private_send', 'stage_payroll'],
     tokenSymbols,
   };
 }

@@ -69,6 +69,8 @@ interface UseAgenticAgentSubmitParams {
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
+  /** Fired when the model asks to open payroll intake (upload/paste). */
+  onPayrollIntent?: (source: 'upload' | 'paste') => void;
 }
 
 export interface UseAgenticAgentSubmitResult {
@@ -86,6 +88,7 @@ export function useAgenticAgentSubmit({
   balance,
   capabilities,
   knownWallets,
+  onPayrollIntent,
 }: UseAgenticAgentSubmitParams): UseAgenticAgentSubmitResult {
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -201,6 +204,7 @@ export function useAgenticAgentSubmit({
         balance,
         capabilities,
         knownWallets,
+        onPayrollIntent,
       })
         .catch((error: unknown) => {
           if (controller.signal.aborted) {
@@ -226,6 +230,7 @@ export function useAgenticAgentSubmit({
       canUseNetwork,
       capabilities,
       knownWallets,
+      onPayrollIntent,
       scope,
       scopeKey,
       scopedMessages,
@@ -250,6 +255,7 @@ interface RunAgentLoopParams {
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
+  onPayrollIntent?: (source: 'upload' | 'paste') => void;
 }
 
 async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
@@ -330,6 +336,10 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
         draft: run.drafts[0],
         conversationId: params.conversationId,
       });
+    }
+
+    if (run.payrollIntents.length > 0 && params.onPayrollIntent != null) {
+      params.onPayrollIntent(run.payrollIntents[0].source);
     }
 
     pendingToolCalls = [...turn.toolCalls];

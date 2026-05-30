@@ -32,6 +32,12 @@ export const promptStyles = StyleSheet.create({
     color: colors.text.primary,
     padding: 0,
   },
+  promptAccessory: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   promptSend: {
     width: PROMPT_ICON_SIZE,
     height: PROMPT_ICON_SIZE,

@@ -50,6 +50,15 @@ function primaryValidator(network: OffpayNetwork): string {
   return validator;
 }
 
+/**
+ * Whether MagicBlock has at least one configured validator for the network.
+ * Used by payroll route preflight to gate the MagicBlock route without
+ * throwing.
+ */
+export function hasMagicBlockValidatorConfig(network: OffpayNetwork): boolean {
+  return validatorList(network).length > 0;
+}
+
 function assertSupportedMint(network: OffpayNetwork, mint: string): void {
   if (!isKnownStablecoinMint(network, mint)) {
     throw new Error(`Private payments support only configured USDC/USDT mints on ${network}.`);

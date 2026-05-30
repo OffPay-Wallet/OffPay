@@ -116,6 +116,18 @@ import type {
   IUmbraClient as LegacyUmbraClient,
   IUmbraSigner as LegacyUmbraSigner,
 } from '@umbra-privacy/sdk-legacy/interfaces';
+import type {
+  UmbraWalletExecutionParams,
+  UmbraTokenExecutionParams,
+  UmbraUnshieldParams,
+  UmbraVaultKeyRepairParams,
+  UmbraPrivateP2PParams,
+  UmbraPrivateP2PFromEncryptedBalanceParams,
+  UmbraEncryptedBalanceSummary,
+  UmbraPendingClaimUtxo,
+  UmbraExecutionResult,
+  UmbraVaultRegistrationStatus,
+} from '@/lib/umbra/umbra-types';
 
 export type {
   UmbraExecutionAction,
@@ -132,19 +144,6 @@ export type {
 } from '@/lib/umbra/umbra-types';
 
 export { isBenignAlreadyClaimedFailure } from '@/lib/umbra/umbra-indexer-adapter';
-
-import type {
-  UmbraWalletExecutionParams,
-  UmbraTokenExecutionParams,
-  UmbraUnshieldParams,
-  UmbraVaultKeyRepairParams,
-  UmbraPrivateP2PParams,
-  UmbraPrivateP2PFromEncryptedBalanceParams,
-  UmbraEncryptedBalanceSummary,
-  UmbraPendingClaimUtxo,
-  UmbraExecutionResult,
-  UmbraVaultRegistrationStatus,
-} from '@/lib/umbra/umbra-types';
 
 interface UmbraRuntime {
   client: IUmbraClient;
@@ -2576,6 +2575,54 @@ export async function fetchUmbraVaultRegistrationStatus(
   await verifyOffpayUmbraRpcReadiness(params.network);
   return withUmbraRuntime(params, async (runtime) =>
     queryUmbraVaultRegistrationStatus(runtime, walletAddress),
+  );
+}
+
+/**
+ * Reads the Umbra registration status of ONE OR MORE arbitrary addresses
+ * (e.g. payroll recipients) using the SIGNER wallet's runtime. The signer is
+ * always the active wallet — only the queried address varies — so this does
+ * NOT require the looked-up addresses to be owned/unlockable on this device.
+ *
+ * This is the read-only counterpart to `fetchUmbraVaultRegistrationStatus`,
+ * which derives signing material for the queried address itself and therefore
+ * only works for the active wallet. The signer runtime is built once and
+ * reused across all lookups, so probing N recipients is N cheap account reads,
+ * not N runtime constructions.
+ *
+ * Results are keyed by the looked-up address. A per-address failure resolves
+ * to `null` (caller treats as not registered) rather than failing the batch.
+ */
+export async function fetchUmbraRegistrationStatusForAddresses(params: {
+  signerWalletAddress: string;
+  walletId: string | null;
+  lookupAddresses: readonly string[];
+  network: OffpayNetwork;
+}): Promise<Record<string, UmbraVaultRegistrationStatus | null>> {
+  assertUmbraNetworkSupported(params.network);
+  const signerWalletAddress = assertWalletAddress(params.signerWalletAddress);
+
+  const unique = Array.from(new Set(params.lookupAddresses));
+  if (unique.length === 0) return {};
+
+  await verifyOffpayUmbraRpcReadiness(params.network);
+
+  return withUmbraRuntime(
+    { walletAddress: signerWalletAddress, walletId: params.walletId, network: params.network },
+    async (runtime) => {
+      const byAddress: Record<string, UmbraVaultRegistrationStatus | null> = {};
+      for (const lookupAddress of unique) {
+        try {
+          byAddress[lookupAddress] = await queryUmbraVaultRegistrationStatus(
+            runtime,
+            lookupAddress,
+          );
+        } catch {
+          byAddress[lookupAddress] = null;
+        }
+      }
+      return byAddress;
+    },
   );
 }
 
