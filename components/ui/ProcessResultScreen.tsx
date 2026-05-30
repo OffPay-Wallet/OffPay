@@ -217,7 +217,7 @@ export function ProcessResultScreen({
   const compact = width < 390 || height < 780 || fontScale > 1.08;
   const dense = width < 350 || height < 700 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
-  const animationSize = animationSizeOverride ?? (dense ? 112 : compact ? 128 : 148);
+  const animationSize = animationSizeOverride ?? (dense ? 160 : compact ? 188 : 220);
   const actionBottomPadding = Math.max(insets.bottom, dense ? spacing.md : spacing.lg);
   const actionTopPadding = dense ? spacing.sm : spacing.md;
   const actionHeight = dense ? layout.buttonHeightMd : layout.buttonHeightLg;

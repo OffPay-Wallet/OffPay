@@ -1,4 +1,11 @@
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { memo, useCallback, useEffect } from 'react';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -13,7 +20,9 @@ interface PrivateRouteSelectorProps {
   onSelectRoute: (route: PrivatePaymentRoute) => void;
 }
 
-export function PrivateRouteSelector({
+const SELECT_TIMING = { duration: 160, easing: Easing.out(Easing.cubic) } as const;
+
+export const PrivateRouteSelector = memo(function PrivateRouteSelector({
   routes,
   selectedRoute,
   onSelectRoute,
@@ -26,56 +35,91 @@ export function PrivateRouteSelector({
   return (
     <View style={styles.section}>
       <View style={[styles.routeGrid, stackRoutes && styles.routeGridStacked]}>
-        {routes.map((route) => {
-          const selected = route.id === selectedRoute;
-          const disabled = route.disabled === true;
-          return (
-            <Pressable
-              key={route.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected, disabled }}
-              accessibilityLabel={`Use ${route.label} route`}
-              disabled={disabled}
-              onPress={() => {
-                if (!disabled) onSelectRoute(route.id);
-              }}
-              style={({ pressed }) => [
-                styles.routeCard,
-                stackRoutes && styles.routeCardStacked,
-                selected && styles.routeCardSelected,
-                disabled && styles.routeCardDisabled,
-                pressed && !disabled && styles.routeCardPressed,
-              ]}
-            >
-              <Text
-                variant="bodyBold"
-                color={disabled ? colors.text.tertiary : colors.text.primary}
-                align="center"
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.82}
-                maxFontSizeMultiplier={1}
-                style={styles.routeTitle}
-              >
-                {route.label}
-              </Text>
-              <Text
-                variant="small"
-                color={disabled ? colors.text.tertiary : colors.text.secondary}
-                align="center"
-                numberOfLines={3}
-                maxFontSizeMultiplier={1}
-                style={styles.routeDescription}
-              >
-                {disabled ? (route.disabledReason ?? route.description) : route.description}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {routes.map((route) => (
+          <RouteCard
+            key={route.id}
+            route={route}
+            selected={route.id === selectedRoute}
+            stacked={stackRoutes}
+            onSelect={onSelectRoute}
+          />
+        ))}
       </View>
     </View>
   );
+});
+
+interface RouteCardProps {
+  route: PrivatePaymentRouteOption;
+  selected: boolean;
+  stacked: boolean;
+  onSelect: (route: PrivatePaymentRoute) => void;
 }
+
+const RouteCard = memo(function RouteCard({
+  route,
+  selected,
+  stacked,
+  onSelect,
+}: RouteCardProps): React.JSX.Element {
+  const disabled = route.disabled === true;
+  // Drive the selected highlight on the UI thread so the tap feedback
+  // is instant and smooth even while the parent recomputes route /
+  // fee / valuation state on the JS thread.
+  const selectedProgress = useSharedValue(selected ? 1 : 0);
+
+  useEffect(() => {
+    selectedProgress.value = withTiming(selected ? 1 : 0, SELECT_TIMING);
+  }, [selected, selectedProgress]);
+
+  const fillStyle = useAnimatedStyle(() => ({ opacity: selectedProgress.value }));
+
+  const handlePress = useCallback(() => {
+    if (!disabled) onSelect(route.id);
+  }, [disabled, onSelect, route.id]);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled }}
+      accessibilityLabel={`Use ${route.label} route`}
+      disabled={disabled}
+      onPress={handlePress}
+      style={({ pressed }) => [
+        styles.routeCard,
+        stacked && styles.routeCardStacked,
+        disabled && styles.routeCardDisabled,
+        pressed && !disabled && styles.routeCardPressed,
+      ]}
+    >
+      {/* Animated selected background — cross-fades in/out on the UI
+          thread; no layout work, so the press never stutters. */}
+      <Animated.View pointerEvents="none" style={[styles.routeCardFill, fillStyle]} />
+      <Text
+        variant="bodyBold"
+        color={disabled ? colors.text.tertiary : colors.text.primary}
+        align="center"
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        maxFontSizeMultiplier={1}
+        style={styles.routeTitle}
+      >
+        {route.label}
+      </Text>
+      <Text
+        variant="small"
+        color={disabled ? colors.text.tertiary : colors.text.secondary}
+        align="center"
+        numberOfLines={1}
+        maxFontSizeMultiplier={1}
+        style={styles.routeDescription}
+      >
+        {disabled ? (route.disabledReason ?? route.description) : route.description}
+      </Text>
+    </Pressable>
+  );
+});
 
 const styles = StyleSheet.create({
   section: {
@@ -90,7 +134,7 @@ const styles = StyleSheet.create({
   },
   routeCard: {
     flex: 1,
-    minHeight: 74,
+    minHeight: 52,
     borderRadius: radii.lg,
     borderCurve: 'continuous',
     borderTopWidth: 1,
@@ -107,11 +151,14 @@ const styles = StyleSheet.create({
     boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   routeCardStacked: {
-    minHeight: 66,
+    minHeight: 48,
   },
-  routeCardSelected: {
-    borderColor: colors.border.accent,
+  routeCardFill: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.glass.cyanWash,
+    borderRadius: radii.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border.accent,
   },
   routeCardDisabled: {
     opacity: 0.62,
@@ -125,7 +172,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   routeDescription: {
-    marginTop: spacing.xs,
+    marginTop: 1,
     fontSize: 11,
     lineHeight: 14,
   },

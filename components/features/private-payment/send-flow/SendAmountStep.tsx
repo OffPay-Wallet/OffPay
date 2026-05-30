@@ -9,6 +9,9 @@ import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 
+import { PrivateRouteSelector } from './PrivateRouteSelector';
+import type { PrivatePaymentRoute, PrivatePaymentRouteOption } from './types';
+
 // Hero gradient mirrors the home portfolio card: soft frost at the top
 // easing into the arctic cyan field, no card elevation.
 const AMOUNT_HERO_GRADIENT = [
@@ -76,6 +79,11 @@ interface SendAmountStepProps {
   amountMetaLabel: string;
   helper: string | null;
   selfSend: boolean;
+  /** Private-route options (empty in offline mode). */
+  routeOptions: PrivatePaymentRouteOption[];
+  /** Currently selected private route, or null when no choice applies. */
+  selectedRoute: PrivatePaymentRoute | null;
+  onSelectRoute: (route: PrivatePaymentRoute) => void;
   onAmountChange: (value: string) => void;
   onMax: () => void;
   onEditRecipient: () => void;
@@ -89,6 +97,9 @@ export function SendAmountStep({
   amountMetaLabel,
   helper,
   selfSend,
+  routeOptions,
+  selectedRoute,
+  onSelectRoute,
   onAmountChange,
   onMax,
   onEditRecipient,
@@ -213,6 +224,22 @@ export function SendAmountStep({
           </Text>
         </Pressable>
       </View>
+
+      {/* Route choice is embedded here so the user picks Normal vs.
+          private route up front, rather than on a separate summary
+          screen. Renders nothing when no route choice applies. */}
+      {routeOptions.length > 0 && selectedRoute != null ? (
+        <Animated.View layout={LinearTransition.duration(220)} style={styles.routeBlock}>
+          <Text variant="small" color={colors.text.secondary} style={styles.routeBlockLabel}>
+            Route
+          </Text>
+          <PrivateRouteSelector
+            routes={routeOptions}
+            selectedRoute={selectedRoute}
+            onSelectRoute={onSelectRoute}
+          />
+        </Animated.View>
+      ) : null}
 
       {selfSend ? (
         <Animated.View
@@ -363,6 +390,13 @@ const styles = StyleSheet.create({
   },
   helper: {
     lineHeight: 18,
+  },
+  routeBlock: {
+    gap: spacing.xs,
+  },
+  routeBlockLabel: {
+    fontFamily: fontFamily.uiMedium,
+    paddingHorizontal: spacing.xs,
   },
   pressed: {
     opacity: 0.78,

@@ -27,12 +27,14 @@ import Animated, {
 
 import { SendAmountStep } from '@/components/features/private-payment/send-flow/SendAmountStep';
 import { SendRecipientStep } from '@/components/features/private-payment/send-flow/SendRecipientStep';
-import { SendSummaryStep } from '@/components/features/private-payment/send-flow/SendSummaryStep';
+import {
+  SendSummarySheet,
+  type SendSheetPhase,
+} from '@/components/features/private-payment/send-flow/SendSummarySheet';
 import { SendTokenSelectStep } from '@/components/features/private-payment/send-flow/SendTokenSelectStep';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import {
-  ProcessResultScreen,
   type ProcessResultDetailRow,
   type ProcessResultTokenLeg,
   type ProcessResultVariant,
@@ -411,7 +413,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const amountValuationQuery = useOffpayPortfolioValuation({
     holdings: valuationHoldings,
     currency: displayCurrency,
-    enabled: step === 'amount' && selectedToken != null,
+    enabled: (step === 'amount' || step === 'summary') && selectedToken != null,
   });
   // Resolve the selected token's unit USD price from the valuation
   // result. Native SOL is keyed in holdings by its wrapped mint, while
@@ -543,7 +545,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       {
         id: 'normal',
         label: 'Normal',
-        description: 'Direct wallet transfer from your public balance.',
+        description: 'Public transfer',
       },
     ];
 
@@ -551,7 +553,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       routes.push({
         id: 'magicblock',
         label: 'MagicBlock',
-        description: 'Delegated settlement route through OffPay private payment backend.',
+        description: 'Private route',
       });
     }
     if (isUmbraPrivateP2PToken(network, selectedToken)) {
@@ -559,9 +561,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         id: 'umbra',
         label: 'Umbra',
         description:
-          umbraPrivateP2pDisabledReason == null
-            ? 'Mixer route using a claimable UTXO from your public balance.'
-            : umbraPrivateP2pDisabledReason,
+          umbraPrivateP2pDisabledReason == null ? 'Mixer route' : umbraPrivateP2pDisabledReason,
         disabled: !canUseUmbraPrivateP2P,
         disabledReason: umbraPrivateP2pDisabledReason ?? undefined,
       });
@@ -680,7 +680,15 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   }, [offlineReceipts, recipientHistoryClearedAt, walletAddress]);
   const closeToHome = useCallback(() => {
     Keyboard.dismiss();
-    router.dismissTo('/(tabs)' as never);
+    // Prefer dismissing the pushed send route back to the tabs. If this
+    // route is the stack root (deep link / fresh entry) `dismissTo`
+    // can't pop, so fall back to a replace — never leave the user on a
+    // frozen sheet.
+    if (router.canGoBack()) {
+      router.dismissTo('/(tabs)' as never);
+      return;
+    }
+    router.replace('/(tabs)' as never);
   }, [router]);
   const handleClearRecentRecipients = useCallback(() => {
     if (walletAddress == null || recentRecipients.length === 0) return;
@@ -1109,11 +1117,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             logo: params.token.logo,
           },
         ],
+        // Minimal: just the recipient and the transaction/offline
+        // reference. Network/mode/status are conveyed by the title +
+        // status pill above, so we don't repeat them as rows.
         detailRows: [
           { label: 'To', value: shortenWalletAddress(params.recipient), selectable: true },
-          { label: 'Network', value: params.network === 'devnet' ? 'Solana Devnet' : 'Solana' },
-          { label: 'Mode', value: getCurrentModeLabel(params.token) },
-          { label: 'Status', value: queued ? 'Queued locally' : 'Submitted on-chain' },
           { label: referenceLabel, value: params.id, selectable: true },
         ],
         primaryActionLabel: 'Close',
@@ -1122,7 +1130,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         secondaryAction: queued ? 'copy-reference' : 'explorer',
       };
     },
-    [getCurrentModeLabel],
+    [],
   );
 
   const buildFailureProcessResult = useCallback(
@@ -1179,29 +1187,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     },
     [amount, effectiveRecipientAddress, getCurrentModeLabel, network, selectedToken],
   );
-
-  const handlePrimaryProcessAction = useCallback(() => {
-    if (sendProcessResult?.primaryAction === 'review') {
-      setResultTransitionDirection('backward');
-      setSendProcessResult(null);
-      if (selectedToken == null) {
-        transitionToStep('token', 'backward');
-      } else if (effectiveRecipientAddress == null) {
-        transitionToStep('recipient', 'backward');
-      } else {
-        transitionToStep('summary', 'backward');
-      }
-      return;
-    }
-
-    closeToHome();
-  }, [
-    closeToHome,
-    effectiveRecipientAddress,
-    selectedToken,
-    sendProcessResult?.primaryAction,
-    transitionToStep,
-  ]);
 
   const baseDisabledReason = useMemo(() => {
     if (isNetworkSwitching) return 'Switching network…';
@@ -1299,6 +1284,28 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     Keyboard.dismiss();
     transitionToStep('summary', 'forward');
   }, [canSubmit, transitionToStep]);
+
+  // Phase for the draggable summary sheet. The sheet owns the whole
+  // review → sending → success lifecycle in one card, so there is no
+  // separate result screen for the send flow.
+  const sendSheetPhase: SendSheetPhase = sendingPending
+    ? 'sending'
+    : step === 'success' && sendResult != null
+      ? 'success'
+      : 'review';
+  const sendSheetResult = useMemo(
+    () =>
+      sendResult == null
+        ? null
+        : {
+            status: sendResult.status,
+            id: sendResult.id,
+            amount: sendResult.amount,
+            symbol: sendResult.symbol,
+            recipient: sendResult.recipient,
+          },
+    [sendResult],
+  );
 
   const handleSubmit = useCallback(() => {
     if (
@@ -1777,37 +1784,13 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       amountMetaLabel={amountMetaLabel}
       helper={amountHelper}
       selfSend={selfSend}
+      routeOptions={effectiveWalletMode !== 'offline' ? paymentRouteOptions : []}
+      selectedRoute={paymentRouteOptions.length > 0 ? effectivePaymentRoute : null}
+      onSelectRoute={setSelectedPrivateRoute}
       onAmountChange={handleAmountChange}
       onMax={handleMaxAmount}
       onEditRecipient={handleEditRecipient}
     />
-  );
-
-  const renderSummaryStep = (): React.JSX.Element | null => {
-    if (selectedToken == null || effectiveRecipientAddress == null || network == null) return null;
-
-    return (
-      <SendSummaryStep
-        token={selectedToken}
-        amount={sanitizeDecimalInput(amount, selectedToken.decimals)}
-        amountMetaLabel={amountMetaLabel}
-        recipientAddress={effectiveRecipientAddress}
-        network={network}
-        modeLabel={paymentRouteModeLabel}
-        networkFeeLabel={networkFeeLabel}
-        selfSend={selfSend}
-        canSubmit={canSubmit}
-        sending={sendingPending}
-        privateRouteOptions={effectiveWalletMode !== 'offline' ? paymentRouteOptions : []}
-        selectedPrivateRoute={paymentRouteOptions.length > 0 ? effectivePaymentRoute : null}
-        onSelectPrivateRoute={setSelectedPrivateRoute}
-        onSubmit={handleSubmit}
-      />
-    );
-  };
-
-  const renderSuccessStep = (): React.JSX.Element => (
-    <View style={[styles.step, styles.successStep]} />
   );
 
   const stepContent =
@@ -1815,16 +1798,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       ? renderTokenStep()
       : step === 'recipient'
         ? renderRecipientStep()
-        : step === 'amount'
-          ? renderAmountStep()
-          : step === 'summary'
-            ? renderSummaryStep()
-            : renderSuccessStep();
+        : // amount / summary / success all keep the amount screen mounted
+          // underneath — summary and success are overlay sheet phases.
+          renderAmountStep();
 
   const footerContent =
-    step === 'success' ? (
-      <PrimaryButton label="Close" onPress={closeToHome} />
-    ) : step === 'recipient' ? (
+    step === 'recipient' ? (
       <PrimaryButton
         label="Next"
         onPress={() => void handleContinueRecipient()}
@@ -1834,6 +1813,8 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     ) : step === 'amount' ? (
       <PrimaryButton label="Next" onPress={handleContinueAmount} disabled={!canSubmit} />
     ) : (
+      // Summary / success are handled entirely by the draggable sheet
+      // (slider + Close), so no footer button is shown underneath it.
       <View style={styles.footerPlaceholder} pointerEvents="none" />
     );
 
@@ -1869,7 +1850,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         >
           <View style={[styles.content, { maxWidth: SEND_CONTENT_MAX_WIDTH }]}>
             <Animated.View
-              key={`send-step-${step}`}
+              key={`send-step-${step === 'summary' || step === 'success' ? 'amount' : step}`}
               entering={getSendStepEnteringAnimation(stepTransitionDirection)}
               exiting={getSendStepExitingAnimation(stepTransitionDirection)}
               style={[styles.stepScreen, { gap: sectionGap }]}
@@ -1877,10 +1858,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
               <View style={styles.header}>
                 <HeaderIconButton
                   onPress={handleBack}
-                  accessibilityLabel={step === 'success' ? 'Close send flow' : 'Go back'}
+                  accessibilityLabel="Go back"
                 >
                   <Ionicons
-                    name={step === 'success' ? 'close' : 'chevron-back'}
+                    name="chevron-back"
                     size={layout.iconSizeNav}
                     color={colors.brand.deepShadow}
                   />
@@ -1894,17 +1875,15 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
                   minimumFontScale={0.82}
                   maxFontSizeMultiplier={1}
                 >
-                  {step === 'amount'
+                  {step === 'amount' || step === 'summary' || step === 'success'
                     ? 'Enter amount'
-                    : step === 'summary'
-                      ? 'Summary'
-                      : step === 'recipient' && selectedToken != null
-                        ? selectedToken.symbol
-                        : step === 'token'
-                          ? 'Send'
-                          : selectedToken != null
-                            ? `Send ${selectedToken.symbol}`
-                            : 'Send'}
+                    : step === 'recipient' && selectedToken != null
+                      ? selectedToken.symbol
+                      : step === 'token'
+                        ? 'Send'
+                        : selectedToken != null
+                          ? `Send ${selectedToken.symbol}`
+                          : 'Send'}
                 </Text>
                 {step === 'amount' ? (
                   <HeaderTextButton
@@ -1953,24 +1932,34 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           {footerContent}
         </Animated.View>
       </View>
-      <ProcessResultScreen
-        visible={sendProcessResult != null}
-        variant={sendProcessResult?.variant ?? 'success'}
-        title={sendProcessResult?.title ?? ''}
-        message={sendProcessResult?.message ?? ''}
-        statusLabel={sendProcessResult?.statusLabel}
-        tokenLegs={sendProcessResult?.tokenLegs ?? []}
-        detailRows={sendProcessResult?.detailRows ?? []}
-        secondaryActionLabel={sendProcessResult?.secondaryActionLabel}
-        onSecondaryAction={
-          sendProcessResult?.secondaryAction != null
-            ? () => void handleTransactionAction()
-            : undefined
+      <SendSummarySheet
+        visible={
+          (step === 'summary' || step === 'success') &&
+          selectedToken != null &&
+          effectiveRecipientAddress != null
         }
-        primaryActionLabel={sendProcessResult?.primaryActionLabel ?? 'Close'}
-        onPrimaryAction={handlePrimaryProcessAction}
-        transition="ios-slide"
-        transitionDirection={resultTransitionDirection}
+        phase={sendSheetPhase}
+        token={selectedToken}
+        amount={selectedToken != null ? sanitizeDecimalInput(amount, selectedToken.decimals) : amount}
+        amountMetaLabel={amountMetaLabel}
+        recipientAddress={effectiveRecipientAddress ?? ''}
+        network={network}
+        modeLabel={paymentRouteModeLabel}
+        networkFeeLabel={networkFeeLabel}
+        selfSend={selfSend}
+        canSubmit={canSubmit}
+        result={sendSheetResult}
+        onCancel={() => transitionToStep('amount', 'backward')}
+        onConfirm={handleSubmit}
+        onResultAction={sendResult != null ? () => void handleTransactionAction() : undefined}
+        resultActionLabel={
+          sendResult == null
+            ? undefined
+            : sendResult.status === 'queued'
+              ? 'Copy offline id'
+              : 'View transaction'
+        }
+        onDone={closeToHome}
       />
     </View>
   );
