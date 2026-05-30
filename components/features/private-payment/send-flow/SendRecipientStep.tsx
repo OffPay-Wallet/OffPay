@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -27,10 +27,11 @@ interface SendRecipientStepProps {
 // Pin the input baseline so the placeholder/value cannot shift on
 // type/clear. Android's TextInput baseline floats by 1–2px when the
 // font metrics change between the placeholder and the value font;
-// fixing `height` + `lineHeight` removes the wobble entirely.
+// fixing `lineHeight` removes the wobble. The input is multiline so a
+// full wallet address (44 chars) wraps to a second line and stays
+// fully visible instead of being clipped/scrolled out of view.
 const RECIPIENT_INPUT_FONT_SIZE = 17;
 const RECIPIENT_INPUT_LINE_HEIGHT = 22;
-const RECIPIENT_INPUT_HEIGHT = RECIPIENT_INPUT_LINE_HEIGHT + 16;
 
 export function SendRecipientStep({
   recipient,
@@ -46,7 +47,11 @@ export function SendRecipientStep({
   onScanNearby,
 }: SendRecipientStepProps): React.JSX.Element {
   return (
-    <Animated.View entering={FadeIn.duration(220)} style={styles.step}>
+    <Animated.View
+      entering={FadeIn.duration(220)}
+      layout={LinearTransition.duration(220)}
+      style={styles.step}
+    >
       <View style={styles.toRow}>
         <Text variant="bodyBold" color={colors.text.secondary}>
           To:
@@ -65,8 +70,11 @@ export function SendRecipientStep({
           autoCapitalize="none"
           autoCorrect={false}
           maxFontSizeMultiplier={1}
-          multiline={false}
-          numberOfLines={1}
+          // Multiline so a pasted 44-char wallet address wraps to a
+          // second line and stays fully visible instead of being
+          // cropped at the row edge.
+          multiline
+          scrollEnabled={false}
           textAlignVertical="center"
           allowFontScaling={false}
           underlineColorAndroid="transparent"
@@ -107,20 +115,26 @@ export function SendRecipientStep({
         ) : null}
       </View>
 
-      {clipboardRecipient != null ? (
-        <Pressable
-          style={({ pressed }) => [styles.clipboardCard, pressed && styles.pressed]}
-          onPress={onUseClipboard}
-          accessibilityRole="button"
-          accessibilityLabel="Paste recipient from clipboard"
+      {clipboardRecipient != null && clipboardRecipient.trim() !== recipient.trim() ? (
+        <Animated.View
+          entering={FadeIn.duration(200)}
+          exiting={FadeOut.duration(160)}
+          layout={LinearTransition.duration(220)}
         >
-          <Text variant="small" color={colors.text.secondary}>
-            Paste from clipboard
-          </Text>
-          <Text variant="bodyBold" color={colors.text.primary} numberOfLines={2}>
-            {clipboardRecipient}
-          </Text>
-        </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.clipboardCard, pressed && styles.pressed]}
+            onPress={onUseClipboard}
+            accessibilityRole="button"
+            accessibilityLabel="Paste recipient from clipboard"
+          >
+            <Text variant="small" color={colors.text.secondary}>
+              Paste from clipboard
+            </Text>
+            <Text variant="bodyBold" color={colors.text.primary} numberOfLines={2}>
+              {clipboardRecipient}
+            </Text>
+          </Pressable>
+        </Animated.View>
       ) : null}
 
       {recentRecipients.length > 0 ? (
@@ -183,7 +197,7 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   toRow: {
-    height: 64,
+    minHeight: 64,
     borderRadius: radii.xl,
     borderCurve: 'continuous',
     borderTopWidth: 1,
@@ -193,6 +207,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
     paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -201,7 +216,6 @@ const styles = StyleSheet.create({
   recipientInput: {
     flex: 1,
     minWidth: 0,
-    height: RECIPIENT_INPUT_HEIGHT,
     color: colors.text.primary,
     fontFamily: fontFamily.uiSemiBold,
     fontSize: RECIPIENT_INPUT_FONT_SIZE,

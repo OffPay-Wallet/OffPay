@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -18,6 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { WalletCard } from '@/components/features/settings/WalletCard';
+import { PreferencesModal } from '@/components/features/settings/PreferencesModal';
+import { SecuritySettingsModal } from '@/components/features/settings/SecuritySettingsModal';
 import { useAppToast } from '@/components/ui/AppToast';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
@@ -30,6 +32,7 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { resetForgottenWallet } from '@/lib/wallet/wallet-reset';
+import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 
 const SUPPORT_EMAIL = 'hello@offpay.app';
 const SUPPORT_EMAIL_URL = `mailto:${SUPPORT_EMAIL}`;
@@ -72,6 +75,29 @@ export function SettingsScreenContent({
 
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [destroying, setDestroying] = useState(false);
+  // Preferences & Security open as inline bottom sheets layered over
+  // the settings screen — not as separate routes — so tapping a card
+  // slides the sheet up over the dimmed settings list instead of
+  // pushing a new screen (which flashed the navigator backdrop).
+  const [preferencesVisible, setPreferencesVisible] = useState(false);
+  const [securityVisible, setSecurityVisible] = useState(false);
+  const showOverlay = useOverlayVisibilityStore((s) => s.showOverlay);
+  const hideOverlay = useOverlayVisibilityStore((s) => s.hideOverlay);
+
+  // Hide the floating tab bar while a settings sheet is open. Keyed by a
+  // stable overlay id so overlapping opens/closes stay consistent, and
+  // the cleanup always releases the flag if this screen unmounts while a
+  // sheet is still open (no stuck-hidden tab bar).
+  const anySettingsSheetOpen = preferencesVisible || securityVisible;
+  useEffect(() => {
+    const overlayId = 'settings-sheet';
+    if (anySettingsSheetOpen) {
+      showOverlay(overlayId);
+    } else {
+      hideOverlay(overlayId);
+    }
+    return () => hideOverlay(overlayId);
+  }, [anySettingsSheetOpen, showOverlay, hideOverlay]);
 
   const handleOpenConfirm = useCallback((): void => {
     if (destroying) return;
@@ -142,7 +168,7 @@ export function SettingsScreenContent({
                   subtitle="Wallet mode, offline payments, network"
                   compact={compact}
                   dense={dense}
-                  onPress={() => router.push('/preferences')}
+                  onPress={() => setPreferencesVisible(true)}
                 />
               </SettingsSectionCard>
             </StaggerRevealItem>
@@ -157,7 +183,7 @@ export function SettingsScreenContent({
                   subtitle="Fingerprint, passcode, wallet keys"
                   compact={compact}
                   dense={dense}
-                  onPress={() => router.push('/security')}
+                  onPress={() => setSecurityVisible(true)}
                 />
               </SettingsSectionCard>
             </StaggerRevealItem>
@@ -366,6 +392,16 @@ export function SettingsScreenContent({
           </View>
         </View>
       </Modal>
+
+      <PreferencesModal
+        visible={preferencesVisible}
+        onClose={() => setPreferencesVisible(false)}
+      />
+
+      <SecuritySettingsModal
+        visible={securityVisible}
+        onClose={() => setSecurityVisible(false)}
+      />
     </>
   );
 }

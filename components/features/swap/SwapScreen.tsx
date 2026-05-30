@@ -16,11 +16,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRootNavigationState, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, {
-  Easing,
   FadeIn,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
+  withSpring,
+  type WithSpringConfig,
 } from 'react-native-reanimated';
 
 import { useAppToast } from '@/components/ui/AppToast';
@@ -196,6 +196,14 @@ function HeaderIconButton({
   );
 }
 
+// Snappy spring for the private-swap switch knob — slides on the UI
+// thread the instant the user taps, decoupled from the parent re-render.
+const PRIVATE_TOGGLE_SPRING: WithSpringConfig = {
+  damping: 20,
+  stiffness: 320,
+  mass: 0.6,
+};
+
 function PrivateSwapToggle({
   enabled,
   available,
@@ -214,12 +222,19 @@ function PrivateSwapToggle({
     transform: [{ translateX: knobProgress.value * 20 }],
   }));
 
+  // Reconcile with the prop for external changes only — the press
+  // handler already moved the knob, so this is a no-op when the prop
+  // catches up.
   useEffect(() => {
-    knobProgress.value = withTiming(enabled ? 1 : 0, {
-      duration: 180,
-      easing: Easing.out(Easing.cubic),
-    });
+    knobProgress.value = withSpring(enabled ? 1 : 0, PRIVATE_TOGGLE_SPRING);
   }, [enabled, knobProgress]);
+
+  // Slide the knob immediately on tap, on the UI thread, decoupled from
+  // the swap screen's heavier re-render so the switch never feels laggy.
+  const handlePress = (): void => {
+    knobProgress.value = withSpring(enabled ? 0 : 1, PRIVATE_TOGGLE_SPRING);
+    onToggle();
+  };
 
   return (
     <Pressable
@@ -228,7 +243,7 @@ function PrivateSwapToggle({
         enabled ? styles.privateTogglePressableActive : null,
         pressed ? styles.headerIconPressed : null,
       ]}
-      onPress={onToggle}
+      onPress={handlePress}
       accessibilityRole="switch"
       accessibilityState={{ checked: enabled }}
       accessibilityLabel="Private swap mode"
@@ -1915,64 +1930,55 @@ export function SwapScreen(): React.JSX.Element {
               </HeaderIconButton>
             </Animated.View>
 
-            <StaggerRevealGroup>
-              <Animated.View style={styles.contentFrame}>
-                <SwapCard
-                  payToken={payToken}
-                  receiveToken={receiveToken}
-                  payAmount={payAmount}
-                  receiveAmount={receiveAmount}
-                  onPayAmountChange={swapInputActions.setUserAmount}
-                  onFlip={handleFlip}
-                  onSelectToken={(type) => {
-                    setSelectingFor(type);
-                    setModalVisible(true);
-                  }}
-                />
-              </Animated.View>
+            <StaggerRevealGroup itemStyle={styles.contentFrame}>
+              <SwapCard
+                payToken={payToken}
+                receiveToken={receiveToken}
+                payAmount={payAmount}
+                receiveAmount={receiveAmount}
+                onPayAmountChange={swapInputActions.setUserAmount}
+                onFlip={handleFlip}
+                onSelectToken={(type) => {
+                  setSelectingFor(type);
+                  setModalVisible(true);
+                }}
+              />
 
-              <Animated.View style={styles.contentFrame}>
-                <PrivateSwapToggle
-                  enabled={privateSwapMode}
-                  available={privateSwapAvailable}
-                  setupLabel={privateSwapSetupLabel}
-                  policyLabel={privateSwapPolicyLabel}
-                  onToggle={handleTogglePrivateSwapMode}
-                />
-              </Animated.View>
+              <PrivateSwapToggle
+                enabled={privateSwapMode}
+                available={privateSwapAvailable}
+                setupLabel={privateSwapSetupLabel}
+                policyLabel={privateSwapPolicyLabel}
+                onToggle={handleTogglePrivateSwapMode}
+              />
 
               {showLiveSwapDetails ? (
-                <Animated.View style={styles.contentFrame}>
-                  <SwapDetailsCard
-                    rateLabel={liveDetailsRateLabel}
-                    priceImpactLabel={liveDetailsPriceImpactLabel}
-                    feeLabel={liveDetailsFeeLabel}
-                    routeLabel={liveDetailsRouteLabel}
-                    slippageLabel={liveDetailsSlippageLabel}
-                  />
-                </Animated.View>
+                <SwapDetailsCard
+                  rateLabel={liveDetailsRateLabel}
+                  priceImpactLabel={liveDetailsPriceImpactLabel}
+                  feeLabel={liveDetailsFeeLabel}
+                  routeLabel={liveDetailsRouteLabel}
+                  slippageLabel={liveDetailsSlippageLabel}
+                />
               ) : null}
 
               {lastSwapResult != null && network != null ? (
-                <Animated.View style={styles.contentFrame}>
-                  <SwapExecutionStatusCard
-                    signature={lastSwapResult.signature}
-                    network={network}
-                    refreshedQuote={lastSwapResult.refreshedQuote}
-                  />
-                </Animated.View>
+                <SwapExecutionStatusCard
+                  signature={lastSwapResult.signature}
+                  network={network}
+                  refreshedQuote={lastSwapResult.refreshedQuote}
+                />
               ) : null}
 
               {visibleSwapStatusMessage != null ? (
-                <Animated.View style={[styles.contentFrame, styles.statusWrap]}>
+                <Animated.View style={styles.statusWrap}>
                   <Text variant="small" color={colors.text.tertiary} align="center">
                     {visibleSwapStatusMessage}
                   </Text>
                 </Animated.View>
               ) : null}
 
-              <Animated.View style={styles.contentFrame}>
-                <SwapConfirmationButton
+              <SwapConfirmationButton
                   disabled={reviewButtonDisabled}
                   feedbackLabel={activeSwapButtonFeedback?.label}
                   feedbackTone={activeSwapButtonFeedback?.tone}
@@ -1995,7 +2001,6 @@ export function SwapScreen(): React.JSX.Element {
                   }
                   onPress={handleReviewSwap}
                 />
-              </Animated.View>
             </StaggerRevealGroup>
           </ScrollView>
         </KeyboardAvoidingView>

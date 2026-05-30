@@ -47,6 +47,7 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
+import { useOffpayPortfolioValuation } from '@/hooks/useOffpayPortfolioValuation';
 import { useUmbraVaultFeeAccountReadiness } from '@/hooks/useUmbraVaultFeeAccountReadiness';
 import {
   offlinePaymentSlotsQueryKey,
@@ -57,8 +58,9 @@ import { useWalletModeState } from '@/hooks/useWalletModeState';
 import { decimalInputToAtomicAmount, sanitizeDecimalInput } from '@/lib/policy/token-amounts';
 import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import {
+  buildStablecoinMetadataLookup,
+  buildVisibleTokenHoldings,
   formatLamportsAsSol,
-  formatTokenBalance,
   shortenWalletAddress,
 } from '@/lib/api/offpay-wallet-data';
 import {
@@ -74,8 +76,10 @@ import {
   RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE,
 } from '@/lib/umbra/umbra-rn-zk-prover';
 import { applyCachedOfflineDebit } from '@/lib/wallet/wallet-display-cache';
+import { formatFiatCurrency, normalizeCurrency } from '@/lib/currency-rates';
 import { resolveXHandle, XHandleNotRegisteredError } from '@/lib/identity/x-handle';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
+import { usePreferencesStore } from '@/store/preferencesStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -93,6 +97,8 @@ import {
   isMagicBlockPrivateToken,
   isPositiveRawAmount,
   isUmbraPrivateP2PToken,
+  NATIVE_SOL_MINT,
+  NATIVE_SOL_SEND_MINT,
   normalizeTokenSymbol,
   routeMintMatchesToken,
   withSendTimeout,
@@ -384,6 +390,41 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     () => stablecoins.find((token) => token.mint === selectedMint) ?? null,
     [selectedMint, stablecoins],
   );
+
+  // Real-time fiat valuation for the entered amount. Reuses the
+  // perf-tuned portfolio valuation infra (UI-thread yields, price
+  // cache, capped concurrency) instead of fetching prices here. Only
+  // enabled on the amount step so the price query doesn't run while the
+  // user is still picking a token or recipient.
+  const displayCurrency = usePreferencesStore((s) => s.currency);
+  const valuationHoldings = useMemo(
+    () =>
+      balanceQuery.data == null
+        ? []
+        : buildVisibleTokenHoldings(
+            balanceQuery.data,
+            tokenLogoMap,
+            buildStablecoinMetadataLookup(supportedStablecoins),
+          ),
+    [balanceQuery.data, supportedStablecoins, tokenLogoMap],
+  );
+  const amountValuationQuery = useOffpayPortfolioValuation({
+    holdings: valuationHoldings,
+    currency: displayCurrency,
+    enabled: step === 'amount' && selectedToken != null,
+  });
+  // Resolve the selected token's unit USD price from the valuation
+  // result. Native SOL is keyed in holdings by its wrapped mint, while
+  // the send list uses the `native-sol` sentinel — map between them.
+  const selectedTokenUnitUsdPrice = useMemo(() => {
+    if (selectedToken == null) return null;
+    const prices = amountValuationQuery.data?.unitUsdPrices;
+    if (prices == null) return null;
+    const priceMint =
+      selectedToken.mint === NATIVE_SOL_SEND_MINT ? NATIVE_SOL_MINT : selectedToken.mint;
+    const price = prices[priceMint];
+    return typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
+  }, [amountValuationQuery.data, selectedToken]);
   const filteredStablecoins = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (normalizedQuery.length === 0) return stablecoins;
@@ -599,10 +640,24 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     (width - SEND_CONTENT_MAX_WIDTH) / 2,
     screenHorizontalPadding,
   );
-  const amountMetaLabel =
-    selectedToken != null && amount.trim().length > 0
-      ? `~${amount} ${selectedToken.symbol}`
-      : '~0.00';
+  const amountMetaLabel = useMemo(() => {
+    const trimmed = amount.trim();
+    if (selectedToken == null || trimmed.length === 0) {
+      return formatFiatCurrency(0, normalizeCurrency(displayCurrency));
+    }
+    const enteredAmount = Number.parseFloat(trimmed.replace(/,/g, ''));
+    if (!Number.isFinite(enteredAmount) || enteredAmount <= 0) {
+      return formatFiatCurrency(0, normalizeCurrency(displayCurrency));
+    }
+    const rate = amountValuationQuery.data?.rate;
+    if (selectedTokenUnitUsdPrice == null || rate == null) {
+      // Price not resolved yet — fall back to the token amount so the
+      // label never shows a misleading $0 while pricing settles.
+      return `~${trimmed} ${selectedToken.symbol}`;
+    }
+    const fiatValue = enteredAmount * selectedTokenUnitUsdPrice * rate;
+    return formatFiatCurrency(fiatValue, amountValuationQuery.data?.currency ?? displayCurrency);
+  }, [amount, amountValuationQuery.data, displayCurrency, selectedToken, selectedTokenUnitUsdPrice]);
   const recentRecipients = useMemo<RecentRecipientOption[]>(() => {
     const byAddress = new Map<string, RecentRecipientOption>();
 
@@ -861,19 +916,30 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     });
   }, []);
 
-  const handlePasteRecipient = useCallback(async () => {
-    const value = await Clipboard.getStringAsync();
-    const normalized = value.trim();
-    if (normalized.length > 0) handleRecipientChange(normalized);
-  }, [handleRecipientChange]);
-
   const handleUseClipboardRecipient = useCallback(() => {
-    if (clipboardRecipient == null) {
-      void handlePasteRecipient();
-      return;
-    }
-    handleRecipientChange(clipboardRecipient);
-  }, [clipboardRecipient, handlePasteRecipient, handleRecipientChange]);
+    // Always re-read the clipboard live on tap so the paste is
+    // authoritative — the probed `clipboardRecipient` can be stale
+    // (clipboard changed after the step mounted) or still null (probe
+    // not resolved yet), which previously made the tap silently no-op.
+    // Fall back to the cached suggestion only if the live read is empty
+    // (e.g. the OS denied a second clipboard read on Android).
+    void Clipboard.getStringAsync()
+      .then((value) => {
+        const normalized = value.trim();
+        if (normalized.length > 0) {
+          handleRecipientChange(normalized);
+          return;
+        }
+        if (clipboardRecipient != null) {
+          handleRecipientChange(clipboardRecipient);
+        }
+      })
+      .catch(() => {
+        if (clipboardRecipient != null) {
+          handleRecipientChange(clipboardRecipient);
+        }
+      });
+  }, [clipboardRecipient, handleRecipientChange]);
 
   const handleSelectRecentRecipient = useCallback(
     (address: string) => {
@@ -1170,8 +1236,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     if (selectedToken == null) return 'Choose a token first.';
     if (amount.trim().length === 0) return null;
     if (!isPositiveRawAmount(amountRaw)) return 'Enter an amount greater than zero.';
-    if (!amountValid)
-      return `Available balance is ${formatTokenBalance(selectedToken.balance, 5)} ${selectedToken.symbol}.`;
+    // The available balance is already shown in the "Available To Send"
+    // card above, so the over-balance hint stays concise instead of
+    // repeating the figure.
+    if (!amountValid) return 'Amount exceeds your balance.';
     return null;
   }, [amount, amountRaw, amountValid, baseDisabledReason, selectedToken]);
 

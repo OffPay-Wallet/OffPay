@@ -54,8 +54,8 @@ const VARIANT_ICON: Record<LocalNotificationVariant, IoniconName> = {
   warning: 'warning',
   info: 'information',
 };
-const MODAL_OPEN_MS = 240;
-const MODAL_CLOSE_MS = 200;
+const MODAL_OPEN_MS = 420;
+const MODAL_CLOSE_MS = 260;
 const CLEAR_ROW_DURATION_MS = 220;
 const CLEAR_ROW_STAGGER_MS = 56;
 const CLEAR_FINISH_SETTLE_MS = 24;
@@ -258,14 +258,16 @@ export function NotificationCenterModal({
       }
       sheetProgress.value = withTiming(1, {
         duration: reduceMotion ? 0 : MODAL_OPEN_MS,
-        easing: Easing.out(Easing.cubic),
+        // Gentle ease-in-out so the drawer glides open and settles
+        // softly instead of snapping down like a spring.
+        easing: Easing.inOut(Easing.cubic),
       });
       return;
     }
 
     sheetProgress.value = withTiming(
       0,
-      { duration: reduceMotion ? 0 : MODAL_CLOSE_MS, easing: Easing.in(Easing.cubic) },
+      { duration: reduceMotion ? 0 : MODAL_CLOSE_MS, easing: Easing.inOut(Easing.cubic) },
       (finished) => {
         if (finished) runOnJS(setRendered)(false);
       },
@@ -378,8 +380,8 @@ export function NotificationCenterModal({
   const sheetStyle = useAnimatedStyle(() => ({
     opacity: interpolate(sheetProgress.value, [0, 1], [0, 1]),
     transform: [
-      { translateY: interpolate(sheetProgress.value, [0, 1], [-14, 0]) },
-      { scale: interpolate(sheetProgress.value, [0, 1], [0.985, 1]) },
+      { translateY: interpolate(sheetProgress.value, [0, 1], [-28, 0]) },
+      { scale: interpolate(sheetProgress.value, [0, 1], [0.97, 1]) },
     ],
   }));
 

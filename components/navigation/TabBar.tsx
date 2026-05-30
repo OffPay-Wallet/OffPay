@@ -5,7 +5,9 @@ import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
+  type WithSpringConfig,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,6 +21,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useWalletModeState } from '@/hooks/useWalletModeState';
+import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 import { useTabHistoryStore, isTabRouteName } from '@/store/tabHistoryStore';
 
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -44,16 +47,27 @@ const QUICK_ACTION_ROW_GAP = spacing.md;
 // ---------------------------------------------------------------------------
 
 const BAR_TINT = '#FFFFFF';
-const PILL_TINT = 'rgba(255, 255, 255, 0.96)';
-const FAB_TINT = '#FFFFFF';
+// Active-tab pill — soft frosted tint so the highlighted tab reads as a
+// gentle raised shape on the white bar (matches the reference's light
+// pill behind the active item).
+const PILL_TINT = colors.brand.iceBlue;
+// FAB — solid blue puck with a white "+" (reference accent button).
+const FAB_TINT = colors.brand.azureBlue;
 const QUICK_ACTION_PUCK_TINT = '#FFFFFF';
+
+// Tab accent colours — active items take the brand blue, inactive items
+// stay solid dark ink with muted grey labels (reference combination).
+const TAB_ACTIVE_TINT = colors.brand.azureBlue;
+const TAB_INACTIVE_TINT = colors.brand.deepShadow;
+const TAB_ACTIVE_LABEL = colors.brand.azureBlue;
+const TAB_INACTIVE_LABEL = colors.text.secondary;
 
 // Hairline borders — subtle ink edge so the glass surfaces read as
 // distinct shapes lifted off the page rather than melting into the
 // ice-blue backdrop.
 const BAR_BORDER_COLOR = 'rgba(14, 42, 53, 0.12)';
 const PILL_BORDER_COLOR = 'rgba(14, 42, 53, 0.10)';
-const FAB_BORDER_COLOR = 'rgba(14, 42, 53, 0.12)';
+const FAB_BORDER_COLOR = 'rgba(46, 174, 210, 0.55)';
 const HAIRLINE = StyleSheet.hairlineWidth;
 // Scrim above the screen content while the FAB menu is open. Uses the
 // app's frost ice-blue rather than a dark navy so the underlying UI
@@ -70,17 +84,20 @@ const FAB_SHADOW =
 
 // Animations — snappy, symmetric, single curve for open + close so the
 // scrim, menu items, and "+" rotation all feel like one motion.
-const TAB_VISIBILITY_ANIMATION = {
-  duration: 220,
-  easing: Easing.out(Easing.cubic),
-} as const;
+// Spring for the bar hide/show so it pops in/out with the same tactile
+// feel as the button presses. Runs on the UI thread.
+const TAB_VISIBILITY_SPRING: WithSpringConfig = {
+  damping: 20,
+  stiffness: 320,
+  mass: 0.6,
+};
 const TAB_SLIDER_ANIMATION = {
   duration: 280,
   easing: Easing.out(Easing.cubic),
 } as const;
 const FAB_FADE_ANIMATION = {
-  duration: 200,
-  easing: Easing.out(Easing.cubic),
+  duration: 300,
+  easing: Easing.inOut(Easing.cubic),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -137,7 +154,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const { effectiveWalletMode } = useWalletModeState();
   const isOffline = effectiveWalletMode === 'offline';
   const activeRouteName = state.routes[state.index]?.name ?? '';
-  const tabBarHidden = HIDDEN_ROUTES.has(activeRouteName);
+  const routeHidesTabBar = HIDDEN_ROUTES.has(activeRouteName);
+  const isOverlayActive = useOverlayVisibilityStore((s) => s.isOverlayActive);
+  // Hide the bar when the active route opts out OR when a full-screen
+  // overlay (settings bottom-sheet) is open over the tabs.
+  const tabBarHidden = routeHidesTabBar || isOverlayActive;
   const recordTabSwitch = useTabHistoryStore((s) => s.recordTabSwitch);
   const [offlineSwapNoticeVisible, setOfflineSwapNoticeVisible] = useState(false);
   const [fabExpanded, setFabExpanded] = useState(false);
@@ -185,7 +206,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const fabExpansion = useSharedValue(0);
 
   useEffect(() => {
-    barVisibility.value = withTiming(tabBarHidden ? 0 : 1, TAB_VISIBILITY_ANIMATION);
+    barVisibility.value = withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING);
   }, [barVisibility, tabBarHidden]);
 
   useEffect(() => {
@@ -232,6 +253,13 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const quickActionStackStyle = useAnimatedStyle(() => ({
     opacity: fabExpansion.value,
+    transform: [
+      // Glide the rows up into place and scale them in from the FAB so
+      // the menu opens/closes as one smooth motion instead of a flat
+      // pop-in fade.
+      { translateY: (1 - fabExpansion.value) * 16 },
+      { scale: 0.92 + fabExpansion.value * 0.08 },
+    ],
   }));
 
   const compactTabs = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
@@ -402,12 +430,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
             const focused = state.index === originalIndex;
             const visuallyFocused =
               hasPrimaryActiveRoute && visualActiveOriginalIndex === originalIndex;
-            const tint = visuallyFocused
-              ? colors.brand.deepShadow
-              : 'rgba(14, 42, 53, 0.55)';
-            const labelColor = visuallyFocused
-              ? colors.brand.deepShadow
-              : 'rgba(14, 42, 53, 0.6)';
+            const tint = visuallyFocused ? TAB_ACTIVE_TINT : TAB_INACTIVE_TINT;
+            const labelColor = visuallyFocused ? TAB_ACTIVE_LABEL : TAB_INACTIVE_LABEL;
             const label = TAB_LABELS[route.name] ?? route.name;
 
             return (
@@ -502,7 +526,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
           hitSlop={6}
         >
           <Animated.View style={fabIconStyle}>
-            <Ionicons name="add" size={fabIconSize} color={colors.brand.deepShadow} />
+            <Ionicons name="add" size={fabIconSize} color={colors.brand.whiteStream} />
           </Animated.View>
         </Pressable>
       </Animated.View>
@@ -700,7 +724,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: QUICK_ACTION_PUCK_TINT,
     borderWidth: HAIRLINE,
-    borderColor: FAB_BORDER_COLOR,
+    borderColor: 'rgba(14, 42, 53, 0.12)',
     boxShadow: FAB_SHADOW,
   },
 });

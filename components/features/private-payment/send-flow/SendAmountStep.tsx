@@ -1,12 +1,21 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+
+// Hero gradient mirrors the home portfolio card: soft frost at the top
+// easing into the arctic cyan field, no card elevation.
+const AMOUNT_HERO_GRADIENT = [
+  colors.brand.iceBlue,
+  colors.surface.backgroundAlt,
+  colors.brand.azureCyan,
+] as const;
 
 import type { SendTokenOption } from './types';
 
@@ -37,7 +46,7 @@ function getScaledAmountTextStyle({
   symbolWidth: number;
   baseFontSize: number;
   baseLineHeight: number;
-}): { fontSize: number; lineHeight: number; width: number } {
+}): { fontSize: number; lineHeight: number } {
   const estimatedBaseWidth = estimateAmountTextWidth(value, baseFontSize);
   const measuredSymbolWidth = Math.max(symbolWidth, 64);
   const availableWidth =
@@ -48,13 +57,14 @@ function getScaledAmountTextStyle({
   const fontSize =
     estimatedBaseWidth <= targetTextWidth
       ? baseFontSize
-      : Math.max(MIN_AMOUNT_FONT_SIZE, Math.floor(baseFontSize * (targetTextWidth / estimatedBaseWidth)));
-  const estimatedScaledWidth = estimateAmountTextWidth(value, fontSize);
+      : Math.max(
+          MIN_AMOUNT_FONT_SIZE,
+          Math.floor(baseFontSize * (targetTextWidth / estimatedBaseWidth)),
+        );
 
   return {
     fontSize,
     lineHeight: Math.min(baseLineHeight, Math.max(18, Math.ceil(fontSize * 1.18))),
-    width: Math.min(availableWidth, Math.max(32, Math.ceil(estimatedScaledWidth + AMOUNT_INPUT_BREATHING_ROOM))),
   };
 }
 
@@ -106,7 +116,11 @@ export function SendAmountStep({
   }, [amount, amountBaseFontSize, amountBaseLineHeight, amountRowWidth, symbolWidth]);
 
   return (
-    <Animated.View entering={FadeIn.duration(220)} style={styles.step}>
+    <Animated.View
+      entering={FadeIn.duration(220)}
+      layout={LinearTransition.duration(220)}
+      style={styles.step}
+    >
       <View style={styles.toRow}>
         <Text variant="bodyBold" color={colors.text.secondary} numberOfLines={1}>
           To: {recipientLabel}
@@ -123,7 +137,13 @@ export function SendAmountStep({
         </Pressable>
       </View>
 
-      <View style={styles.amountHero}>
+      <LinearGradient
+        colors={[...AMOUNT_HERO_GRADIENT]}
+        locations={[0, 0.6, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.amountHero}
+      >
         <View
           style={styles.amountInputRow}
           onLayout={(event) => {
@@ -139,7 +159,6 @@ export function SendAmountStep({
             style={[
               styles.amountInput,
               {
-                width: amountTextStyle.width,
                 height: amountTextStyle.lineHeight + 6,
                 fontSize: amountTextStyle.fontSize,
                 lineHeight: amountTextStyle.lineHeight,
@@ -172,7 +191,7 @@ export function SendAmountStep({
         <Text variant="h3" color={colors.text.secondary} align="center" style={styles.metaLabel}>
           {amountMetaLabel}
         </Text>
-      </View>
+      </LinearGradient>
 
       <View style={styles.availableCard}>
         <View>
@@ -196,7 +215,12 @@ export function SendAmountStep({
       </View>
 
       {selfSend ? (
-        <View style={styles.warningBox}>
+        <Animated.View
+          entering={FadeIn.duration(200)}
+          exiting={FadeOut.duration(160)}
+          layout={LinearTransition.duration(220)}
+          style={styles.warningBox}
+        >
           <Text
             variant="caption"
             color={colors.text.inverse}
@@ -207,13 +231,15 @@ export function SendAmountStep({
           >
             This is your current address. Sending will incur fees with no balance change.
           </Text>
-        </View>
+        </Animated.View>
       ) : null}
 
       {helper != null ? (
-        <Text variant="small" color={colors.semantic.warning} style={styles.helper}>
-          {helper}
-        </Text>
+        <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(160)}>
+          <Text variant="small" color={colors.semantic.warning} style={styles.helper}>
+            {helper}
+          </Text>
+        </Animated.View>
       ) : null}
     </Animated.View>
   );
@@ -258,17 +284,13 @@ const styles = StyleSheet.create({
     minHeight: 260,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   amountInputRow: {
     width: '100%',
@@ -278,6 +300,9 @@ const styles = StyleSheet.create({
     gap: AMOUNT_SYMBOL_GAP,
   },
   amountInput: {
+    flexShrink: 0,
+    flexGrow: 0,
+    minWidth: 0,
     color: colors.text.primary,
     fontFamily: fontFamily.mono,
     padding: 0,
@@ -287,7 +312,7 @@ const styles = StyleSheet.create({
   },
   symbol: {
     fontFamily: fontFamily.semiBold,
-    flexShrink: 1,
+    flexShrink: 0,
   },
   metaLabel: {
     fontFamily: fontFamily.semiBold,

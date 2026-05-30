@@ -419,25 +419,39 @@ export function HomeScreenContent(): React.JSX.Element {
                   pendingUploadCount === 1 ? '' : 's'
                 } waiting to sync.`
               : null;
+  // During the staged data ramp the balance/transactions queries are
+  // intentionally disabled until their stage is reached. A disabled
+  // query reports neither "loading" nor "capabilities pending", so the
+  // empty-state logic would otherwise fall through to "unavailable" for
+  // the ~0.5-1s warm-up window on cold open / resume. Treat that
+  // pre-enablement window (online + wallet present, stage not yet
+  // reached) as loading so the skeleton shows instead of a misleading
+  // "unavailable" flash.
+  const hasWallet = publicKey != null;
+  const balanceWarmingUp =
+    hasWallet && canUseNetwork && (!balanceReady || balanceQuery.isCapabilitiesPending);
+  const activityWarmingUp =
+    hasWallet && canUseNetwork && (!transactionsReady || transactionsQuery.isCapabilitiesPending);
   const holdingsLoading =
-    previewHoldings.length === 0 && (balanceQuery.isLoading || balanceQuery.isCapabilitiesPending);
+    previewHoldings.length === 0 &&
+    (balanceWarmingUp || balanceQuery.isLoading || balanceQuery.isCapabilitiesPending);
   const activityLoading =
     recentActivity.length === 0 &&
-    (transactionsQuery.isLoading || transactionsQuery.isCapabilitiesPending);
+    (activityWarmingUp || transactionsQuery.isLoading || transactionsQuery.isCapabilitiesPending);
   const holdingsEmptyTitle = balanceQuery.isCapabilityEnabled
     ? balanceQuery.isLoading
       ? 'Loading holdings'
       : balanceQuery.isError
         ? 'Unable to load holdings'
         : 'No tokens found'
-    : balanceQuery.isCapabilitiesPending
+    : balanceWarmingUp || balanceQuery.isCapabilitiesPending
       ? 'Loading holdings'
       : 'Holdings unavailable';
   const holdingsEmptySubtitle = balanceQuery.isCapabilityEnabled
     ? balanceQuery.isError
       ? balanceErrorMessage
       : undefined
-    : balanceQuery.isCapabilitiesPending
+    : balanceWarmingUp || balanceQuery.isCapabilitiesPending
       ? undefined
       : balanceQuery.capability.message;
   const activityEmptyTitle = transactionsQuery.isCapabilityEnabled
@@ -446,14 +460,14 @@ export function HomeScreenContent(): React.JSX.Element {
       : transactionsQuery.isError
         ? 'Unable to load activity'
         : 'No transactions yet'
-    : transactionsQuery.isCapabilitiesPending
+    : activityWarmingUp || transactionsQuery.isCapabilitiesPending
       ? 'Loading activity'
       : 'Activity unavailable';
   const activityEmptySubtitle = transactionsQuery.isCapabilityEnabled
     ? transactionsQuery.isError
       ? transactionsErrorMessage
       : 'Your transaction history will appear here'
-    : transactionsQuery.isCapabilitiesPending
+    : activityWarmingUp || transactionsQuery.isCapabilitiesPending
       ? 'Checking activity access'
       : transactionsQuery.capability.message;
 
