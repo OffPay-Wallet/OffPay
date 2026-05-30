@@ -1,5 +1,6 @@
 import { isPayrollRowSendable } from '@/lib/payroll/payroll-types';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { isAbortError } from '@/lib/perf/abort';
 
 import type { PayrollRoute, PayrollRow } from '@/lib/payroll/payroll-types';
 
@@ -45,10 +46,6 @@ export interface PayrollBatchSummary {
   interrupted: boolean;
   /** Index to resume from next time. */
   nextCursor: number;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 /**

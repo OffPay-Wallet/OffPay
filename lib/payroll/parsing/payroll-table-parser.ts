@@ -5,6 +5,7 @@ import {
   type PayrollFileFormat,
 } from '@/lib/payroll/parsing/payroll-formats';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { createAbortError, isAbortError } from '@/lib/perf/abort';
 
 /**
  * A normalized, header-keyed table. Cells are raw strings; downstream
@@ -30,7 +31,7 @@ export interface PayrollTableResult {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw new DOMException('Payroll parsing was cancelled.', 'AbortError');
+    throw createAbortError('Payroll parsing was cancelled.');
   }
 }
 
@@ -191,7 +192,7 @@ export async function parsePayrollTable(
     }
     return { ok: true, table };
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (isAbortError(error)) throw error;
     const message = error instanceof Error ? error.message : 'Unable to parse this file.';
     return { ok: false, message };
   }

@@ -17,8 +17,13 @@ import { PayrollConfirmationCard } from './PayrollConfirmationCard';
 import { PayrollRowList } from './PayrollRowList';
 import { payrollStyles as styles } from './styles';
 import { buildPayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import {
+  payrollRunOutcomeSpeech,
+  shouldSpeakPayrollRunOutcome,
+} from '@/lib/payroll/payroll-copy';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import type { PayrollRunStatus } from '@/lib/payroll/payroll-types';
 
 interface PayrollChatControllerProps {
   runId: string;
@@ -26,6 +31,8 @@ interface PayrollChatControllerProps {
   summary: PayrollConfirmationSummary | null;
   onSetupUmbra?: () => void;
   onRefreshRoutes?: () => Promise<void>;
+  /** Optional outcome read-aloud, called once when the run reaches a terminal status. */
+  onSpeakOutcome?: (phrase: string) => void;
   setupBusy?: boolean;
 }
 
@@ -45,6 +52,7 @@ export function PayrollChatController({
   summary,
   onSetupUmbra,
   onRefreshRoutes,
+  onSpeakOutcome,
   setupBusy = false,
 }: PayrollChatControllerProps): React.JSX.Element | null {
   const { run, isExecuting, execute, pause, retryFailed, cancel } = usePayrollRun({
@@ -54,6 +62,11 @@ export function PayrollChatController({
   const rows = usePayrollStore((state) => state.rowsByRun[runId]);
   const router = useRouter();
   const routeRefreshInFlightRef = useRef(false);
+  const spokenStatusRef = useRef<string | null>(null);
+  const previousStatusRef = useRef<{ runId: string; status: PayrollRunStatus | null }>({
+    runId,
+    status: null,
+  });
 
   const openDetails = useCallback(() => {
     // `as never`: the typed-routes manifest regenerates on dev-server start;
@@ -96,6 +109,27 @@ export function PayrollChatController({
       routeRefreshInFlightRef.current = false;
     });
   }, [onRefreshRoutes, run]);
+
+  // Speak only fresh in-session outcomes. A terminal status loaded from MMKV
+  // on mount (old completed/paused run) must stay silent; speaking is allowed
+  // only for transitions out of a live executing state.
+  useEffect(() => {
+    const status = run?.status;
+    const previous =
+      previousStatusRef.current.runId === runId ? previousStatusRef.current.status : null;
+    previousStatusRef.current = { runId, status: status ?? null };
+
+    if (status == null || !shouldSpeakPayrollRunOutcome(previous, status)) {
+      if (status === 'running' || status === 'confirming') spokenStatusRef.current = null;
+      return;
+    }
+
+    const spokenKey = `${runId}:${status}:${run?.updatedAt ?? ''}`;
+    if (spokenStatusRef.current === spokenKey) return;
+    spokenStatusRef.current = spokenKey;
+    const phrase = payrollRunOutcomeSpeech(status);
+    if (phrase != null) onSpeakOutcome?.(phrase);
+  }, [runId, run?.status, run?.updatedAt, onSpeakOutcome]);
 
   const progress = useMemo(() => {
     if (rows == null) return null;

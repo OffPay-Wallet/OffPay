@@ -1,12 +1,17 @@
 /**
  * Voice input for the Yuga chat dock. Records mic audio (expo-audio),
- * uploads it to the Worker's Sarvam-backed transcribe endpoint, and hands the
- * transcript back to the caller (which feeds it into the same agent submit
- * path as typed text).
+ * uploads it to the Worker's Sarvam-backed transcribe endpoint, and surfaces
+ * the transcript for review before it is sent.
  *
- * State machine: idle → recording → transcribing → idle. Recording and
- * transcription are both cancellable. The recorded file is deleted after
- * upload so audio never lingers on disk.
+ * State machine:
+ *   idle → recording → transcribing → review → (accept → idle | discard → idle)
+ *
+ * The `review` step is what the voice card shows: the recognized transcript
+ * with stop (discard) and send (accept) controls, so the user confirms before
+ * anything reaches the agent. Recording/transcription are cancellable, and the
+ * recorded file is deleted after upload so audio never lingers on disk.
+ *
+ * `metering` (0..1) is surfaced for the live waveform while recording.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -16,15 +21,17 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
+  useAudioRecorderState,
 } from 'expo-audio';
 import { File } from 'expo-file-system';
 
 import { transcribeAgentVoice } from '@/lib/agentic-payments/ai-proxy-client';
+import { isAbortError } from '@/lib/perf/abort';
 
-export type AgenticVoiceState = 'idle' | 'recording' | 'transcribing';
+export type AgenticVoiceState = 'idle' | 'recording' | 'transcribing' | 'review';
 
 export interface UseAgenticVoiceParams {
-  /** Called with the recognized transcript once transcription succeeds. */
+  /** Called with the confirmed transcript when the user taps send (accept). */
   onTranscript: (transcript: string) => void;
   /** Called with a user-facing message when recording/transcription fails. */
   onError?: (message: string) => void;
@@ -33,20 +40,31 @@ export interface UseAgenticVoiceParams {
 
 export interface UseAgenticVoiceResult {
   state: AgenticVoiceState;
+  /** Transcript awaiting review (only meaningful in the `review` state). */
+  transcript: string;
+  /** Normalized 0..1 input level for the waveform (only while recording). */
+  level: number;
   /** Toggles recording: starts when idle, stops + transcribes when recording. */
   toggle: () => void;
+  /** Sends the reviewed transcript to the agent (review state only). */
+  accept: () => void;
+  /** Discards the current recording/transcript and returns to idle. */
   cancel: () => void;
 }
 
 const TRANSCRIBE_TIMEOUT_MS = 30_000;
+// expo-audio reports metering in dBFS (roughly -60 silent .. 0 loud).
+const METERING_FLOOR_DB = -60;
 
 function fileNameForUri(uri: string): string {
   const base = uri.split('/').pop();
   return base != null && base.length > 0 ? base : 'recording.m4a';
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+function normalizeMetering(metering: number | undefined): number {
+  if (metering == null || Number.isNaN(metering)) return 0;
+  const clamped = Math.max(METERING_FLOOR_DB, Math.min(0, metering));
+  return (clamped - METERING_FLOOR_DB) / -METERING_FLOOR_DB;
 }
 
 async function restorePlaybackAudioMode(): Promise<void> {
@@ -67,8 +85,13 @@ function deleteRecordingFile(uri: string | null | undefined): void {
 }
 
 export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceResult {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorder = useAudioRecorder({
+    ...RecordingPresets.HIGH_QUALITY,
+    isMeteringEnabled: true,
+  });
+  const recorderState = useAudioRecorderState(recorder, 80);
   const [state, setState] = useState<AgenticVoiceState>('idle');
+  const [transcript, setTranscript] = useState('');
 
   const abortRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
@@ -101,6 +124,7 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
   const fail = useCallback(
     (message: string) => {
       setState('idle');
+      setTranscript('');
       params.onError?.(message);
     },
     [params],
@@ -108,6 +132,7 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
 
   const startRecording = useCallback(async () => {
     cancelledRef.current = false;
+    setTranscript('');
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
@@ -161,13 +186,14 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
         return;
       }
 
-      const transcript = result.transcript?.trim() ?? '';
-      if (transcript.length === 0) {
+      const recognized = result.transcript?.trim() ?? '';
+      if (recognized.length === 0) {
         fail("Didn't catch that. Try speaking again.");
         return;
       }
-      setState('idle');
-      params.onTranscript(transcript);
+      // Hold the transcript for review instead of auto-submitting.
+      setTranscript(recognized);
+      setState('review');
     } catch (error) {
       if (isAbortError(error)) {
         setState('idle');
@@ -189,8 +215,16 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
     } else if (stateRef.current === 'recording') {
       void stopAndTranscribe();
     }
-    // Ignore taps while transcribing.
+    // Ignore taps while transcribing or in review (those use accept/cancel).
   }, [startRecording, stopAndTranscribe]);
+
+  const accept = useCallback(() => {
+    if (stateRef.current !== 'review') return;
+    const confirmed = transcript.trim();
+    setState('idle');
+    setTranscript('');
+    if (confirmed.length > 0) params.onTranscript(confirmed);
+  }, [params, transcript]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
@@ -212,7 +246,10 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
       void restorePlaybackAudioMode();
     }
     setState('idle');
+    setTranscript('');
   }, [recorder]);
 
-  return { state, toggle, cancel };
+  const level = state === 'recording' ? normalizeMetering(recorderState.metering) : 0;
+
+  return { state, transcript, level, toggle, accept, cancel };
 }

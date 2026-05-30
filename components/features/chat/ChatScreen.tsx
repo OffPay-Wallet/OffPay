@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -54,6 +55,7 @@ import { PayrollPasteSheet } from '@/components/features/payroll/PayrollPasteShe
 import { usePayrollChatIntake } from '@/hooks/payroll/usePayrollChatIntake';
 import { usePayrollResume } from '@/hooks/payroll/usePayrollResume';
 import { useAgenticVoice } from '@/hooks/agentic-chat/useAgenticVoice';
+import { useAgenticSpeech } from '@/hooks/agentic-chat/useAgenticSpeech';
 
 export function ChatScreen(): React.JSX.Element {
   const router = useRouter();
@@ -92,13 +94,16 @@ export function ChatScreen(): React.JSX.Element {
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
-  const bottomPadding = Math.max(insets.bottom, spacing.lg) + PROMPT_HEIGHT + spacing['2xl'];
+  // The composer card (input row + action row) is taller than the legacy
+  // pill, so reserve extra space below the scroll content for it.
+  const bottomPadding = Math.max(insets.bottom, spacing.lg) + PROMPT_HEIGHT + spacing['4xl'];
   const avatarSize = dense ? 36 : compact ? 40 : 44;
   const displayName = username != null ? `@${username}` : (accountName ?? 'there');
 
   const [prompt, setPrompt] = useState('');
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const [payrollPasteOpen, setPayrollPasteOpen] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   // Declared early so the agent-submit callback can reach payroll intake
   // without a declaration-order cycle; assigned once intake is created.
   const payrollIntakeRef = useRef<ReturnType<typeof usePayrollChatIntake> | null>(null);
@@ -160,6 +165,10 @@ export function ChatScreen(): React.JSX.Element {
     [balanceQuery.data, capabilitiesQuery.capabilities],
   );
 
+  // Outcome read-aloud. Speaks short, sanitized status lines after a send or
+  // payroll run resolves. Silent-fail and privacy-gated inside the hook.
+  const speech = useAgenticSpeech();
+
   const { submit, busy: agentBusy } = useAgenticAgentSubmit({
     scope,
     scopeKey,
@@ -186,6 +195,9 @@ export function ChatScreen(): React.JSX.Element {
     balance: agentBalance,
     capabilities: capabilitiesQuery.capabilities,
     knownWallets,
+    onSpeakOutcome: (phrase) => {
+      void speech.speak(phrase);
+    },
   });
 
   const activeWalletId = useWalletStore((s) => s.activeWalletId);
@@ -244,6 +256,21 @@ export function ChatScreen(): React.JSX.Element {
     scope.walletAddress,
     showToast,
   ]);
+
+  // Track keyboard visibility so the dock can drop its safe-area bottom
+  // padding while the keyboard is up — the keyboard inset replaces the
+  // home-indicator inset, preventing a double gap (and the input being
+  // pushed under the keyboard on some devices).
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Migrate legacy messages with a missing `conversationId` once.
   useEffect(() => {
@@ -365,7 +392,8 @@ export function ChatScreen(): React.JSX.Element {
   return (
     <KeyboardAvoidingView
       style={headerStyles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
     >
       <ChatHeader
         topInset={insets.top}
@@ -423,6 +451,9 @@ export function ChatScreen(): React.JSX.Element {
               onRefreshRoutes={
                 payrollIntake.activeRunId != null ? payrollIntake.refreshRoutes : undefined
               }
+              onSpeakOutcome={(phrase) => {
+                void speech.speak(phrase, { payrollMode: true });
+              }}
               setupBusy={mixerRegisterMutation.isPending}
             />
           </View>
@@ -455,7 +486,7 @@ export function ChatScreen(): React.JSX.Element {
         prompt={prompt}
         busy={agentBusy}
         canSubmit={canSubmit}
-        bottomInset={insets.bottom}
+        bottomInset={keyboardVisible ? spacing.xs : insets.bottom}
         horizontalPadding={horizontalPadding}
         onChangeText={setPrompt}
         onSubmit={handleSubmit}
@@ -464,7 +495,23 @@ export function ChatScreen(): React.JSX.Element {
         }}
         onUploadLongPress={() => setPayrollPasteOpen(true)}
         uploadBusy={payrollIntake.busy}
-        voice={{ state: voice.state, onPress: voice.toggle, onCancel: voice.cancel }}
+        voice={{
+          state: voice.state,
+          transcript: voice.transcript,
+          level: voice.level,
+          onPress: () => {
+            if (voice.state === 'idle') speech.stop();
+            voice.toggle();
+          },
+          onAccept: voice.accept,
+          onCancel: voice.cancel,
+        }}
+        speech={{
+          state: speech.state,
+          muted: speech.muted,
+          onStop: speech.stop,
+          onToggleMuted: speech.toggleMuted,
+        }}
       />
 
       <PayrollPasteSheet

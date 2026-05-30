@@ -1,27 +1,55 @@
 /**
- * Prompt dock — text input, optional upload + mic affordances, and send
- * button. Pure presentation with controlled input state owned by the parent.
+ * Prompt dock — a rounded chat card with a multiline input on top and an
+ * action row beneath (leading "+" on the left; mic + send/voice on the right).
  *
- * Upload and voice are optional: pass `onUpload` to show the payroll file
- * button and `voice` to show the mic. When neither is provided the dock
- * renders exactly as before, so non-payroll surfaces are unaffected.
+ * Voice: tapping the voice orb starts recording, which morphs the card into an
+ * expanded voice card showing a live waveform. After transcription the card
+ * shows the recognized text with discard (✕) and send (✓) controls, so the
+ * user confirms before anything is sent. The morph uses a layout animation so
+ * the expand/collapse is smooth.
+ *
+ * Upload and voice are optional: pass `onUpload` to show the "+" button and
+ * `voice` to enable the mic. When neither is provided the dock is a plain
+ * text composer.
  */
 
 import React, { type RefObject } from 'react';
-import { ActivityIndicator, Pressable, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import Animated, {
+  FadeOut,
+  LinearTransition,
+  ZoomIn,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
+import { Text } from '@/components/ui/Text';
 
+import { VoiceWaveform } from './VoiceWaveform';
 import { promptStyles as styles } from './styles/prompt';
 
-export type ChatVoiceState = 'idle' | 'recording' | 'transcribing' | 'speaking';
+export type ChatVoiceState = 'idle' | 'recording' | 'transcribing' | 'review';
 
 interface ChatVoiceControl {
   state: ChatVoiceState;
+  /** Transcript awaiting review (review state only). */
+  transcript: string;
+  /** Normalized 0..1 input level for the waveform (recording state). */
+  level: number;
+  /** Start recording (idle) / stop + transcribe (recording). */
   onPress: () => void;
-  onCancel?: () => void;
+  /** Send the reviewed transcript (review state). */
+  onAccept: () => void;
+  /** Discard the recording/transcript and collapse the card. */
+  onCancel: () => void;
+}
+
+interface ChatSpeechControl {
+  state: 'idle' | 'loading' | 'speaking';
+  muted: boolean;
+  onStop: () => void;
+  onToggleMuted: () => void;
 }
 
 interface ChatPromptDockProps {
@@ -33,26 +61,21 @@ interface ChatPromptDockProps {
   horizontalPadding: number;
   onChangeText: (next: string) => void;
   onSubmit: () => void;
-  /** Optional payroll/file upload affordance. */
+  /** Optional payroll/file upload affordance ("+" button). */
   onUpload?: () => void;
   /** Optional long-press on upload (e.g. open paste sheet). */
   onUploadLongPress?: () => void;
   uploadBusy?: boolean;
   /** Optional voice control. Omit to hide the mic. */
   voice?: ChatVoiceControl;
+  /** Optional spoken-output control. Omit to hide the speaker toggle. */
+  speech?: ChatSpeechControl;
+  placeholder?: string;
 }
 
-function voiceIconName(state: ChatVoiceState): keyof typeof Ionicons.glyphMap {
-  switch (state) {
-    case 'recording':
-      return 'stop-circle';
-    case 'transcribing':
-      return 'close-circle';
-    case 'speaking':
-      return 'volume-high';
-    default:
-      return 'mic-outline';
-  }
+function speechIconName(speech: ChatSpeechControl): keyof typeof Ionicons.glyphMap {
+  if (speech.state !== 'idle') return 'stop-circle';
+  return speech.muted ? 'volume-mute-outline' : 'volume-high-outline';
 }
 
 export function ChatPromptDock({
@@ -68,16 +91,11 @@ export function ChatPromptDock({
   onUploadLongPress,
   uploadBusy = false,
   voice,
+  speech,
+  placeholder = 'Chat with Yuga',
 }: ChatPromptDockProps): React.JSX.Element {
-  const voiceActive = voice != null && voice.state !== 'idle';
-  const voicePress =
-    voice?.state === 'transcribing' && voice.onCancel != null ? voice.onCancel : voice?.onPress;
-  const voiceLabel =
-    voice?.state === 'recording'
-      ? 'Stop recording'
-      : voice?.state === 'transcribing'
-        ? 'Cancel transcription'
-        : 'Start voice input';
+  const voiceCardActive =
+    voice != null && (voice.state === 'recording' || voice.state === 'review');
 
   return (
     <View
@@ -90,81 +108,273 @@ export function ChatPromptDock({
         },
       ]}
     >
-      <Pressable style={styles.prompt} onPress={() => inputRef.current?.focus()}>
-        {onUpload != null ? (
-          <Pressable
-            onPress={onUpload}
-            onLongPress={onUploadLongPress}
-            disabled={uploadBusy}
-            style={styles.promptAccessory}
-            accessibilityRole="button"
-            accessibilityLabel="Upload payroll file"
-            accessibilityHint="Long press to paste payroll rows"
-            hitSlop={8}
-          >
-            {uploadBusy ? (
-              <ActivityIndicator size="small" color={colors.brand.deepShadow} />
-            ) : (
-              <Ionicons name="add-circle-outline" size={22} color={colors.brand.deepShadow} />
-            )}
-          </Pressable>
-        ) : null}
+      <Animated.View layout={LinearTransition.springify().damping(20).stiffness(180)}>
+        {voiceCardActive && voice != null ? (
+          <VoiceCard voice={voice} />
+        ) : (
+          <ComposerCard
+            inputRef={inputRef}
+            prompt={prompt}
+            busy={busy}
+            canSubmit={canSubmit}
+            placeholder={placeholder}
+            onChangeText={onChangeText}
+            onSubmit={onSubmit}
+            onUpload={onUpload}
+            onUploadLongPress={onUploadLongPress}
+            uploadBusy={uploadBusy}
+            voice={voice}
+            speech={speech}
+          />
+        )}
+      </Animated.View>
+    </View>
+  );
+}
 
+interface ComposerCardProps {
+  inputRef: RefObject<TextInput | null>;
+  prompt: string;
+  busy: boolean;
+  canSubmit: boolean;
+  placeholder: string;
+  onChangeText: (next: string) => void;
+  onSubmit: () => void;
+  onUpload?: () => void;
+  onUploadLongPress?: () => void;
+  uploadBusy: boolean;
+  voice?: ChatVoiceControl;
+  speech?: ChatSpeechControl;
+}
+
+function ComposerCard({
+  inputRef,
+  prompt,
+  busy,
+  canSubmit,
+  placeholder,
+  onChangeText,
+  onSubmit,
+  onUpload,
+  onUploadLongPress,
+  uploadBusy,
+  voice,
+  speech,
+}: ComposerCardProps): React.JSX.Element {
+  const hasText = prompt.trim().length > 0;
+  const transcribing = voice?.state === 'transcribing';
+
+  return (
+    <Pressable style={styles.prompt} onPress={() => inputRef.current?.focus()}>
+      <View style={styles.promptInputRow}>
         <TextInput
           ref={inputRef}
           value={prompt}
           onChangeText={onChangeText}
-          placeholder="Ask anything"
+          placeholder={placeholder}
           placeholderTextColor={colors.text.placeholder}
           style={styles.promptInput}
           returnKeyType="send"
           onSubmitEditing={onSubmit}
           blurOnSubmit
-          multiline={false}
+          multiline
           maxLength={500}
           accessibilityLabel="Ask Yuga"
         />
+      </View>
 
-        {voice != null ? (
+      <View style={styles.promptActionRow}>
+        <View style={styles.promptActionGroup}>
+          {onUpload != null ? (
+            <Pressable
+              onPress={onUpload}
+              onLongPress={onUploadLongPress}
+              disabled={uploadBusy}
+              style={styles.promptAccessory}
+              accessibilityRole="button"
+              accessibilityLabel="Upload payroll file"
+              accessibilityHint="Long press to paste payroll rows"
+              hitSlop={8}
+            >
+              {uploadBusy ? (
+                <ActivityIndicator size="small" color={colors.brand.deepShadow} />
+              ) : (
+                <Ionicons name="add" size={24} color={colors.brand.deepShadow} />
+              )}
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={styles.promptActionGroup}>
+          {speech != null ? (
+            <Pressable
+              onPress={speech.state !== 'idle' ? speech.onStop : speech.onToggleMuted}
+              style={styles.promptAccessory}
+              accessibilityRole="button"
+              accessibilityLabel={
+                speech.state !== 'idle'
+                  ? 'Stop voice response'
+                  : speech.muted
+                    ? 'Unmute voice responses'
+                    : 'Mute voice responses'
+              }
+              accessibilityState={{ selected: !speech.muted }}
+              hitSlop={8}
+            >
+              <Ionicons
+                name={speechIconName(speech)}
+                size={22}
+                color={
+                  speech.state !== 'idle'
+                    ? colors.brand.azureBlue
+                    : speech.muted
+                      ? colors.text.tertiary
+                      : colors.brand.deepShadow
+                }
+              />
+            </Pressable>
+          ) : null}
+
+          {/* When the user has typed, the send button takes priority. Voice is
+              the default action on an empty composer (matches the design). */}
+          {hasText ? (
+            <Pressable
+              onPress={onSubmit}
+              disabled={!canSubmit}
+              style={({ pressed }) => [
+                styles.promptSend,
+                !canSubmit && styles.promptSendDisabled,
+                pressed && canSubmit && styles.promptSendPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Send prompt"
+              accessibilityState={{ disabled: !canSubmit }}
+              hitSlop={8}
+            >
+              {busy ? (
+                <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+              ) : (
+                <Ionicons name="arrow-up" size={18} color={colors.brand.whiteStream} />
+              )}
+            </Pressable>
+          ) : voice != null ? (
+            <Pressable
+              onPress={voice.onPress}
+              disabled={transcribing}
+              style={({ pressed }) => [
+                styles.voiceOrb,
+                pressed && styles.voiceOrbPressed,
+                transcribing && styles.voiceControlDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Start voice input"
+              hitSlop={8}
+            >
+              {transcribing ? (
+                <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+              ) : (
+                <VoiceOrbGlyph />
+              )}
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={onSubmit}
+              disabled={!canSubmit}
+              style={({ pressed }) => [
+                styles.promptSend,
+                !canSubmit && styles.promptSendDisabled,
+                pressed && canSubmit && styles.promptSendPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Send prompt"
+              accessibilityState={{ disabled: !canSubmit }}
+              hitSlop={8}
+            >
+              {busy ? (
+                <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+              ) : (
+                <Ionicons name="arrow-up" size={18} color={colors.brand.whiteStream} />
+              )}
+            </Pressable>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+function VoiceOrbGlyph(): React.JSX.Element {
+  // A small static waveform cluster (matches the design's dark voice orb).
+  return (
+    <View style={orbStyles.row}>
+      {ORB_BAR_HEIGHTS.map((height, index) => (
+        <View key={index} style={[orbStyles.bar, { height }]} />
+      ))}
+    </View>
+  );
+}
+
+const ORB_BAR_HEIGHTS = [6, 11, 16, 11, 6];
+
+const orbStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  bar: {
+    width: 2,
+    borderRadius: 1,
+    backgroundColor: colors.brand.whiteStream,
+  },
+});
+
+function VoiceCard({ voice }: { voice: ChatVoiceControl }): React.JSX.Element {
+  const isReview = voice.state === 'review';
+  const canAccept = isReview && voice.transcript.trim().length > 0;
+
+  return (
+    <Animated.View
+      entering={ZoomIn.springify().damping(18).stiffness(170)}
+      exiting={FadeOut.duration(140)}
+      style={styles.voiceCard}
+    >
+      {isReview ? (
+        <Text style={styles.voiceTranscript}>{voice.transcript}</Text>
+      ) : (
+        <Text style={styles.voiceTranscriptPlaceholder}>Listening…</Text>
+      )}
+
+      <View style={styles.voiceWaveRow}>
+        <VoiceWaveform level={voice.level} active={voice.state === 'recording'} />
+
+        <View style={styles.voiceControls}>
           <Pressable
-            onPress={voicePress}
-            style={styles.promptAccessory}
+            onPress={voice.onCancel}
+            style={styles.voiceControlNeutral}
             accessibilityRole="button"
-            accessibilityLabel={voiceLabel}
+            accessibilityLabel="Discard voice input"
+            hitSlop={8}
+          >
+            <Ionicons name="close" size={20} color={colors.brand.deepShadow} />
+          </Pressable>
+
+          <Pressable
+            onPress={isReview ? voice.onAccept : voice.onPress}
+            disabled={isReview && !canAccept}
+            style={[styles.voiceControlPrimary, isReview && !canAccept && styles.voiceControlDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel={isReview ? 'Send voice input' : 'Stop and transcribe'}
             hitSlop={8}
           >
             <Ionicons
-              name={voiceIconName(voice.state)}
-              size={22}
-              color={voiceActive ? colors.brand.azureBlue : colors.brand.deepShadow}
+              name={isReview ? 'checkmark' : 'stop'}
+              size={20}
+              color={colors.brand.deepShadow}
             />
           </Pressable>
-        ) : null}
-
-        <Pressable
-          onPress={onSubmit}
-          disabled={!canSubmit}
-          style={({ pressed }) => [
-            styles.promptSend,
-            !canSubmit && styles.promptSendDisabled,
-            pressed && canSubmit && styles.promptSendPressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Send prompt"
-          accessibilityState={{ disabled: !canSubmit }}
-          hitSlop={8}
-        >
-          {busy ? (
-            <ActivityIndicator size="small" color={colors.brand.whiteStream} />
-          ) : (
-            <Ionicons
-              name="arrow-up"
-              size={18}
-              color={canSubmit ? colors.brand.whiteStream : 'rgba(252, 252, 255, 0.6)'}
-            />
-          )}
-        </Pressable>
-      </Pressable>
-    </View>
+        </View>
+      </View>
+    </Animated.View>
   );
 }

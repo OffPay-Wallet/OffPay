@@ -1,6 +1,7 @@
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import { decimalInputToAtomicAmount, sanitizeDecimalInput } from '@/lib/policy/token-amounts';
 import { yieldToUiIfNeeded } from '@/lib/perf/ui-work-scheduler';
+import { createAbortError } from '@/lib/perf/abort';
 import { PAYROLL_MAX_ROWS } from '@/lib/payroll/parsing/payroll-formats';
 
 import type { PayrollColumnMapping } from '@/lib/payroll/parsing/payroll-column-mapping';
@@ -40,7 +41,7 @@ const VALIDATION_BATCH = 100;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw new DOMException('Payroll validation was cancelled.', 'AbortError');
+    throw createAbortError('Payroll validation was cancelled.');
   }
 }
 

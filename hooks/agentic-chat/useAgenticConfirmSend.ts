@@ -17,6 +17,7 @@ import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useAppToast } from '@/components/ui/AppToast';
+import { agenticSendOutcomeSpeech } from '@/lib/agentic-payments/send-outcome-speech';
 import { validateAgenticNormalSendDraft } from '@/lib/agentic-payments/normal-send';
 import { validateAgenticPrivateSendDraft } from '@/lib/agentic-payments/private-send';
 import {
@@ -41,6 +42,8 @@ interface UseAgenticConfirmSendParams {
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: ReadonlyArray<{ name: string; address: string; active: boolean }>;
+  /** Optional outcome read-aloud. Receives a pre-sanitized, outcome-only phrase. */
+  onSpeakOutcome?: (phrase: string) => void;
 }
 
 interface SubmitResult {
@@ -62,6 +65,7 @@ export function useAgenticConfirmSend({
   balance,
   capabilities,
   knownWallets,
+  onSpeakOutcome,
 }: UseAgenticConfirmSendParams): UseAgenticConfirmSendResult {
   const queryClient = useQueryClient();
   const { showToast } = useAppToast();
@@ -180,6 +184,7 @@ export function useAgenticConfirmSend({
           message: `${validation.draft.amount} ${validation.draft.tokenSymbol}`,
           variant: 'success',
         });
+        onSpeakOutcome?.(agenticSendOutcomeSpeech(result.status, action.route));
       } catch (error) {
         const message =
           error instanceof Error
@@ -189,6 +194,7 @@ export function useAgenticConfirmSend({
               : 'Unable to submit private send.';
         updateAction(action.id, { status: 'failed', errorMessage: message });
         showToast({ title: 'Yuga transfer failed', message, variant: 'error' });
+        onSpeakOutcome?.(agenticSendOutcomeSpeech('failed', action.route));
       }
     },
     [
@@ -197,6 +203,7 @@ export function useAgenticConfirmSend({
       canUseNetwork,
       capabilities,
       knownWallets,
+      onSpeakOutcome,
       queryClient,
       scope.network,
       scope.walletAddress,

@@ -1,5 +1,9 @@
 import type { PayrollRouteBlockReason } from '@/lib/payroll/payroll-route-readiness';
-import type { PayrollRoutePolicy, PayrollRowStatus } from '@/lib/payroll/payroll-types';
+import type {
+  PayrollRoutePolicy,
+  PayrollRowStatus,
+  PayrollRunStatus,
+} from '@/lib/payroll/payroll-types';
 
 /** Human copy for route block reasons. Pure — shared by chat card + review. */
 const BLOCK_REASON_COPY: Record<PayrollRouteBlockReason, string> = {
@@ -47,4 +51,37 @@ const ROW_STATUS_COPY: Record<PayrollRowStatus, string> = {
 
 export function payrollRowStatusCopy(status: PayrollRowStatus): string {
   return ROW_STATUS_COPY[status];
+}
+
+/**
+ * Short, sanitized spoken outcome for a finished payroll run. Returns null
+ * when the terminal status has nothing worth speaking (e.g. still running).
+ * Never includes addresses, amounts, or recipient detail — safe for cloud TTS
+ * under `payrollMode`.
+ */
+export function payrollRunOutcomeSpeech(status: PayrollRunStatus): string | null {
+  switch (status) {
+    case 'completed':
+      return 'Payroll completed.';
+    case 'completed_with_claims_pending':
+      return 'Payroll submitted. Some recipients still need to claim their funds.';
+    case 'completed_with_errors':
+      return 'Payroll finished, but some rows failed or were skipped.';
+    case 'paused':
+      return 'Payroll paused.';
+    case 'cancelled':
+      return 'Payroll cancelled.';
+    case 'failed':
+      return 'Payroll failed.';
+    default:
+      return null;
+  }
+}
+
+export function shouldSpeakPayrollRunOutcome(
+  previousStatus: PayrollRunStatus | null,
+  nextStatus: PayrollRunStatus | null,
+): boolean {
+  if (nextStatus == null || payrollRunOutcomeSpeech(nextStatus) == null) return false;
+  return previousStatus === 'running' || previousStatus === 'confirming';
 }

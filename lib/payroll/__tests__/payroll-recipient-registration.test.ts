@@ -3,6 +3,7 @@ import {
   probeRecipientRegistration,
 } from '@/lib/payroll/payroll-recipient-registration';
 import { fetchUmbraRegistrationStatusForAddresses } from '@/lib/umbra/umbra-execution';
+import { createAbortError } from '@/lib/perf/abort';
 
 jest.mock('@/lib/umbra/umbra-execution', () => ({
   __esModule: true,
@@ -102,7 +103,7 @@ describe('probeRecipientRegistration', () => {
   });
 
   it('rethrows abort failures', async () => {
-    mockLookup.mockRejectedValue(new DOMException('cancelled', 'AbortError'));
+    mockLookup.mockRejectedValue(createAbortError('cancelled'));
 
     await expect(
       probeRecipientRegistration({

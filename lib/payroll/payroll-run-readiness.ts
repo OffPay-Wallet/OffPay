@@ -2,6 +2,7 @@ import { fetchUmbraVaultRegistrationStatus } from '@/lib/umbra/umbra-execution';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import { verifyOffpayUmbraVaultFeeAccountReadiness } from '@/lib/umbra/umbra-offpay-providers';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { createAbortError } from '@/lib/perf/abort';
 
 import type { OffpayNetwork } from '@/types/offpay-api';
 
@@ -35,7 +36,7 @@ export interface GatherPayrollRunReadinessParams {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw new DOMException('Payroll readiness gathering was cancelled.', 'AbortError');
+    throw createAbortError('Payroll readiness gathering was cancelled.');
   }
 }
 

@@ -29,6 +29,7 @@ import { probeRecipientRegistration } from '@/lib/payroll/payroll-recipient-regi
 import { umbraBlockedOnlyBySenderSetup } from '@/lib/payroll/payroll-route-readiness';
 import { resolvePayrollTokenContext, walletCanSignPayroll } from '@/lib/payroll/payroll-wallet-eligibility';
 import { stagePayroll } from '@/lib/payroll/payroll-staging';
+import { isAbortError } from '@/lib/perf/abort';
 import { usePayrollStore } from '@/store/payrollStore';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
@@ -75,10 +76,6 @@ export interface UsePayrollChatIntakeResult {
   cancelMapping: () => void;
   refreshRoutes: () => Promise<void>;
   reset: () => void;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 function restoreRouteBlockedRows(rows: readonly PayrollRow[]): PayrollRow[] {
@@ -329,7 +326,7 @@ export function usePayrollChatIntake(
         setActiveRunId(staged.run.id);
         setSummary(routed.summary);
       } catch (caught) {
-        if (caught instanceof DOMException && caught.name === 'AbortError') return;
+        if (isAbortError(caught)) return;
         setError(caught instanceof Error ? caught.message : 'Failed to stage payroll.');
       } finally {
         setBusy(false);

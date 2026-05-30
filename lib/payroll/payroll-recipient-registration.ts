@@ -1,4 +1,5 @@
 import { fetchUmbraRegistrationStatusForAddresses } from '@/lib/umbra/umbra-execution';
+import { isAbortError, throwIfAborted } from '@/lib/perf/abort';
 
 import type { OffpayNetwork } from '@/types/offpay-api';
 
@@ -35,16 +36,6 @@ export interface ProbeRecipientRegistrationParams {
   signal?: AbortSignal;
   /** Optional shared cache so repeated stagings reuse prior probes. */
   cache?: Map<string, boolean>;
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted === true) {
-    throw new DOMException('Recipient registration probe was cancelled.', 'AbortError');
-  }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 function registrationCacheKey(network: OffpayNetwork, address: string): string {
