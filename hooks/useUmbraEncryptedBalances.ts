@@ -16,7 +16,7 @@ import { useWalletStore } from '@/store/walletStore';
 import type { UmbraExecutionResult } from '@/lib/umbra/umbra-execution';
 import type { UmbraVaultTokenConfig } from '@/components/features/umbra-vault/types';
 
-const UMBRA_BALANCE_STALE_TIME_MS = 0;
+const UMBRA_BALANCE_STALE_TIME_MS = 15_000;
 const UMBRA_BALANCE_GC_TIME_MS = 1000 * 60 * 30;
 
 export function useUmbraEncryptedBalances(
@@ -65,9 +65,9 @@ export function useUmbraEncryptedBalances(
       });
     },
     enabled,
-    // Shielded balances are wallet-critical. Keep the last resolved value in
-    // memory for smooth rendering, but mark it stale immediately so every
-    // mount/manual refresh asks the chain-backed query path for current data.
+    // Keep the expensive chain-backed balance query fresh briefly so rapid
+    // remounts do not re-run the same Umbra read path. Manual refresh and
+    // explicit post-transaction invalidation still force a fresh query.
     staleTime: UMBRA_BALANCE_STALE_TIME_MS,
     gcTime: UMBRA_BALANCE_GC_TIME_MS,
     refetchOnMount: true,

@@ -73,7 +73,7 @@ const RECEIVE_QR_LOGO = require('../../../assets/appIcons/android/playstore-icon
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_ROUTE_MINT = 'native-sol';
 const RECEIVE_CONTENT_MAX_WIDTH = 430;
-const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 32;
+const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 384;
 // Fade-out timing for the standard / private content swap. The
 // outgoing content fades quickly (the user has already committed to
 // the new mode); the incoming content is revealed by the per-component
@@ -157,14 +157,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     (state) => state.claimedUtxoInsertionIndices,
   );
   const markUmbraUtxosClaimed = useUmbraPrivacyStore((state) => state.markUtxosClaimed);
-  const addUmbraReceipt = useUmbraPrivacyStore((state) => state.addReceipt);
-  const umbraReceipts = useUmbraPrivacyStore((state) => state.receipts);
-  const umbraHistoryForCurrentNetwork = useMemo(() => {
-    if (network == null) return [];
-    return umbraReceipts.filter(
-      (receipt) => receipt.network === network && receipt.action === 'claim',
-    );
-  }, [network, umbraReceipts]);
   const claimedUmbraIndexSet = useMemo<ReadonlySet<number>>(
     () =>
       getClaimedUmbraUtxoIndexSet(
@@ -407,10 +399,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     }
 
     router.navigate('/(tabs)' as never);
-  }, [router]);
-
-  const handleOpenHistoryTab = useCallback(() => {
-    router.navigate('/(tabs)/history' as never);
   }, [router]);
 
   const handleViewAllPendingClaims = useCallback(() => {
@@ -667,24 +655,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               message: 'Encrypted balance is up to date.',
               variant: 'success',
             });
-            // Surface the benign already-claimed outcome in the
-            // inline history strip + History tab as well, so the user
-            // can see that their tap reconciled the on-chain state
-            // even though the SDK reported a duplicate-nullifier.
-            addUmbraReceipt({
-              id: `claim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              action: 'claim',
-              title: 'Claim confirmed',
-              subtitle:
-                fallbackIndices.length > 0
-                  ? `${fallbackIndices.length} Umbra UTXO${
-                      fallbackIndices.length === 1 ? '' : 's'
-                    } already settled into encrypted balance.`
-                  : 'Encrypted balance is already up to date.',
-              signature: null,
-              network,
-              createdAt: Date.now(),
-            });
             scanUmbraPendingClaims();
             schedulePostClaimEncryptedBalanceRefetch();
             return;
@@ -720,28 +690,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
       if ((result.claimedUtxoCount ?? 0) > 0) {
         setPendingClaimResult(null);
         pendingClaimToastRef.current = null;
-      }
-      // Persist a claim receipt so the inline history strip and the
-      // History tab both reflect the action. We only emit the receipt
-      // when at least one UTXO actually moved into the encrypted
-      // balance (or we hit the benign already-claimed short-circuit
-      // — that path runs through its own catch arm above and emits
-      // its own receipt below).
-      if ((result.claimedUtxoCount ?? 0) > 0) {
-        addUmbraReceipt({
-          id: `claim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          action: 'claim',
-          title:
-            result.title === 'Already claimed'
-              ? 'Claim confirmed'
-              : `Claimed ${result.claimedUtxoCount} private payment${
-                  (result.claimedUtxoCount ?? 0) === 1 ? '' : 's'
-                }`,
-          subtitle: result.subtitle,
-          signature: result.primarySignature ?? result.signatures[0] ?? null,
-          network,
-          createdAt: Date.now(),
-        });
       }
       void queryClient.invalidateQueries({
         queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
@@ -780,7 +728,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
       })
       .finally(() => setClaimingUmbra(false));
   }, [
-    addUmbraReceipt,
     canUseUmbraClaim,
     claimedUmbraIndexSet,
     markUmbraUtxosClaimed,
@@ -1130,12 +1077,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                     pendingClaimCount > 0
                       ? 'Claim all pending Umbra private payments'
                       : 'Check for pending Umbra private payments',
+                  pendingClaims: pendingClaimResult?.pendingClaimUtxoDetails ?? [],
+                  previewLimit: 2,
                 }}
-                history={umbraHistoryForCurrentNetwork}
-                historyLimit={3}
-                onViewAllHistory={
-                  umbraHistoryForCurrentNetwork.length > 0 ? handleOpenHistoryTab : undefined
-                }
                 revealKey={renderedReceiveMode}
               />
             </View>

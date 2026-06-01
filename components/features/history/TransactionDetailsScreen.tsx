@@ -738,6 +738,7 @@ export function TransactionDetailsScreen(): React.JSX.Element {
       umbraReceipts.find(
         (item) =>
           (network == null || item.network === network) &&
+          item.action !== 'claim' &&
           (item.id === transactionId ||
             item.signature === transactionId ||
             (transaction?.signature != null && item.signature === transaction.signature)),
@@ -1090,86 +1091,86 @@ export function TransactionDetailsScreen(): React.JSX.Element {
             </View>
 
             <View style={styles.infoPanel}>
-                <View style={styles.infoGrid}>
-                  {infoTiles.map((tile) => {
-                    const tileCopyValue = 'copyValue' in tile ? tile.copyValue : null;
+              <View style={styles.infoGrid}>
+                {infoTiles.map((tile) => {
+                  const tileCopyValue = 'copyValue' in tile ? tile.copyValue : null;
 
-                    return (
-                      <InfoTile
-                        key={`${tile.label}:${tile.value}`}
-                        label={tile.label}
-                        value={tile.value}
-                        mono={'mono' in tile ? tile.mono : false}
-                        copyable={tileCopyValue != null}
-                        onCopy={
-                          tileCopyValue != null
-                            ? () => copyValue(`${tile.label} copied`, tileCopyValue)
-                            : undefined
-                        }
+                  return (
+                    <InfoTile
+                      key={`${tile.label}:${tile.value}`}
+                      label={tile.label}
+                      value={tile.value}
+                      mono={'mono' in tile ? tile.mono : false}
+                      copyable={tileCopyValue != null}
+                      onCopy={
+                        tileCopyValue != null
+                          ? () => copyValue(`${tile.label} copied`, tileCopyValue)
+                          : undefined
+                      }
+                    />
+                  );
+                })}
+              </View>
+
+              {visibleParticipants.length > 0 ? (
+                <View style={styles.accountsBlock}>
+                  <Text
+                    variant="small"
+                    color={colors.text.secondary}
+                    style={styles.accountsTitle}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                  >
+                    Accounts
+                  </Text>
+                  <View style={styles.accountsRow}>
+                    {visibleParticipants.map((participant) => (
+                      <AccountPill
+                        key={participant.id}
+                        participant={participant}
+                        onCopy={copyValue}
                       />
-                    );
-                  })}
+                    ))}
+                    {hiddenParticipantCount > 0 ? (
+                      <View style={styles.moreAccountsPill}>
+                        <Text
+                          variant="small"
+                          color={colors.text.secondary}
+                          style={styles.moreAccountsText}
+                          numberOfLines={1}
+                          maxFontSizeMultiplier={1}
+                        >
+                          +{hiddenParticipantCount}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
+              ) : null}
 
-                {visibleParticipants.length > 0 ? (
-                  <View style={styles.accountsBlock}>
-                    <Text
-                      variant="small"
-                      color={colors.text.secondary}
-                      style={styles.accountsTitle}
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={1}
-                    >
-                      Accounts
-                    </Text>
-                    <View style={styles.accountsRow}>
-                      {visibleParticipants.map((participant) => (
-                        <AccountPill
-                          key={participant.id}
-                          participant={participant}
-                          onCopy={copyValue}
-                        />
-                      ))}
-                      {hiddenParticipantCount > 0 ? (
-                        <View style={styles.moreAccountsPill}>
-                          <Text
-                            variant="small"
-                            color={colors.text.secondary}
-                            style={styles.moreAccountsText}
-                            numberOfLines={1}
-                            maxFontSizeMultiplier={1}
-                          >
-                            +{hiddenParticipantCount}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                ) : null}
-
-                {description != null ? (
-                  <View style={styles.memoBlock}>
-                    <Text
-                      variant="small"
-                      color={colors.text.secondary}
-                      style={styles.memoLabel}
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={1}
-                    >
-                      Memo
-                    </Text>
-                    <Text
-                      variant="small"
-                      color={colors.text.primary}
-                      style={styles.memoText}
-                      numberOfLines={2}
-                      selectable
-                      maxFontSizeMultiplier={1}
-                    >
-                      {description}
-                    </Text>
-                  </View>
-                ) : null}
+              {description != null ? (
+                <View style={styles.memoBlock}>
+                  <Text
+                    variant="small"
+                    color={colors.text.secondary}
+                    style={styles.memoLabel}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                  >
+                    Memo
+                  </Text>
+                  <Text
+                    variant="small"
+                    color={colors.text.primary}
+                    style={styles.memoText}
+                    numberOfLines={2}
+                    selectable
+                    maxFontSizeMultiplier={1}
+                  >
+                    {description}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           </StaggerRevealGroup>
         )}

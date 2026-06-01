@@ -28,15 +28,17 @@ export function useUmbraExecution() {
     useUmbraCacheInvalidator();
 
   const onExecutionSuccess = (result: UmbraExecutionResult) => {
-    addReceipt({
-      id: receiptId(result.action),
-      action: result.action,
-      title: result.title,
-      subtitle: result.subtitle,
-      signature: result.primarySignature ?? result.signatures[0] ?? null,
-      network: result.network,
-      createdAt: Date.now(),
-    });
+    if (result.action !== 'claim') {
+      addReceipt({
+        id: receiptId(result.action),
+        action: result.action,
+        title: result.title,
+        subtitle: result.subtitle,
+        signature: result.primarySignature ?? result.signatures[0] ?? null,
+        network: result.network,
+        createdAt: Date.now(),
+      });
+    }
 
     // Optimistic public-balance updates so the UI reflects the new
     // value immediately. Provider/indexer views can lag finalization,

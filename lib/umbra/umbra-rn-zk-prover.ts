@@ -70,6 +70,7 @@ const UMBRA_ZK_MANIFEST_PATH = `${UMBRA_RN_ZK_ASSET_VERSION}/manifest.json`;
 const UMBRA_ZK_ASSET_MANIFEST_URL = `${UMBRA_ZK_ASSET_BASE_URL}/${UMBRA_ZK_MANIFEST_PATH}`;
 const UMBRA_ZK_ASSET_DIRECTORY = new Directory(Paths.cache, 'offpay-umbra-zk-assets');
 const UMBRA_ZK_ASSET_LOCAL_MANIFEST_FILENAME = 'manifest.json';
+const UMBRA_ZK_REMOTE_MANIFEST_CACHE_TTL_MS = 60_000;
 // Umbra zkey sizes range widely (the public-balance deposit circuit is ~4 MB,
 // user-registration is ~50 MB). A global minimum is unreliable, so we treat a
 // zkey as "complete" only if it non-empty AND matches the size in our local
@@ -80,6 +81,7 @@ export const RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE =
   'Umbra private P2P proving requires an Android build that includes the MoproFfi native module. Rebuild the Android development or preview app after installing @umbra-privacy/rn-zk-prover.';
 
 let nativeProverPromise: Promise<NativeRnZkProver> | null = null;
+let remoteManifestCache: { expiresAt: number; promise: Promise<ZkAssetManifest> } | null = null;
 
 export function isRnZkProverNativeModuleAvailable(): boolean {
   if (Platform.OS === 'web') return false;
@@ -230,6 +232,11 @@ export function clearUmbraZkAssetsCache(): void {
   if (UMBRA_ZK_ASSET_DIRECTORY.exists) {
     UMBRA_ZK_ASSET_DIRECTORY.delete();
   }
+  remoteManifestCache = null;
+}
+
+export function __clearUmbraZkManifestCacheForTesting(): void {
+  remoteManifestCache = null;
 }
 
 let manifestVersionCheckPromise: Promise<void> | null = null;
@@ -305,13 +312,43 @@ function getManifestAssetVersion(manifest: ZkAssetManifest, entry: ManifestAsset
   return entry.version ?? manifest.version ?? entry.url;
 }
 
-async function fetchZkeyManifest(): Promise<ZkAssetManifest> {
-  const response = await fetch(`${UMBRA_ZK_ASSET_MANIFEST_URL}?t=${Date.now()}`);
-  if (!response.ok) {
-    throw new Error(`Unable to fetch Umbra ZK manifest: ${response.status}`);
+async function fetchZkeyManifest(options?: { forceRefresh?: boolean }): Promise<ZkAssetManifest> {
+  const now = Date.now();
+  if (
+    options?.forceRefresh !== true &&
+    remoteManifestCache != null &&
+    remoteManifestCache.expiresAt > now
+  ) {
+    return remoteManifestCache.promise;
   }
 
-  return (await response.json()) as ZkAssetManifest;
+  const startedAt = mark();
+  const manifestPromise = fetch(`${UMBRA_ZK_ASSET_MANIFEST_URL}?t=${now}`)
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Unable to fetch Umbra ZK manifest: ${response.status}`);
+      }
+
+      return (await response.json()) as ZkAssetManifest;
+    })
+    .finally(() => {
+      measure('umbra.zkProver.manifest', startedAt, {
+        forceRefresh: options?.forceRefresh === true,
+      });
+    });
+  remoteManifestCache = {
+    expiresAt: now + UMBRA_ZK_REMOTE_MANIFEST_CACHE_TTL_MS,
+    promise: manifestPromise,
+  };
+
+  try {
+    return await manifestPromise;
+  } catch (error) {
+    if (remoteManifestCache?.promise === manifestPromise) {
+      remoteManifestCache = null;
+    }
+    throw error;
+  }
 }
 
 async function fetchContentLength(url: string): Promise<number | null> {
@@ -403,7 +440,7 @@ export async function resolveUmbraZkeyPath(
   // Arkworks crate and the Rust prover would panic.
   let remoteManifest: ZkAssetManifest | null = null;
   try {
-    remoteManifest = await fetchZkeyManifest();
+    remoteManifest = await fetchZkeyManifest({ forceRefresh: options?.forceRefresh === true });
     await ensureManifestVersionMatches(remoteManifest.version);
   } catch {
     // Manifest fetch failed: if we already have a complete local copy that was
@@ -443,7 +480,8 @@ export async function resolveUmbraZkeyPath(
   }
 
   // Download path.
-  const manifest = remoteManifest ?? (await fetchZkeyManifest());
+  const manifest =
+    remoteManifest ?? (await fetchZkeyManifest({ forceRefresh: options?.forceRefresh === true }));
   await ensureManifestVersionMatches(manifest.version);
   if (!UMBRA_ZK_ASSET_DIRECTORY.exists) {
     ensureAssetDirectory();
@@ -573,7 +611,9 @@ type NativeProofLibCandidate = {
   readonly value: NativeProofLib;
 };
 
-function getNativeProofLibCandidates(nativeProver: NativeRnZkProver): readonly NativeProofLibCandidate[] {
+function getNativeProofLibCandidates(
+  nativeProver: NativeRnZkProver,
+): readonly NativeProofLibCandidate[] {
   const candidates: NativeProofLibCandidate[] = [];
   const proofLib = nativeProver.ProofLib;
 
@@ -674,7 +714,9 @@ async function proveCircom(type: ZKeyType, inputs: unknown, variant?: ClaimVaria
   // Non-secret zkey diagnostics for the Umbra team's claim-failure bundle:
   // which asset/variant was used and its on-disk byte size (so we can confirm
   // the v5 zkey downloaded intact and matches the expected proving key).
-  const resolvedZkeyFile = new File(zkeyPath.startsWith('file://') ? zkeyPath : `file://${zkeyPath}`);
+  const resolvedZkeyFile = new File(
+    zkeyPath.startsWith('file://') ? zkeyPath : `file://${zkeyPath}`,
+  );
   measure('umbra.zkProver.resolveZkey', zkeyStartedAt, {
     asset: label,
     zkeyFileName: getUmbraZkeyCacheFileName(type, variant),

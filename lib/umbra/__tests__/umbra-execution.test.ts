@@ -63,10 +63,15 @@ let mockCapturedUmbraSigner: {
     signatures: Record<string, Uint8Array>;
   }>;
 } | null = null;
+const mockTransactionForwarder = Object.assign(jest.fn(), {
+  fireAndForget: jest.fn(),
+  forwardInParallel: jest.fn(),
+  forwardSequentially: jest.fn(),
+});
 const mockSdkDeps = {
   accountInfoProvider: jest.fn(),
   blockhashProvider: jest.fn(),
-  transactionForwarder: jest.fn(),
+  transactionForwarder: mockTransactionForwarder,
   epochInfoProvider: jest.fn(),
   computationMonitor: jest.fn(),
 };
@@ -253,6 +258,7 @@ const {
   ensureUmbraEncryptedBalanceRegistration,
   ensureUmbraMixerRegistration,
   fetchUmbraEncryptedBalances,
+  claimUmbraPrivateP2PToEncryptedBalance,
   repairUmbraVaultEncryptionKey,
   resolveUmbraToken,
   scanUmbraPrivateP2PClaims,
@@ -263,6 +269,15 @@ const {
 } = require('@/lib/umbra/umbra-execution') as typeof import('@/lib/umbra/umbra-execution');
 const { getMintEncryptionKeyRotatorFunction } = require('@umbra-privacy/sdk/account') as {
   getMintEncryptionKeyRotatorFunction: jest.Mock;
+};
+const {
+  getReceiverBurnableStealthPoolNoteIntoETABurnerFunction:
+    getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction,
+  getSelfBurnableStealthPoolNoteIntoETABurnerFunction:
+    getSelfClaimableUtxoToEncryptedBalanceClaimerFunction,
+} = require('@umbra-privacy/sdk/burn') as {
+  getReceiverBurnableStealthPoolNoteIntoETABurnerFunction: jest.Mock;
+  getSelfBurnableStealthPoolNoteIntoETABurnerFunction: jest.Mock;
 };
 const {
   getATAIntoETADirectDepositorFunction: getPublicBalanceToEncryptedBalanceDirectDepositorFunction,
@@ -468,6 +483,9 @@ describe('umbra-execution', () => {
       mockSdkDeps.accountInfoProvider,
       mockSdkDeps.blockhashProvider,
       mockSdkDeps.transactionForwarder,
+      mockSdkDeps.transactionForwarder.fireAndForget,
+      mockSdkDeps.transactionForwarder.forwardInParallel,
+      mockSdkDeps.transactionForwarder.forwardSequentially,
       mockSdkDeps.epochInfoProvider,
       mockSdkDeps.computationMonitor,
     ].forEach((mock) => mock.mockReset());
@@ -475,6 +493,9 @@ describe('umbra-execution', () => {
     mockClaimableScannerDeps = null;
     mockClaimableScannerArgs = null;
     mockMmkvValues.clear();
+    delete (mockClient as { masterSeed?: unknown }).masterSeed;
+    delete (mockClient as { masterSeedSchemes?: unknown }).masterSeedSchemes;
+    delete (mockClient as { getSchemeMasterSeed?: unknown }).getSchemeMasterSeed;
     resetUmbraPrivacyStore();
     mockReadServiceClient.mockImplementation(function MockReadServiceClient() {
       return {
@@ -1110,9 +1131,20 @@ describe('umbra-execution', () => {
       { client: mockClient },
       expect.objectContaining({
         rpc: expect.objectContaining({
-          transactionForwarder: mockSdkDeps.transactionForwarder,
+          transactionForwarder: expect.objectContaining({
+            fireAndForget: mockSdkDeps.transactionForwarder.fireAndForget,
+          }),
         }),
       }),
+    );
+    const publicP2PForwarder = (
+      getPublicBalanceToReceiverClaimableUtxoCreatorFunction.mock.calls[0]?.[1] as {
+        rpc?: { transactionForwarder?: typeof mockSdkDeps.transactionForwarder };
+      }
+    ).rpc?.transactionForwarder;
+    expect(publicP2PForwarder).not.toBe(mockSdkDeps.transactionForwarder);
+    expect(publicP2PForwarder?.forwardSequentially).not.toBe(
+      mockSdkDeps.transactionForwarder.forwardSequentially,
     );
     expect(getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction).not.toHaveBeenCalled();
     expect(mockCreatePublicReceiverUtxo).toHaveBeenCalledWith(
@@ -1169,9 +1201,20 @@ describe('umbra-execution', () => {
       { client: mockClient },
       expect.objectContaining({
         rpc: expect.objectContaining({
-          transactionForwarder: mockSdkDeps.transactionForwarder,
+          transactionForwarder: expect.objectContaining({
+            fireAndForget: mockSdkDeps.transactionForwarder.fireAndForget,
+          }),
         }),
       }),
+    );
+    const publicP2PForwarder = (
+      getPublicBalanceToReceiverClaimableUtxoCreatorFunction.mock.calls[0]?.[1] as {
+        rpc?: { transactionForwarder?: typeof mockSdkDeps.transactionForwarder };
+      }
+    ).rpc?.transactionForwarder;
+    expect(publicP2PForwarder).not.toBe(mockSdkDeps.transactionForwarder);
+    expect(publicP2PForwarder?.forwardSequentially).not.toBe(
+      mockSdkDeps.transactionForwarder.forwardSequentially,
     );
     expect(getPublicBalanceToSelfClaimableUtxoCreatorFunction).not.toHaveBeenCalled();
     expect(getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction).not.toHaveBeenCalled();
@@ -1397,7 +1440,7 @@ describe('umbra-execution', () => {
     expect(mockReadServiceClientGetUtxoDataColumnar).toHaveBeenCalledWith({
       start: 616n,
       end: 999n,
-      limit: 32n,
+      limit: 384n,
     });
   });
 
@@ -1450,7 +1493,7 @@ describe('umbra-execution', () => {
     expect(mockReadServiceClientGetUtxoDataColumnar).toHaveBeenCalledWith({
       start: 777n,
       end: 777n,
-      limit: 32n,
+      limit: 384n,
     });
   });
 
@@ -1672,6 +1715,87 @@ describe('umbra-execution', () => {
 
     const deps = mockClaimableScannerDeps as { aesDecryptor?: unknown } | null;
     expect(typeof deps?.aesDecryptor).toBe('function');
+  });
+
+  it('passes the matched legacy master-seed scheme into receiver claim generation', async () => {
+    const claimableIndex = 7001;
+    const currentTokenKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const legacyTokenKey = Uint8Array.from({ length: 32 }, (_, index) => index + 101);
+    const mockReceiverClaim = jest.fn(async () => ({
+      batches: new Map([
+        [
+          0,
+          {
+            status: 'completed',
+            stealthPoolNoteIds: [`0:${claimableIndex}`],
+          },
+        ],
+      ]),
+      signatures: ['claim-sig'],
+    }));
+
+    Object.assign(mockClient, {
+      masterSeedSchemes: [{ id: 'current' }, { id: 'v4' }],
+      getSchemeMasterSeed: jest.fn(async (schemeId: string) =>
+        Uint8Array.from({ length: 64 }, (_, index) =>
+          index === 0 && schemeId === 'v4' ? 4 : index,
+        ),
+      ),
+    });
+    mockDecodeEncryptedUserAccount.mockReturnValue({
+      exists: true,
+      data: {
+        statusBits: {
+          first: 1n << 4n,
+        },
+        x25519PublicKeyForTokenEncryption: {
+          first: legacyTokenKey,
+        },
+      },
+    });
+    getUserAccountX25519KeypairDeriver.mockImplementation(
+      ({ client }: { client: { masterSeed?: { getMasterSeed: () => Promise<Uint8Array> } } }) =>
+        async () => {
+          const seed = await client.masterSeed?.getMasterSeed();
+          return {
+            ed25519Keypair: {
+              seed: new Uint8Array(32),
+              publicKey: new Uint8Array(32),
+            },
+            x25519Keypair: {
+              privateKey: new Uint8Array(32),
+              publicKey: seed?.[0] === 4 ? legacyTokenKey : currentTokenKey,
+            },
+          };
+        },
+    );
+    configureRegisteredUmbraVault();
+    mockClaimableScanner.mockResolvedValueOnce(makeClaimableScanResult([claimableIndex]));
+    getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction.mockReturnValueOnce(
+      mockReceiverClaim,
+    );
+
+    await claimUmbraPrivateP2PToEncryptedBalance({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      startInsertionIndex: claimableIndex,
+      endInsertionIndex: claimableIndex,
+      excludedInsertionIndices: [],
+    });
+
+    expect(getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client: expect.any(Object),
+        masterSeedSchemeId: 'v4',
+      }),
+      expect.any(Object),
+    );
+    expect(mockReceiverClaim).toHaveBeenCalledWith(
+      [expect.objectContaining({ insertionIndex: BigInt(claimableIndex) })],
+      expect.any(Uint8Array),
+    );
+    expect(getSelfClaimableUtxoToEncryptedBalanceClaimerFunction).not.toHaveBeenCalled();
   });
 
   it('filters cold-boot scan results by on-chain Umbra nullifier-set membership', async () => {

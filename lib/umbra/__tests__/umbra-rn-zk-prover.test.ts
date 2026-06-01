@@ -1,4 +1,5 @@
 import {
+  __clearUmbraZkManifestCacheForTesting,
   convertUmbraCircuitInputsToMoproInputs,
   convertNativeCircomProofToUmbraProofBytes,
   getRnUserRegistrationProver,
@@ -66,6 +67,7 @@ describe('umbra-rn-zk-prover', () => {
     (require('expo-file-system') as { __INTERNAL_RESET?: () => void }).__INTERNAL_RESET?.();
     delete (NativeModules as Record<string, unknown>).MoproFfi;
     global.fetch = originalFetch;
+    __clearUmbraZkManifestCacheForTesting();
   });
 
   it('serializes bigint-heavy circuit inputs for the native bridge', () => {
@@ -184,8 +186,9 @@ describe('umbra-rn-zk-prover', () => {
       '/cache/offpay-umbra-zk-assets/userregistration.zkey',
     );
 
-    // Manifest fetch for each resolve (2) + a single HEAD for the only download.
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // The remote manifest is cached briefly after the first resolve, so the
+    // second resolve can reuse the local zkey without another manifest fetch.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toContain(
       'https://zk.api.umbraprivacy.com/v5/manifest.json',
     );
@@ -198,6 +201,7 @@ describe('umbra-rn-zk-prover', () => {
     const downloadFileAsync = File.downloadFileAsync as jest.Mock;
 
     await resolveUmbraZkeyPath('userRegistration');
+    __clearUmbraZkManifestCacheForTesting();
     await resolveUmbraZkeyPath('userRegistration');
 
     expect(downloadFileAsync).toHaveBeenCalledTimes(2);
@@ -240,17 +244,24 @@ describe('umbra-rn-zk-prover', () => {
         } as unknown as Response;
       }
       if (url.includes('manifest.json')) {
-        // Third manifest call onwards should return v4.
-        const version = manifestCallIndex >= 2 ? 'v4' : 'v3';
+        // Second manifest call onwards should return v4. The in-memory
+        // manifest cache is cleared before the final resolve to simulate TTL
+        // expiry without waiting in the test.
+        const version = manifestCallIndex >= 1 ? 'v4' : 'v3';
         manifestCallIndex += 1;
         return { ok: true, json: async () => extendedManifest(version) } as unknown as Response;
       }
-      return { ok: true, headers: { get: () => null }, json: async () => ({}) } as unknown as Response;
+      return {
+        ok: true,
+        headers: { get: () => null },
+        json: async () => ({}),
+      } as unknown as Response;
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
     await resolveUmbraZkeyPath('userRegistration');
     await resolveUmbraZkeyPath('createDepositWithPublicAmount');
+    __clearUmbraZkManifestCacheForTesting();
     await resolveUmbraZkeyPath('userRegistration');
 
     const downloadFileAsync = File.downloadFileAsync as jest.Mock;

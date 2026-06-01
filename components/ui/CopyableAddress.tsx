@@ -14,14 +14,16 @@ interface CopyableAddressProps {
   label?: string;
   color?: string;
   iconSize?: number;
+  maxFontSizeMultiplier?: number;
   textStyle?: StyleProp<TextStyle>;
 }
 
-export function CopyableAddress({ 
-  address, 
+export function CopyableAddress({
+  address,
   label,
   color = colors.text.secondary,
   iconSize = layout.iconSizeInline,
+  maxFontSizeMultiplier,
   textStyle,
 }: CopyableAddressProps): React.JSX.Element {
   const [copied, setCopied] = useState(false);
@@ -33,9 +35,10 @@ export function CopyableAddress({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const truncated = address && address.length > 10 
-    ? `${address.slice(0, 4)}...${address.slice(-4)}`
-    : address || '—';
+  const truncated =
+    address && address.length > 10
+      ? `${address.slice(0, 4)}...${address.slice(-4)}`
+      : address || '—';
 
   const displayText = label || truncated;
 
@@ -47,13 +50,14 @@ export function CopyableAddress({
         style={[styles.addressText, !label ? styles.addressMono : undefined, textStyle]}
         numberOfLines={1}
         ellipsizeMode="tail"
+        maxFontSizeMultiplier={maxFontSizeMultiplier}
       >
         {displayText}
       </Text>
-      <Ionicons 
-        name={copied ? "checkmark" : "copy-outline"} 
+      <Ionicons
+        name={copied ? 'checkmark' : 'copy-outline'}
         size={iconSize}
-        color={copied ? colors.semantic.success : color} 
+        color={copied ? colors.semantic.success : color}
         style={styles.copyIcon}
       />
     </Pressable>

@@ -42,7 +42,7 @@ const ROW_CARD_COLORS = [
   colors.brand.iceBlue,
   colors.brand.whiteStream,
 ] as const;
-const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 32;
+const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 384;
 
 const ROW_BORDER = {
   borderTopWidth: 1,
@@ -169,12 +169,23 @@ const ClaimRow = memo(function ClaimRow({
           accessibilityState={{ disabled: disabled || busy, busy }}
           style={({ pressed }) => [
             styles.rowPrimaryButton,
-            (disabled || busy) && styles.rowPrimaryButtonDisabled,
+            disabled && !busy && styles.rowPrimaryButtonDisabled,
             pressed && !(disabled || busy) ? styles.pressed : null,
           ]}
         >
           {busy ? (
-            <LazyLoadingSpinner size={18} color={colors.text.inverse} />
+            <>
+              <LazyLoadingSpinner size={18} color={colors.text.inverse} />
+              <Text
+                variant="button"
+                color={colors.text.inverse}
+                numberOfLines={1}
+                maxFontSizeMultiplier={1.1}
+                style={styles.rowPrimaryButtonText}
+              >
+                Claiming
+              </Text>
+            </>
           ) : (
             <Text
               variant="button"
@@ -307,11 +318,15 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
         if (signal.aborted) return;
         setUtxos(result.pendingClaimUtxoDetails ?? []);
         setError(null);
-        measure(isDeep ? 'receive.umbraClaims.deepScan' : 'receive.umbraClaims.fullScreenScan', startedAt, {
-          network,
-          pendingCount: result.pendingClaimCount ?? 0,
-          pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
-        });
+        measure(
+          isDeep ? 'receive.umbraClaims.deepScan' : 'receive.umbraClaims.fullScreenScan',
+          startedAt,
+          {
+            network,
+            pendingCount: result.pendingClaimCount ?? 0,
+            pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+          },
+        );
       } catch (scanError) {
         if (signal.aborted) return;
         setError(scanError instanceof Error ? scanError.message : 'Unable to load pending claims.');
@@ -575,7 +590,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               onPress={() => void runScan('deep')}
               style={({ pressed }) => [
                 styles.deepScanButton,
-                (deepScanning || scanning || refreshing) && styles.deepScanButtonDisabled,
+                !deepScanning && (scanning || refreshing) && styles.deepScanButtonDisabled,
                 pressed && styles.pressed,
               ]}
             >
@@ -764,8 +779,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     borderRadius: radii.full,
     backgroundColor: colors.brand.azureBlue,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.xs,
     flexShrink: 1,
     maxWidth: '100%',
   },

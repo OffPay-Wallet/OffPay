@@ -186,8 +186,8 @@ const UMBRA_AWAIT_COMPUTATION_FINALIZATION = {
   safetyTimeoutMs: 120_000,
   reclaimComputationRent: false,
 } as const;
-const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 32n;
 const UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT = 384n;
+const UMBRA_CLAIM_SCAN_PAGE_LIMIT = UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT;
 const U64_MAX = (1n << 64n) - 1n;
 const ENCRYPTED_USER_STATUS_BIT_MVK_KEY_REGISTERED = 2;
 const ENCRYPTED_USER_STATUS_BIT_TOKEN_KEY_REGISTERED = 4;
@@ -228,8 +228,7 @@ type UmbraClaimScanWindow = {
 
 function normalizePositiveBigint(value: number | bigint | undefined, fallback: bigint): bigint {
   if (value == null) return fallback;
-  const normalized =
-    typeof value === 'bigint' ? value : BigInt(Math.max(1, Math.trunc(value)));
+  const normalized = typeof value === 'bigint' ? value : BigInt(Math.max(1, Math.trunc(value)));
   return normalized > 0n ? normalized : fallback;
 }
 
@@ -468,10 +467,7 @@ function getUmbraClientForMasterSeedScheme(client: IUmbraClient, schemeId: strin
  * `schemeId` is null (registration not resolvable) the full client is returned
  * unchanged so the scanner still tries every scheme and never misses a note.
  */
-function narrowUmbraClientToScheme(
-  client: IUmbraClient,
-  schemeId: string | null,
-): IUmbraClient {
+function narrowUmbraClientToScheme(client: IUmbraClient, schemeId: string | null): IUmbraClient {
   if (schemeId == null) return client;
   const schemes = Array.isArray(client.masterSeedSchemes) ? client.masterSeedSchemes : [];
   const matched = schemes.find((scheme) => scheme.id === schemeId);
@@ -503,6 +499,15 @@ function createYieldingUmbraAesDecryptor(budgetMs = 8) {
     sliceStartedAt = await yieldToUiIfNeeded(sliceStartedAt, budgetMs);
     return baseDecryptor(key as never, ciphertext as never) as Promise<Uint8Array>;
   };
+}
+
+function getUmbraClaimFactoryArgs(runtime: UmbraRuntime): {
+  client: IUmbraClient;
+  masterSeedSchemeId?: string;
+} {
+  return runtime.activeMasterSeedSchemeId == null
+    ? { client: runtime.client }
+    : { client: runtime.client, masterSeedSchemeId: runtime.activeMasterSeedSchemeId };
 }
 
 const UMBRA_STRUCT_TEXT_ENCODER = new TextEncoder();
@@ -1018,6 +1023,102 @@ function buildLegacyRpcDeps(runtime: LegacyUmbraRuntime) {
     blockhashProvider: runtime.rpc.blockhashProvider,
     transactionForwarder: runtime.rpc.transactionForwarder,
     epochInfo: runtime.rpc.epochInfoProvider,
+  };
+}
+
+type UmbraSubmitOnlyForwarderPayload = {
+  mint: string;
+  network: OffpayNetwork;
+  protocol: UmbraProtocolVersion;
+  source: 'public-balance';
+};
+
+function toTransactionList(transactions: unknown): readonly unknown[] {
+  return Array.isArray(transactions) ? transactions : [transactions];
+}
+
+function createSubmitOnlyUmbraTransactionForwarder<
+  TForwarder extends {
+    fireAndForget: (...args: never[]) => unknown;
+    forwardInParallel: (...args: never[]) => unknown;
+    forwardSequentially: (...args: never[]) => unknown;
+  },
+>(forwarder: TForwarder, payload: UmbraSubmitOnlyForwarderPayload): TForwarder {
+  const submit = forwarder.fireAndForget as (transaction: unknown) => Promise<unknown>;
+
+  return {
+    ...forwarder,
+    forwardInParallel: (async (transactions: unknown) => {
+      const transactionList = toTransactionList(transactions);
+      const startedAt = mark();
+      let submittedCount = 0;
+      try {
+        const signatures = await Promise.all(
+          transactionList.map(async (transaction) => {
+            const signature = await submit(transaction);
+            submittedCount += 1;
+            return signature;
+          }),
+        );
+        return signatures;
+      } finally {
+        measure('umbra.txForwarder.submitOnly.forwardInParallel', startedAt, {
+          ...payload,
+          transactionCount: transactionList.length,
+          submittedCount,
+        });
+      }
+    }) as TForwarder['forwardInParallel'],
+    forwardSequentially: (async (transactions: unknown) => {
+      const transactionList = toTransactionList(transactions);
+      const startedAt = mark();
+      const signatures: unknown[] = [];
+      try {
+        for (const transaction of transactionList) {
+          signatures.push(await submit(transaction));
+        }
+        return signatures;
+      } finally {
+        measure('umbra.txForwarder.submitOnly.forwardSequentially', startedAt, {
+          ...payload,
+          transactionCount: transactionList.length,
+          submittedCount: signatures.length,
+        });
+      }
+    }) as TForwarder['forwardSequentially'],
+  };
+}
+
+function buildPublicP2PSubmitOnlyRpcDeps(runtime: UmbraRuntime, token: UmbraSupportedToken) {
+  return {
+    ...buildRpcDeps(runtime),
+    transactionForwarder: createSubmitOnlyUmbraTransactionForwarder(
+      runtime.rpc.transactionForwarder,
+      {
+        mint: token.mint,
+        network: runtime.network,
+        protocol: 'current',
+        source: 'public-balance',
+      },
+    ),
+  };
+}
+
+function buildLegacyPublicP2PSubmitOnlyRpcDeps(
+  runtime: LegacyUmbraRuntime,
+  token: UmbraSupportedToken,
+) {
+  return {
+    ...buildLegacyRpcDeps(runtime),
+    transactionForwarder: createSubmitOnlyUmbraTransactionForwarder(
+      runtime.rpc.transactionForwarder,
+      {
+        mint: token.mint,
+        network: runtime.network,
+        protocol: 'legacy',
+        source: 'public-balance',
+      },
+    ),
   };
 }
 
@@ -1583,157 +1684,268 @@ export async function shieldTokenWithUmbra(
 export async function sendUmbraPrivateP2PFromPublicBalance(
   params: UmbraPrivateP2PParams,
 ): Promise<UmbraExecutionResult> {
+  const totalStartedAt = mark();
+  let ok = false;
+  let signatureCount = 0;
+  let tokenMint: string | null = null;
   assertUmbraNetworkSupported(params.network);
-  const walletAddress = assertWalletAddress(params.walletAddress);
-  const recipient = assertRecipientAddress(params.recipient);
-  const token = await resolveUmbraToken({ ...params, requireMixer: true });
-  await verifyOffpayUmbraRpcReadiness(params.network);
-  await assertOffpayUmbraVaultFeeAccountsReady({
-    action: 'privateP2pFromPublic',
-    mint: token.metadata.mint,
-    network: params.network,
-  });
-
-  const buildResult = (
-    result: unknown,
-    senderRegistrationStatus: UmbraVaultRegistrationStatus,
-  ): UmbraExecutionResult => {
-    const signatures = collectSignaturesFromResult(result);
-    const primarySignature = getUmbraPublicCreateUtxoSignature(result);
-    if (primarySignature == null) {
-      throw new Error(
-        getUmbraFriendlyErrorMessage('Umbra private P2P did not submit a transaction.', 'shield'),
-      );
-    }
-
-    return {
-      action: 'private-p2p',
-      walletAddress,
-      network: params.network,
-      title: 'Umbra private payment sent',
-      subtitle: `${token.amountDisplay} ${token.metadata.symbol} → ${recipient.slice(
-        0,
-        4,
-      )}...${recipient.slice(-4)}`,
-      signatures,
-      primarySignature,
-      mint: token.metadata.mint,
-      tokenSymbol: token.metadata.symbol,
-      amountAtomic: token.amountAtomic,
-      amountDisplay: token.amountDisplay,
-      recipient,
-      p2pSource: 'public-balance',
-      vaultState: senderRegistrationStatus.vaultState,
-      vaultRegistered: senderRegistrationStatus.vaultRegistered,
-      vaultCanShield: senderRegistrationStatus.vaultCanShield,
-      mixerRegistered: senderRegistrationStatus.mixerRegistered,
-    };
-  };
-
-  const runLegacyPublicPrivateP2P = (): Promise<UmbraExecutionResult> =>
-    withLegacyUmbraRuntime(params, async (runtime) => {
-      const recipientIsSender = recipient === walletAddress;
-      if (!recipientIsSender) {
-        const receiverRegistrationStatus = await queryLegacyUmbraVaultRegistrationStatus(
-          runtime,
-          recipient,
-        );
-        if (!receiverRegistrationStatus.mixerRegistered) {
-          throw new Error(
-            'Recipient has not set up Umbra private P2P yet. Ask them to open Receive, choose Umbra private P2P, complete setup, then retry.',
-          );
-        }
-      }
-
-      const senderRegistrationStatus = await ensureLegacyUmbraPrivateP2PSenderReady(
-        runtime,
-        walletAddress,
-        { autoSetup: params.autoSetupSender === true },
-      );
-      if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
-        throw new Error(
-          'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
-        );
-      }
-      const createUtxo = getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction(
-        { client: runtime.client },
-        {
-          zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
-          rpc: buildLegacyRpcDeps(runtime),
-        } as never,
-      );
-      const result = await createUtxo(
-        {
-          amount: BigInt(token.amountAtomic) as never,
-          destinationAddress: recipient as never,
-          mint: token.metadata.mint as never,
-        } as never,
-        {
-          optionalData: new Uint8Array(32) as never,
-        } as never,
-      );
-
-      return buildResult(result, senderRegistrationStatus);
-    });
-
-  const runCurrentPublicPrivateP2P = (): Promise<UmbraExecutionResult> =>
-    withUmbraRuntime(params, async (runtime) => {
-      const recipientIsSender = recipient === walletAddress;
-      if (!recipientIsSender) {
-        const receiverRegistrationStatus = await queryUmbraVaultRegistrationStatus(
-          runtime,
-          recipient,
-        );
-        if (!receiverRegistrationStatus.mixerRegistered) {
-          throw new Error(
-            'Recipient has not set up Umbra private P2P yet. Ask them to open Receive, choose Umbra private P2P, complete setup, then retry.',
-          );
-        }
-      }
-
-      const senderRegistrationStatus = await ensureUmbraPrivateP2PSenderReady(
-        runtime,
-        walletAddress,
-        params,
-        { autoSetup: params.autoSetupSender === true },
-      );
-      if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
-        throw new Error(
-          'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
-        );
-      }
-      const createUtxo = getPublicBalanceToReceiverClaimableUtxoCreatorFunction(
-        { client: runtime.client },
-        {
-          zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
-          rpc: buildRpcDeps(runtime),
-        } as never,
-      );
-      const result = await createUtxo(
-        {
-          amount: BigInt(token.amountAtomic) as never,
-          destinationAddress: recipient as never,
-          mint: token.metadata.mint as never,
-        } as never,
-        {
-          optionalData: new Uint8Array(32) as never,
-        } as never,
-      );
-
-      return buildResult(result, senderRegistrationStatus);
-    });
-
-  if (shouldPreferLegacyUmbraProtocol(params.network)) {
-    return runLegacyPublicPrivateP2P();
-  }
 
   try {
-    return await runCurrentPublicPrivateP2P();
-  } catch (error) {
-    if (!isUmbraInstructionFallbackNotFound(error)) throw error;
-    if (!isLegacyUmbraProtocolAccepted(params.network)) throw error;
-    markOffpayUmbraProtocolVersionUnsupported(params.network, 'current');
-    return runLegacyPublicPrivateP2P();
+    const walletAddress = assertWalletAddress(params.walletAddress);
+    const recipient = assertRecipientAddress(params.recipient);
+    const token = await resolveUmbraToken({ ...params, requireMixer: true });
+    tokenMint = token.metadata.mint;
+    const readinessStartedAt = mark();
+    try {
+      await verifyOffpayUmbraRpcReadiness(params.network);
+      await assertOffpayUmbraVaultFeeAccountsReady({
+        action: 'privateP2pFromPublic',
+        mint: token.metadata.mint,
+        network: params.network,
+      });
+    } finally {
+      measure('umbra.p2p.public.readiness', readinessStartedAt, {
+        mint: token.metadata.mint,
+        network: params.network,
+      });
+    }
+
+    const buildResult = (
+      result: unknown,
+      senderRegistrationStatus: UmbraVaultRegistrationStatus,
+    ): UmbraExecutionResult => {
+      const signatures = collectSignaturesFromResult(result);
+      const primarySignature = getUmbraPublicCreateUtxoSignature(result);
+      if (primarySignature == null) {
+        throw new Error(
+          getUmbraFriendlyErrorMessage('Umbra private P2P did not submit a transaction.', 'shield'),
+        );
+      }
+
+      return {
+        action: 'private-p2p',
+        walletAddress,
+        network: params.network,
+        title: 'Umbra private payment sent',
+        subtitle: `${token.amountDisplay} ${token.metadata.symbol} → ${recipient.slice(
+          0,
+          4,
+        )}...${recipient.slice(-4)}`,
+        signatures,
+        primarySignature,
+        mint: token.metadata.mint,
+        tokenSymbol: token.metadata.symbol,
+        amountAtomic: token.amountAtomic,
+        amountDisplay: token.amountDisplay,
+        recipient,
+        p2pSource: 'public-balance',
+        vaultState: senderRegistrationStatus.vaultState,
+        vaultRegistered: senderRegistrationStatus.vaultRegistered,
+        vaultCanShield: senderRegistrationStatus.vaultCanShield,
+        mixerRegistered: senderRegistrationStatus.mixerRegistered,
+      };
+    };
+
+    const runLegacyPublicPrivateP2P = (): Promise<UmbraExecutionResult> => {
+      const runtimeStartedAt = mark();
+      return withLegacyUmbraRuntime(params, async (runtime) => {
+        measure('umbra.p2p.public.runtimeReady', runtimeStartedAt, {
+          mint: token.metadata.mint,
+          network: params.network,
+          protocol: 'legacy',
+        });
+        const recipientIsSender = recipient === walletAddress;
+        const queryReceiverRegistration = async (): Promise<void> => {
+          if (recipientIsSender) return;
+          const receiverStartedAt = mark();
+          const receiverRegistrationStatus = await queryLegacyUmbraVaultRegistrationStatus(
+            runtime,
+            recipient,
+          ).finally(() => {
+            measure('umbra.p2p.public.receiverRegistration', receiverStartedAt, {
+              mint: token.metadata.mint,
+              network: params.network,
+              protocol: 'legacy',
+            });
+          });
+          if (!receiverRegistrationStatus.mixerRegistered) {
+            throw new Error(
+              'Recipient has not set up Umbra private P2P yet. Ask them to open Receive, choose Umbra private P2P, complete setup, then retry.',
+            );
+          }
+        };
+        const querySenderRegistration = async (): Promise<UmbraVaultRegistrationStatus> => {
+          const senderStartedAt = mark();
+          return ensureLegacyUmbraPrivateP2PSenderReady(runtime, walletAddress, {
+            autoSetup: params.autoSetupSender === true,
+          }).finally(() => {
+            measure('umbra.p2p.public.senderReady', senderStartedAt, {
+              autoSetup: params.autoSetupSender === true,
+              mint: token.metadata.mint,
+              network: params.network,
+              protocol: 'legacy',
+            });
+          });
+        };
+        let senderRegistrationStatus: UmbraVaultRegistrationStatus;
+        if (!recipientIsSender && params.autoSetupSender !== true) {
+          const [receiverResult, senderResult] = await Promise.allSettled([
+            queryReceiverRegistration(),
+            querySenderRegistration(),
+          ]);
+          if (receiverResult.status === 'rejected') throw receiverResult.reason;
+          if (senderResult.status === 'rejected') throw senderResult.reason;
+          senderRegistrationStatus = senderResult.value;
+        } else {
+          await queryReceiverRegistration();
+          senderRegistrationStatus = await querySenderRegistration();
+        }
+        if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
+          throw new Error(
+            'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
+          );
+        }
+        const createUtxo = getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+          { client: runtime.client },
+          {
+            zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
+            rpc: buildLegacyPublicP2PSubmitOnlyRpcDeps(runtime, token.metadata),
+          } as never,
+        );
+        const createUtxoStartedAt = mark();
+        const result = await createUtxo(
+          {
+            amount: BigInt(token.amountAtomic) as never,
+            destinationAddress: recipient as never,
+            mint: token.metadata.mint as never,
+          } as never,
+          {
+            optionalData: new Uint8Array(32) as never,
+          } as never,
+        ).finally(() => {
+          measure('umbra.p2p.public.createUtxo', createUtxoStartedAt, {
+            mint: token.metadata.mint,
+            network: params.network,
+            protocol: 'legacy',
+          });
+        });
+
+        return buildResult(result, senderRegistrationStatus);
+      });
+    };
+
+    const runCurrentPublicPrivateP2P = (): Promise<UmbraExecutionResult> => {
+      const runtimeStartedAt = mark();
+      return withUmbraRuntime(params, async (runtime) => {
+        measure('umbra.p2p.public.runtimeReady', runtimeStartedAt, {
+          mint: token.metadata.mint,
+          network: params.network,
+          protocol: 'current',
+        });
+        const recipientIsSender = recipient === walletAddress;
+        const queryReceiverRegistration = async (): Promise<void> => {
+          if (recipientIsSender) return;
+          const receiverStartedAt = mark();
+          const receiverRegistrationStatus = await queryUmbraVaultRegistrationStatus(
+            runtime,
+            recipient,
+          ).finally(() => {
+            measure('umbra.p2p.public.receiverRegistration', receiverStartedAt, {
+              mint: token.metadata.mint,
+              network: params.network,
+              protocol: 'current',
+            });
+          });
+          if (!receiverRegistrationStatus.mixerRegistered) {
+            throw new Error(
+              'Recipient has not set up Umbra private P2P yet. Ask them to open Receive, choose Umbra private P2P, complete setup, then retry.',
+            );
+          }
+        };
+        const querySenderRegistration = async (): Promise<UmbraVaultRegistrationStatus> => {
+          const senderStartedAt = mark();
+          return ensureUmbraPrivateP2PSenderReady(runtime, walletAddress, params, {
+            autoSetup: params.autoSetupSender === true,
+          }).finally(() => {
+            measure('umbra.p2p.public.senderReady', senderStartedAt, {
+              autoSetup: params.autoSetupSender === true,
+              mint: token.metadata.mint,
+              network: params.network,
+              protocol: 'current',
+            });
+          });
+        };
+        let senderRegistrationStatus: UmbraVaultRegistrationStatus;
+        if (!recipientIsSender && params.autoSetupSender !== true) {
+          const [receiverResult, senderResult] = await Promise.allSettled([
+            queryReceiverRegistration(),
+            querySenderRegistration(),
+          ]);
+          if (receiverResult.status === 'rejected') throw receiverResult.reason;
+          if (senderResult.status === 'rejected') throw senderResult.reason;
+          senderRegistrationStatus = senderResult.value;
+        } else {
+          await queryReceiverRegistration();
+          senderRegistrationStatus = await querySenderRegistration();
+        }
+        if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
+          throw new Error(
+            'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
+          );
+        }
+        const createUtxo = getPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+          { client: runtime.client },
+          {
+            zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
+            rpc: buildPublicP2PSubmitOnlyRpcDeps(runtime, token.metadata),
+          } as never,
+        );
+        const createUtxoStartedAt = mark();
+        const result = await createUtxo(
+          {
+            amount: BigInt(token.amountAtomic) as never,
+            destinationAddress: recipient as never,
+            mint: token.metadata.mint as never,
+          } as never,
+          {
+            optionalData: new Uint8Array(32) as never,
+          } as never,
+        ).finally(() => {
+          measure('umbra.p2p.public.createUtxo', createUtxoStartedAt, {
+            mint: token.metadata.mint,
+            network: params.network,
+            protocol: 'current',
+          });
+        });
+
+        return buildResult(result, senderRegistrationStatus);
+      });
+    };
+
+    let result: UmbraExecutionResult;
+    if (shouldPreferLegacyUmbraProtocol(params.network)) {
+      result = await runLegacyPublicPrivateP2P();
+    } else {
+      try {
+        result = await runCurrentPublicPrivateP2P();
+      } catch (error) {
+        if (!isUmbraInstructionFallbackNotFound(error)) throw error;
+        if (!isLegacyUmbraProtocolAccepted(params.network)) throw error;
+        markOffpayUmbraProtocolVersionUnsupported(params.network, 'current');
+        result = await runLegacyPublicPrivateP2P();
+      }
+    }
+
+    ok = true;
+    signatureCount = result.signatures.length;
+    return result;
+  } finally {
+    measure('umbra.p2p.public.total', totalStartedAt, {
+      mint: tokenMint,
+      network: params.network,
+      ok,
+      signatureCount,
+    });
   }
 }
 
@@ -2475,7 +2687,7 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
                 } as never,
               )
             : getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction(
-                { client: runtime.client },
+                getUmbraClaimFactoryArgs(runtime) as never,
                 {
                   fetchBatchMerkleProof: createOffpayUmbraBatchMerkleProofFetcher(params.network),
                   relayer: createOffpayUmbraClaimRelayer(params.network),
@@ -2501,7 +2713,8 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
               network: params.network,
               utxoCount: receiverClaimableUtxos.length,
               ok: false,
-              error: claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
+              error:
+                claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
             });
             throw claimCallError;
           }
@@ -2590,12 +2803,15 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
                   awaitCompletion: true,
                 } as never,
               )
-            : getSelfClaimableUtxoToEncryptedBalanceClaimerFunction({ client: runtime.client }, {
-                fetchBatchMerkleProof: createOffpayUmbraBatchMerkleProofFetcher(params.network),
-                relayer: createOffpayUmbraClaimRelayer(params.network),
-                zkProver: getRnClaimSelfClaimableUtxoIntoEncryptedBalanceProver(),
-                awaitCompletion: true,
-              } as never);
+            : getSelfClaimableUtxoToEncryptedBalanceClaimerFunction(
+                getUmbraClaimFactoryArgs(runtime) as never,
+                {
+                  fetchBatchMerkleProof: createOffpayUmbraBatchMerkleProofFetcher(params.network),
+                  relayer: createOffpayUmbraClaimRelayer(params.network),
+                  zkProver: getRnClaimSelfClaimableUtxoIntoEncryptedBalanceProver(),
+                  awaitCompletion: true,
+                } as never,
+              );
         try {
           const claimStartedAt = mark();
           let result: unknown;
@@ -2611,7 +2827,8 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
               network: params.network,
               utxoCount: selfClaimableUtxos.length,
               ok: false,
-              error: claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
+              error:
+                claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
             });
             throw claimCallError;
           }
@@ -2942,76 +3159,123 @@ export async function fetchUmbraRegistrationStatusForAddresses(params: {
 export async function fetchUmbraEncryptedBalances(
   params: UmbraWalletExecutionParams & { tokens: string[] },
 ): Promise<UmbraExecutionResult> {
+  const totalStartedAt = mark();
+  let ok = false;
+  let tokenCount = 0;
+  let unreadableCount = 0;
   assertUmbraNetworkSupported(params.network);
   const walletAddress = assertWalletAddress(params.walletAddress);
-  await verifyOffpayUmbraRpcReadiness(params.network);
-  return withUmbraRuntime(params, async (runtime) => {
-    const mints = params.tokens.flatMap((token) => {
-      try {
-        return [resolveUmbraSupportedToken({ network: params.network, token })];
-      } catch {
-        return [];
-      }
-    });
-    if (mints.length === 0) {
-      throw new Error(
-        `Umbra encrypted balances do not support this token set on ${params.network}.`,
-      );
+  try {
+    const readinessStartedAt = mark();
+    try {
+      await verifyOffpayUmbraRpcReadiness(params.network);
+    } finally {
+      measure('umbra.encryptedBalances.readiness', readinessStartedAt, {
+        network: params.network,
+      });
     }
+    return await withUmbraRuntime(params, async (runtime) => {
+      const mints = params.tokens.flatMap((token) => {
+        try {
+          return [resolveUmbraSupportedToken({ network: params.network, token })];
+        } catch {
+          return [];
+        }
+      });
+      if (mints.length === 0) {
+        throw new Error(
+          `Umbra encrypted balances do not support this token set on ${params.network}.`,
+        );
+      }
 
-    const registrationStatus = await queryUmbraVaultRegistrationStatus(runtime, walletAddress);
-    const queryBalances = getEncryptedBalanceQuerierFunction({ client: runtime.client }, {
-      accountInfoProvider: runtime.rpc.accountInfoProvider,
-    } as never);
-    const uniqueMints = mints.filter(
-      (token, index, tokens) =>
-        tokens.findIndex((candidate) => candidate.mint === token.mint) === index,
-    );
-    const result = await queryBalances(uniqueMints.map((token) => token.mint as never));
-    const balances = await Promise.all(
-      uniqueMints.map(async (token) => {
-        const entry = getUmbraSdkEncryptedBalanceEntry(result, token.mint);
-        const balance = normalizeUmbraEncryptedBalanceEntry(entry, token.decimals);
-        const keyStatus =
-          balance.state === 'shared_unreadable'
-            ? await queryUmbraVaultEncryptionKeyStatus(runtime, walletAddress, token.mint)
-            : null;
-        const unreadableReason =
-          keyStatus?.state === 'mismatched' ? 'key_mismatch' : balance.unreadableReason;
+      const registrationStartedAt = mark();
+      const registrationStatus = await queryUmbraVaultRegistrationStatus(
+        runtime,
+        walletAddress,
+      ).finally(() => {
+        measure('umbra.encryptedBalances.registrationStatus', registrationStartedAt, {
+          network: params.network,
+        });
+      });
+      const queryBalances = getEncryptedBalanceQuerierFunction({ client: runtime.client }, {
+        accountInfoProvider: runtime.rpc.accountInfoProvider,
+      } as never);
+      const uniqueMints = mints.filter(
+        (token, index, tokens) =>
+          tokens.findIndex((candidate) => candidate.mint === token.mint) === index,
+      );
+      tokenCount = uniqueMints.length;
+      const queryStartedAt = mark();
+      const result = await queryBalances(uniqueMints.map((token) => token.mint as never)).finally(
+        () => {
+          measure('umbra.encryptedBalances.querySdk', queryStartedAt, {
+            network: params.network,
+            tokenCount: uniqueMints.length,
+          });
+        },
+      );
+      const keyStatusStartedAt = mark();
+      const balances = await Promise.all(
+        uniqueMints.map(async (token) => {
+          const entry = getUmbraSdkEncryptedBalanceEntry(result, token.mint);
+          const balance = normalizeUmbraEncryptedBalanceEntry(entry, token.decimals);
+          const keyStatus =
+            balance.state === 'shared_unreadable'
+              ? await queryUmbraVaultEncryptionKeyStatus(runtime, walletAddress, token.mint)
+              : null;
+          if (balance.state === 'shared_unreadable') {
+            unreadableCount += 1;
+          }
+          const unreadableReason =
+            keyStatus?.state === 'mismatched' ? 'key_mismatch' : balance.unreadableReason;
 
-        return {
-          mint: token.mint,
-          symbol: token.symbol,
-          name: token.name,
-          decimals: token.decimals,
-          logoUri: token.logoUri ?? null,
-          state: keyStatus?.state === 'mismatched' ? 'shared_key_mismatch' : balance.state,
-          rawBalance: balance.rawBalance,
-          displayBalance: balance.displayBalance,
-          ...(unreadableReason == null ? {} : { unreadableReason }),
-          ...(keyStatus == null
-            ? {}
-            : {
-                encryptionKeyStatus: keyStatus.state,
-                encryptedUserAccount: keyStatus.encryptedUserAccount,
-                encryptedTokenAccount: keyStatus.encryptedTokenAccount,
-              }),
-        };
-      }),
-    );
+          return {
+            mint: token.mint,
+            symbol: token.symbol,
+            name: token.name,
+            decimals: token.decimals,
+            logoUri: token.logoUri ?? null,
+            state: keyStatus?.state === 'mismatched' ? 'shared_key_mismatch' : balance.state,
+            rawBalance: balance.rawBalance,
+            displayBalance: balance.displayBalance,
+            ...(unreadableReason == null ? {} : { unreadableReason }),
+            ...(keyStatus == null
+              ? {}
+              : {
+                  encryptionKeyStatus: keyStatus.state,
+                  encryptedUserAccount: keyStatus.encryptedUserAccount,
+                  encryptedTokenAccount: keyStatus.encryptedTokenAccount,
+                }),
+          };
+        }),
+      );
+      measure('umbra.encryptedBalances.keyStatus', keyStatusStartedAt, {
+        network: params.network,
+        tokenCount: uniqueMints.length,
+        unreadableCount,
+      });
 
-    return {
-      action: 'balance',
-      walletAddress,
+      ok = true;
+      return {
+        action: 'balance',
+        walletAddress,
+        network: params.network,
+        title: 'Encrypted balance refreshed',
+        subtitle: `${balances.length} balance${balances.length === 1 ? '' : 's'} checked.`,
+        signatures: [],
+        vaultState: registrationStatus.vaultState,
+        vaultRegistered: registrationStatus.vaultRegistered,
+        vaultCanShield: registrationStatus.vaultCanShield,
+        mixerRegistered: registrationStatus.mixerRegistered,
+        balances,
+      };
+    });
+  } finally {
+    measure('umbra.encryptedBalances.fetch', totalStartedAt, {
       network: params.network,
-      title: 'Encrypted balance refreshed',
-      subtitle: `${balances.length} balance${balances.length === 1 ? '' : 's'} checked.`,
-      signatures: [],
-      vaultState: registrationStatus.vaultState,
-      vaultRegistered: registrationStatus.vaultRegistered,
-      vaultCanShield: registrationStatus.vaultCanShield,
-      mixerRegistered: registrationStatus.mixerRegistered,
-      balances,
-    };
-  });
+      ok,
+      tokenCount,
+      unreadableCount,
+    });
+  }
 }

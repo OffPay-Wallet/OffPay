@@ -53,6 +53,7 @@ import {
   getRpcSignaturesForAddress,
   getRpcSlot,
 } from '@/lib/api/offpay-api-client';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { getPrimaryRpcEndpoint } from '@/services/rpc';
 
 import type { OffpayNetwork, RpcAccountRecord } from '@/types/offpay-api';
@@ -128,6 +129,7 @@ const UMBRA_PROGRAM_ID_BY_NETWORK: Partial<Record<OffpayNetwork, string>> = {
 
 const PROTOCOL_FEE_VAULT_OFFSET_ZERO = 0n as never;
 const UMBRA_FORWARDER_SEND_MAX_RETRIES = 1;
+const UMBRA_VAULT_READINESS_POSITIVE_CACHE_TTL_MS = 5 * 60_000;
 const depositProtocolFeeProvider = getHardcodedDepositProtocolFeeProvider();
 const createUtxoProtocolFeeProvider = getHardcodedCreateUtxoProtocolFeeProvider();
 const withdrawalProtocolFeeProvider = getHardcodedWithdrawalProtocolFeeProvider();
@@ -135,6 +137,11 @@ type UmbraCurrentInstructionSeed =
   typeof DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_SHARED_BALANCE_V17_SEED;
 export type UmbraProtocolVersion = 'current' | 'legacy';
 const unsupportedProtocolVersions = new Map<string, Set<UmbraProtocolVersion>>();
+const positiveVaultReadinessCache = new Map<
+  string,
+  { expiresAt: number; readiness: UmbraVaultFeeAccountReadiness }
+>();
+const inFlightVaultReadinessCache = new Map<string, Promise<UmbraVaultFeeAccountReadiness>>();
 
 const LEGACY_FEE_SCHEDULE_SEED = Uint8Array.from([
   219, 103, 184, 147, 198, 147, 112, 38, 55, 38, 235, 215, 80, 203, 76, 46, 100, 134, 54, 137, 90,
@@ -529,6 +536,24 @@ function protocolVersionCacheKey(network: OffpayNetwork): string {
   return `${network}:${UMBRA_PROGRAM_ID_BY_NETWORK[network] ?? 'unsupported'}`;
 }
 
+function vaultReadinessCacheKey(params: {
+  action: UmbraDirectVaultAction;
+  mint: string;
+  network: OffpayNetwork;
+}): string {
+  return `${protocolVersionCacheKey(params.network)}:${params.action}:${params.mint}`;
+}
+
+function clearVaultReadinessCacheForNetwork(network: OffpayNetwork): void {
+  const prefix = `${protocolVersionCacheKey(network)}:`;
+  for (const key of positiveVaultReadinessCache.keys()) {
+    if (key.startsWith(prefix)) positiveVaultReadinessCache.delete(key);
+  }
+  for (const key of inFlightVaultReadinessCache.keys()) {
+    if (key.startsWith(prefix)) inFlightVaultReadinessCache.delete(key);
+  }
+}
+
 function isProtocolVersionSupportedBySession(
   network: OffpayNetwork,
   protocolVersion: UmbraProtocolVersion,
@@ -595,10 +620,13 @@ export function markOffpayUmbraProtocolVersionUnsupported(
   const unsupported = unsupportedProtocolVersions.get(key) ?? new Set<UmbraProtocolVersion>();
   unsupported.add(protocolVersion);
   unsupportedProtocolVersions.set(key, unsupported);
+  clearVaultReadinessCacheForNetwork(network);
 }
 
 export function __clearOffpayUmbraProtocolVersionCacheForTesting(): void {
   unsupportedProtocolVersions.clear();
+  positiveVaultReadinessCache.clear();
+  inFlightVaultReadinessCache.clear();
 }
 
 async function deriveCurrentProtocolFeeAccountAddresses(params: {
@@ -741,7 +769,7 @@ export async function deriveUmbraProtocolFeeAccounts(params: {
   return deriveProtocolFeeAccountChecks({ ...params, protocolVersion: 'current' });
 }
 
-export async function verifyOffpayUmbraVaultFeeAccountReadiness(params: {
+async function verifyOffpayUmbraVaultFeeAccountReadinessUncached(params: {
   action: UmbraDirectVaultAction;
   mint: string;
   network: OffpayNetwork;
@@ -845,6 +873,59 @@ export async function verifyOffpayUmbraVaultFeeAccountReadiness(params: {
     protocolVersion: selectedAvailable?.protocolVersion ?? null,
     protocolVersions,
   };
+}
+
+export async function verifyOffpayUmbraVaultFeeAccountReadiness(params: {
+  action: UmbraDirectVaultAction;
+  mint: string;
+  network: OffpayNetwork;
+}): Promise<UmbraVaultFeeAccountReadiness> {
+  const cacheKey = vaultReadinessCacheKey(params);
+  const now = Date.now();
+  const cached = positiveVaultReadinessCache.get(cacheKey);
+  if (cached != null && cached.expiresAt > now) {
+    const startedAt = mark();
+    measure('umbra.vaultReadiness.cacheHit', startedAt, {
+      action: params.action,
+      mint: params.mint,
+      network: params.network,
+    });
+    return cached.readiness;
+  }
+  if (cached != null) {
+    positiveVaultReadinessCache.delete(cacheKey);
+  }
+
+  const inFlight = inFlightVaultReadinessCache.get(cacheKey);
+  if (inFlight != null) {
+    const startedAt = mark();
+    try {
+      return await inFlight;
+    } finally {
+      measure('umbra.vaultReadiness.inFlightJoin', startedAt, {
+        action: params.action,
+        mint: params.mint,
+        network: params.network,
+      });
+    }
+  }
+
+  const promise = verifyOffpayUmbraVaultFeeAccountReadinessUncached(params).then((readiness) => {
+    if (readiness.available) {
+      positiveVaultReadinessCache.set(cacheKey, {
+        expiresAt: Date.now() + UMBRA_VAULT_READINESS_POSITIVE_CACHE_TTL_MS,
+        readiness,
+      });
+    }
+    return readiness;
+  });
+  inFlightVaultReadinessCache.set(cacheKey, promise);
+
+  try {
+    return await promise;
+  } finally {
+    inFlightVaultReadinessCache.delete(cacheKey);
+  }
 }
 
 export async function assertOffpayUmbraVaultFeeAccountsReady(params: {
@@ -1053,20 +1134,28 @@ export function createOffpayUmbraAccountInfoProvider(
   return async (addresses) => {
     if (addresses.length === 0) return new Map();
 
-    const response = await getRpcAccounts({
-      addresses: addresses.map(toRpcString),
-      network,
-    });
-    const result = new Map<AccountAddress, MaybeEncodedAccount>();
+    const startedAt = mark();
+    try {
+      const response = await getRpcAccounts({
+        addresses: addresses.map(toRpcString),
+        network,
+      });
+      const result = new Map<AccountAddress, MaybeEncodedAccount>();
 
-    addresses.forEach((requestedAddress, index) => {
-      result.set(
-        requestedAddress,
-        toMaybeEncodedAccount(requestedAddress, response.accounts[index]),
-      );
-    });
+      addresses.forEach((requestedAddress, index) => {
+        result.set(
+          requestedAddress,
+          toMaybeEncodedAccount(requestedAddress, response.accounts[index]),
+        );
+      });
 
-    return result;
+      return result;
+    } finally {
+      measure('umbra.rpc.accountInfoProvider', startedAt, {
+        accountCount: addresses.length,
+        network,
+      });
+    }
   };
 }
 
@@ -1191,10 +1280,14 @@ export async function verifyOffpayUmbraRpcReadiness(network: OffpayNetwork): Pro
   slot: bigint;
 }> {
   assertUmbraNetworkSupportedForProviders(network);
+  const startedAt = mark();
   const [blockhash, slot] = await Promise.all([
     getRpcLatestBlockhash(network),
     getRpcSlot(network),
   ]);
+  measure('umbra.rpc.readiness', startedAt, {
+    network,
+  });
 
   return {
     blockhash: blockhash.blockhash,

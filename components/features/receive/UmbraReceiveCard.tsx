@@ -11,7 +11,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
-import type { UmbraPrivacyReceipt } from '@/store/umbraPrivacyStore';
+import type { UmbraPendingClaimUtxo } from '@/lib/umbra/umbra-execution';
 
 /**
  * UI surface for the Umbra private-receive flow.
@@ -27,6 +27,7 @@ const PRIVATE_CARD_COLORS = [
   colors.brand.iceBlue,
   colors.brand.whiteStream,
 ] as const;
+const CLAIM_PREVIEW_DEFAULT_LIMIT = 2;
 
 type StatusTone = 'neutral' | 'success' | 'warning' | 'error';
 
@@ -48,6 +49,8 @@ interface UmbraReceiveCardProps {
   };
   pendingClaimPanel?: {
     pendingCount: number;
+    pendingClaims?: readonly UmbraPendingClaimUtxo[];
+    previewLimit?: number;
     status?: string | null;
     statusTone?: StatusTone;
     buttonLabel: string;
@@ -59,12 +62,6 @@ interface UmbraReceiveCardProps {
     onViewAllPress?: () => void;
     accessibilityLabel: string;
   };
-  /** Recent claim/private receipts to surface inline. */
-  history?: readonly UmbraPrivacyReceipt[];
-  /** Maximum number of receipts to show inline before the View all CTA. */
-  historyLimit?: number;
-  /** Tap handler for the "View all" CTA. Hidden when omitted. */
-  onViewAllHistory?: () => void;
   /**
    * Replays the staggered entrance of the inner cards whenever this
    * value changes (e.g. when the receive screen switches to the
@@ -180,7 +177,7 @@ const SetupSection = memo(function SetupSection({
                 accessibilityState={{ disabled, busy: loading }}
                 style={({ pressed }) => [
                   styles.setupActionButton,
-                  (disabled || loading) && styles.ctaButtonDisabled,
+                  disabled && !loading && styles.ctaButtonDisabled,
                   pressed && !(disabled || loading) ? styles.pressed : null,
                 ]}
               >
@@ -239,7 +236,75 @@ interface ClaimSectionProps {
   allowEmptyAction?: boolean;
   accessibilityLabel: string;
   pendingCount: number;
+  pendingClaims?: readonly UmbraPendingClaimUtxo[];
+  previewLimit?: number;
 }
+
+function formatClaimPreviewTimestamp(ms: number | null): string {
+  if (ms == null) return 'Unknown';
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  const delta = Date.now() - ms;
+  if (delta >= 0 && delta < 60_000) return 'Now';
+  if (delta >= 60_000 && delta < 60 * 60_000) {
+    return `${Math.max(1, Math.round(delta / 60_000))}m`;
+  }
+  if (delta >= 60 * 60_000 && delta < 24 * 60 * 60_000) {
+    return `${Math.max(1, Math.round(delta / (60 * 60_000)))}h`;
+  }
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function shortenClaimAddress(address: string | null, head = 4, tail = 4): string {
+  if (address == null || address.length === 0) return 'Unknown sender';
+  if (address.length <= head + tail + 1) return address;
+  return `${address.slice(0, head)}…${address.slice(-tail)}`;
+}
+
+const ClaimPreviewRow = memo(function ClaimPreviewRow({
+  utxo,
+}: {
+  utxo: UmbraPendingClaimUtxo;
+}): React.JSX.Element {
+  return (
+    <View style={styles.claimPreviewRow}>
+      <View style={styles.claimPreviewIcon}>
+        <Ionicons name="lock-closed" size={13} color={colors.brand.deepShadow} />
+      </View>
+      <View style={styles.claimPreviewTextBlock}>
+        <Text
+          variant="captionBold"
+          color={colors.text.primary}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1}
+          style={styles.claimPreviewTitle}
+        >
+          {utxo.kind === 'receiver' ? 'Receiver claim' : 'Self claim'}
+        </Text>
+        <Text
+          variant="caption"
+          color={colors.text.secondary}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1}
+          style={styles.claimPreviewSubtitle}
+        >
+          {shortenClaimAddress(utxo.senderBase58)} · #{utxo.insertionIndex}
+        </Text>
+      </View>
+      <View style={styles.claimPreviewMetaChip}>
+        <Text
+          variant="caption"
+          color={colors.text.tertiary}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1}
+          style={styles.claimPreviewMetaText}
+        >
+          {formatClaimPreviewTimestamp(utxo.depositTimestampMs)}
+        </Text>
+      </View>
+    </View>
+  );
+});
 
 const ClaimSection = memo(function ClaimSection({
   status,
@@ -253,10 +318,17 @@ const ClaimSection = memo(function ClaimSection({
   allowEmptyAction = false,
   accessibilityLabel,
   pendingCount,
+  pendingClaims,
+  previewLimit = CLAIM_PREVIEW_DEFAULT_LIMIT,
 }: ClaimSectionProps): React.JSX.Element {
   const statusColor = statusToneColor(statusTone);
   const hasPending = pendingCount > 0;
   const claimDisabled = (!hasPending && !allowEmptyAction) || disabled;
+  const visibleClaims = useMemo(
+    () => (pendingClaims ?? []).slice(0, Math.max(0, previewLimit)),
+    [pendingClaims, previewLimit],
+  );
+  const hiddenClaimCount = Math.max(0, pendingCount - visibleClaims.length);
 
   return (
     <Animated.View layout={LinearTransition.duration(200)}>
@@ -331,6 +403,26 @@ const ClaimSection = memo(function ClaimSection({
           </Text>
         )}
 
+        {hasPending && visibleClaims.length > 0 ? (
+          <View style={styles.claimPreviewList}>
+            {visibleClaims.map((utxo) => (
+              <ClaimPreviewRow key={utxo.id} utxo={utxo} />
+            ))}
+            {hiddenClaimCount > 0 ? (
+              <Text
+                variant="caption"
+                color={colors.text.tertiary}
+                numberOfLines={1}
+                maxFontSizeMultiplier={1}
+                align="center"
+                style={styles.claimPreviewMoreText}
+              >
+                +{hiddenClaimCount} more in all claims
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         {status != null && status.length > 0 ? (
           <Text
             variant="small"
@@ -353,7 +445,7 @@ const ClaimSection = memo(function ClaimSection({
             accessibilityState={{ disabled: claimDisabled || loading, busy: loading }}
             style={({ pressed }) => [
               styles.claimActionButton,
-              (claimDisabled || loading) && styles.ctaButtonDisabled,
+              claimDisabled && !loading && styles.ctaButtonDisabled,
               pressed && !(claimDisabled || loading) ? styles.pressed : null,
             ]}
           >
@@ -395,76 +487,6 @@ const ClaimSection = memo(function ClaimSection({
 });
 
 // ---------------------------------------------------------------------------
-// History card — eyebrow + View all + simple stack of rows.
-// ---------------------------------------------------------------------------
-
-interface UmbraHistoryRowProps {
-  receipt: UmbraPrivacyReceipt;
-}
-
-const UmbraHistoryRow = memo(function UmbraHistoryRow({
-  receipt,
-}: UmbraHistoryRowProps): React.JSX.Element {
-  const subtitle = formatReceiptSubtitle(receipt);
-  return (
-    <View style={styles.historyRow}>
-      <View style={styles.historyTextBlock}>
-        <Text
-          variant="captionBold"
-          color={colors.text.primary}
-          numberOfLines={1}
-          maxFontSizeMultiplier={1}
-          style={styles.historyTitle}
-        >
-          {receipt.title}
-        </Text>
-        <Text
-          variant="caption"
-          color={colors.text.secondary}
-          numberOfLines={2}
-          maxFontSizeMultiplier={1}
-          style={styles.historySubtitle}
-        >
-          {subtitle}
-        </Text>
-      </View>
-      <View style={styles.historyTimestampChip}>
-        <Text
-          variant="caption"
-          color={colors.text.tertiary}
-          numberOfLines={1}
-          maxFontSizeMultiplier={1}
-          style={styles.historyTimestampText}
-        >
-          {formatReceiptTimestamp(receipt.createdAt)}
-        </Text>
-      </View>
-    </View>
-  );
-});
-
-function formatReceiptSubtitle(receipt: UmbraPrivacyReceipt): string {
-  if (receipt.subtitle.length === 0) return receipt.action;
-  return receipt.subtitle;
-}
-
-function formatReceiptTimestamp(createdAt: number): string {
-  const now = Date.now();
-  const delta = now - createdAt;
-  if (delta < 60_000) return 'Just now';
-  if (delta < 60 * 60_000) {
-    const mins = Math.max(1, Math.round(delta / 60_000));
-    return `${mins}m ago`;
-  }
-  if (delta < 24 * 60 * 60_000) {
-    const hours = Math.max(1, Math.round(delta / (60 * 60_000)));
-    return `${hours}h ago`;
-  }
-  const days = Math.max(1, Math.round(delta / (24 * 60 * 60_000)));
-  return `${days}d ago`;
-}
-
-// ---------------------------------------------------------------------------
 // Card root
 // ---------------------------------------------------------------------------
 
@@ -472,16 +494,8 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
   unavailableMessage,
   setupPanel,
   pendingClaimPanel,
-  history,
-  historyLimit = 3,
-  onViewAllHistory,
   revealKey,
 }: UmbraReceiveCardProps): React.JSX.Element {
-  const trimmedHistory = useMemo(() => {
-    if (history == null || history.length === 0) return [];
-    return history.slice(0, historyLimit);
-  }, [history, historyLimit]);
-
   return (
     <Animated.View
       entering={FadeIn.duration(220)}
@@ -551,56 +565,9 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
               allowEmptyAction={pendingClaimPanel.allowEmptyAction}
               accessibilityLabel={pendingClaimPanel.accessibilityLabel}
               pendingCount={pendingClaimPanel.pendingCount}
+              pendingClaims={pendingClaimPanel.pendingClaims}
+              previewLimit={pendingClaimPanel.previewLimit}
             />
-          </StaggerRevealItem>
-        ) : null}
-
-        {/* History */}
-        {trimmedHistory.length > 0 ? (
-          <StaggerRevealItem index={2} trigger={revealKey}>
-            <LinearGradient
-              colors={[...PRIVATE_CARD_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.bodyCard}
-            >
-              <View style={styles.historyHeader}>
-                <Text
-                  variant="caption"
-                  color={colors.text.tertiary}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={1}
-                  style={styles.eyebrow}
-                >
-                  RECENT ACTIVITY
-                </Text>
-                {onViewAllHistory != null ? (
-                  <Pressable
-                    onPress={onViewAllHistory}
-                    accessibilityRole="button"
-                    accessibilityLabel="View all private receive activity"
-                    hitSlop={8}
-                    style={({ pressed }) => [styles.viewAllPressable, pressed && styles.pressed]}
-                  >
-                    <Text
-                      variant="captionBold"
-                      color={colors.brand.deepShadow}
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={1}
-                      style={styles.viewAllText}
-                    >
-                      View all
-                    </Text>
-                    <Ionicons name="chevron-forward" size={14} color={colors.brand.deepShadow} />
-                  </Pressable>
-                ) : null}
-              </View>
-              <View style={styles.historyList}>
-                {trimmedHistory.map((receipt) => (
-                  <UmbraHistoryRow key={receipt.id} receipt={receipt} />
-                ))}
-              </View>
-            </LinearGradient>
           </StaggerRevealItem>
         ) : null}
       </View>
@@ -783,6 +750,62 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     paddingTop: spacing.xs,
   },
+  claimPreviewList: {
+    gap: spacing.xs,
+  },
+  claimPreviewRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.lg,
+    borderCurve: 'continuous',
+    backgroundColor: colors.glass.frostFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+  },
+  claimPreviewIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand.whiteStream,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    flexShrink: 0,
+  },
+  claimPreviewTextBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
+  },
+  claimPreviewTitle: {
+    fontFamily: fontFamily.semiBold,
+  },
+  claimPreviewSubtitle: {
+    lineHeight: 15,
+  },
+  claimPreviewMetaChip: {
+    minHeight: 24,
+    minWidth: 42,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.glass.badgeFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    flexShrink: 0,
+  },
+  claimPreviewMetaText: {
+    fontFamily: fontFamily.uiSemiBold,
+  },
+  claimPreviewMoreText: {
+    fontFamily: fontFamily.uiSemiBold,
+  },
   claimButtonWrap: {
     width: '100%',
     alignItems: 'center',
@@ -813,63 +836,5 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.78,
-  },
-
-  // History.
-  historyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  viewAllPressable: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radii.full,
-  },
-  viewAllText: {
-    fontFamily: fontFamily.semiBold,
-  },
-  historyList: {
-    gap: spacing.sm,
-  },
-  historyRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  historyTextBlock: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  historyTitle: {
-    fontFamily: fontFamily.semiBold,
-  },
-  historySubtitle: {
-    lineHeight: 16,
-  },
-  historyTimestampChip: {
-    minHeight: 26,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.badgeFill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  historyTimestampText: {
-    fontFamily: fontFamily.uiSemiBold,
-    letterSpacing: 0.2,
   },
 });

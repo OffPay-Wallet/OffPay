@@ -106,7 +106,8 @@ const {
   markOffpayUmbraProtocolVersionUnsupported,
   verifyOffpayUmbraVaultFeeAccountReadiness,
   verifyOffpayUmbraRpcReadiness,
-} = require('@/lib/umbra/umbra-offpay-providers') as typeof import('@/lib/umbra/umbra-offpay-providers');
+} =
+  require('@/lib/umbra/umbra-offpay-providers') as typeof import('@/lib/umbra/umbra-offpay-providers');
 
 const TEST_ADDRESS = 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw';
 const TEST_OWNER = '11111111111111111111111111111111';
@@ -550,6 +551,35 @@ describe('umbra-offpay-providers', () => {
       addresses: expect.arrayContaining(accounts.map((account) => account.address)),
       network: 'devnet',
     });
+  });
+
+  it('reuses positive Umbra vault readiness without refetching static fee accounts', async () => {
+    const accounts = await deriveUmbraProtocolFeeAccounts({
+      action: 'privateP2pFromPublic',
+      mint: DEVNET_DUSDC_MINT,
+      network: 'devnet',
+    });
+    mockGetRpcAccounts.mockResolvedValue({
+      network: 'devnet',
+      accounts: accounts.map((account) => feeAccountRecord(account, DEVNET_UMBRA_PROGRAM_ID)),
+    });
+
+    await expect(
+      verifyOffpayUmbraVaultFeeAccountReadiness({
+        action: 'privateP2pFromPublic',
+        mint: DEVNET_DUSDC_MINT,
+        network: 'devnet',
+      }),
+    ).resolves.toMatchObject({ available: true });
+    await expect(
+      verifyOffpayUmbraVaultFeeAccountReadiness({
+        action: 'privateP2pFromPublic',
+        mint: DEVNET_DUSDC_MINT,
+        network: 'devnet',
+      }),
+    ).resolves.toMatchObject({ available: true });
+
+    expect(mockGetRpcAccounts).toHaveBeenCalledTimes(1);
   });
 
   it('does not select legacy fee accounts after current protocol is marked unsupported', async () => {

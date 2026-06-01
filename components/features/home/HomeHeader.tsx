@@ -91,7 +91,7 @@ function HomeHeaderComponent({
   const compactHeader = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
   const denseHeader = windowWidth < 340 || fontScale > 1.18;
   const showWalletAddress = publicKey != null || privacyHidden;
-  const avatarSize = denseHeader ? 32 : ultraCompactHeader ? 34 : compactHeader ? 38 : 42;
+  const avatarSize = denseHeader ? 36 : ultraCompactHeader ? 38 : compactHeader ? 40 : 44;
   const actionButtonSize = denseHeader ? 36 : ultraCompactHeader ? 38 : compactHeader ? 40 : 44;
   const toggleWidth = denseHeader ? 48 : ultraCompactHeader ? 52 : compactHeader ? 58 : 66;
   const toggleHeight = denseHeader ? 30 : ultraCompactHeader ? 32 : compactHeader ? 34 : 36;
@@ -104,9 +104,29 @@ function HomeHeaderComponent({
   const headerBottomGap = denseHeader ? spacing.xs : spacing.sm;
   const headerGap = denseHeader || ultraCompactHeader ? spacing.xs : spacing.sm;
   const walletGap = denseHeader || ultraCompactHeader ? spacing.xs : spacing.sm;
-  const walletPaddingLeft = denseHeader || ultraCompactHeader ? spacing.xs : spacing.sm;
-  const walletPaddingRight = denseHeader || ultraCompactHeader ? spacing.sm : spacing.md;
+  const screenHorizontalPadding = denseHeader
+    ? spacing.md
+    : compactHeader
+      ? spacing.lg
+      : spacing['2xl'];
+  const headerFrameWidth = Math.min(430, windowWidth - screenHorizontalPadding * 2);
   const actionGap = denseHeader || ultraCompactHeader ? 2 : spacing.xs;
+  const actionClusterWidth =
+    Math.max(layout.minTouchTarget, toggleWidth) + actionButtonSize + actionGap + spacing.xs * 2;
+  const walletTextTargetWidth = denseHeader
+    ? 84
+    : ultraCompactHeader
+      ? 96
+      : compactHeader
+        ? 112
+        : 136;
+  const walletTextWidth = Math.max(
+    72,
+    Math.min(
+      walletTextTargetWidth,
+      headerFrameWidth - actionClusterWidth - headerGap - avatarSize - walletGap - spacing.xs,
+    ),
+  );
   const notificationSheetTopOffset =
     headerTopPadding + layout.minTouchTarget + spacing.xs + headerBottomGap + spacing.xs;
   const walletDisplayName = username != null ? `@${username}` : accountName;
@@ -184,27 +204,18 @@ function HomeHeaderComponent({
         importantForAccessibility="no-hide-descendants"
       >
         <View style={[styles.walletPressable, { marginRight: headerGap }]}>
-          <View
-            style={[
-              styles.walletGlass,
-              {
-                gap: walletGap,
-                paddingLeft: walletPaddingLeft,
-                paddingRight: walletPaddingRight,
-              },
-            ]}
-          >
+          <View style={[styles.walletIdentity, { gap: walletGap }]}>
             <SkeletonBlock width={avatarSize} height={avatarSize} radius={radii.full} />
-            <View style={styles.walletTextBlock}>
+            <View style={[styles.walletTextBlock, { width: walletTextWidth }]}>
               <SkeletonBlock
-                width={denseHeader ? 78 : ultraCompactHeader ? 92 : compactHeader ? 112 : 132}
-                height={denseHeader ? 15 : 18}
+                width={walletTextWidth}
+                height={denseHeader ? 19 : 23}
                 radius={radii.full}
               />
               {showWalletAddress ? (
                 <SkeletonBlock
-                  width={denseHeader ? 72 : ultraCompactHeader ? 84 : compactHeader ? 94 : 112}
-                  height={denseHeader ? 10 : 12}
+                  width={Math.min(walletTextWidth, denseHeader ? 72 : 104)}
+                  height={denseHeader ? 12 : 15}
                   radius={radii.full}
                   style={styles.walletSkeletonAddress}
                 />
@@ -246,18 +257,9 @@ function HomeHeaderComponent({
         accessibilityRole="button"
         accessibilityLabel="Open accounts"
       >
-        <View
-          style={[
-            styles.walletGlass,
-            {
-              gap: walletGap,
-              paddingLeft: walletPaddingLeft,
-              paddingRight: walletPaddingRight,
-            },
-          ]}
-        >
+        <View style={[styles.walletIdentity, { gap: walletGap }]}>
           <WalletAvatar size={avatarSize} solidFill />
-          <View style={styles.walletTextBlock}>
+          <View style={[styles.walletTextBlock, { width: walletTextWidth }]}>
             <Text
               variant="bodyBold"
               color={colors.text.primary}
@@ -265,28 +267,33 @@ function HomeHeaderComponent({
               numberOfLines={1}
               ellipsizeMode="tail"
               adjustsFontSizeToFit
-              minimumFontScale={0.82}
-              maxFontSizeMultiplier={1.1}
+              minimumFontScale={0.84}
+              maxFontSizeMultiplier={1.05}
             >
               {walletDisplayName}
             </Text>
             {showWalletAddress && privacyHidden ? (
-              <Text
-                variant="small"
-                color={colors.text.secondary}
-                style={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
-                numberOfLines={1}
-                maxFontSizeMultiplier={1}
-              >
-                ****
-              </Text>
+              <View style={styles.walletAddressRow}>
+                <Text
+                  variant="small"
+                  color={colors.text.secondary}
+                  style={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1}
+                >
+                  ****
+                </Text>
+              </View>
             ) : showWalletAddress ? (
-              <CopyableAddress
-                address={publicKey ?? ''}
-                color={colors.text.secondary}
-                iconSize={denseHeader ? 11 : 13}
-                textStyle={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
-              />
+              <View style={styles.walletAddressRow}>
+                <CopyableAddress
+                  address={publicKey ?? ''}
+                  color={colors.text.secondary}
+                  iconSize={denseHeader ? 12 : 14}
+                  maxFontSizeMultiplier={1.05}
+                  textStyle={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
+                />
+              </View>
             ) : null}
           </View>
         </View>
@@ -402,44 +409,48 @@ const styles = StyleSheet.create({
     minWidth: 0,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    overflow: 'hidden',
   },
   walletPressed: {
     opacity: 0.72,
   },
-  walletGlass: {
-    minHeight: layout.minTouchTarget + spacing.xs,
+  walletIdentity: {
+    minHeight: layout.minTouchTarget,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingVertical: spacing.xs,
-    paddingLeft: spacing.sm,
-    paddingRight: spacing.md,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.clearFill,
+    minWidth: 0,
   },
   walletTextBlock: {
-    flex: 1,
+    flexShrink: 1,
     minWidth: 0,
-    gap: 2,
+    justifyContent: 'center',
+    gap: 1,
+    overflow: 'hidden',
   },
   walletName: {
-    fontFamily: fontFamily.displaySemiBold,
-    lineHeight: 20,
+    color: colors.text.primary,
+    fontFamily: fontFamily.uiBold,
+    fontSize: 18,
+    lineHeight: 22,
   },
   walletNameDense: {
     fontSize: 16,
-    lineHeight: 18,
+    lineHeight: 20,
+  },
+  walletAddressRow: {
+    width: '100%',
+    minWidth: 0,
+    overflow: 'hidden',
   },
   walletAddress: {
-    fontFamily: fontFamily.mono,
+    color: colors.text.secondary,
+    fontFamily: fontFamily.monoMedium,
     fontSize: 12,
     lineHeight: 15,
   },
   walletAddressDense: {
-    fontSize: 10,
-    lineHeight: 12,
+    fontSize: 11,
+    lineHeight: 14,
   },
   walletSkeletonAddress: {
     marginTop: 2,

@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
+  Easing,
   FadeIn,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
-  withSpring,
-  type WithSpringConfig,
+  withTiming,
+  type WithTimingConfig,
 } from 'react-native-reanimated';
 
 import { SkeletonBlock } from '@/components/ui/Skeleton';
@@ -34,15 +36,20 @@ const MODES: { id: HomeBalanceMode; label: string; accessibilityLabel: string }[
   { id: 'shielded', label: 'Shielded', accessibilityLabel: 'Show shielded wallet view' },
 ];
 const TRACK_PADDING = 4;
-const SEGMENT_GAP = 4;
+const SEGMENT_GAP = 2;
 
-// Snappy spring — the thumb slides with a tight, smooth motion and a
-// barely-perceptible settle. Runs entirely on the UI thread.
-const THUMB_SPRING: WithSpringConfig = {
-  damping: 22,
-  stiffness: 320,
-  mass: 0.7,
+// Timing-only thumb motion: smooth and predictable, with no spring settle.
+const THUMB_TIMING: WithTimingConfig = {
+  duration: 220,
+  easing: Easing.out(Easing.cubic),
 };
+
+function modeIndex(mode: HomeBalanceMode): number {
+  for (let i = 0; i < MODES.length; i += 1) {
+    if (MODES[i].id === mode) return i;
+  }
+  return 0;
+}
 
 export function HomeBalanceModeDivider({
   selectedMode,
@@ -51,73 +58,69 @@ export function HomeBalanceModeDivider({
   onShieldedPressIn,
 }: HomeBalanceModeDividerProps): React.JSX.Element {
   const { width, height, fontScale } = useWindowDimensions();
-  const [trackWidth, setTrackWidth] = useState(0);
   const dense = width < 340 || fontScale > 1.18;
   const compact = width < 390 || height < 760 || fontScale > 1.08;
-  const trackHeight = dense ? 44 : compact ? 48 : 54;
+  const trackHeight = dense ? 44 : compact ? 46 : 50;
   const segmentHeight = trackHeight - TRACK_PADDING * 2;
-  const segmentWidth = Math.max(0, (trackWidth - TRACK_PADDING * 2 - SEGMENT_GAP) / MODES.length);
-  const selectedIndex = useMemo(
-    () =>
-      Math.max(
-        0,
-        MODES.findIndex((mode) => mode.id === selectedMode),
-      ),
-    [selectedMode],
-  );
-  const thumbOffset = useSharedValue(0);
-  // Per-segment stride (width + gap) mirrored into a shared value so
-  // the press handler can move the thumb on the UI thread without
-  // reading React state inside a worklet.
-  const segmentStride = useSharedValue(0);
-
-  useEffect(() => {
-    segmentStride.value = segmentWidth + SEGMENT_GAP;
-  }, [segmentStride, segmentWidth]);
+  const labelFontSize = compact ? 14 : 15;
+  const labelLineHeight = compact ? 18 : 20;
+  const trackWidth = useSharedValue(0);
+  const selectedIndex = useSharedValue(modeIndex(selectedMode));
 
   // Reconcile the thumb with the prop for *external* mode changes only.
   // Taps already moved the thumb in the press handler, so when the prop
   // later catches up this resolves to the same target (a no-op).
   useEffect(() => {
-    thumbOffset.value = withSpring(selectedIndex * (segmentWidth + SEGMENT_GAP), THUMB_SPRING);
-  }, [selectedIndex, segmentWidth, thumbOffset]);
+    selectedIndex.value = withTiming(modeIndex(selectedMode), THUMB_TIMING);
+  }, [selectedIndex, selectedMode]);
 
   // Slide the thumb immediately on tap, on the UI thread, decoupled
   // from the parent's (heavy) Portfolio/Shielded content swap.
   const handleSelect = useCallback(
-    (mode: HomeBalanceMode, index: number) => {
-      thumbOffset.value = withSpring(index * segmentStride.value, THUMB_SPRING);
+    (mode: HomeBalanceMode) => {
+      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING);
       onChangeMode(mode);
     },
-    [onChangeMode, segmentStride, thumbOffset],
+    [onChangeMode, selectedIndex],
   );
 
-  const thumbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: thumbOffset.value }],
-  }));
+  const segmentWidth = useDerivedValue(() => {
+    if (trackWidth.value <= 0) return 0;
+    return Math.max(
+      0,
+      (trackWidth.value - TRACK_PADDING * 2 - SEGMENT_GAP * (MODES.length - 1)) / MODES.length,
+    );
+  });
+
+  const thumbStyle = useAnimatedStyle(() => {
+    const w = segmentWidth.value;
+    return {
+      width: w,
+      height: segmentHeight,
+      borderRadius: segmentHeight / 2,
+      opacity: w > 0 ? 1 : 0,
+      transform: [{ translateX: selectedIndex.value * (w + SEGMENT_GAP) }],
+    };
+  });
+
+  const handleTrackLayout = useCallback(
+    (event: { nativeEvent: { layout: { width: number } } }) => {
+      const nextWidth = event.nativeEvent.layout.width;
+      if (Math.abs(trackWidth.value - nextWidth) > 0.5) {
+        trackWidth.value = nextWidth;
+      }
+    },
+    [trackWidth],
+  );
 
   return (
     <Animated.View
       entering={FadeIn.duration(180).delay(60)}
       style={[styles.wrapper, compact && styles.wrapperCompact]}
     >
-      <View
-        style={[styles.track, { height: trackHeight }]}
-        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-      >
-        {!loading && segmentWidth > 0 ? (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.thumb,
-              {
-                width: segmentWidth,
-                height: segmentHeight,
-                borderRadius: segmentHeight / 2,
-              },
-              thumbStyle,
-            ]}
-          />
+      <View style={[styles.track, { height: trackHeight }]} onLayout={handleTrackLayout}>
+        {!loading ? (
+          <Animated.View pointerEvents="none" style={[styles.thumb, thumbStyle]} />
         ) : null}
         <View
           style={styles.segmentRow}
@@ -139,10 +142,9 @@ export function HomeBalanceModeDivider({
                   <SkeletonBlock width="100%" height={segmentHeight} radius={segmentHeight / 2} />
                 </View>
               ))
-            : MODES.map((mode, index) => {
+            : MODES.map((mode) => {
                 const selected = selectedMode === mode.id;
-                const handlePressIn =
-                  mode.id === 'shielded' ? onShieldedPressIn : undefined;
+                const handlePressIn = mode.id === 'shielded' ? onShieldedPressIn : undefined;
                 return (
                   <Pressable
                     key={mode.id}
@@ -151,7 +153,7 @@ export function HomeBalanceModeDivider({
                     accessibilityLabel={mode.accessibilityLabel}
                     onPressIn={handlePressIn}
                     onPress={() => {
-                      if (!selected) handleSelect(mode.id, index);
+                      if (!selected) handleSelect(mode.id);
                     }}
                     hitSlop={6}
                     style={({ pressed }) => [
@@ -168,9 +170,10 @@ export function HomeBalanceModeDivider({
                       color={selected ? colors.text.onAccent : colors.text.secondary}
                       style={[
                         styles.segmentText,
+                        selected ? styles.segmentTextSelected : undefined,
                         {
-                          fontSize: compact ? 15 : 16,
-                          lineHeight: compact ? 18 : 20,
+                          fontSize: labelFontSize,
+                          lineHeight: labelLineHeight,
                         },
                       ]}
                       numberOfLines={1}
@@ -196,20 +199,23 @@ const styles = StyleSheet.create({
   wrapperCompact: {
     marginBottom: spacing.lg,
   },
-  // Container-less segmented control — no track background, border, or
-  // shadow. The active segment is a soft translucent pill floating on
-  // the bare gradient (reference behaviour); inactive is muted text.
   track: {
     width: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
     padding: TRACK_PADDING,
+    backgroundColor: colors.surface.pressed,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    overflow: 'hidden',
   },
   thumb: {
     position: 'absolute',
     top: TRACK_PADDING,
     left: TRACK_PADDING,
     backgroundColor: colors.glass.strongFill,
+    borderWidth: 1,
+    borderColor: colors.glass.rim,
   },
   segmentRow: {
     flex: 1,
@@ -234,7 +240,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   segmentPressed: {
-    backgroundColor: colors.glass.frostFill,
+    backgroundColor: colors.surface.pressed,
   },
   segmentText: {
     fontFamily: fontFamily.uiSemiBold,
@@ -242,5 +248,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
     includeFontPadding: false,
     letterSpacing: 0,
+  },
+  segmentTextSelected: {
+    fontFamily: fontFamily.uiBold,
   },
 });

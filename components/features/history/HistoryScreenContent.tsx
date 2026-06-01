@@ -22,10 +22,7 @@ import { fontFamily } from '@/constants/typography';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
-import {
-  isOffpayOfflineP2pReceipt,
-  shortenWalletAddress,
-} from '@/lib/api/offpay-wallet-data';
+import { isOffpayOfflineP2pReceipt, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
@@ -43,12 +40,11 @@ function runAfterTapFrame(task: () => void): void {
 }
 
 /**
- * Map an Umbra-side receipt (claim / shield / unshield / register /
+ * Map an Umbra-side receipt (shield / unshield / register /
  * mixer-register) into the `OffpayLocalReceiptViewInput` shape that
- * `buildWalletHistoryGroups` already understands. This lets the
- * shared history list group claim activity alongside on-chain
- * transactions and offline-P2P receipts without growing a new
- * receipt-type pathway.
+ * `buildWalletHistoryGroups` already understands. Claim receipts stay
+ * out of wallet history; claimed UTXO tracking lives in the privacy
+ * store's insertion-index set instead.
  */
 function mapUmbraReceiptToHistoryInput(receipt: UmbraPrivacyReceipt): OffpayLocalReceiptViewInput {
   // 'unshield' moves value back to the public balance; everything
@@ -98,7 +94,11 @@ function mapAgenticPrivateReceiptToHistoryInput(
     routeLabel: 'Yuga Transfer',
     privacyLabel: receipt.route === 'normal' ? 'Public route' : 'Private route',
     programLabel:
-      receipt.route === 'normal' ? 'Normal transfer' : receipt.route === 'umbra' ? 'Umbra' : 'MagicBlock',
+      receipt.route === 'normal'
+        ? 'Normal transfer'
+        : receipt.route === 'umbra'
+          ? 'Umbra'
+          : 'MagicBlock',
   };
 }
 
@@ -125,7 +125,9 @@ export function HistoryScreenContent(): React.JSX.Element {
         (network == null || receipt.network === network) && isOffpayOfflineP2pReceipt(receipt),
     );
     const umbraInputs: OffpayLocalReceiptViewInput[] = umbraReceipts
-      .filter((receipt) => network == null || receipt.network === network)
+      .filter(
+        (receipt) => receipt.action !== 'claim' && (network == null || receipt.network === network),
+      )
       .map(mapUmbraReceiptToHistoryInput);
     const agenticPrivateInputs = privatePaymentReceipts
       .filter(
