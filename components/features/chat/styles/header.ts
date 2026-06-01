@@ -9,7 +9,7 @@ import { HEADER_BUTTON_SIZE } from '../constants';
 export const headerStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
   },
   scrollContent: {
     flexGrow: 1,

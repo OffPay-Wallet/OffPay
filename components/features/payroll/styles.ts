@@ -13,7 +13,7 @@ export const payrollStyles = StyleSheet.create({
     borderColor: colors.glass.rim,
     padding: spacing.lg,
     gap: spacing.md,
-    boxShadow: '0 2px 10px rgba(14, 42, 53, 0.08)',
+    boxShadow: '0 2px 10px rgba(16, 16, 16, 0.08)',
   },
   headerRow: {
     flexDirection: 'row',
@@ -105,7 +105,7 @@ export const payrollStyles = StyleSheet.create({
     gap: spacing.xs,
   },
   primaryButtonDisabled: {
-    backgroundColor: 'rgba(14, 42, 53, 0.4)',
+    backgroundColor: 'rgba(16, 16, 16, 0.4)',
   },
   primaryButtonText: {
     fontFamily: fontFamily.uiSemiBold,

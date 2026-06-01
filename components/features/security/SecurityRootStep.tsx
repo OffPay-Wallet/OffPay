@@ -113,8 +113,8 @@ const styles = StyleSheet.create({
     boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.72)',
   },
   toggleOn: {
-    backgroundColor: colors.glass.cyanWash,
-    borderColor: colors.glass.azureCyanHalf,
+    backgroundColor: colors.glass.smokeWash,
+    borderColor: colors.glass.accentVeil,
     alignItems: 'flex-end',
   },
   toggleOff: {
@@ -126,8 +126,8 @@ const styles = StyleSheet.create({
     width: layout.iconSizeNav,
     height: layout.iconSizeNav,
     borderRadius: radii.full,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
-  toggleKnobOn: { backgroundColor: colors.brand.azureCyan },
+  toggleKnobOn: { backgroundColor: colors.brand.glossAccent },
   toggleKnobOff: { backgroundColor: colors.glass.strongFill },
 });

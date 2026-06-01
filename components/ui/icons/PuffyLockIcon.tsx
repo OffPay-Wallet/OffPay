@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyLockIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyLockIconProps {
 
 export function PuffyLockIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyLockIconProps): React.JSX.Element {
   // Bootstrap `bi-lock-fill` (16x16) path.
@@ -26,4 +28,3 @@ export function PuffyLockIcon({
     </Svg>
   );
 }
-

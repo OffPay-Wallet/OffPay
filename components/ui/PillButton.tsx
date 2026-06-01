@@ -1,10 +1,9 @@
 /**
- * PillButton — reusable gradient pill button.
+ * PillButton — reusable solid glossy pill button.
  * Used across Security and other settings modals.
  */
 import React from 'react';
-import { Pressable, StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -25,14 +24,15 @@ export function PillButton({
   disabled = false,
   loading = false,
 }: PillButtonProps): React.JSX.Element {
-  const gradientColors: readonly [string, string] =
-    variant === 'primary'
-      ? [colors.brand.whiteStream, colors.brand.azureCyan]
-      : variant === 'danger'
-        ? [colors.semantic.error, '#A93131']
-        : [colors.glass.strongFill, colors.glass.frostFill];
+  const surfaceStyle =
+    variant === 'primary' ? styles.primary : variant === 'danger' ? styles.danger : styles.neutral;
 
-  const textColor = variant === 'danger' ? colors.text.inverse : colors.text.primary;
+  const textColor =
+    variant === 'primary'
+      ? colors.text.onAccent
+      : variant === 'danger'
+        ? colors.text.inverse
+        : colors.text.primary;
 
   return (
     <Pressable
@@ -42,16 +42,11 @@ export function PillButton({
       accessibilityLabel={label}
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
     >
-      <LinearGradient
-        colors={gradientColors}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.gradient}
-      >
+      <View style={[styles.surface, surfaceStyle]}>
         <Text variant="button" color={textColor} allowFontScaling={false}>
           {label}
         </Text>
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -62,12 +57,21 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 10px 20px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
   },
   disabled: { opacity: 0.4 },
-  gradient: {
+  surface: {
     paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  primary: {
+    backgroundColor: colors.brand.glossAccent,
+  },
+  neutral: {
+    backgroundColor: colors.surface.cardElevated,
+  },
+  danger: {
+    backgroundColor: colors.semantic.error,
   },
 });

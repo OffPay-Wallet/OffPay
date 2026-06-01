@@ -86,7 +86,7 @@ export function PayrollPasteSheet({
 const pasteStyles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(14, 42, 53, 0.32)',
+    backgroundColor: 'rgba(16, 16, 16, 0.32)',
     justifyContent: 'flex-end',
   },
   sheet: {

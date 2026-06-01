@@ -7,16 +7,27 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
+import { WaterKeypadButton } from '@/components/ui/WaterKeypadButton';
 import { PuffyFingerprintIcon } from '@/components/ui/icons/PuffyFingerprintIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { authenticateWithBiometrics } from '@/lib/wallet/biometric-auth';
-import { getSecuritySettings, setWalletLocked, verifyPasscode } from '@/lib/wallet/security-settings';
+import {
+  getSecuritySettings,
+  setWalletLocked,
+  verifyPasscode,
+} from '@/lib/wallet/security-settings';
 import { clearSigningSeedCache } from '@/lib/wallet/signing-seed-cache';
 import { getStoredWalletInfo } from '@/lib/wallet/secure-wallet-store';
 import { resetForgottenWallet } from '@/lib/wallet/wallet-reset';
@@ -40,8 +51,6 @@ interface KeyButtonProps {
   disabled: boolean;
   muted?: boolean;
   frameStyle: ViewStyle;
-  innerLineStyle: ViewStyle;
-  puffStyle: ViewStyle;
   onPress: () => void;
 }
 
@@ -51,28 +60,19 @@ const KeyButton = memo(function KeyButton({
   disabled,
   muted,
   frameStyle,
-  innerLineStyle,
-  puffStyle,
   onPress,
 }: KeyButtonProps): React.JSX.Element {
-  const innerGlass = (
-    <>
-      <View pointerEvents="none" style={[styles.keyPuff, puffStyle]} />
-      <View pointerEvents="none" style={[styles.keyInnerLine, innerLineStyle]} />
-    </>
-  );
-
   if (kind === 'fingerprint') {
     return (
-      <Pressable
-        style={[styles.iconKey, frameStyle]}
+      <WaterKeypadButton
+        frameStyle={frameStyle}
         onPress={onPress}
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel="Unlock with fingerprint"
       >
-        <PuffyFingerprintIcon size={layout.iconSizeTab} color={colors.brand.azureCyan} focused />
-      </Pressable>
+        <PuffyFingerprintIcon size={layout.iconSizeTab} color={colors.text.primary} focused />
+      </WaterKeypadButton>
     );
   }
 
@@ -85,24 +85,24 @@ const KeyButton = memo(function KeyButton({
   const accessibilityRole = kind === 'digit' ? 'keyboardkey' : 'button';
 
   return (
-    <Pressable
-      style={[styles.key, frameStyle, muted ? styles.keyMuted : undefined]}
+    <WaterKeypadButton
+      frameStyle={frameStyle}
       onPress={onPress}
       disabled={disabled}
+      muted={muted}
       accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel}
     >
-      {innerGlass}
       <Text
         variant="h2"
-        color={colors.brand.azureCyan}
+        color={muted ? colors.text.tertiary : colors.text.primary}
         align="center"
         style={styles.keyLabel}
         allowFontScaling={false}
       >
         {label}
       </Text>
-    </Pressable>
+    </WaterKeypadButton>
   );
 });
 
@@ -130,42 +130,19 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
         Math.floor((keypadHeightBudget - keypadGap * 3) / 4),
       ),
     );
-    const keyInnerInset = Math.max(5, Math.round(keySize * 0.08));
-    const keyPuffSize = Math.round(keySize * 0.58);
     const keyFrameStyle = {
       width: keySize,
       height: keySize,
       borderRadius: keySize / 2,
-    } as const;
-    const keyInnerLineStyle = {
-      top: keyInnerInset,
-      right: keyInnerInset,
-      bottom: keyInnerInset,
-      left: keyInnerInset,
-      borderRadius: (keySize - keyInnerInset * 2) / 2,
-    } as const;
-    const keyPuffStyle = {
-      width: keyPuffSize,
-      height: keyPuffSize,
-      borderRadius: keyPuffSize / 2,
     } as const;
     return {
       keypadMaxWidth,
       keypadGap,
       contentGap,
       keyFrameStyle,
-      keyInnerLineStyle,
-      keyPuffStyle,
     };
   }, [compact, height, horizontalPadding, veryCompact, width]);
-  const {
-    keypadMaxWidth,
-    keypadGap,
-    contentGap,
-    keyFrameStyle,
-    keyInnerLineStyle,
-    keyPuffStyle,
-  } = keypadLayout;
+  const { keypadMaxWidth, keypadGap, contentGap, keyFrameStyle } = keypadLayout;
   const resetDialogMaxWidth = Math.min(360, Math.max(280, width - horizontalPadding * 2));
 
   const hasStoredWallet = useWalletStore((state) => state.wallets.length > 0);
@@ -197,6 +174,25 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const autoBiometricPromptedRef = useRef(false);
   const ignoreBackgroundLockUntilRef = useRef(0);
   const backgroundLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Shake animation for wrong passcode
+  const shakeX = useSharedValue(0);
+  const shakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeX.value }],
+  }));
+  const triggerShake = useCallback((): void => {
+    const d = 60;
+    const a = 12;
+    shakeX.value = withSequence(
+      withTiming(-a, { duration: d }),
+      withTiming(a, { duration: d }),
+      withTiming(-a, { duration: d }),
+      withTiming(a, { duration: d }),
+      withTiming(-a * 0.5, { duration: d }),
+      withTiming(a * 0.5, { duration: d }),
+      withTiming(0, { duration: d }),
+    );
+  }, [shakeX]);
 
   const setLockedState = useCallback((nextLocked: boolean): void => {
     lockedRef.current = nextLocked;
@@ -506,12 +502,14 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
         const ok = await verifyPasscode(candidate);
         if (!ok) {
           setToast('Incorrect wallet password.');
+          triggerShake();
           setPasscodeValue('');
           return;
         }
         await unlockWallet();
       } catch {
         setToast('Could not unlock wallet.');
+        triggerShake();
         setPasscodeValue('');
       } finally {
         setUnlockingState(false);
@@ -526,6 +524,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       scheduleBackgroundLock,
       setPasscodeValue,
       setUnlockingState,
+      triggerShake,
       unlockWallet,
       unlocking,
     ],
@@ -640,8 +639,6 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
             kind="fingerprint"
             disabled={inputDisabled}
             frameStyle={keyFrameStyle}
-            innerLineStyle={keyInnerLineStyle}
-            puffStyle={keyPuffStyle}
             onPress={fingerprintPress}
           />
         );
@@ -655,8 +652,6 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
             disabled={passcode.length === 0 || inputDisabled}
             muted={passcode.length === 0}
             frameStyle={keyFrameStyle}
-            innerLineStyle={keyInnerLineStyle}
-            puffStyle={keyPuffStyle}
             onPress={handleClear}
           />
         );
@@ -670,8 +665,6 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
             disabled={passcode.length === 0 || inputDisabled}
             muted={passcode.length === 0}
             frameStyle={keyFrameStyle}
-            innerLineStyle={keyInnerLineStyle}
-            puffStyle={keyPuffStyle}
             onPress={handleDelete}
           />
         );
@@ -683,8 +676,6 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
           label={key}
           disabled={inputDisabled || passcode.length >= 6}
           frameStyle={keyFrameStyle}
-          innerLineStyle={keyInnerLineStyle}
-          puffStyle={keyPuffStyle}
           onPress={digitHandlers[key]!}
         />
       );
@@ -696,8 +687,6 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       handleDelete,
       inputDisabled,
       keyFrameStyle,
-      keyInnerLineStyle,
-      keyPuffStyle,
       passcode.length,
     ],
   );
@@ -730,8 +719,8 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
 
         {showUnlockControls ? (
           <>
-            <View
-              style={styles.dotRow}
+            <Animated.View
+              style={[styles.dotRow, shakeStyle]}
               accessibilityLabel={`${passcode.length} of 6 digits entered`}
             >
               {Array.from({ length: 6 }).map((_, index) => (
@@ -740,7 +729,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
                   style={[styles.dot, index < passcode.length ? styles.dotFilled : styles.dotEmpty]}
                 />
               ))}
-            </View>
+            </Animated.View>
 
             <View style={[styles.keypad, { maxWidth: keypadMaxWidth, gap: keypadGap }]}>
               {keypadRows.map((row, rowIndex) => (
@@ -763,7 +752,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
             >
               <Text
                 variant="buttonSmall"
-                color={colors.brand.azureCyan}
+                color={colors.text.primary}
                 align="center"
                 style={styles.forgotPasswordText}
               >
@@ -834,7 +823,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
                 accessibilityRole="button"
                 accessibilityLabel="Reset wallet and return to onboarding"
               >
-                <Text variant="buttonSmall" color={colors.brand.whiteStream} align="center">
+                <Text variant="buttonSmall" color={colors.text.inverse} align="center">
                   Reset wallet
                 </Text>
               </Pressable>
@@ -851,9 +840,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 10000,
     elevation: 10000,
-    // Flat frosty surface — matches the rest of the wallet-setup
-    // and lock surfaces. No gradient, no glow.
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.surface.background,
   },
   content: {
     flex: 1,
@@ -882,13 +869,15 @@ const styles = StyleSheet.create({
     width: spacing.xl,
     height: spacing.xl,
     borderRadius: radii.full,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   dotFilled: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
+    borderColor: colors.brand.glossAccent,
+    boxShadow: '0 6px 14px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.82)',
   },
   dotEmpty: {
-    backgroundColor: colors.brand.whiteStream,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.surface.cardElevated,
     borderColor: colors.glass.rim,
   },
   keypad: {
@@ -896,34 +885,6 @@ const styles = StyleSheet.create({
   },
   keyRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  key: {
-    position: 'relative',
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.whiteStream,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-  },
-  keyPuff: {
-    // No-op spacer kept for layout parity — see PasscodeSetupScreen.
-    position: 'absolute',
-    top: '21%',
-    left: '21%',
-    backgroundColor: 'transparent',
-  },
-  keyInnerLine: {
-    // No-op holder. Same dimensions, no decoration.
-    position: 'absolute',
-    borderWidth: 0,
-  },
-  keyMuted: {
-    opacity: 0.62,
-  },
-  iconKey: {
-    alignItems: 'center',
     justifyContent: 'center',
   },
   keyLabel: {
@@ -939,7 +900,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
   },
   forgotPasswordButtonPressed: {
-    backgroundColor: 'rgba(252, 252, 255, 0.34)',
+    backgroundColor: colors.surface.pressed,
   },
   forgotPasswordButtonDisabled: {
     opacity: 0.64,
@@ -955,9 +916,10 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+    boxShadow: '0 10px 22px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
   },
   resetDialogLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -969,7 +931,7 @@ const styles = StyleSheet.create({
   },
   resetDialogScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(14, 42, 53, 0.46)',
+    backgroundColor: 'rgba(0, 0, 0, 0.68)',
   },
   resetDialogCard: {
     width: '100%',
@@ -977,9 +939,10 @@ const styles = StyleSheet.create({
     borderRadius: radii['2xl'],
     padding: spacing.xl,
     gap: spacing.xl,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+    boxShadow: '0 24px 54px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
   },
   resetDialogCopy: {
     gap: spacing.sm,
@@ -1005,7 +968,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   resetDialogSecondaryButton: {
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.glass.strongFill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
   },

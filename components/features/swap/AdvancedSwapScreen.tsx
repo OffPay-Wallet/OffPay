@@ -12,7 +12,6 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,7 +27,11 @@ import {
 } from '@/components/ui/ProcessResultScreen';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
-import { SwapReviewFlowScreen, type SwapReviewDetailRow, type SwapReviewTokenLeg } from '@/components/features/swap/SwapReviewFlowScreen';
+import {
+  SwapReviewFlowScreen,
+  type SwapReviewDetailRow,
+  type SwapReviewTokenLeg,
+} from '@/components/features/swap/SwapReviewFlowScreen';
 import { TokenSelectorModal } from '@/components/features/swap/TokenSelectorModal';
 import type { SwapTokenOption } from '@/components/features/swap/types';
 import { colors } from '@/constants/colors';
@@ -44,7 +47,10 @@ import {
   TOKEN_LOGO_CACHE_GC_MS,
   TOKEN_LOGO_CACHE_STALE_MS,
 } from '@/hooks/useOffpayTokenLogoMap';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import {
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
@@ -73,11 +79,6 @@ const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const ADVANCED_CONTENT_MAX_WIDTH = 430;
 const screenHeaderEntering = FadeInDown.duration(220).easing(Easing.out(Easing.cubic));
 const screenSectionEntering = FadeInUp.duration(220).easing(Easing.out(Easing.cubic));
-const HEADER_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 
 type RecurringFrequency = 'daily:1' | 'weekly:1' | 'monthly:1';
 
@@ -346,14 +347,9 @@ function HeaderIconButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={onPress == null ? { disabled: true } : undefined}
     >
-      <LinearGradient
-        colors={[...HEADER_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerIconSurface}
-      >
+      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}>
         {children}
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -382,7 +378,7 @@ function CompactInputField({
         placeholder={placeholder}
         placeholderTextColor={colors.text.placeholder}
         style={styles.compactInput}
-        selectionColor={colors.brand.azureCyan}
+        selectionColor={colors.brand.glossAccent}
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType={keyboardType}
@@ -431,7 +427,7 @@ function CompactTokenButton({
               {token.symbol}
             </Text>
             {token.verified ? (
-              <Ionicons name="checkmark-circle" size={16} color={colors.brand.azureCyan} />
+              <Ionicons name="checkmark-circle" size={16} color={colors.brand.glossAccent} />
             ) : null}
           </>
         ) : (
@@ -1014,7 +1010,7 @@ export function AdvancedSwapScreen(): React.JSX.Element {
                 <Ionicons
                   name="chevron-back"
                   size={layout.iconSizeNav}
-                  color={colors.brand.deepShadow}
+                  color={colors.text.primary}
                 />
               </HeaderIconButton>
               <Text
@@ -1084,7 +1080,7 @@ export function AdvancedSwapScreen(): React.JSX.Element {
                   <Ionicons
                     name="arrow-forward"
                     size={denseScreen ? 15 : 17}
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                   />
                 </View>
                 <CompactTokenButton
@@ -1200,15 +1196,10 @@ export function AdvancedSwapScreen(): React.JSX.Element {
                 }
                 accessibilityState={{ disabled: disabledReason != null || isSubmitting }}
               >
-                <LinearGradient
-                  colors={[colors.brand.whiteStream, colors.brand.azureCyan]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.submitGradient}
-                >
+                <View style={[{ backgroundColor: colors.brand.whiteStream }, styles.submitSurface]}>
                   <Text
                     variant="button"
-                    color={colors.brand.deepShadow}
+                    color={colors.text.onAccent}
                     numberOfLines={1}
                     adjustsFontSizeToFit
                     minimumFontScale={0.78}
@@ -1221,7 +1212,7 @@ export function AdvancedSwapScreen(): React.JSX.Element {
                         ? 'Review Target Swap'
                         : 'Review Repeat Swap'}
                   </Text>
-                </LinearGradient>
+                </View>
               </Pressable>
             </Animated.View>
           </ScrollView>
@@ -1299,7 +1290,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   headerIconPressed: {
     opacity: 0.72,
@@ -1339,7 +1330,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     padding: spacing.xs,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   segmentButton: {
     flex: 1,
@@ -1351,7 +1342,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   segmentButtonActive: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   card: {
     borderRadius: radii['2xl'],
@@ -1365,7 +1356,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.strongFill,
     padding: spacing.lg,
     gap: spacing.md,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   cardCompact: {
     padding: spacing.md,
@@ -1520,7 +1511,7 @@ const styles = StyleSheet.create({
   submitButtonDisabled: {
     opacity: 0.62,
   },
-  submitGradient: {
+  submitSurface: {
     minHeight: 50,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1544,7 +1535,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
     padding: spacing.lg,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   receiptIcon: {
     minWidth: layout.avatarMd,

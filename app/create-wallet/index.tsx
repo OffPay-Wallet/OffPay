@@ -184,14 +184,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   optionPillActive: {
-    backgroundColor: colors.glass.azureCyanHalf,
+    backgroundColor: colors.glass.accentVeil,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   optionPillIdle: {
     backgroundColor: colors.glass.clearFill,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   optionLabel: {
     flexDirection: 'row',

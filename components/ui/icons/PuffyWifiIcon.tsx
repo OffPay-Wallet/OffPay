@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyWifiIconProps {
   size?: number;
   color?: string;
@@ -11,7 +13,7 @@ export interface PuffyWifiIconProps {
 
 export function PuffyWifiIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
   off = false,
 }: PuffyWifiIconProps): React.JSX.Element {

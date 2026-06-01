@@ -45,15 +45,11 @@ export default function SettingsScreen(): React.JSX.Element {
             accessibilityLabel="Go back"
             hitSlop={6}
           >
-            <Ionicons
-              name="chevron-back"
-              size={layout.iconSizeNav}
-              color={colors.brand.deepShadow}
-            />
+            <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
           </Pressable>
           <Text
             variant="h3"
-            color={colors.brand.deepShadow}
+            color={colors.text.primary}
             style={[styles.headerTitle, compact && styles.headerTitleCompact]}
             numberOfLines={1}
             adjustsFontSizeToFit
@@ -74,7 +70,7 @@ export default function SettingsScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.surface.background,
   },
   headerOuter: {
     paddingTop: spacing.sm,
@@ -92,6 +88,11 @@ const styles = StyleSheet.create({
     height: layout.minTouchTarget,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: layout.minTouchTarget / 2,
+    backgroundColor: colors.surface.cardElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 8px 18px rgba(0, 0, 0, 0.36)',
   },
   headerIconPressed: {
     opacity: 0.72,

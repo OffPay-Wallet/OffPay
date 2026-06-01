@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { BackHandler, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { router } from 'expo-router';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { CreateWalletScreenLayout } from '@/components/features/wallet-setup/CreateWalletScreenLayout';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { Text } from '@/components/ui/Text';
+import { WaterKeypadButton } from '@/components/ui/WaterKeypadButton';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import {
@@ -16,6 +23,10 @@ import {
 
 type SecuritySetupIntent = 'create-wallet' | 'restore-wallet' | 'privy-wallet';
 type PasscodeMode = 'create' | 'confirm' | 'unlockExisting';
+
+const PASSCODE_SHAKE_SEGMENT_MS = 60;
+const PASSCODE_SHAKE_DURATION_MS = PASSCODE_SHAKE_SEGMENT_MS * 7;
+const PASSCODE_SHAKE_OFFSET = 12;
 
 interface PasscodeSetupScreenProps {
   intent: SecuritySetupIntent;
@@ -45,8 +56,6 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
       Math.floor((keypadHeightBudget - keypadGap * 3) / 4),
     ),
   );
-  const keyInnerInset = Math.max(5, Math.round(keySize * 0.08));
-  const keyPuffSize = Math.round(keySize * 0.58);
   const bodyOffsetY = veryCompact ? 0 : compact ? spacing.sm : spacing['2xl'];
   const titleFontSize = width < 360 || veryCompact ? 26 : width < 390 || compact ? 28 : 32;
 
@@ -61,6 +70,23 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
   const firstPasscodeRef = useRef('');
   const setupTouchedRef = useRef(false);
   const completingEntryRef = useRef(false);
+
+  // Shake animation for wrong passcode
+  const shakeX = useSharedValue(0);
+  const shakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeX.value }],
+  }));
+  const triggerShake = useCallback((): void => {
+    shakeX.value = withSequence(
+      withTiming(-PASSCODE_SHAKE_OFFSET, { duration: PASSCODE_SHAKE_SEGMENT_MS }),
+      withTiming(PASSCODE_SHAKE_OFFSET, { duration: PASSCODE_SHAKE_SEGMENT_MS }),
+      withTiming(-PASSCODE_SHAKE_OFFSET, { duration: PASSCODE_SHAKE_SEGMENT_MS }),
+      withTiming(PASSCODE_SHAKE_OFFSET, { duration: PASSCODE_SHAKE_SEGMENT_MS }),
+      withTiming(-PASSCODE_SHAKE_OFFSET * 0.5, { duration: PASSCODE_SHAKE_SEGMENT_MS }),
+      withTiming(PASSCODE_SHAKE_OFFSET * 0.5, { duration: PASSCODE_SHAKE_SEGMENT_MS }),
+      withTiming(0, { duration: PASSCODE_SHAKE_SEGMENT_MS }),
+    );
+  }, [shakeX]);
 
   const setModeValue = useCallback((nextMode: PasscodeMode): void => {
     modeRef.current = nextMode;
@@ -165,12 +191,14 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
             const ok = await verifyPasscode(nextEntry);
             if (!ok) {
               setToast('Incorrect wallet password.');
+              triggerShake();
               setEntryValue('');
               return;
             }
             nextRoute(intent);
           } catch {
             setToast('Could not verify wallet password.');
+            triggerShake();
             setEntryValue('');
           } finally {
             setSaving(false);
@@ -188,9 +216,9 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
 
         if (nextEntry !== firstPasscodeRef.current) {
           setToast('Passwords did not match. Try again.');
-          setFirstPasscodeValue('');
+          triggerShake();
+          await new Promise<void>((resolve) => setTimeout(resolve, PASSCODE_SHAKE_DURATION_MS));
           setEntryValue('');
-          setModeValue('create');
           return;
         }
 
@@ -202,6 +230,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         } catch (error: unknown) {
           console.error('[PasscodeSetup] save failed:', error);
           setToast('Could not save the wallet password.');
+          triggerShake();
           setEntryValue('');
         } finally {
           setSaving(false);
@@ -211,7 +240,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         setProcessingEntry(false);
       }
     },
-    [intent, setEntryValue, setFirstPasscodeValue, setModeValue, settingsReady],
+    [intent, setEntryValue, setFirstPasscodeValue, setModeValue, settingsReady, triggerShake],
   );
 
   const handleDigit = useCallback(
@@ -277,93 +306,75 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
 
   function renderKey(key: string): React.JSX.Element {
     const keyFrameStyle = { width: keySize, height: keySize, borderRadius: keySize / 2 };
-    const keyInnerLineStyle = {
-      top: keyInnerInset,
-      right: keyInnerInset,
-      bottom: keyInnerInset,
-      left: keyInnerInset,
-      borderRadius: (keySize - keyInnerInset * 2) / 2,
-    };
-    const keyPuffStyle = {
-      width: keyPuffSize,
-      height: keyPuffSize,
-      borderRadius: keyPuffSize / 2,
-    };
-    const innerGlass = (
-      <>
-        <View pointerEvents="none" style={[styles.keyPuff, keyPuffStyle]} />
-        <View pointerEvents="none" style={[styles.keyInnerLine, keyInnerLineStyle]} />
-      </>
-    );
 
     if (key === 'clear') {
       return (
-        <Pressable
+        <WaterKeypadButton
           key={key}
-          style={[styles.key, keyFrameStyle, entry.length === 0 ? styles.keyMuted : undefined]}
+          frameStyle={keyFrameStyle}
           onPress={handleClear}
           disabled={entry.length === 0 || inputDisabled}
+          muted={entry.length === 0}
           accessibilityRole="button"
           accessibilityLabel="Clear passcode"
         >
-          {innerGlass}
           <Text
             variant="h2"
-            color={colors.brand.azureCyan}
+            color={colors.text.primary}
             align="center"
             style={styles.keyLabel}
             allowFontScaling={false}
           >
             x
           </Text>
-        </Pressable>
+        </WaterKeypadButton>
       );
     }
 
     if (key === 'delete') {
       return (
-        <Pressable
+        <WaterKeypadButton
           key={key}
-          style={[styles.key, keyFrameStyle, entry.length === 0 ? styles.keyMuted : undefined]}
+          frameStyle={keyFrameStyle}
           onPress={handleDelete}
           disabled={entry.length === 0 || inputDisabled}
+          muted={entry.length === 0}
           accessibilityRole="button"
           accessibilityLabel="Delete last digit"
         >
-          {innerGlass}
           <Text
             variant="h2"
-            color={colors.brand.azureCyan}
+            color={colors.text.primary}
             align="center"
             style={styles.keyLabel}
             allowFontScaling={false}
           >
             {'<'}
           </Text>
-        </Pressable>
+        </WaterKeypadButton>
       );
     }
 
     return (
-      <Pressable
+      <WaterKeypadButton
         key={key}
-        style={[styles.key, keyFrameStyle, inputDisabled ? styles.keyMuted : undefined]}
+        frameStyle={keyFrameStyle}
         onPress={() => handleDigit(key)}
         disabled={inputDisabled || entry.length >= 6}
+        muted={inputDisabled}
         accessibilityRole="keyboardkey"
         accessibilityLabel={`Digit ${key}`}
       >
-        {innerGlass}
         <Text
           variant="h2"
-          color={colors.brand.azureCyan}
+          color={colors.text.primary}
           align="center"
           style={styles.keyLabel}
           allowFontScaling={false}
         >
           {key}
         </Text>
-      </Pressable>
+      </WaterKeypadButton>
     );
   }
 
@@ -397,14 +408,17 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
             </Text>
           </View>
 
-          <View style={styles.dotRow} accessibilityLabel={`${entry.length} of 6 digits entered`}>
+          <Animated.View
+            style={[styles.dotRow, shakeStyle]}
+            accessibilityLabel={`${entry.length} of 6 digits entered`}
+          >
             {Array.from({ length: 6 }).map((_, index) => (
               <View
                 key={index}
                 style={[styles.dot, index < entry.length ? styles.dotFilled : styles.dotEmpty]}
               />
             ))}
-          </View>
+          </Animated.View>
 
           <View style={[styles.keypad, { maxWidth: keypadMaxWidth, gap: keypadGap }]}>
             {keypadRows.map((row, rowIndex) => (
@@ -466,13 +480,15 @@ const styles = StyleSheet.create({
     width: spacing.xl,
     height: spacing.xl,
     borderRadius: radii.full,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   dotFilled: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
+    borderColor: colors.brand.glossAccent,
+    boxShadow: '0 6px 14px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.82)',
   },
   dotEmpty: {
-    backgroundColor: colors.brand.whiteStream,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.surface.cardElevated,
     borderColor: colors.glass.rim,
   },
   keypad: {
@@ -481,33 +497,6 @@ const styles = StyleSheet.create({
   keyRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-  },
-  key: {
-    position: 'relative',
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.whiteStream,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-  },
-  keyPuff: {
-    // Kept as a non-painted spacer so keypad rendering math
-    // (`keyPuffSize`) does not need to change. The previous
-    // decorative fill + glow conflicted with the new flat
-    // background, so we render an empty View at the same size.
-    position: 'absolute',
-    top: '21%',
-    left: '21%',
-    backgroundColor: 'transparent',
-  },
-  keyInnerLine: {
-    // No-op holder. Same layout dimensions, no decoration.
-    position: 'absolute',
-    borderWidth: 0,
-  },
-  keyMuted: {
-    opacity: 0.62,
   },
   keyLabel: {
     zIndex: 1,
@@ -522,8 +511,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+    boxShadow: '0 10px 22px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
   },
 });

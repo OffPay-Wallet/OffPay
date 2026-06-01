@@ -7,7 +7,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   runOnJS,
@@ -24,17 +23,6 @@ import { PuffyQRIcon } from '@/components/ui/icons/PuffyQRIcon';
 import { PuffyShieldIcon } from '@/components/ui/icons/PuffyShieldIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
-
-const RECEIVE_SHEET_COLORS = [
-  colors.brand.whiteStream,
-  colors.brand.iceBlue,
-  colors.brand.whiteStream,
-] as const;
-const RECEIVE_INFO_CARD_COLORS = [
-  colors.brand.whiteStream,
-  colors.brand.whiteStream,
-  colors.brand.iceBlue,
-] as const;
 
 interface ReceiveInfoModalProps {
   visible: boolean;
@@ -109,11 +97,11 @@ export function ReceiveInfoModal({
         <Animated.View
           style={[styles.sheet, { width: sheetWidth, padding: sheetPadding }, sheetStyle]}
         >
-          <LinearGradient
-            colors={[...RECEIVE_SHEET_COLORS]}
-            style={[StyleSheet.absoluteFill, styles.sheetGradient]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <View
+            style={[
+              { backgroundColor: colors.surface.cardElevated },
+              [StyleSheet.absoluteFill, styles.sheetSurface],
+            ]}
           />
 
           <View style={styles.headerRow}>
@@ -138,25 +126,22 @@ export function ReceiveInfoModal({
               accessibilityRole="button"
               accessibilityLabel="Close receive information"
             >
-              <LinearGradient
-                colors={[...RECEIVE_INFO_CARD_COLORS]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.closeBtnSurface}
+              <View
+                style={[{ backgroundColor: colors.surface.cardElevated }, styles.closeBtnSurface]}
               >
                 <Ionicons name="close" size={layout.iconSizeInline} color={colors.text.primary} />
-              </LinearGradient>
+              </View>
             </Pressable>
           </View>
 
-          <LinearGradient
-            colors={[...RECEIVE_INFO_CARD_COLORS]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.infoCard, compactSheet && styles.infoCardCompact]}
+          <View
+            style={[
+              { backgroundColor: colors.surface.cardElevated },
+              [styles.infoCard, compactSheet && styles.infoCardCompact],
+            ]}
           >
             <View style={styles.iconContainer}>
-              <PuffyShieldIcon size={layout.iconSizeTab} color={colors.brand.azureCyan} focused />
+              <PuffyShieldIcon size={layout.iconSizeTab} color={colors.brand.glossAccent} focused />
             </View>
             <View style={styles.infoTextContainer}>
               <Text variant="bodyBold" color={colors.text.primary}>
@@ -166,16 +151,16 @@ export function ReceiveInfoModal({
                 Share this address on Solana {networkLabel}.
               </Text>
             </View>
-          </LinearGradient>
+          </View>
 
-          <LinearGradient
-            colors={[...RECEIVE_INFO_CARD_COLORS]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.infoCard, compactSheet && styles.infoCardCompact]}
+          <View
+            style={[
+              { backgroundColor: colors.surface.cardElevated },
+              [styles.infoCard, compactSheet && styles.infoCardCompact],
+            ]}
           >
             <View style={styles.iconContainer}>
-              <PuffyQRIcon size={layout.iconSizeTab} color={colors.brand.azureCyan} />
+              <PuffyQRIcon size={layout.iconSizeTab} color={colors.brand.glossAccent} />
             </View>
             <View style={styles.infoTextContainer}>
               <Text variant="bodyBold" color={colors.text.primary}>
@@ -185,23 +170,18 @@ export function ReceiveInfoModal({
                 Use the QR or copy the address when a sender asks for your wallet.
               </Text>
             </View>
-          </LinearGradient>
+          </View>
 
           <Pressable
             style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
             onPress={handleClose}
             accessibilityRole="button"
           >
-            <LinearGradient
-              colors={[colors.brand.azureCyan, colors.glass.azureCyanHalf, colors.glass.cyanWash]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.actionBtnSurface}
-            >
-              <Text variant="button" color={colors.brand.navyDepth} align="center">
+            <View style={[{ backgroundColor: colors.brand.glossAccent }, styles.actionBtnSurface]}>
+              <Text variant="button" color={colors.brand.graphiteDepth} align="center">
                 Got it!
               </Text>
-            </LinearGradient>
+            </View>
           </Pressable>
         </Animated.View>
       </View>
@@ -221,7 +201,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sheet: {
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -232,7 +212,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     boxShadow: SWAP_PANEL_SHADOW,
   },
-  sheetGradient: {
+  sheetSurface: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
   },
@@ -257,7 +237,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -280,7 +260,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     padding: spacing.md,
     marginBottom: spacing.md,
     minWidth: 0,
@@ -294,7 +274,7 @@ const styles = StyleSheet.create({
     height: layout.buttonHeightMd,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.cyanWash,
+    backgroundColor: colors.glass.smokeWash,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -320,7 +300,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,

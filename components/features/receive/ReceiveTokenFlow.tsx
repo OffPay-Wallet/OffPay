@@ -819,11 +819,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         <View style={[styles.content, { maxWidth: contentMaxWidth }]}>
           <View style={styles.header}>
             <HeaderIconButton onPress={handleClose} accessibilityLabel="Go back">
-              <Ionicons
-                name="chevron-back"
-                size={layout.iconSizeNav}
-                color={colors.brand.deepShadow}
-              />
+              <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
             </HeaderIconButton>
             <Text
               variant="h2"
@@ -836,17 +832,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
             >
               {title}
             </Text>
-            <HeaderIconButton
-              onPress={() => setInfoOpen(true)}
-              accessibilityLabel="Receive token information"
-              active={infoOpen}
-            >
-              <PuffyInfoCircleIcon
-                size={layout.iconSizeNav}
-                color={colors.brand.deepShadow}
-                focused={infoOpen}
-              />
-            </HeaderIconButton>
+            <View style={styles.headerSpacer} />
           </View>
 
           {canShowUmbraReceiveRoute || pendingClaimCount > 0 ? (
@@ -978,11 +964,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                   <Ionicons
                     name="copy-outline"
                     size={denseReceive ? 15 : 16}
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                   />
                   <Text
                     variant="captionBold"
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                     numberOfLines={1}
                     maxFontSizeMultiplier={1}
                   >
@@ -1003,11 +989,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                   <Ionicons
                     name="share-outline"
                     size={denseReceive ? 15 : 16}
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                   />
                   <Text
                     variant="captionBold"
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                     numberOfLines={1}
                     maxFontSizeMultiplier={1}
                   >
@@ -1126,7 +1112,17 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.glass.clearFill,
+    backgroundColor: colors.glass.strongFill,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   headerIconSurface: {
     width: '100%',
@@ -1135,12 +1131,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerIconSurfaceActive: {
-    backgroundColor: colors.glass.cyanWash,
+    backgroundColor: colors.glass.smokeWash,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     fontFamily: fontFamily.semiBold,
+  },
+  headerSpacer: {
+    width: layout.minTouchTarget + spacing.xs,
   },
   pressed: {
     opacity: 0.78,
@@ -1175,13 +1174,21 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     backgroundColor: colors.glass.strongFill,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.28)',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   identityBlock: {
     width: '100%',
@@ -1209,6 +1216,10 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: [
+      '0 8px 24px rgba(0, 0, 0, 0.35)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+    ].join(', '),
   },
   qrCardDense: {
     padding: spacing.md,
@@ -1232,8 +1243,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     backgroundColor: colors.glass.strongFill,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   networkChipDot: {
     width: 7,
@@ -1258,8 +1277,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     backgroundColor: colors.glass.strongFill,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   addressActionChipDisabled: {
     opacity: 0.48,

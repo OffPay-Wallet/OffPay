@@ -1,190 +1,191 @@
 /**
- * OffPay Arctic Mist palette tokens.
+ * OffPay glossy dark palette tokens.
  *
- * The app now uses a light liquid-glass system:
- *   #5BC8E8 — saturated arctic cyan backing
- *   #DFF7FA — frosted glass tint
- *   #FCFCFF — clear snow glass fill
- *   #0E2A35 — deep navy text and icon ink
+ * The app uses a black/white system:
+ *   #050505 - primary screen background
+ *   #111111 - raised dark surfaces
+ *   #F7F7F2 - glossy highlight and primary copy
+ *   #C8C8C2 - muted secondary copy
+ *   #FF4D5A - destructive and failed-state accent
  *
  * Usage: import { colors } from '@/constants/colors'
- * Never hardcode hex values in components — always use these tokens.
+ * Never hardcode hex values in components - always use these tokens.
  */
 
-/** Brand colors — Arctic Mist */
+/** Brand colors - glossy dark monochrome */
 const brand = {
-  /** Primary accent — active states, control glow, saturated backing */
-  azureCyan: '#5BC8E8',
-  /** Primary ink — deep navy text and filled control content */
-  deepShadow: '#0E2A35',
-  /** Secondary ink/surface depth */
-  navyDepth: '#17485A',
-  /** Medium cyan — secondary actions, links */
-  azureBlue: '#2EAED2',
-  /** Frost tint — translucent panel surface */
-  iceBlue: '#DFF7FA',
-  /** Clear snow — brightest glass fill */
-  whiteStream: '#FCFCFF',
+  /** Gloss highlight surface - active states and filled light controls */
+  glossAccent: '#F7F7F2',
+  /** Primary black ink and deepest surface */
+  deepShadow: '#050505',
+  /** Secondary dark depth */
+  graphiteDepth: '#111111',
+  /** Strong dark action fill */
+  actionFill: '#050505',
+  /** Soft neutral tint for translucent panels */
+  glassTint: '#242424',
+  /** Brightest highlight fill */
+  whiteStream: '#F7F7F2',
 } as const;
 
-/** Semantic colors — derived from brand + fintech conventions */
+/** Semantic colors - dark-theme role accents */
 const semantic = {
   /** Settlement confirmed, positive amounts, receive */
-  success: '#168A64',
+  success: '#F7F7F2',
   /** Failed transactions, negative amounts, warnings */
-  error: '#C73A3A',
+  error: '#FF4D5A',
   /** Pending states, caution */
-  warning: '#9A6B16',
+  warning: '#D7D7CE',
   /** Info banners, notifications */
-  info: '#227A96',
+  info: '#F7F7F2',
 } as const;
 
-/** Notification event icon badges — light fills with readable icon ink. */
+/** Notification event icon badges - dark fills with readable icon ink. */
 const notificationIcon = {
   /** Success badge fill */
-  successFill: '#B9F5D8',
+  successFill: 'rgba(247, 247, 242, 0.16)',
   /** Success icon ink */
-  successInk: '#0C6848',
+  successInk: '#F7F7F2',
   /** Error badge fill */
-  errorFill: '#FFC9C9',
+  errorFill: 'rgba(255, 77, 90, 0.18)',
   /** Error icon ink */
-  errorInk: '#9A2424',
-  /** Warning badge fill — deliberately yellow, not brown */
-  warningFill: '#FFE27A',
+  errorInk: '#FF4D5A',
+  /** Warning badge fill */
+  warningFill: 'rgba(215, 215, 206, 0.18)',
   /** Warning icon ink */
-  warningInk: '#6C4A00',
+  warningInk: '#D7D7CE',
   /** Info badge fill */
-  infoFill: '#BDEFF7',
+  infoFill: 'rgba(247, 247, 242, 0.14)',
   /** Info icon ink */
-  infoInk: brand.deepShadow,
+  infoInk: brand.whiteStream,
 } as const;
 
-/** Text colors — optimized for light glass surfaces */
+/** Text colors - optimized for glossy dark surfaces */
 const text = {
   /** Primary text on glass */
-  primary: brand.deepShadow,
+  primary: brand.whiteStream,
   /** Subtitles, timestamps, secondary info */
-  secondary: '#466A75',
+  secondary: '#C8C8C2',
   /** Disabled, inactive */
-  tertiary: '#6F8F99',
+  tertiary: '#94948E',
   /** Placeholder text */
-  placeholder: '#7D98A1',
+  placeholder: '#767670',
   /** Text on filled dark controls */
   inverse: brand.whiteStream,
-  /** Text on arctic cyan accent */
+  /** Text on filled light gloss controls */
   onAccent: brand.deepShadow,
 } as const;
 
 /**
- * Surface/background colors — light glass palette.
+ * Surface/background colors - glossy dark glass palette.
  */
 const surface = {
-  /** Primary screen background — saturated backing for glass */
-  background: '#5BC8E8',
-  /** Secondary background — softer arctic field */
-  backgroundAlt: '#BDEFF7',
-  /** Cyan tint for selected/hovered surfaces */
-  backgroundTint: '#DFF7FA',
-  /** Card surfaces — semi-opaque fallback for glass panels */
-  card: 'rgba(252, 252, 255, 0.68)',
+  /** Primary screen background */
+  background: '#050505',
+  /** Secondary background */
+  backgroundAlt: '#101010',
+  /** Tint for selected/hovered surfaces */
+  backgroundTint: '#181818',
+  /** Card surfaces - semi-opaque fallback for glass panels */
+  card: 'rgba(22, 22, 22, 0.76)',
   /** Elevated glass surface */
-  cardElevated: 'rgba(252, 252, 255, 0.82)',
+  cardElevated: 'rgba(34, 34, 34, 0.9)',
   /** Accent card surface */
-  cardAccent: brand.azureCyan,
+  cardAccent: brand.glossAccent,
   /** Pressed/active state overlay */
-  pressed: 'rgba(14, 42, 53, 0.08)',
+  pressed: 'rgba(255, 255, 255, 0.1)',
   /** Disabled surface */
-  disabled: 'rgba(223, 247, 250, 0.48)',
+  disabled: 'rgba(255, 255, 255, 0.08)',
 } as const;
 
-/** Border colors — glass rims */
+/** Border colors - glass rims */
 const border = {
   /** Default border */
-  default: 'rgba(252, 252, 255, 0.68)',
+  default: 'rgba(255, 255, 255, 0.18)',
   /** Subtle border (cards) */
-  subtle: 'rgba(14, 42, 53, 0.1)',
+  subtle: 'rgba(255, 255, 255, 0.1)',
   /** Strong border (inputs, focused) */
-  strong: 'rgba(14, 42, 53, 0.24)',
+  strong: 'rgba(255, 255, 255, 0.28)',
   /** Accent border */
-  accent: brand.azureCyan,
+  accent: brand.glossAccent,
 } as const;
 
-/** Token colors for crypto assets */
+/** Token colors for crypto assets - monochrome variants */
 const token = {
-  /** USDC blue */
-  usdc: '#2775CA',
-  /** USDT green */
-  usdt: '#26A17B',
-  /** Solana purple */
-  solana: '#9945FF',
+  /** USDC monochrome */
+  usdc: '#1A1A1A',
+  /** USDT monochrome */
+  usdt: '#2B2B2B',
+  /** Solana monochrome */
+  solana: '#3D3D3D',
   /** SOL gradient start */
-  solanaGradientStart: '#9945FF',
+  solanaGradientStart: '#111111',
   /** SOL gradient end */
-  solanaGradientEnd: '#14F195',
+  solanaGradientEnd: '#565656',
 } as const;
 
 /**
- * App background gradient tokens — derived from Azure Cyan
- * layered over Deep Shadow. Kept here so background components do
+ * App background gradient tokens - derived from monochrome neutrals.
+ * Kept here so background components do
  * not hardcode brand color math.
  */
 const backgroundGradient = {
   /** Base layer */
-  base: brand.azureCyan,
-  /** Soft full-field layers — no isolated decorative orbs */
-  blobTop: 'rgba(252, 252, 255, 0.34)',
-  blobTopSoft: 'rgba(223, 247, 250, 0.52)',
-  blobMid: 'rgba(252, 252, 255, 0.22)',
-  blobLower: 'rgba(14, 42, 53, 0.08)',
-  blobBlue: 'rgba(91, 200, 232, 0.36)',
-  blobShadow: 'rgba(14, 42, 53, 0.12)',
+  base: surface.background,
+  /** Soft full-field layers - no isolated decorative orbs */
+  blobTop: 'rgba(255, 255, 255, 0.14)',
+  blobTopSoft: 'rgba(255, 255, 255, 0.08)',
+  blobMid: 'rgba(255, 255, 255, 0.06)',
+  blobLower: 'rgba(255, 255, 255, 0.04)',
+  blobGloss: 'rgba(255, 255, 255, 0.1)',
+  blobShadow: 'rgba(0, 0, 0, 0.58)',
   /** Film-grain noise */
-  noiseLight: 'rgba(252, 252, 255, 0.5)',
-  noiseGreen: 'rgba(223, 247, 250, 0.44)',
-  noiseDark: 'rgba(14, 42, 53, 0.1)',
+  noiseLight: 'rgba(255, 255, 255, 0.12)',
+  noiseSoft: 'rgba(255, 255, 255, 0.08)',
+  noiseDark: 'rgba(0, 0, 0, 0.42)',
   /** Vignette */
-  topDepth: 'rgba(252, 252, 255, 0.24)',
-  bottomDepth: 'rgba(14, 42, 53, 0.1)',
+  topDepth: 'rgba(255, 255, 255, 0.1)',
+  bottomDepth: 'rgba(0, 0, 0, 0.68)',
 } as const;
 
-/** Holdings card gradient — clear snow glass fading into Arctic Mist. */
+/** Holdings card gradient - dark glass fading into black. */
 const holdingsCard = {
-  /** Top — clear snow glass */
-  gradientTop: 'rgba(252, 252, 255, 0.78)',
-  /** Mid — frost tint */
-  gradientMid: 'rgba(223, 247, 250, 0.58)',
-  /** Bottom — arctic cyan bleed */
-  gradientBottom: 'rgba(91, 200, 232, 0.24)',
+  /** Top - glossy dark glass */
+  gradientTop: 'rgba(42, 42, 42, 0.9)',
+  /** Mid - soft neutral tint */
+  gradientMid: 'rgba(26, 26, 26, 0.78)',
+  /** Bottom - black bleed */
+  gradientBottom: 'rgba(8, 8, 8, 0.82)',
   /** Top-edge glow for glass depth */
-  innerGlow: 'rgba(252, 252, 255, 0.84)',
+  innerGlow: 'rgba(255, 255, 255, 0.2)',
   /** Row separator */
-  divider: 'rgba(14, 42, 53, 0.08)',
+  divider: 'rgba(255, 255, 255, 0.08)',
   /** Pressed row overlay */
-  pressed: 'rgba(252, 252, 255, 0.44)',
+  pressed: 'rgba(255, 255, 255, 0.08)',
 } as const;
 
 /**
  * Recovery phrase / backup UI.
  */
 const recoveryPhrase = {
-  chipBackground: 'rgba(252, 252, 255, 0.62)',
-  chipBorder: 'rgba(14, 42, 53, 0.12)',
-  chipIndex: '#5F818B',
+  chipBackground: 'rgba(255, 255, 255, 0.08)',
+  chipBorder: 'rgba(255, 255, 255, 0.14)',
+  chipIndex: '#A6A6A0',
 } as const;
 
 /** Liquid glass material recipes used by interactive surfaces. */
 const glass = {
-  clearFill: 'rgba(252, 252, 255, 0.62)',
-  frostFill: 'rgba(223, 247, 250, 0.56)',
-  strongFill: 'rgba(252, 252, 255, 0.82)',
-  rim: 'rgba(252, 252, 255, 0.76)',
-  rimSubtle: 'rgba(255, 255, 255, 0.48)',
-  innerShadow: 'rgba(14, 42, 53, 0.1)',
-  depthShadow: 'rgba(14, 42, 53, 0.18)',
-  textBacking: 'rgba(252, 252, 255, 0.72)',
-  badgeFill: 'rgba(252, 252, 255, 0.94)',
-  azureCyanHalf: 'rgba(91, 200, 232, 0.5)',
-  cyanWash: 'rgba(91, 200, 232, 0.28)',
+  clearFill: 'rgba(26, 26, 26, 0.74)',
+  frostFill: 'rgba(38, 38, 38, 0.66)',
+  strongFill: 'rgba(48, 48, 48, 0.9)',
+  rim: 'rgba(255, 255, 255, 0.2)',
+  rimSubtle: 'rgba(255, 255, 255, 0.12)',
+  innerShadow: 'rgba(255, 255, 255, 0.08)',
+  depthShadow: 'rgba(0, 0, 0, 0.58)',
+  textBacking: 'rgba(255, 255, 255, 0.1)',
+  badgeFill: 'rgba(255, 255, 255, 0.16)',
+  accentVeil: 'rgba(255, 255, 255, 0.24)',
+  smokeWash: 'rgba(255, 255, 255, 0.08)',
 } as const;
 
 /** Complete color palette — single import for the entire app */

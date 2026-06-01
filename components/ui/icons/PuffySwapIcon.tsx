@@ -1,13 +1,19 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyIconProps {
   size?: number;
   color?: string;
   focused?: boolean;
 }
 
-export function PuffySwapIcon({ size = 24, color = '#000', focused = false }: PuffyIconProps) {
+export function PuffySwapIcon({
+  size = 24,
+  color = colors.text.primary,
+  focused = false,
+}: PuffyIconProps) {
   // Ultra-thick organic swap half-arrows, precisely math-crafted to match the provided layout.
   const strokeWidth = focused ? '3.2' : '2.5';
 

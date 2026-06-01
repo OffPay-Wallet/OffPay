@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyShieldIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyShieldIconProps {
 
 export function PuffyShieldIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyShieldIconProps) {
   // Bootstrap `bi-shield-fill` (16x16) path.

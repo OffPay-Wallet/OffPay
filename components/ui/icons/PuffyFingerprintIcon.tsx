@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyFingerprintIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyFingerprintIconProps {
 
 export function PuffyFingerprintIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyFingerprintIconProps) {
   // Bootstrap `bi-fingerprint` (16x16) paths.

@@ -11,7 +11,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRootNavigationState, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -68,7 +67,10 @@ import {
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import {
   createSwapQuote,
   executeSwapQuote,
@@ -105,13 +107,13 @@ import {
   shouldRefreshSwapExecution,
   type SwapButtonFeedback,
 } from '@/lib/swap/swap-helpers';
-import { executePrivacyEnvelopeSwap, type PrivacyEnvelopeSwapResult } from '@/lib/swap/advanced-swap';
+import {
+  executePrivacyEnvelopeSwap,
+  type PrivacyEnvelopeSwapResult,
+} from '@/lib/swap/advanced-swap';
 import { observeOfflineTokenMetadataFromSwapTokens } from '@/lib/offline/offline-token-metadata';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import {
-  formatTokenBalance,
-  shortenWalletAddress,
-} from '@/lib/api/offpay-wallet-data';
+import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { signSerializedTransactionForWallet } from '@/lib/crypto/solana-transaction-signing';
 import {
   decimalInputToAtomicAmount,
@@ -121,9 +123,7 @@ import {
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
 
-import type {
-  SwapQuoteResponse,
-} from '@/types/offpay-api';
+import type { SwapQuoteResponse } from '@/types/offpay-api';
 
 interface SwapReviewState {
   quote: SwapQuoteResponse;
@@ -180,18 +180,9 @@ function HeaderIconButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={active ? { selected: true } : undefined}
     >
-      <LinearGradient
-        colors={[
-          colors.glass.strongFill,
-          active ? colors.glass.cyanWash : colors.glass.frostFill,
-          colors.glass.clearFill,
-        ]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerIconSurface}
-      >
+      <View style={[{ backgroundColor: colors.glass.strongFill }, styles.headerIconSurface]}>
         {children}
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -249,16 +240,7 @@ function PrivateSwapToggle({
       accessibilityLabel="Private swap mode"
       hitSlop={6}
     >
-      <LinearGradient
-        colors={[
-          colors.glass.strongFill,
-          enabled ? colors.glass.cyanWash : colors.glass.frostFill,
-          colors.glass.clearFill,
-        ]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.privateToggleSurface}
-      >
+      <View style={[{ backgroundColor: colors.glass.strongFill }, styles.privateToggleSurface]}>
         <View style={styles.privateToggleCopy}>
           <Text
             variant="captionBold"
@@ -288,7 +270,7 @@ function PrivateSwapToggle({
             ]}
           />
         </View>
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -1904,7 +1886,7 @@ export function SwapScreen(): React.JSX.Element {
                 <Ionicons
                   name="chevron-back"
                   size={layout.iconSizeNav}
-                  color={colors.brand.deepShadow}
+                  color={colors.text.primary}
                 />
               </HeaderIconButton>
               <Text
@@ -1922,11 +1904,7 @@ export function SwapScreen(): React.JSX.Element {
                 onPress={handleOpenAdvancedModes}
                 accessibilityLabel="Open advanced swap"
               >
-                <PuffySettingsIcon
-                  size={layout.iconSizeNav}
-                  color={colors.brand.deepShadow}
-                  focused
-                />
+                <PuffySettingsIcon size={layout.iconSizeNav} color={colors.text.primary} focused />
               </HeaderIconButton>
             </Animated.View>
 
@@ -1979,28 +1957,28 @@ export function SwapScreen(): React.JSX.Element {
               ) : null}
 
               <SwapConfirmationButton
-                  disabled={reviewButtonDisabled}
-                  feedbackLabel={activeSwapButtonFeedback?.label}
-                  feedbackTone={activeSwapButtonFeedback?.tone}
-                  holdOnComplete
-                  resetSignal={sliderResetSignal}
-                  label={
-                    privateSwapMode
-                      ? privateSwapMutation.isPending
-                        ? 'Submitting Private Swap'
-                        : 'Review Private Swap'
-                      : executeSwapMutation.isPending
-                        ? 'Submitting Swap'
-                        : swapActionRefreshAvailable
-                          ? 'Refresh Quote'
-                          : quoteRetryAvailable
-                            ? 'Retry Quote'
-                            : quoteExpired
-                              ? 'Refresh Quote'
-                              : 'Review Swap'
-                  }
-                  onPress={handleReviewSwap}
-                />
+                disabled={reviewButtonDisabled}
+                feedbackLabel={activeSwapButtonFeedback?.label}
+                feedbackTone={activeSwapButtonFeedback?.tone}
+                holdOnComplete
+                resetSignal={sliderResetSignal}
+                label={
+                  privateSwapMode
+                    ? privateSwapMutation.isPending
+                      ? 'Submitting Private Swap'
+                      : 'Review Private Swap'
+                    : executeSwapMutation.isPending
+                      ? 'Submitting Swap'
+                      : swapActionRefreshAvailable
+                        ? 'Refresh Quote'
+                        : quoteRetryAvailable
+                          ? 'Retry Quote'
+                          : quoteExpired
+                            ? 'Refresh Quote'
+                            : 'Review Swap'
+                }
+                onPress={handleReviewSwap}
+              />
             </StaggerRevealGroup>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -2076,7 +2054,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   headerIconPressed: {
     opacity: 0.72,
@@ -2106,10 +2084,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   privateTogglePressableActive: {
-    borderColor: colors.brand.azureCyan,
+    borderColor: colors.brand.glossAccent,
   },
   privateToggleSurface: {
     minHeight: 70,
@@ -2136,21 +2114,21 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(14, 42, 53, 0.1)',
+    backgroundColor: 'rgba(16, 16, 16, 0.1)',
     borderWidth: 1.5,
-    borderColor: colors.brand.azureCyan,
+    borderColor: colors.brand.glossAccent,
     padding: 3,
     justifyContent: 'center',
   },
   privateSwitchTrackActive: {
-    backgroundColor: colors.brand.azureCyan,
-    borderColor: colors.brand.azureBlue,
+    backgroundColor: colors.brand.glossAccent,
+    borderColor: colors.brand.actionFill,
   },
   privateSwitchKnob: {
     width: 22,
     height: 22,
     borderRadius: radii.full,
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     borderWidth: 1,
     borderColor: colors.glass.rim,
   },

@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyInfoCircleIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyInfoCircleIconProps {
 
 export function PuffyInfoCircleIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyInfoCircleIconProps): React.JSX.Element {
   const fillOpacity = focused ? 0.95 : 0.75;

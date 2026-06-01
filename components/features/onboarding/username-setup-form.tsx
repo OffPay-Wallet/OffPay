@@ -28,7 +28,9 @@ export function UsernameSetupForm({
   submitting = false,
 }: UsernameSetupFormProps): React.JSX.Element {
   const { width } = useWindowDimensions();
-  const [username, setUsername] = useState(() => sanitizeOffpayUsernameInput(initialUsername ?? ''));
+  const [username, setUsername] = useState(() =>
+    sanitizeOffpayUsernameInput(initialUsername ?? ''),
+  );
   const normalizedUsername = useMemo(() => sanitizeOffpayUsernameInput(username), [username]);
   const usernameError = username.length > 0 ? getOffpayUsernameError(username) : null;
   const canContinue = formatOffpayUsername(username) != null;
@@ -46,7 +48,7 @@ export function UsernameSetupForm({
     <View style={styles.shell}>
       <PuffyAvatarIcon
         size={layout.avatarLg + spacing['3xl']}
-        color={colors.brand.azureCyan}
+        color={colors.brand.glossAccent}
         style={styles.avatarIcon}
       />
 
@@ -79,7 +81,7 @@ export function UsernameSetupForm({
             onChangeText={(value) => setUsername(sanitizeOffpayUsernameInput(value))}
             placeholder="wallet01"
             placeholderTextColor={colors.text.placeholder}
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="username"

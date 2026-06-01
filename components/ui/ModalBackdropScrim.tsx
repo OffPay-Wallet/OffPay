@@ -28,6 +28,6 @@ const styles = StyleSheet.create({
   },
   softFocus: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.backgroundGradient.blobBlue,
+    backgroundColor: colors.backgroundGradient.blobGloss,
   },
 });

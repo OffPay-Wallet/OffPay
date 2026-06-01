@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   interpolate,
@@ -33,19 +32,18 @@ interface AccountListCardProps {
   onRequestSetPrimary?: (wallet: WalletAccount) => void;
 }
 
-const ACCOUNT_CARD_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
-const ACCOUNT_CARD_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+const ACCOUNT_CARD_SHADOW = [
+  '0 12px 28px rgba(0, 0, 0, 0.4)',
+  'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+  'inset 0 0 14px rgba(255, 255, 255, 0.03)',
+  'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
+].join(', ');
 const MENU_ANIMATION_CONFIG = {
   duration: 120,
   easing: Easing.out(Easing.cubic),
 } as const;
-const ACTION_BUTTON_SURFACE = colors.brand.iceBlue;
-const ACTION_BUTTON_BORDER = colors.surface.backgroundAlt;
+const ACTION_BUTTON_SURFACE = colors.surface.cardElevated;
+const ACTION_BUTTON_BORDER = colors.glass.rim;
 
 export function AccountListCard({
   wallet,
@@ -168,13 +166,6 @@ export function AccountListCard({
 
   return (
     <View style={[styles.shell, isMenuOpen && styles.shellMenuOpen]}>
-      <LinearGradient
-        colors={[...ACCOUNT_CARD_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.gradientBg}
-      />
-
       {isMenuOpen ? (
         <Pressable style={styles.overlay} onPress={() => setActionsMenuOpen(false)} />
       ) : null}
@@ -305,16 +296,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: ACCOUNT_CARD_SHADOW,
     zIndex: 1,
   },
   shellMenuOpen: {
     zIndex: 40,
-  },
-  gradientBg: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: radii['2xl'],
   },
   overlay: {
     position: 'absolute',
@@ -362,9 +349,16 @@ const styles = StyleSheet.create({
     backgroundColor: ACTION_BUTTON_SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: ACTION_BUTTON_BORDER,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   accountName: {
     fontWeight: 'bold',
@@ -379,7 +373,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   primaryBadge: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radii.full,
@@ -390,7 +384,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   actionRoundButtonActive: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   balance: {
     opacity: 0.8,
@@ -423,8 +417,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radii.xl,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.surface.backgroundAlt,
+    backgroundColor: colors.surface.cardElevated,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    boxShadow: [
+      '0 6px 16px rgba(0, 0, 0, 0.35)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.14)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+    ].join(', '),
   },
 });

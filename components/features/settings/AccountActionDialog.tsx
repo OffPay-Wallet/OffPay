@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { Easing, FadeIn, FadeOut } from 'react-native-reanimated';
@@ -27,14 +26,8 @@ interface AccountActionDialogProps {
   onConfirmRemove: () => void;
 }
 
-const GLASS_PANEL_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 const CARD_MAX_WIDTH = 520;
-const CARD_SHADOW =
-  '0 8px 24px rgba(4, 28, 36, 0.16)';
+const CARD_SHADOW = '0 18px 36px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 
 function getDialogCopy(dialog: AccountActionDialogState): {
   icon: IoniconName;
@@ -116,12 +109,7 @@ export function AccountActionDialog({
         exiting={FadeOut.duration(120).easing(Easing.out(Easing.cubic))}
         style={{ width: cardWidth }}
       >
-        <LinearGradient
-          colors={[...GLASS_PANEL_COLORS]}
-          start={{ x: 0.02, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.card}
-        >
+        <View style={styles.card}>
           <View style={styles.header}>
             <View style={styles.iconBubble}>
               <Ionicons name={copy.icon} size={layout.iconSizeInline} color={copy.iconColor} />
@@ -168,7 +156,7 @@ export function AccountActionDialog({
               </Text>
             </Pressable>
           </View>
-        </LinearGradient>
+        </View>
       </Animated.View>
     </Animated.View>
   );
@@ -195,7 +183,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: CARD_SHADOW,
   },
   header: {
@@ -234,7 +222,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   destructiveButton: {
     backgroundColor: colors.semantic.error,

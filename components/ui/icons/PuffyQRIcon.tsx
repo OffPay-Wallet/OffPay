@@ -1,12 +1,17 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyIconProps {
   size?: number;
   color?: string;
 }
 
-export function PuffyQRIcon({ size = 24, color = '#000' }: PuffyIconProps): React.JSX.Element {
+export function PuffyQRIcon({
+  size = 24,
+  color = colors.text.primary,
+}: PuffyIconProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 256 256">
       <Path

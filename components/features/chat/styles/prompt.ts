@@ -21,7 +21,7 @@ export const promptStyles = StyleSheet.create({
     gap: spacing.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '0 6px 20px rgba(14, 42, 53, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 6px 20px rgba(16, 16, 16, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   // Top row holds the multiline text input.
   promptInputRow: {
@@ -74,7 +74,7 @@ export const promptStyles = StyleSheet.create({
     backgroundColor: colors.brand.deepShadow,
   },
   promptSendDisabled: {
-    backgroundColor: 'rgba(14, 42, 53, 0.4)',
+    backgroundColor: 'rgba(16, 16, 16, 0.4)',
   },
   promptSendPressed: {
     opacity: 0.82,
@@ -91,7 +91,7 @@ export const promptStyles = StyleSheet.create({
     gap: spacing.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '0 6px 20px rgba(14, 42, 53, 0.10), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 6px 20px rgba(16, 16, 16, 0.10), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   voiceTranscript: {
     fontFamily: fontFamily.ui,
@@ -124,7 +124,7 @@ export const promptStyles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(14, 42, 53, 0.08)',
+    backgroundColor: 'rgba(16, 16, 16, 0.08)',
   },
   voiceControlPrimary: {
     width: PROMPT_ICON_SIZE,
@@ -133,7 +133,7 @@ export const promptStyles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   voiceControlDisabled: {
     opacity: 0.5,

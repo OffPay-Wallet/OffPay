@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
@@ -22,15 +21,10 @@ interface SendTokenSelectStepProps {
   onSelectToken: (token: SendTokenOption) => void;
 }
 
-const SEND_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 const SEND_PANEL_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 18px 42px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const SEND_CONTROL_SHADOW =
-  '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 14px 30px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 
 function TokenLoadingRow({
   compact,
@@ -42,11 +36,11 @@ function TokenLoadingRow({
   const iconSize = dense ? 32 : compact ? 34 : 40;
   return (
     <View style={styles.tokenRowShell}>
-      <LinearGradient
-        colors={[...SEND_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.tokenRow, compact && styles.tokenRowCompact, dense && styles.tokenRowDense]}
+      <View
+        style={[
+          { backgroundColor: colors.surface.cardElevated },
+          [styles.tokenRow, compact && styles.tokenRowCompact, dense && styles.tokenRowDense],
+        ]}
       >
         <SkeletonBlock width={iconSize} height={iconSize} radius={radii.full} />
         <View style={styles.tokenText}>
@@ -57,7 +51,7 @@ function TokenLoadingRow({
           <SkeletonBlock width="72%" height={14} radius={radii.full} />
           <SkeletonBlock width="46%" height={11} radius={radii.full} />
         </View>
-      </LinearGradient>
+      </View>
     </View>
   );
 }
@@ -106,11 +100,11 @@ export function SendTokenSelectStep({
       </View>
 
       <View style={styles.searchShell}>
-        <LinearGradient
-          colors={[...SEND_GLASS_COLORS]}
-          start={{ x: 0.04, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.searchRow, dense && styles.searchRowDense]}
+        <View
+          style={[
+            { backgroundColor: colors.surface.cardElevated },
+            [styles.searchRow, dense && styles.searchRowDense],
+          ]}
         >
           <Ionicons name="search" size={layout.iconSizeInline} color={colors.text.secondary} />
           <TextInput
@@ -119,13 +113,13 @@ export function SendTokenSelectStep({
             placeholder="Search token"
             placeholderTextColor={colors.text.placeholder}
             style={styles.searchInput}
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             autoCapitalize="none"
             autoCorrect={false}
             maxFontSizeMultiplier={1}
             accessibilityLabel="Search wallet tokens"
           />
-        </LinearGradient>
+        </View>
       </View>
 
       <View style={styles.tokenList}>
@@ -143,14 +137,14 @@ export function SendTokenSelectStep({
               accessibilityRole="button"
               accessibilityLabel={`Send ${token.symbol}`}
             >
-              <LinearGradient
-                colors={[...SEND_GLASS_COLORS]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
+              <View
                 style={[
-                  styles.tokenRow,
-                  compact && styles.tokenRowCompact,
-                  dense && styles.tokenRowDense,
+                  { backgroundColor: colors.surface.cardElevated },
+                  [
+                    styles.tokenRow,
+                    compact && styles.tokenRowCompact,
+                    dense && styles.tokenRowDense,
+                  ],
                 ]}
               >
                 <TokenIcon
@@ -213,17 +207,12 @@ export function SendTokenSelectStep({
                     {token.symbol}
                   </Text>
                 </View>
-              </LinearGradient>
+              </View>
             </Pressable>
           ))
         ) : (
           <View style={styles.emptyShell}>
-            <LinearGradient
-              colors={[...SEND_GLASS_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.emptyState}
-            >
+            <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.emptyState]}>
               <Ionicons name="wallet-outline" size={dense ? 28 : 32} color={colors.text.tertiary} />
               <Text variant="bodyBold" color={colors.text.primary} align="center">
                 No tokens found
@@ -236,7 +225,7 @@ export function SendTokenSelectStep({
               >
                 {emptyMessage}
               </Text>
-            </LinearGradient>
+            </View>
           </View>
         )}
       </View>

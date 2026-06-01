@@ -1,13 +1,19 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyIconProps {
   size?: number;
   color?: string;
   focused?: boolean;
 }
 
-export function PuffySettingsIcon({ size = 24, color = '#000', focused = false }: PuffyIconProps) {
+export function PuffySettingsIcon({
+  size = 24,
+  color = colors.text.primary,
+  focused = false,
+}: PuffyIconProps) {
   // Ultra-thick chunky solid gear matching the pristine fully-filled organic series.
   const opacity = focused ? 1 : 0.4; // Fade into glassmorphism on inactive state
 

@@ -439,7 +439,7 @@ export function OfflinePaymentSlotsStep({
             style={styles.input}
             keyboardType="number-pad"
             editable={!isMutatingSlots}
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             accessibilityLabel="Custom offline payment slot count"
           />
         </View>
@@ -545,8 +545,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.textBacking,
     padding: spacing.lg,
     gap: spacing.sm,
-    boxShadow:
-      '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   statusHeader: {
     flexDirection: 'row',
@@ -583,14 +582,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    backgroundColor: 'rgba(252, 252, 255, 0.84)',
+    backgroundColor: 'rgba(255, 255, 255, 0.84)',
     boxShadow:
-      'inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -6px 12px rgba(14, 42, 53, 0.05)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -6px 12px rgba(16, 16, 16, 0.05)',
   },
   toggleActive: {
-    borderColor: colors.brand.azureCyan,
+    borderColor: colors.brand.glossAccent,
     justifyContent: 'flex-end',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   toggleDot: {
     width: 24,
@@ -599,7 +598,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.78)',
     backgroundColor: colors.text.secondary,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.18)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.18)',
   },
   toggleDotActive: {
     borderColor: 'rgba(255, 255, 255, 0.92)',
@@ -614,7 +613,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     borderRadius: radii.full,
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   mono: {
     fontVariant: ['tabular-nums'],
@@ -671,7 +670,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   noteText: {
     lineHeight: 18,
@@ -706,8 +705,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.textBacking,
   },
   presetButtonActive: {
-    borderColor: colors.brand.azureCyan,
-    backgroundColor: colors.brand.azureCyan,
+    borderColor: colors.brand.glossAccent,
+    backgroundColor: colors.brand.glossAccent,
   },
   customRow: {
     minHeight: 48,
@@ -726,8 +725,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   customRowActive: {
-    borderColor: colors.glass.azureCyanHalf,
-    backgroundColor: colors.glass.cyanWash,
+    borderColor: colors.glass.accentVeil,
+    backgroundColor: colors.glass.smokeWash,
   },
   input: {
     flex: 1,
@@ -771,7 +770,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     flexDirection: 'row',
     gap: spacing.sm,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   confirmIcon: {
     width: layout.buttonHeightSm,

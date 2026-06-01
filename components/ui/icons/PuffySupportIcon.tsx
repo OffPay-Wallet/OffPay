@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffySupportIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffySupportIconProps {
 
 export function PuffySupportIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffySupportIconProps): React.JSX.Element {
   // Bootstrap `bi-patch-question-fill` (16x16) path.

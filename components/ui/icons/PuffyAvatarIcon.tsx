@@ -4,7 +4,7 @@
  * Single solid path, no gradients, no offset shadow stack, no rim
  * stroke. The component API stays the same so existing call sites
  * (`solidFill`, `focused`, `color`) continue to work; the visual
- * recipe is now one filled silhouette in the brand cyan (or any
+ * recipe is now one filled silhouette in the current theme tone (or any
  * caller-supplied colour).
  */
 import React from 'react';
@@ -19,7 +19,7 @@ const AVATAR_PATH =
 
 interface PuffyAvatarIconProps {
   size?: number;
-  /** Fill colour. Defaults to the brand cyan. */
+  /** Fill colour. Defaults to the current theme text tone. */
   color?: string;
   /**
    * Reserved for parity with the previous API. When `false`, the
@@ -38,7 +38,7 @@ interface PuffyAvatarIconProps {
 
 export function PuffyAvatarIcon({
   size = 48,
-  color = colors.brand.azureCyan,
+  color = colors.text.primary,
   focused = true,
   // `solidFill` is kept for compatibility — see prop comment above.
   solidFill: _solidFill = false,

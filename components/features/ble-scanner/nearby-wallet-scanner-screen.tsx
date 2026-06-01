@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,18 +20,13 @@ import type { OfflineBleDiscoveredReceiver } from '@/lib/offline/offline-ble-tra
 
 const SCAN_TIMEOUT_MS = 18_000;
 const SCANNER_CONTENT_MAX_WIDTH = 430;
-const SCANNER_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 const SCANNER_HEADER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const SCANNER_PANEL_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 18px 42px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 
 function getParam(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
 function ScanButtonLabel({
@@ -100,11 +94,13 @@ export function NearbyWalletScannerScreen(): React.JSX.Element {
       ? `${receivers.length} nearby ${receivers.length === 1 ? 'wallet' : 'wallets'} detected`
       : scanning
         ? 'Scanning for nearby OffPay wallets'
-        : error ?? 'Open Receive on the other device';
+        : (error ?? 'Open Receive on the other device');
   const scanButtonLabel = receivers.length > 0 ? 'Scan Again' : 'Scan';
   const scanAccessibilityLabel = scanning ? 'Scanning for nearby wallets' : scanButtonLabel;
   const selectedReceiver =
-    receivers.find((receiver) => receiver.walletAddress === selectedWalletAddress) ?? receivers[0] ?? null;
+    receivers.find((receiver) => receiver.walletAddress === selectedWalletAddress) ??
+    receivers[0] ??
+    null;
   const selectedDisplayLabel =
     selectedReceiver == null
       ? null
@@ -197,18 +193,11 @@ export function NearbyWalletScannerScreen(): React.JSX.Element {
             accessibilityLabel="Go back"
             hitSlop={6}
           >
-            <LinearGradient
-              colors={[...SCANNER_GLASS_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.headerButtonSurface}
+            <View
+              style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerButtonSurface]}
             >
-              <Ionicons
-                name="chevron-back"
-                size={layout.iconSizeNav}
-                color={colors.brand.deepShadow}
-              />
-            </LinearGradient>
+              <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
+            </View>
           </Pressable>
           <Text
             variant="h2"
@@ -239,17 +228,10 @@ export function NearbyWalletScannerScreen(): React.JSX.Element {
           </View>
         </View>
 
-        <Animated.View
-          entering={FadeIn.duration(260).delay(80)}
-          style={styles.footer}
-        >
+        <Animated.View entering={FadeIn.duration(260).delay(80)} style={styles.footer}>
           <View style={styles.detailsCard}>
-            <LinearGradient
-              colors={[...SCANNER_GLASS_COLORS]}
-              locations={[0, 0.52, 1]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFill}
+            <View
+              style={[{ backgroundColor: colors.surface.cardElevated }, StyleSheet.absoluteFill]}
             />
             <View style={styles.receiverRow}>
               <View style={styles.receiverIdentity}>
@@ -466,13 +448,13 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: spacing.xs,
     paddingHorizontal: spacing.md,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   sendButtonText: {
     flexShrink: 1,

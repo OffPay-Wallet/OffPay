@@ -33,7 +33,7 @@ export default function ShoppingScreen(): React.JSX.Element {
         ]}
       >
         <View style={styles.iconShell}>
-          <PuffyShoppingIcon size={48} color={colors.brand.deepShadow} focused />
+          <PuffyShoppingIcon size={48} color={colors.text.primary} focused />
         </View>
         <Text
           variant="h2"

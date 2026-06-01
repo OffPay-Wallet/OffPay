@@ -1,16 +1,16 @@
 /**
  * GlassActionButton — primary CTA for the wallet-setup flow.
  *
- * Solid-fill recipe (matches the onboarding "Create a new wallet"
- * and Settings → Reset buttons): no gradient, no shadow, no rim
- * glow. The variant controls the fill colour and label ink while
- * the geometry (pill, full-width, 48–56dp height) stays constant.
+ * Solid-fill glossy recipe (matches the dark app theme): no gradient
+ * fill, with the rim and inset highlight carrying the gloss. The
+ * variant controls the fill colour and label ink while the geometry
+ * (pill, full-width, 48–56dp height) stays constant.
  *
  * Variants:
- *   - primary    → azureCyan fill, white text. Primary CTA.
- *   - secondary  → whiteStream fill, deep navy text, hairline rim.
+ *   - primary    -> gloss highlight fill, dark text. Primary CTA.
+ *   - secondary  -> dark raised fill, white text, hairline rim.
  *                  Reads as a peer to the primary without competing.
- *   - solidBlue  → azureBlue fill, white text. Use for a third
+ *   - solidDark  -> black fill, white text. Use for a third
  *                  emphasis tier (rare).
  */
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
@@ -21,7 +21,7 @@ import { layout, radii, spacing } from '@/constants/spacing';
 
 import type { ReactNode } from 'react';
 
-export type GlassActionButtonVariant = 'primary' | 'secondary' | 'solidBlue';
+export type GlassActionButtonVariant = 'primary' | 'secondary' | 'solidDark';
 export type GlassActionButtonSize = 'regular' | 'compact';
 
 interface GlassActionButtonProps {
@@ -45,21 +45,25 @@ interface VariantTokens {
 
 const VARIANT_TOKENS: Record<GlassActionButtonVariant, VariantTokens> = {
   primary: {
-    fill: colors.brand.azureCyan,
-    pressedFill: colors.brand.azureBlue,
-    label: colors.brand.whiteStream,
-  },
-  secondary: {
-    fill: colors.brand.whiteStream,
-    pressedFill: colors.brand.iceBlue,
-    label: colors.brand.deepShadow,
+    fill: colors.brand.glossAccent,
+    pressedFill: colors.semantic.warning,
+    label: colors.text.onAccent,
     borderColor: colors.glass.rim,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  solidBlue: {
-    fill: colors.brand.azureBlue,
-    pressedFill: colors.brand.deepShadow,
-    label: colors.brand.whiteStream,
+  secondary: {
+    fill: colors.surface.cardElevated,
+    pressedFill: colors.surface.pressed,
+    label: colors.text.primary,
+    borderColor: colors.glass.rim,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  solidDark: {
+    fill: colors.brand.actionFill,
+    pressedFill: colors.surface.backgroundTint,
+    label: colors.text.primary,
+    borderColor: colors.glass.rimSubtle,
+    borderWidth: StyleSheet.hairlineWidth,
   },
 };
 
@@ -109,9 +113,7 @@ export function GlassActionButton({
         >
           {label}
         </Text>
-        {loading ? (
-          <ActivityIndicator size="small" color={tokens.label} />
-        ) : null}
+        {loading ? <ActivityIndicator size="small" color={tokens.label} /> : null}
       </View>
     </Pressable>
   );
@@ -124,6 +126,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: `0 14px 32px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
   },
   disabled: {
     opacity: 0.5,

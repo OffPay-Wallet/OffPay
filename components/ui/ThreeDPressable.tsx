@@ -35,6 +35,7 @@ import Animated, {
 import { radii } from '@/constants/spacing';
 
 import type { ReactNode } from 'react';
+import { useCallback, useRef } from 'react';
 import type { GestureResponderEvent, ViewStyle, AccessibilityRole } from 'react-native';
 
 export interface ThreeDPressableProps {
@@ -51,6 +52,8 @@ export interface ThreeDPressableProps {
   /** Optional rim around the cap (e.g. for white-on-white parity). */
   borderColor?: string;
   borderWidth?: number;
+  /** Optional boxShadow applied to the cap for glossy/glass effects. */
+  capShadow?: string;
   /**
    * Override the press spring. Defaults to the onboarding curve
    * (`PRESS_SPRING`). Pass a snappier config for lower-latency
@@ -104,6 +107,7 @@ export function ThreeDPressable({
   borderRadius = radii.full,
   borderColor,
   borderWidth,
+  capShadow,
   pressSpring = PRESS_SPRING,
   children,
   capStyle,
@@ -115,6 +119,8 @@ export function ThreeDPressable({
   style,
 }: ThreeDPressableProps): React.JSX.Element {
   const offset = useSharedValue(0);
+  const onPressRef = useRef(onPress);
+  onPressRef.current = onPress;
 
   const animatedCapStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: offset.value }],
@@ -129,6 +135,17 @@ export function ThreeDPressable({
     'worklet';
     offset.value = withSpring(0, pressSpring);
   };
+
+  // Delay onPress so the press-down animation is visible before
+  // navigation or other heavy side-effects unmount the component.
+  const handlePress = useCallback(
+    (event: GestureResponderEvent) => {
+      setTimeout(() => {
+        onPressRef.current?.(event);
+      }, 100);
+    },
+    [],
+  );
 
   return (
     <View style={[styles.frame, { paddingBottom: depth }, style]}>
@@ -159,6 +176,7 @@ export function ThreeDPressable({
             backgroundColor: surfaceColor,
             borderColor,
             borderWidth,
+            ...(capShadow != null ? { boxShadow: capShadow } : {}),
           },
           animatedCapStyle,
         ]}
@@ -171,7 +189,7 @@ export function ThreeDPressable({
             ...accessibilityState,
           }}
           disabled={disabled}
-          onPress={disabled ? undefined : onPress}
+          onPress={disabled ? undefined : handlePress}
           onPressIn={disabled ? undefined : handlePressIn}
           onPressOut={disabled ? undefined : handlePressOut}
           style={({ pressed }) => [

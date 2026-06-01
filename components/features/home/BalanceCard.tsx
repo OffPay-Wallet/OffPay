@@ -14,8 +14,8 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -40,6 +40,7 @@ import { CURRENCIES } from '@/constants/currencies';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import Svg, { Defs, Filter, Rect, FeTurbulence, FeColorMatrix } from 'react-native-svg';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,24 +65,20 @@ const QUICK_ACTIONS: QuickAction[] = [
   { id: 'receive', label: 'Receive' },
   { id: 'swap', label: 'Swap' },
 ];
-// Single hero container gradient (Expo-UI style: one rounded container
-// holds the flat balance panel + the action row, all sharing this
-// gradient — no per-card elevation). Soft vertical arctic ramp from
-// existing palette: light frost at the top behind the white balance
-// panel, deepening into the arctic cyan field behind the action
-// buttons so they read as sitting "in" the card.
-const PORTFOLIO_HERO_GRADIENT = [
-  colors.brand.iceBlue,
-  colors.surface.backgroundAlt,
-  colors.brand.azureCyan,
-] as const;
+// Single hero container: solid graphite shell with gloss from borders
+// and inset shadows. No gradients; controls use distinct dark variants
+// so they do not blend into the page background.
 // Flat card treatment — the reference dashboard uses clean glass cards
 // that sit on the gradient with only a faint ambient lift, not the
-// heavy puffy drop shadow + inner cyan bloom we had before. Keep a
+// heavy puffy drop shadow + coloured inner bloom we had before. Keep a
 // single soft shadow for separation and a 1px top highlight so the
 // glass edge still catches light.
-const HEADER_CONTAINER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+const HEADER_CONTAINER_SHADOW = [
+  '0 12px 28px rgba(0, 0, 0, 0.48)',
+  'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
+  'inset 0 0 16px rgba(255, 255, 255, 0.03)',
+  'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
+].join(', ');
 
 // ---------------------------------------------------------------------------
 // Helpers & Components
@@ -96,7 +93,7 @@ function ActionIcon({
   disabled: boolean;
   size: number;
 }): React.JSX.Element {
-  const iconColor = disabled ? colors.text.tertiary : colors.brand.azureCyan;
+  const iconColor = disabled ? colors.text.tertiary : colors.brand.glossAccent;
 
   if (actionId === 'send') {
     return <PuffySendIcon size={size} color={iconColor} />;
@@ -134,19 +131,24 @@ function ActionButton({
       disabled={disabled}
       depth={compact ? 2 : 3}
       borderRadius={radii['2xl']}
-      surfaceColor={colors.glass.strongFill}
-      shelfColor={colors.glass.cyanWash}
-      borderColor="rgba(255, 255, 255, 0.28)"
-      borderWidth={StyleSheet.hairlineWidth}
+      surfaceColor={colors.surface.cardElevated}
+      shelfColor={colors.brand.deepShadow}
+      borderColor={colors.glass.rim}
+      borderWidth={1}
       pressSpring={SNAPPY_PRESS_SPRING}
       capStyle={compact ? styles.actionCapCompact : styles.actionCap}
+      capShadow={[
+        'inset 0 1px 2px rgba(255, 255, 255, 0.22)',
+        'inset 0 0 12px rgba(255, 255, 255, 0.04)',
+        'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
+      ].join(', ')}
     >
       <View style={[styles.actionIconSlot, { width: iconSize, height: iconSize }]}>
         <ActionIcon actionId={action.id} disabled={disabled} size={iconSize} />
       </View>
       <Text
         variant="small"
-        color={disabled ? colors.text.tertiary : colors.brand.deepShadow}
+        color={disabled ? colors.text.tertiary : colors.text.primary}
         style={styles.actionLabel}
         numberOfLines={1}
         adjustsFontSizeToFit
@@ -291,7 +293,7 @@ export function BalanceCard({
   const maskedAddress = privacyHidden ? '****' : displayAddress;
   const cardHPadding = compact ? spacing.md : spacing.lg;
   const cardVPadding = compact ? spacing.md : 18;
-  const portfolioCardMinHeight = stackFooter ? 182 : compact ? 158 : 180;
+  const portfolioCardMinHeight = stackFooter ? 202 : compact ? 178 : 200;
   const topControlSize = ultraCompact ? 30 : compact ? 32 : 36;
   const footerControlHeight = ultraCompact ? 30 : 32;
   const statusPillHeight = ultraCompact ? 24 : 26;
@@ -343,17 +345,37 @@ export function BalanceCard({
   const showActionSkeletons = loading || actionsLoading;
   return (
     <View style={[styles.outer, wideLayout && styles.outerWide]}>
-      {/* ── Single hero container — gradient holds the balance panel
-          and the action row, Expo-UI style. No card elevation. ── */}
-      <LinearGradient
-        colors={[...PORTFOLIO_HERO_GRADIENT]}
-        locations={[0, 0.6, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={[styles.heroContainer, compact && styles.heroContainerCompact]}
-      >
-        {/* Flat white balance panel sitting on the gradient. */}
+      {/* Single hero container: solid glossy shell, no gradients. */}
+      <View style={[styles.heroContainer, compact && styles.heroContainerCompact]}>
+        {/* Flat dark balance panel sitting on the gradient. */}
         <View style={[styles.imageWrap, { minHeight: portfolioCardMinHeight }]}>
+          {/* Grainy gradient overlay */}
+          <LinearGradient
+            colors={['rgba(58, 58, 58, 0.95)', 'rgba(34, 34, 34, 0.94)', 'rgba(14, 14, 14, 0.98)']}
+            locations={[0, 0.45, 1]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+          {/* SVG noise texture */}
+          <View style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} pointerEvents="none">
+            <Svg width="100%" height="100%">
+              <Defs>
+                <Filter id="noise" x="0%" y="0%" width="100%" height="100%">
+                  <FeTurbulence
+                    type="fractalNoise"
+                    baseFrequency="0.85"
+                    numOctaves={4}
+                    stitchTiles="stitch"
+                    result="noise"
+                  />
+                  <FeColorMatrix type="saturate" values="0" in="noise" />
+                </Filter>
+              </Defs>
+              <Rect width="100%" height="100%" filter="url(#noise)" opacity={0.6} />
+            </Svg>
+          </View>
           <View
             style={[
               styles.content,
@@ -364,184 +386,154 @@ export function BalanceCard({
               },
             ]}
           >
-          <View style={[styles.topRow, ultraCompact && styles.topRowCompact]}>
-            {loading ? (
-              <>
-                <SkeletonBlock
-                  width={compact ? 86 : 104}
-                  height={compact ? 18 : 20}
-                  radius={radii.full}
-                />
-                <View style={styles.topActions}>
+            <View style={[styles.topRow, ultraCompact && styles.topRowCompact]}>
+              {loading ? (
+                <>
                   <SkeletonBlock
-                    width={addressPillMaxWidth}
-                    height={topControlSize}
+                    width={compact ? 86 : 104}
+                    height={compact ? 18 : 20}
                     radius={radii.full}
                   />
-                  <SkeletonBlock
-                    width={topControlSize}
-                    height={topControlSize}
-                    radius={radii.full}
-                  />
-                </View>
-              </>
-            ) : (
-              <>
-                <Text
-                  variant="bodyBold"
-                  color={colors.text.primary}
-                  style={[styles.ticker, compact && styles.tickerCompact]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.82}
-                  maxFontSizeMultiplier={1.1}
-                >
-                  {balanceTicker}
-                </Text>
-                <View style={styles.topActions}>
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.addressPill,
-                      { height: topControlSize, maxWidth: addressPillMaxWidth },
-                      pressed && styles.controlPressed,
-                    ]}
-                    onPress={handleCopy}
-                    disabled={publicKey == null}
-                    hitSlop={6}
-                    accessibilityRole="button"
-                    accessibilityLabel="Copy wallet address"
-                    accessibilityState={{ disabled: publicKey == null }}
-                  >
-                    <View style={styles.addressPillGlass}>
-                      <Text
-                        variant="small"
-                        color={colors.text.primary}
-                        style={styles.addressText}
-                        numberOfLines={1}
-                        ellipsizeMode="middle"
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.78}
-                        maxFontSizeMultiplier={1}
-                      >
-                        {maskedAddress}
-                      </Text>
-                      <Ionicons
-                        name={copied ? 'checkmark' : 'copy-outline'}
-                        size={compact ? 15 : 16}
-                        color={colors.text.primary}
-                      />
-                    </View>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.refreshButton,
-                      { width: topControlSize, height: topControlSize },
-                      pressed && !refreshing && styles.controlPressed,
-                    ]}
-                    onPress={onRefresh}
-                    disabled={onRefresh == null || refreshing}
-                    hitSlop={6}
-                    accessibilityRole="button"
-                    accessibilityLabel="Refresh wallet data"
-                    accessibilityState={{
-                      busy: refreshing,
-                      disabled: onRefresh == null || refreshing,
-                    }}
-                  >
-                    <View style={styles.iconControlGlass}>
-                      {refreshing ? (
-                        <Animated.View
-                          key="refresh-loader"
-                          entering={FadeIn.duration(100)}
-                          exiting={FadeOut.duration(80)}
-                          style={styles.refreshLoader}
-                        >
-                          <LazyLoadingSpinner size={refreshIconSize} color={colors.text.primary} />
-                        </Animated.View>
-                      ) : (
-                        <Animated.View
-                          key="refresh-icon"
-                          entering={FadeIn.duration(100)}
-                          exiting={FadeOut.duration(80)}
-                          style={styles.refreshIcon}
-                        >
-                          <PuffyRefreshIcon size={compact ? 17 : 18} color={colors.text.primary} />
-                        </Animated.View>
-                      )}
-                    </View>
-                  </Pressable>
-                </View>
-              </>
-            )}
-          </View>
-          <View style={styles.metricRow}>
-            <View style={styles.valueCol}>
-              {showPortfolioSkeleton ? (
-                <SkeletonBlock
-                  width={compact ? 156 : 196}
-                  height={compact ? 34 : 42}
-                  radius={radii.lg}
-                  style={styles.balanceSkeleton}
-                />
-              ) : (
-                <SlotText
-                  value={displayedPortfolioValue}
-                  variant="display"
-                  color={colors.text.primary}
-                  style={[styles.balanceAmount, compact && styles.balanceAmountCompact]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.42}
-                  maxFontSizeMultiplier={1}
-                />
-              )}
-            </View>
-          </View>
-          <View
-            style={[
-              styles.bottomRow,
-              compact && styles.bottomRowCompact,
-              stackFooter && styles.bottomRowStacked,
-            ]}
-          >
-            {loading ? (
-              <>
-                <View
-                  style={[
-                    styles.statusPillRow,
-                    compact && styles.statusPillRowCompact,
-                    stackFooter && styles.statusPillRowStacked,
-                  ]}
-                >
-                  <SkeletonBlock
-                    width={compact ? 82 : 94}
-                    height={statusPillHeight}
-                    radius={radii.full}
-                  />
-                  <SkeletonBlock
-                    width={compact ? 68 : 82}
-                    height={statusPillHeight}
-                    radius={radii.full}
-                  />
-                </View>
-                <View style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}>
-                  <View style={styles.privacyCurrencyRow}>
+                  <View style={styles.topActions}>
                     <SkeletonBlock
-                      width={footerControlHeight}
-                      height={footerControlHeight}
+                      width={addressPillMaxWidth}
+                      height={topControlSize}
                       radius={radii.full}
                     />
                     <SkeletonBlock
-                      width={currencyPillWidth}
-                      height={footerControlHeight}
+                      width={topControlSize}
+                      height={topControlSize}
                       radius={radii.full}
                     />
                   </View>
-                </View>
-              </>
-            ) : (
-              <>
-                {networkLabel != null || offlineSlotsLabel != null ? (
+                </>
+              ) : (
+                <>
+                  <Text
+                    variant="bodyBold"
+                    color={colors.text.primary}
+                    style={[styles.ticker, compact && styles.tickerCompact]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
+                    maxFontSizeMultiplier={1.1}
+                  >
+                    {balanceTicker}
+                  </Text>
+                  <View style={styles.topActions}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.addressPill,
+                        { height: topControlSize, maxWidth: addressPillMaxWidth },
+                        pressed && styles.controlPressed,
+                      ]}
+                      onPress={handleCopy}
+                      disabled={publicKey == null}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Copy wallet address"
+                      accessibilityState={{ disabled: publicKey == null }}
+                    >
+                      <View style={styles.addressPillGlass}>
+                        <Text
+                          variant="small"
+                          color={colors.text.primary}
+                          style={styles.addressText}
+                          numberOfLines={1}
+                          ellipsizeMode="middle"
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.78}
+                          maxFontSizeMultiplier={1}
+                        >
+                          {maskedAddress}
+                        </Text>
+                        <Ionicons
+                          name={copied ? 'checkmark' : 'copy-outline'}
+                          size={compact ? 15 : 16}
+                          color={colors.text.primary}
+                        />
+                      </View>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.refreshButton,
+                        { width: topControlSize, height: topControlSize },
+                        pressed && !refreshing && styles.controlPressed,
+                      ]}
+                      onPress={onRefresh}
+                      disabled={onRefresh == null || refreshing}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Refresh wallet data"
+                      accessibilityState={{
+                        busy: refreshing,
+                        disabled: onRefresh == null || refreshing,
+                      }}
+                    >
+                      <View style={styles.iconControlGlass}>
+                        {refreshing ? (
+                          <Animated.View
+                            key="refresh-loader"
+                            entering={FadeIn.duration(100)}
+                            exiting={FadeOut.duration(80)}
+                            style={styles.refreshLoader}
+                          >
+                            <LazyLoadingSpinner
+                              size={refreshIconSize}
+                              color={colors.text.primary}
+                            />
+                          </Animated.View>
+                        ) : (
+                          <Animated.View
+                            key="refresh-icon"
+                            entering={FadeIn.duration(100)}
+                            exiting={FadeOut.duration(80)}
+                            style={styles.refreshIcon}
+                          >
+                            <PuffyRefreshIcon
+                              size={compact ? 17 : 18}
+                              color={colors.text.primary}
+                            />
+                          </Animated.View>
+                        )}
+                      </View>
+                    </Pressable>
+                  </View>
+                </>
+              )}
+            </View>
+            <View style={styles.metricRow}>
+              <View style={styles.valueCol}>
+                {showPortfolioSkeleton ? (
+                  <SkeletonBlock
+                    width={compact ? 156 : 196}
+                    height={compact ? 34 : 42}
+                    radius={radii.lg}
+                    style={styles.balanceSkeleton}
+                  />
+                ) : (
+                  <SlotText
+                    value={displayedPortfolioValue}
+                    variant="display"
+                    color={colors.text.primary}
+                    style={[styles.balanceAmount, compact && styles.balanceAmountCompact]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.42}
+                    maxFontSizeMultiplier={1}
+                  />
+                )}
+              </View>
+            </View>
+            <View
+              style={[
+                styles.bottomRow,
+                compact && styles.bottomRowCompact,
+                stackFooter && styles.bottomRowStacked,
+              ]}
+            >
+              {loading ? (
+                <>
                   <View
                     style={[
                       styles.statusPillRow,
@@ -549,241 +541,281 @@ export function BalanceCard({
                       stackFooter && styles.statusPillRowStacked,
                     ]}
                   >
-                    {networkLabel != null ? (
-                      <View
-                        style={[
-                          styles.networkPill,
-                          stackFooter && styles.networkPillStacked,
-                          {
-                            width: networkPillWidth,
-                            height: statusPillHeight,
-                          },
-                        ]}
-                      >
+                    <SkeletonBlock
+                      width={compact ? 82 : 94}
+                      height={statusPillHeight}
+                      radius={radii.full}
+                    />
+                    <SkeletonBlock
+                      width={compact ? 68 : 82}
+                      height={statusPillHeight}
+                      radius={radii.full}
+                    />
+                  </View>
+                  <View
+                    style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}
+                  >
+                    <View style={styles.privacyCurrencyRow}>
+                      <SkeletonBlock
+                        width={footerControlHeight}
+                        height={footerControlHeight}
+                        radius={radii.full}
+                      />
+                      <SkeletonBlock
+                        width={currencyPillWidth}
+                        height={footerControlHeight}
+                        radius={radii.full}
+                      />
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <>
+                  {networkLabel != null || offlineSlotsLabel != null ? (
+                    <View
+                      style={[
+                        styles.statusPillRow,
+                        compact && styles.statusPillRowCompact,
+                        stackFooter && styles.statusPillRowStacked,
+                      ]}
+                    >
+                      {networkLabel != null ? (
                         <View
                           style={[
-                            styles.statusPillGlass,
-                            ultraCompact && styles.statusPillGlassCompact,
+                            styles.networkPill,
+                            stackFooter && styles.networkPillStacked,
+                            {
+                              width: networkPillWidth,
+                              height: statusPillHeight,
+                            },
                           ]}
                         >
-                          <Text
-                            variant="small"
-                            color={colors.text.secondary}
-                            style={styles.networkText}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.76}
-                            maxFontSizeMultiplier={1}
+                          <View
+                            style={[
+                              styles.statusPillGlass,
+                              ultraCompact && styles.statusPillGlassCompact,
+                            ]}
                           >
-                            {displayedNetworkLabel}
-                          </Text>
-                        </View>
-                      </View>
-                    ) : null}
-                    {offlineSlotsLabel != null ? (
-                      <View
-                        style={[
-                          styles.networkPill,
-                          stackFooter && styles.networkPillStacked,
-                          {
-                            width: slotsPillWidth,
-                            height: statusPillHeight,
-                          },
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.statusPillGlass,
-                            ultraCompact && styles.statusPillGlassCompact,
-                          ]}
-                        >
-                          <Text
-                            variant="small"
-                            color={colors.text.secondary}
-                            style={styles.networkText}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.76}
-                            maxFontSizeMultiplier={1}
-                          >
-                            {displayedOfflineSlotsLabel}
-                          </Text>
-                        </View>
-                      </View>
-                    ) : null}
-                  </View>
-                ) : (
-                  <View style={styles.networkPillPlaceholder} />
-                )}
-                <View style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}>
-                  <View style={styles.privacyCurrencyRow}>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.privacyButton,
-                        { width: footerControlHeight, height: footerControlHeight },
-                        pressed && styles.controlPressed,
-                      ]}
-                      onPress={onTogglePrivacy}
-                      disabled={onTogglePrivacy == null}
-                      hitSlop={6}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        privacyHidden ? 'Show wallet values' : 'Hide wallet values'
-                      }
-                      accessibilityState={{
-                        checked: privacyHidden,
-                        disabled: onTogglePrivacy == null,
-                      }}
-                    >
-                      <View style={styles.iconControlGlass}>
-                        <Ionicons
-                          name={privacyHidden ? 'eye-off-outline' : 'eye-outline'}
-                          size={18}
-                          color={colors.text.primary}
-                        />
-                      </View>
-                    </Pressable>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.currencyPill,
-                        { width: currencyPillWidth, height: footerControlHeight },
-                        pressed && styles.controlPressed,
-                      ]}
-                      onPress={() => setCurrencyMenuOpen(true)}
-                      hitSlop={6}
-                      accessibilityRole="button"
-                      accessibilityLabel="Select display currency"
-                    >
-                      <View style={styles.currencyPillGlass}>
-                        <Text
-                          variant="small"
-                          color={colors.text.primary}
-                          style={styles.currencyText}
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.82}
-                          maxFontSizeMultiplier={1}
-                        >
-                          {currencyCode}
-                        </Text>
-                        <Ionicons name="chevron-down" size={13} color={colors.text.secondary} />
-                      </View>
-                    </Pressable>
-                  </View>
-                </View>
-              </>
-            )}
-          </View>
-          <Modal
-            visible={currencyMenuOpen}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setCurrencyMenuOpen(false)}
-          >
-            <Pressable style={styles.modalBackdrop} onPress={() => setCurrencyMenuOpen(false)}>
-              <Pressable
-                style={[
-                  styles.currencySheet,
-                  {
-                    height: currencySheetHeight,
-                    paddingBottom: currencySheetBottomPadding,
-                  },
-                ]}
-                onPress={(event) => event.stopPropagation()}
-              >
-                <View style={styles.currencySheetHeader}>
-                  <Text
-                    variant="bodyBold"
-                    color={colors.text.primary}
-                    style={styles.currencySheetTitle}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1.1}
-                  >
-                    Display Currency
-                  </Text>
-                  <Pressable
-                    style={styles.sheetClose}
-                    onPress={() => setCurrencyMenuOpen(false)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Close currency selector"
-                  >
-                    <Ionicons name="close" size={18} color={colors.text.primary} />
-                  </Pressable>
-                </View>
-                <View style={styles.currencySearchBox}>
-                  <Ionicons name="search" size={16} color={colors.text.tertiary} />
-                  <TextInput
-                    value={currencySearch}
-                    onChangeText={setCurrencySearch}
-                    placeholder="Search currencies"
-                    placeholderTextColor={colors.text.placeholder}
-                    selectionColor={colors.brand.azureCyan}
-                    autoCorrect={false}
-                    autoCapitalize="characters"
-                    style={styles.currencySearchInput}
-                  />
-                </View>
-                <ScrollView
-                  style={styles.currencyScroll}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={styles.currencyList}
-                >
-                  {currencyOptions.map((currency) => {
-                    const selected = currency.code === currencyCode;
-                    return (
-                      <Pressable
-                        key={currency.code}
-                        style={({ pressed }) => [
-                          styles.currencyOption,
-                          selected && styles.currencyOptionActive,
-                          pressed && styles.currencyOptionPressed,
-                        ]}
-                        onPress={() => {
-                          onCurrencyChange?.(currency.code);
-                          setCurrencyMenuOpen(false);
-                          setCurrencySearch('');
-                        }}
-                      >
-                        <View style={styles.currencyOptionLeft}>
-                          <Text
-                            variant="body"
-                            color={colors.text.primary}
-                            style={styles.currencySymbol}
-                          >
-                            {currency.symbol}
-                          </Text>
-                          <View style={styles.currencyOptionText}>
                             <Text
-                              variant="captionBold"
-                              color={colors.text.primary}
+                              variant="small"
+                              color={colors.text.secondary}
+                              style={styles.networkText}
                               numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.76}
+                              maxFontSizeMultiplier={1}
                             >
-                              {currency.code}
-                            </Text>
-                            <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
-                              {currency.name}
+                              {displayedNetworkLabel}
                             </Text>
                           </View>
                         </View>
-                        {selected ? (
+                      ) : null}
+                      {offlineSlotsLabel != null ? (
+                        <View
+                          style={[
+                            styles.networkPill,
+                            stackFooter && styles.networkPillStacked,
+                            {
+                              width: slotsPillWidth,
+                              height: statusPillHeight,
+                            },
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.statusPillGlass,
+                              ultraCompact && styles.statusPillGlassCompact,
+                            ]}
+                          >
+                            <Text
+                              variant="small"
+                              color={colors.text.secondary}
+                              style={styles.networkText}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.76}
+                              maxFontSizeMultiplier={1}
+                            >
+                              {displayedOfflineSlotsLabel}
+                            </Text>
+                          </View>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <View style={styles.networkPillPlaceholder} />
+                  )}
+                  <View
+                    style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}
+                  >
+                    <View style={styles.privacyCurrencyRow}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.privacyButton,
+                          { width: footerControlHeight, height: footerControlHeight },
+                          pressed && styles.controlPressed,
+                        ]}
+                        onPress={onTogglePrivacy}
+                        disabled={onTogglePrivacy == null}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          privacyHidden ? 'Show wallet values' : 'Hide wallet values'
+                        }
+                        accessibilityState={{
+                          checked: privacyHidden,
+                          disabled: onTogglePrivacy == null,
+                        }}
+                      >
+                        <View style={styles.iconControlGlass}>
                           <Ionicons
-                            name="checkmark-circle"
+                            name={privacyHidden ? 'eye-off-outline' : 'eye-outline'}
                             size={18}
-                            color={colors.brand.azureCyan}
+                            color={colors.text.primary}
                           />
-                        ) : null}
+                        </View>
                       </Pressable>
-                    );
-                  })}
-                </ScrollView>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.currencyPill,
+                          { width: currencyPillWidth, height: footerControlHeight },
+                          pressed && styles.controlPressed,
+                        ]}
+                        onPress={() => setCurrencyMenuOpen(true)}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel="Select display currency"
+                      >
+                        <View style={styles.currencyPillGlass}>
+                          <Text
+                            variant="small"
+                            color={colors.text.primary}
+                            style={styles.currencyText}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.82}
+                            maxFontSizeMultiplier={1}
+                          >
+                            {currencyCode}
+                          </Text>
+                          <Ionicons name="chevron-down" size={13} color={colors.text.secondary} />
+                        </View>
+                      </Pressable>
+                    </View>
+                  </View>
+                </>
+              )}
+            </View>
+            <Modal
+              visible={currencyMenuOpen}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setCurrencyMenuOpen(false)}
+            >
+              <Pressable style={styles.modalBackdrop} onPress={() => setCurrencyMenuOpen(false)}>
+                <Pressable
+                  style={[
+                    styles.currencySheet,
+                    {
+                      height: currencySheetHeight,
+                      paddingBottom: currencySheetBottomPadding,
+                    },
+                  ]}
+                  onPress={(event) => event.stopPropagation()}
+                >
+                  <View style={styles.currencySheetHeader}>
+                    <Text
+                      variant="bodyBold"
+                      color={colors.text.primary}
+                      style={styles.currencySheetTitle}
+                      numberOfLines={1}
+                      maxFontSizeMultiplier={1.1}
+                    >
+                      Display Currency
+                    </Text>
+                    <Pressable
+                      style={styles.sheetClose}
+                      onPress={() => setCurrencyMenuOpen(false)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Close currency selector"
+                    >
+                      <Ionicons name="close" size={18} color={colors.text.primary} />
+                    </Pressable>
+                  </View>
+                  <View style={styles.currencySearchBox}>
+                    <Ionicons name="search" size={16} color={colors.text.tertiary} />
+                    <TextInput
+                      value={currencySearch}
+                      onChangeText={setCurrencySearch}
+                      placeholder="Search currencies"
+                      placeholderTextColor={colors.text.placeholder}
+                      selectionColor={colors.brand.glossAccent}
+                      autoCorrect={false}
+                      autoCapitalize="characters"
+                      style={styles.currencySearchInput}
+                    />
+                  </View>
+                  <ScrollView
+                    style={styles.currencyScroll}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.currencyList}
+                  >
+                    {currencyOptions.map((currency) => {
+                      const selected = currency.code === currencyCode;
+                      return (
+                        <Pressable
+                          key={currency.code}
+                          style={({ pressed }) => [
+                            styles.currencyOption,
+                            selected && styles.currencyOptionActive,
+                            pressed && styles.currencyOptionPressed,
+                          ]}
+                          onPress={() => {
+                            onCurrencyChange?.(currency.code);
+                            setCurrencyMenuOpen(false);
+                            setCurrencySearch('');
+                          }}
+                        >
+                          <View style={styles.currencyOptionLeft}>
+                            <Text
+                              variant="body"
+                              color={colors.text.primary}
+                              style={styles.currencySymbol}
+                            >
+                              {currency.symbol}
+                            </Text>
+                            <View style={styles.currencyOptionText}>
+                              <Text
+                                variant="captionBold"
+                                color={colors.text.primary}
+                                numberOfLines={1}
+                              >
+                                {currency.code}
+                              </Text>
+                              <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+                                {currency.name}
+                              </Text>
+                            </View>
+                          </View>
+                          {selected ? (
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={18}
+                              color={colors.brand.glossAccent}
+                            />
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </Pressable>
               </Pressable>
-            </Pressable>
-          </Modal>
+            </Modal>
           </View>
         </View>
 
-        {/* ── Actions row — shares the hero container gradient ── */}
+        {/* Actions row — shares the solid hero shell. */}
         <Animated.View
           style={[styles.actionsRow, compact && styles.actionsRowCompact, actionsRowStyle]}
         >
@@ -809,7 +841,7 @@ export function BalanceCard({
             ),
           )}
         </Animated.View>
-      </LinearGradient>
+      </View>
     </View>
   );
 }
@@ -826,15 +858,20 @@ const styles = StyleSheet.create({
   outerWide: {
     maxWidth: 430,
   },
-  // Single hero container — holds the balance panel + action row and
-  // owns the gradient. No drop shadow / elevation per the reference;
-  // the rounded gradient alone defines the surface.
+  // Single hero container - holds the balance panel + action row.
   heroContainer: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
     padding: spacing.md,
     gap: spacing.lg,
+    backgroundColor: colors.surface.card,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    boxShadow: HEADER_CONTAINER_SHADOW,
   },
   heroContainerCompact: {
     padding: spacing.sm,
@@ -847,9 +884,18 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.glass.frostFill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.28)',
+    backgroundColor: colors.surface.cardElevated,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.14)',
+      'inset 0 0 14px rgba(255, 255, 255, 0.03)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
+      '0 6px 16px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   content: {
     minWidth: 0,
@@ -929,6 +975,11 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     minWidth: 0,
     backgroundColor: colors.glass.strongFill,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   networkPillStacked: {
     flex: 1,
@@ -994,6 +1045,11 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
     backgroundColor: colors.glass.strongFill,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   addressPillGlass: {
     height: '100%',
@@ -1038,6 +1094,11 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     flexShrink: 0,
     backgroundColor: colors.glass.strongFill,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   currencyPillGlass: {
     width: '100%',
@@ -1064,6 +1125,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   iconControlGlass: {
     width: '100%',
@@ -1094,17 +1160,22 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     flexShrink: 0,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(14, 42, 53, 0.42)',
+    backgroundColor: 'rgba(16, 16, 16, 0.42)',
     justifyContent: 'flex-end',
   },
   currencySheet: {
     borderTopLeftRadius: radii['2xl'],
     borderTopRightRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderRightWidth: StyleSheet.hairlineWidth,
@@ -1134,13 +1205,13 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 8px 18px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
   },
   currencySearchBox: {
     flexDirection: 'row',
@@ -1148,13 +1219,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
     paddingHorizontal: spacing.md,
     height: 42,
     marginBottom: spacing.md,
@@ -1181,20 +1252,20 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: radii.md,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 8px 18px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
   },
   currencyOptionActive: {
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
     borderColor: colors.glass.rim,
   },
   currencyOptionPressed: {

@@ -5,12 +5,11 @@
  *   - A list of recent transactions (when available)
  *   - An empty state with a subtle animation prompt
  *
- * Uses the same arctic glass material as the home header,
+ * Uses the same neutral glossy glass material as the home header,
  * portfolio card, and token holdings card.
  */
 import { memo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { TransactionActivityRow } from '@/components/features/history/TransactionActivityRow';
@@ -54,15 +53,10 @@ interface RecentActivityCardProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-const HOME_GLASS_COLORS = [
-  'rgba(252, 252, 255, 0.94)',
-  'rgba(238, 250, 252, 0.86)',
-  'rgba(223, 247, 250, 0.78)',
-] as const;
 // Flat card treatment — see BalanceCard. Soft ambient lift + 1px top
-// highlight only, dropping the previous heavy drop shadow + cyan glow.
+// highlight only, with neutral dark depth instead of coloured glow.
 const HOME_CONTAINER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 12px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14)';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -215,14 +209,9 @@ export function RecentActivityCard({
         <View style={styles.list}>
           {Array.from({ length: compact ? 2 : 3 }, (_, index) => (
             <View style={styles.cardShell} key={`activity-skeleton-${index}`}>
-              <LinearGradient
-                colors={[...HOME_GLASS_COLORS]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.gradient}
-              >
+              <View style={styles.cardSurface}>
                 <ActivityRowSkeleton compact={compact} />
-              </LinearGradient>
+              </View>
             </View>
           ))}
         </View>
@@ -241,14 +230,9 @@ export function RecentActivityCard({
         </View>
       ) : (
         <View style={styles.cardShell}>
-          <LinearGradient
-            colors={[...HOME_GLASS_COLORS]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.gradient}
-          >
+          <View style={styles.cardSurface}>
             <EmptyState title={emptyTitle} subtitle={emptySubtitle} />
-          </LinearGradient>
+          </View>
         </View>
       )}
     </View>
@@ -305,11 +289,11 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-    backgroundColor: 'rgba(252, 252, 255, 0.94)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: HOME_CONTAINER_SHADOW,
   },
-  gradient: {
+  cardSurface: {
     paddingVertical: spacing.xs,
     position: 'relative',
     backgroundColor: 'transparent',

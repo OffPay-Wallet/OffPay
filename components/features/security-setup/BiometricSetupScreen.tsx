@@ -123,7 +123,7 @@ export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): Rea
           <View style={styles.copyBlock}>
             <PuffyFingerprintIcon
               size={fingerprintIconSize}
-              color={colors.brand.azureCyan}
+              color={colors.brand.glossAccent}
               focused
             />
             <Text variant="h1" color={colors.text.primary} align="center" style={styles.title}>
@@ -179,7 +179,7 @@ export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): Rea
             ) : null}
             <SecuritySetupButton
               label="I'll do it later"
-              variant="solidBlue"
+              variant="solidDark"
               onPress={() => void handleSkip()}
               disabled={saving}
               size="compact"

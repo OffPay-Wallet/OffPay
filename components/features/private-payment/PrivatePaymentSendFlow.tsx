@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -58,7 +57,10 @@ import {
 } from '@/hooks/useOfflinePaymentSlots';
 import { useWalletModeState } from '@/hooks/useWalletModeState';
 import { decimalInputToAtomicAmount, sanitizeDecimalInput } from '@/lib/policy/token-amounts';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import {
   buildStablecoinMetadataLookup,
   buildVisibleTokenHoldings,
@@ -111,15 +113,10 @@ type SendStep = 'token' | 'recipient' | 'amount' | 'summary' | 'success';
 type SendStepTransitionDirection = 'forward' | 'backward';
 const MAX_AMOUNT_INPUT_CHARACTERS = 48;
 const SEND_CONTENT_MAX_WIDTH = 430;
-const SEND_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 const PRIVATE_SEND_TIMEOUT_MS = 120_000;
 const UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS = 300_000;
 const SEND_HEADER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const SEND_STEP_TRANSITION_DURATION_MS = 260;
 const SEND_STEP_ORDER: Record<SendStep, number> = {
   token: 0,
@@ -221,14 +218,9 @@ function HeaderIconButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <LinearGradient
-        colors={[...SEND_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerIconSurface}
-      >
+      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}>
         {children}
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -258,21 +250,18 @@ function HeaderTextButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
     >
-      <LinearGradient
-        colors={[...SEND_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerTextButtonSurface}
+      <View
+        style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerTextButtonSurface]}
       >
         <Text
           variant="bodyBold"
-          color={disabled ? colors.text.tertiary : colors.brand.deepShadow}
+          color={disabled ? colors.text.tertiary : colors.text.primary}
           numberOfLines={1}
           maxFontSizeMultiplier={1}
         >
           {label}
         </Text>
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -324,7 +313,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const [step, setStep] = useState<SendStep>('token');
   const [stepTransitionDirection, setStepTransitionDirection] =
     useState<SendStepTransitionDirection>('forward');
-  const [resultTransitionDirection, setResultTransitionDirection] =
+  const [_resultTransitionDirection, setResultTransitionDirection] =
     useState<SendStepTransitionDirection>('forward');
   const stepRef = useRef<SendStep>('token');
   const [query, setQuery] = useState('');
@@ -339,7 +328,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const [normalSending, setNormalSending] = useState(false);
   const [privateSending, setPrivateSending] = useState(false);
   const [sendResult, setSendResult] = useState<SendResultView | null>(null);
-  const [sendProcessResult, setSendProcessResult] = useState<SendProcessResultState | null>(null);
+  const [_sendProcessResult, setSendProcessResult] = useState<SendProcessResultState | null>(null);
   const [selectedPrivateRoute, setSelectedPrivateRoute] = useState<PrivatePaymentRoute | null>(
     null,
   );
@@ -352,8 +341,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       if (currentStep === nextStep) return;
 
       stepRef.current = nextStep;
-      const resolvedDirection =
-        direction ?? getSendStepTransitionDirection(currentStep, nextStep);
+      const resolvedDirection = direction ?? getSendStepTransitionDirection(currentStep, nextStep);
       setStepTransitionDirection(resolvedDirection);
       // Defer the step swap by one frame so the outgoing view first
       // re-renders with the updated `exiting` direction, then
@@ -657,7 +645,13 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     }
     const fiatValue = enteredAmount * selectedTokenUnitUsdPrice * rate;
     return formatFiatCurrency(fiatValue, amountValuationQuery.data?.currency ?? displayCurrency);
-  }, [amount, amountValuationQuery.data, displayCurrency, selectedToken, selectedTokenUnitUsdPrice]);
+  }, [
+    amount,
+    amountValuationQuery.data,
+    displayCurrency,
+    selectedToken,
+    selectedTokenUnitUsdPrice,
+  ]);
   const recentRecipients = useMemo<RecentRecipientOption[]>(() => {
     const byAddress = new Map<string, RecentRecipientOption>();
 
@@ -1451,7 +1445,8 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             return;
           }
           const { OFFPAY_BLE_PROTOCOL } = await import('@/lib/offline/offline-ble-protocol');
-          const { sendOfflineBlePaymentPayload } = await import('@/lib/offline/offline-ble-transport');
+          const { sendOfflineBlePaymentPayload } =
+            await import('@/lib/offline/offline-ble-transport');
           void sendOfflineBlePaymentPayload(
             {
               version: 1,
@@ -1532,7 +1527,8 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       runAfterLoadingPaint(() => {
         void (async () => {
           if (!mountedRef.current) return;
-          const { submitNormalTokenTransfer } = await import('@/lib/payments/normal-token-transfer');
+          const { submitNormalTokenTransfer } =
+            await import('@/lib/payments/normal-token-transfer');
           const result = await submitNormalTokenTransfer({
             walletAddress,
             walletId,
@@ -1856,14 +1852,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
               style={[styles.stepScreen, { gap: sectionGap }]}
             >
               <View style={styles.header}>
-                <HeaderIconButton
-                  onPress={handleBack}
-                  accessibilityLabel="Go back"
-                >
+                <HeaderIconButton onPress={handleBack} accessibilityLabel="Go back">
                   <Ionicons
                     name="chevron-back"
                     size={layout.iconSizeNav}
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                   />
                 </HeaderIconButton>
                 <Text
@@ -1940,7 +1933,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         }
         phase={sendSheetPhase}
         token={selectedToken}
-        amount={selectedToken != null ? sanitizeDecimalInput(amount, selectedToken.decimals) : amount}
+        amount={
+          selectedToken != null ? sanitizeDecimalInput(amount, selectedToken.decimals) : amount
+        }
         amountMetaLabel={amountMetaLabel}
         recipientAddress={effectiveRecipientAddress ?? ''}
         network={network}
@@ -2437,10 +2432,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   primaryButton: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   secondaryButton: {
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
   },
@@ -2448,6 +2443,6 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   buttonPressed: {
-    backgroundColor: colors.brand.azureBlue,
+    backgroundColor: colors.brand.actionFill,
   },
 });

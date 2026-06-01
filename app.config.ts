@@ -9,9 +9,10 @@ const ANDROID_PACKAGE = 'com.offpay.app';
 const APP_ICON_PATH = './assets/AppIcons/appstore.png';
 const ANDROID_ICON_PATH = './assets/AppIcons/playstore.png';
 const ANDROID_ADAPTIVE_ICON_FOREGROUND_PATH = './assets/AppIcons/playstore.png';
-/** Matches colors.backgroundGradient.base from constants/colors.ts — Arctic Mist */
-const BRAND_BACKGROUND_COLOR = '#5BC8E8';
-const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = BRAND_BACKGROUND_COLOR;
+/** Matches colors.backgroundGradient.base from constants/colors.ts. */
+const BRAND_BACKGROUND_COLOR = '#050505';
+const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = '#000000';
+const ANDROID_NOTIFICATION_COLOR = '#F7F7F2';
 
 export default function appConfig(_context: ConfigContext): ExpoConfig {
   return {
@@ -144,7 +145,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
           // Local notifications only — no remote push tokens. The
           // plugin still needs to be present for the Android
           // notification channel and iOS entitlements to be wired.
-          color: BRAND_BACKGROUND_COLOR,
+          color: ANDROID_NOTIFICATION_COLOR,
         },
       ],
       [

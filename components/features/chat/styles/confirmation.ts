@@ -26,7 +26,7 @@ export const confirmationStyles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(46, 174, 210, 0.14)',
+    backgroundColor: 'rgba(16, 16, 16, 0.14)',
   },
   confirmationTitleStack: {
     flex: 1,
@@ -85,7 +85,7 @@ export const confirmationStyles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(14, 42, 53, 0.06)',
+    backgroundColor: 'rgba(16, 16, 16, 0.06)',
   },
   actionButtonPressed: {
     opacity: 0.78,

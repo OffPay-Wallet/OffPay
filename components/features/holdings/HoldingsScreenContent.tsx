@@ -1,16 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 
-import {
-  TokenRow,
-  TokenRowSkeleton,
-  TOKEN_HOLDINGS_GLASS_COLORS,
-} from '@/components/features/home/TokenHoldingsCard';
+import { TokenRow, TokenRowSkeleton } from '@/components/features/home/TokenHoldingsCard';
 import { HoldingsHeader } from '@/components/features/holdings/HoldingsHeader';
 import { HoldingsSearchBar } from '@/components/features/holdings/HoldingsSearchBar';
 import { Text } from '@/components/ui/Text';
@@ -160,12 +155,7 @@ export function HoldingsScreenContent({
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<RowItem>) => (
       <View style={[styles.rowCardShell, { width: rowFrameWidth }]}>
-        <LinearGradient
-          colors={[...TOKEN_HOLDINGS_GLASS_COLORS]}
-          start={{ x: 0.04, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.cardGradient}
-        >
+        <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.cardSurface]}>
           <TokenRow
             holding={item.holding}
             isLast
@@ -175,7 +165,7 @@ export function HoldingsScreenContent({
             privacyHidden={false}
             valuation={item.valuation}
           />
-        </LinearGradient>
+        </View>
       </View>
     ),
     [compact, dense, handleTokenPress, rowFrameWidth],
@@ -206,14 +196,9 @@ export function HoldingsScreenContent({
               style={[styles.rowCardShell, { width: rowFrameWidth }]}
               key={`token-skeleton-${index}`}
             >
-              <LinearGradient
-                colors={[...TOKEN_HOLDINGS_GLASS_COLORS]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.cardGradient}
-              >
+              <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.cardSurface]}>
                 <TokenRowSkeleton compact={compact} dense={dense} isLast />
-              </LinearGradient>
+              </View>
             </View>
           ))}
         </View>
@@ -222,11 +207,11 @@ export function HoldingsScreenContent({
 
     return (
       <View style={[styles.rowCardShell, { width: rowFrameWidth }]}>
-        <LinearGradient
-          colors={[...TOKEN_HOLDINGS_GLASS_COLORS]}
-          start={{ x: 0.04, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.cardGradient, styles.emptyState]}
+        <View
+          style={[
+            { backgroundColor: colors.surface.cardElevated },
+            [styles.cardSurface, styles.emptyState],
+          ]}
         >
           <Ionicons
             name="wallet-outline"
@@ -241,7 +226,7 @@ export function HoldingsScreenContent({
               {emptySubtitle}
             </Text>
           ) : null}
-        </LinearGradient>
+        </View>
       </View>
     );
   }, [compact, dense, emptySubtitle, emptyTitle, rowFrameWidth, showLoadingPlaceholder]);
@@ -344,7 +329,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: colors.glass.strongFill,
   },
-  cardGradient: {
+  cardSurface: {
     width: '100%',
   },
   emptyState: {

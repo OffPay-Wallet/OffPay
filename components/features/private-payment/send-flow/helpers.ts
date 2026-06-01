@@ -19,13 +19,10 @@
  *     used only by the submission orchestrator; doesn't gain anything
  *     from extraction.
  *   - Header / button sub-components — they depend on the screen's
- *     local `styles`, `SEND_GLASS_COLORS`, and layout constants.
- *     Extracting them without moving styles would just churn imports.
+ *     local `styles` and layout constants. Extracting them without
+ *     moving styles would just churn imports.
  */
-import {
-  formatLamportsAsSol,
-  type TokenLogoLookup,
-} from '@/lib/api/offpay-wallet-data';
+import { formatLamportsAsSol, type TokenLogoLookup } from '@/lib/api/offpay-wallet-data';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 
@@ -172,7 +169,9 @@ export function getStablecoinOptions(
           logos,
         }),
         balance: token.balance,
-        decimals: normalizeTokenDecimals(stablecoin?.decimals ?? umbraToken?.decimals ?? token.decimals),
+        decimals: normalizeTokenDecimals(
+          stablecoin?.decimals ?? umbraToken?.decimals ?? token.decimals,
+        ),
         verified: token.verified || stablecoin != null || umbraToken != null,
         privateSupported,
       };

@@ -1,6 +1,5 @@
 import React from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors } from '@/constants/colors';
@@ -17,12 +16,7 @@ export function HoldingsSearchBar({ value, onChange }: HoldingsSearchBarProps): 
 
   return (
     <View style={styles.wrap}>
-      <LinearGradient
-        colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.surface}
-      >
+      <View style={[{ backgroundColor: colors.glass.strongFill }, styles.surface]}>
         <Ionicons
           name="search-outline"
           size={layout.iconSizeInline}
@@ -36,7 +30,7 @@ export function HoldingsSearchBar({ value, onChange }: HoldingsSearchBarProps): 
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
-          selectionColor={colors.brand.azureCyan}
+          selectionColor={colors.brand.glossAccent}
           style={styles.input}
           accessibilityLabel="Search tokens"
         />
@@ -57,7 +51,7 @@ export function HoldingsSearchBar({ value, onChange }: HoldingsSearchBarProps): 
             />
           ) : null}
         </Pressable>
-      </LinearGradient>
+      </View>
     </View>
   );
 }
@@ -74,7 +68,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   surface: {
     flexDirection: 'row',

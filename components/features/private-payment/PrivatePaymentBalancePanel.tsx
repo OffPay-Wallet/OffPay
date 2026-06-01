@@ -1,6 +1,5 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
@@ -42,17 +41,7 @@ export function PrivatePaymentBalancePanel({
   onRefresh,
 }: PrivatePaymentBalancePanelProps): React.JSX.Element {
   return (
-    <LinearGradient
-      colors={[
-        colors.holdingsCard.gradientTop,
-        colors.holdingsCard.gradientMid,
-        colors.holdingsCard.gradientBottom,
-      ]}
-      locations={[0, 0.45, 1]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 0, y: 1 }}
-      style={styles.card}
-    >
+    <View style={[{ backgroundColor: colors.holdingsCard.gradientTop }, styles.card]}>
       <View style={styles.headerRow}>
         <View style={styles.headerText}>
           <Text variant="captionBold" color={colors.text.secondary}>
@@ -76,7 +65,7 @@ export function PrivatePaymentBalancePanel({
           <Ionicons
             name="refresh"
             size={layout.iconSizeInline}
-            color={isLoading ? colors.text.tertiary : colors.brand.azureCyan}
+            color={isLoading ? colors.text.tertiary : colors.brand.glossAccent}
           />
         </Pressable>
       </View>
@@ -130,7 +119,7 @@ export function PrivatePaymentBalancePanel({
           {errorMessage}
         </Text>
       ) : null}
-    </LinearGradient>
+    </View>
   );
 }
 

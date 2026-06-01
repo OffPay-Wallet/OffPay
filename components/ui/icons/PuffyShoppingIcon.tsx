@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyShoppingIconProps {
   size?: number;
   color?: string;
@@ -16,7 +18,7 @@ export interface PuffyShoppingIconProps {
  */
 export function PuffyShoppingIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyShoppingIconProps): React.JSX.Element {
   const cartBodyPath =

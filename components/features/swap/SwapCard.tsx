@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { View, StyleSheet, TextInput, Pressable, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -15,7 +14,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
-import { SWAP_CONTROL_SHADOW, SWAP_GLASS_COLORS, SWAP_PANEL_SHADOW } from './swapGlass';
+import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
 import type { SwapTokenOption } from './types';
 
@@ -157,18 +156,11 @@ export function SwapCard({
 
   const handleReceiveInputLayout = (width: number) => {
     const nextWidth = Math.round(width);
-    setReceiveInputWidth((currentWidth) =>
-      currentWidth === nextWidth ? currentWidth : nextWidth,
-    );
+    setReceiveInputWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
   };
 
   return (
-    <LinearGradient
-      colors={[...SWAP_GLASS_COLORS]}
-      start={{ x: 0.04, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.container}
-    >
+    <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.container]}>
       <View
         style={[
           styles.assetBlock,
@@ -183,18 +175,14 @@ export function SwapCard({
         </View>
         <View style={styles.inputRow}>
           <TextInput
-            style={[
-              styles.input,
-              { height: amountInputHeight },
-              payAmountTextStyle,
-            ]}
+            style={[styles.input, { height: amountInputHeight }, payAmountTextStyle]}
             value={payAmount}
             onChangeText={handleManualInput}
             onLayout={(event) => handlePayInputLayout(event.nativeEvent.layout.width)}
             placeholder="0"
-            placeholderTextColor="rgba(14, 42, 53, 0.18)"
+            placeholderTextColor="rgba(16, 16, 16, 0.18)"
             keyboardType="decimal-pad"
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             numberOfLines={1}
             multiline={false}
             allowFontScaling={false}
@@ -228,7 +216,11 @@ export function SwapCard({
               {payToken.symbol}
             </Text>
             {payToken.verified ? (
-              <Ionicons name="checkmark-circle" size={tokenCheckIconSize} color={colors.brand.azureCyan} />
+              <Ionicons
+                name="checkmark-circle"
+                size={tokenCheckIconSize}
+                color={colors.brand.glossAccent}
+              />
             ) : null}
             <Ionicons
               name="chevron-down"
@@ -255,7 +247,7 @@ export function SwapCard({
             >
               <Text
                 variant="caption"
-                color={activePill === '0' ? colors.brand.navyDepth : colors.text.secondary}
+                color={activePill === '0' ? colors.brand.graphiteDepth : colors.text.secondary}
               >
                 0
               </Text>
@@ -282,7 +274,7 @@ export function SwapCard({
             >
               <Text
                 variant="caption"
-                color={activePill === '50%' ? colors.brand.navyDepth : colors.text.secondary}
+                color={activePill === '50%' ? colors.brand.graphiteDepth : colors.text.secondary}
               >
                 50%
               </Text>
@@ -302,7 +294,7 @@ export function SwapCard({
             >
               <Text
                 variant="caption"
-                color={activePill === 'Max' ? colors.brand.navyDepth : colors.text.secondary}
+                color={activePill === 'Max' ? colors.brand.graphiteDepth : colors.text.secondary}
               >
                 Max
               </Text>
@@ -323,17 +315,12 @@ export function SwapCard({
           accessibilityLabel="Swap direction"
         >
           <Animated.View style={animatedIconStyle}>
-            <PuffySwapIcon size={directionIconSize} color={colors.brand.azureCyan} focused />
+            <PuffySwapIcon size={directionIconSize} color={colors.brand.glossAccent} focused />
           </Animated.View>
         </Pressable>
       </View>
 
-      <View
-        style={[
-          styles.assetBlock,
-          { padding: cardPadding, minHeight: receiveBlockMinHeight },
-        ]}
-      >
+      <View style={[styles.assetBlock, { padding: cardPadding, minHeight: receiveBlockMinHeight }]}>
         <View style={styles.blockHeader}>
           <Text variant="captionBold" color={colors.text.secondary} style={styles.blockLabel}>
             You Receive
@@ -351,7 +338,7 @@ export function SwapCard({
             editable={false}
             onLayout={(event) => handleReceiveInputLayout(event.nativeEvent.layout.width)}
             placeholder="0"
-            placeholderTextColor="rgba(14, 42, 53, 0.18)"
+            placeholderTextColor="rgba(16, 16, 16, 0.18)"
             numberOfLines={1}
             multiline={false}
             allowFontScaling={false}
@@ -385,7 +372,11 @@ export function SwapCard({
               {receiveToken.symbol}
             </Text>
             {receiveToken.verified ? (
-              <Ionicons name="checkmark-circle" size={tokenCheckIconSize} color={colors.brand.azureCyan} />
+              <Ionicons
+                name="checkmark-circle"
+                size={tokenCheckIconSize}
+                color={colors.brand.glossAccent}
+              />
             ) : null}
             <Ionicons
               name="chevron-down"
@@ -396,7 +387,7 @@ export function SwapCard({
           </Pressable>
         </View>
       </View>
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -520,7 +511,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   quickPillActive: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     borderColor: colors.glass.rim,
     boxShadow: SWAP_CONTROL_SHADOW,
   },

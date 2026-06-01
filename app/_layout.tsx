@@ -72,12 +72,12 @@ if (!isRunningInExpoGo()) {
   });
 }
 
-/** OffPay Arctic Mist theme — light liquid-glass surfaces with deep navy ink. */
+/** OffPay glossy dark theme - neutral glass surfaces with high-contrast ink. */
 const OffPayTheme: Theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    primary: colors.brand.azureCyan,
+    primary: colors.brand.glossAccent,
     background: colors.backgroundGradient.base,
     card: colors.surface.card,
     text: colors.text.primary,
@@ -156,7 +156,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const inWalletFlow = inCreateWallet || inRestoreWallet || inPrivyWallet;
   const inAuthFlow = inOnboarding || inOAuthCallback;
   // The wallet-setup flow (onboarding + security setup + create/
-  // restore wallet + privy wallet) paints a flat iceBlue surface
+  // restore wallet + privy wallet) paints a flat neutral surface
   // inside `CreateWalletScreenLayout`. We opt those routes out of
   // the screen-wide gradient so the design stays one calm tint
   // across the full flow — no gradients, no shadows, no rims.

@@ -4,6 +4,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { WaterKeypadButton } from '@/components/ui/WaterKeypadButton';
+
 import { PillButton } from '@/components/ui/PillButton';
 import { Text } from '@/components/ui/Text';
 import { PuffyRefreshIcon } from '@/components/ui/icons/PuffyRefreshIcon';
@@ -111,17 +113,12 @@ export function PasscodeStep({
     const isAction = key === 'clear' || key === 'delete';
     const disabled = key === 'clear' ? activeValue.length === 0 : false;
     const label = key === 'delete' ? '<' : key === 'clear' ? 'x' : key;
+    const keyFrameStyle = { width: keySize, height: keySize, borderRadius: keySize / 2 };
 
     return (
-      <Pressable
+      <WaterKeypadButton
         key={key}
-        style={({ pressed }) => [
-          styles.key,
-          isAction ? styles.keyAction : undefined,
-          disabled ? styles.keyDisabled : undefined,
-          pressed && !disabled ? styles.keyPressed : undefined,
-          { width: keySize, height: keySize, borderRadius: keySize / 2 },
-        ]}
+        frameStyle={keyFrameStyle}
         onPress={() => {
           if (key === 'delete') {
             handleDelete();
@@ -134,6 +131,7 @@ export function PasscodeStep({
           handleDigit(key);
         }}
         disabled={disabled}
+        muted={disabled}
         accessibilityRole="keyboardkey"
         accessibilityLabel={
           key === 'delete'
@@ -145,14 +143,14 @@ export function PasscodeStep({
       >
         <Text
           variant={isAction ? 'body' : 'h2'}
-          color={colors.brand.azureCyan}
+          color={colors.text.primary}
           align="center"
           style={styles.keyLabel}
           allowFontScaling={false}
         >
           {label}
         </Text>
-      </Pressable>
+      </WaterKeypadButton>
     );
   };
 
@@ -177,7 +175,7 @@ export function PasscodeStep({
               New
             </Text>
             {activeField === 'new' ? (
-              <Text variant="small" color={colors.brand.azureCyan} style={styles.activeHint}>
+              <Text variant="small" color={colors.brand.glossAccent} style={styles.activeHint}>
                 Enter 6 digits
               </Text>
             ) : null}
@@ -202,7 +200,7 @@ export function PasscodeStep({
             {activeField === 'confirm' ? (
               <Text
                 variant="small"
-                color={confirmationMismatch ? colors.semantic.error : colors.brand.azureCyan}
+                color={confirmationMismatch ? colors.semantic.error : colors.brand.glossAccent}
                 style={styles.activeHint}
               >
                 {confirmationMismatch ? 'Does not match' : 'Confirm now'}
@@ -228,7 +226,7 @@ export function PasscodeStep({
       <View style={styles.actions}>
         {hasAnyInput ? (
           <Pressable
-            style={({ pressed }) => [styles.resetButton, pressed ? styles.keyPressed : undefined]}
+            style={({ pressed }) => [styles.resetButton, pressed ? { opacity: 0.76 } : undefined]}
             onPress={handleReset}
             accessibilityRole="button"
             accessibilityLabel="Reset passcode entry"
@@ -265,8 +263,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    boxShadow:
-      '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   blockCompact: {
     gap: spacing.xs,
@@ -306,17 +303,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(252, 252, 255, 0.44)',
+    backgroundColor: 'rgba(255, 255, 255, 0.44)',
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(252, 252, 255, 0.62)',
+    borderColor: 'rgba(255, 255, 255, 0.62)',
     boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.82)',
   },
   dotInputActive: {
-    borderColor: colors.glass.azureCyanHalf,
-    backgroundColor: 'rgba(224, 252, 255, 0.52)',
+    borderColor: colors.glass.accentVeil,
+    backgroundColor: colors.surface.pressed,
   },
   dotInputError: {
     borderColor: 'rgba(255, 90, 110, 0.48)',
@@ -332,17 +329,21 @@ const styles = StyleSheet.create({
     width: spacing.sm,
     height: spacing.sm,
     borderRadius: radii.full,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   dotFilled: {
-    backgroundColor: colors.brand.azureCyan,
-    boxShadow: '0 0 8px rgba(0, 223, 255, 0.28)',
+    backgroundColor: colors.brand.glossAccent,
+    borderColor: colors.brand.glossAccent,
+    boxShadow: '0 6px 14px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.82)',
   },
   dotError: {
     backgroundColor: colors.semantic.error,
-    boxShadow: '0 0 8px rgba(255, 90, 110, 0.24)',
+    borderColor: colors.semantic.error,
+    boxShadow: '0 6px 14px rgba(0, 0, 0, 0.3)',
   },
   dotEmpty: {
-    backgroundColor: 'rgba(10, 53, 65, 0.18)',
+    backgroundColor: colors.surface.cardElevated,
+    borderColor: colors.glass.rimSubtle,
   },
   keypad: {
     alignSelf: 'center',
@@ -350,28 +351,6 @@ const styles = StyleSheet.create({
   keyRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-  },
-  key: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderCurve: 'continuous',
-    backgroundColor: 'rgba(252, 252, 255, 0.58)',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(252, 252, 255, 0.74)',
-    boxShadow:
-      '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
-  },
-  keyAction: {
-    backgroundColor: colors.glass.textBacking,
-  },
-  keyPressed: {
-    opacity: 0.76,
-  },
-  keyDisabled: {
-    opacity: 0.42,
   },
   keyLabel: {
     fontFamily: fontFamily.uiSemiBold,

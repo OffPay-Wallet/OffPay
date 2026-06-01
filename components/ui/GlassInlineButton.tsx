@@ -1,5 +1,4 @@
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -35,19 +34,14 @@ export function GlassInlineButton({
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled }}
     >
-      <LinearGradient
-        colors={['rgba(252, 252, 255, 0.74)', 'rgba(223, 247, 250, 0.56)']}
-        start={{ x: 0.05, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.surface}
-      >
+      <View style={styles.surface}>
         <View style={styles.content}>
           {icon}
           <Text variant="captionBold" color={colors.text.primary} style={styles.label}>
             {label}
           </Text>
         </View>
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -64,7 +58,8 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: `0 8px 16px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
   },
   pressed: {
     opacity: 0.82,
@@ -85,7 +80,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   label: {
-    textShadowColor: 'rgba(252, 252, 255, 0.68)',
+    textShadowColor: 'rgba(255, 255, 255, 0.68)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },

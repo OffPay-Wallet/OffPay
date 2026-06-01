@@ -51,7 +51,7 @@ export function WalletAvatar({ count, size = 48 }: WalletAvatarProps): React.JSX
 
 const styles = StyleSheet.create({
   avatar: {
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
   },
   container: {
     position: 'relative',
@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -2,
     right: -2,
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,

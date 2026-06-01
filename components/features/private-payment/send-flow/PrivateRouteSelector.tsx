@@ -148,14 +148,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   routeCardStacked: {
     minHeight: 48,
   },
   routeCardFill: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.glass.cyanWash,
+    backgroundColor: colors.glass.smokeWash,
     borderRadius: radii.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border.accent,

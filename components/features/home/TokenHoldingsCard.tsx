@@ -9,7 +9,6 @@
  */
 import { memo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SlotText } from '@/components/ui/SlotText';
@@ -50,16 +49,10 @@ function hasNumericLabel(value: string | null | undefined): value is string {
   return typeof value === 'string' && /\d/.test(value);
 }
 
-export const TOKEN_HOLDINGS_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
-const HEADER_CONTAINER_GLASS_COLORS = TOKEN_HOLDINGS_GLASS_COLORS;
-// Flat card treatment — see BalanceCard. Single soft ambient lift plus
-// a 1px top highlight, no heavy drop shadow or inner cyan bloom.
+// Flat card treatment - see BalanceCard. Single soft ambient lift plus
+// a 1px top highlight, no heavy drop shadow or coloured inner bloom.
 const HEADER_CONTAINER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 12px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14)';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -321,12 +314,7 @@ export function TokenHoldingsCard({
       ) : null}
 
       <View style={[separatedRows ? styles.separatedList : styles.cardShell]}>
-        <LinearGradient
-          colors={[...HEADER_CONTAINER_GLASS_COLORS]}
-          start={{ x: 0.04, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.cardGradient, separatedRows && styles.hiddenWhenSeparated]}
-        >
+        <View style={[styles.cardSurface, separatedRows && styles.hiddenWhenSeparated]}>
           {separatedRows ? null : loading ? (
             Array.from({ length: compact ? 2 : 3 }, (_, index) => (
               <TokenRowSkeleton
@@ -366,30 +354,20 @@ export function TokenHoldingsCard({
               ) : null}
             </View>
           )}
-        </LinearGradient>
+        </View>
         {separatedRows ? (
           loading ? (
             Array.from({ length: compact ? 3 : 4 }, (_, index) => (
               <View style={styles.rowCardShell} key={`token-separated-skeleton-${index}`}>
-                <LinearGradient
-                  colors={[...HEADER_CONTAINER_GLASS_COLORS]}
-                  start={{ x: 0.04, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.cardGradient}
-                >
+                <View style={styles.cardSurface}>
                   <TokenRowSkeleton compact={compact} dense={dense} isLast />
-                </LinearGradient>
+                </View>
               </View>
             ))
           ) : holdings.length > 0 ? (
             holdings.map((holding) => (
               <View style={styles.rowCardShell} key={holding.mint}>
-                <LinearGradient
-                  colors={[...HEADER_CONTAINER_GLASS_COLORS]}
-                  start={{ x: 0.04, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.cardGradient}
-                >
+                <View style={styles.cardSurface}>
                   <TokenRow
                     holding={holding}
                     isLast
@@ -399,17 +377,12 @@ export function TokenHoldingsCard({
                     privacyHidden={privacyHidden}
                     valuation={valuations?.[holding.mint]}
                   />
-                </LinearGradient>
+                </View>
               </View>
             ))
           ) : (
             <View style={styles.rowCardShell}>
-              <LinearGradient
-                colors={[...HEADER_CONTAINER_GLASS_COLORS]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.cardGradient}
-              >
+              <View style={styles.cardSurface}>
                 <View style={styles.emptyState}>
                   <Ionicons
                     name="wallet-outline"
@@ -425,7 +398,7 @@ export function TokenHoldingsCard({
                     </Text>
                   ) : null}
                 </View>
-              </LinearGradient>
+              </View>
             </View>
           )
         ) : null}
@@ -484,11 +457,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: HEADER_CONTAINER_SHADOW,
   },
-  cardGradient: {
+  cardSurface: {
     paddingVertical: spacing.xs,
+    backgroundColor: 'transparent',
   },
   hiddenWhenSeparated: {
     display: 'none',
@@ -505,7 +479,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: HEADER_CONTAINER_SHADOW,
   },
   row: {
     flexDirection: 'row',

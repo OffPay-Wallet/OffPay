@@ -2,7 +2,7 @@
  * Restore wallet — choose import method: Seed Phrase or Private Key.
  */
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 
@@ -29,14 +29,14 @@ interface MethodOption {
 const METHOD_OPTIONS: MethodOption[] = [
   {
     id: 'seed-phrase',
-    label: 'Import Recovery Phrase',
-    description: 'Import using your 12 or 24 word recovery phrase',
+    label: 'Recovery Phrase',
+    description: '12 or 24 word seed phrase',
     icon: 'document-text-outline',
   },
   {
     id: 'private-key',
-    label: 'Import Private Key',
-    description: 'Import a single-chain Solana account',
+    label: 'Private Key',
+    description: 'Single Solana account',
     icon: 'key-outline',
   },
 ];
@@ -45,6 +45,8 @@ export default function RestoreWalletMethodScreen(): React.JSX.Element {
   const { source } = useLocalSearchParams<{ source?: string | string[] }>();
   const flowSource = Array.isArray(source) ? source[0] : source;
   const [selected, setSelected] = useState<ImportMethod>('seed-phrase');
+  const { width, height } = useWindowDimensions();
+  const compact = height < 700 || width < 360;
 
   function handleBack(): void {
     if (router.canGoBack()) {
@@ -71,10 +73,7 @@ export default function RestoreWalletMethodScreen(): React.JSX.Element {
           <Text variant="h1" color={colors.text.primary} style={styles.title}>
             Import a wallet
           </Text>
-          <Text variant="caption" color={colors.text.secondary} style={styles.subtitle}>
-            Import an existing wallet with your recovery phrase or private key.
-          </Text>
-          <View style={styles.options}>
+          <View style={[styles.options, compact ? styles.optionsCompact : undefined]}>
             {METHOD_OPTIONS.map((option) => {
               const isActive = selected === option.id;
               return (
@@ -85,6 +84,7 @@ export default function RestoreWalletMethodScreen(): React.JSX.Element {
                   }}
                   style={[
                     styles.optionCard,
+                    compact ? styles.optionCardCompact : undefined,
                     isActive ? styles.optionCardActive : styles.optionCardIdle,
                   ]}
                   accessibilityRole="radio"
@@ -94,12 +94,13 @@ export default function RestoreWalletMethodScreen(): React.JSX.Element {
                   <View
                     style={[
                       styles.iconCircle,
+                      compact ? styles.iconCircleCompact : undefined,
                       isActive ? styles.iconCircleActive : styles.iconCircleIdle,
                     ]}
                   >
                     <Ionicons
                       name={option.icon}
-                      size={layout.iconSizeNav}
+                      size={compact ? layout.iconSizeInline : layout.iconSizeNav}
                       color={colors.text.primary}
                     />
                   </View>
@@ -116,11 +117,16 @@ export default function RestoreWalletMethodScreen(): React.JSX.Element {
                       variant="small"
                       color={colors.text.secondary}
                       style={styles.optionDescription}
-                      numberOfLines={2}
+                      numberOfLines={1}
                     >
                       {option.description}
                     </Text>
                   </View>
+                  <Ionicons
+                    name={isActive ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={layout.iconSizeNav}
+                    color={isActive ? colors.brand.glossAccent : colors.text.tertiary}
+                  />
                 </Pressable>
               );
             })}
@@ -154,16 +160,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    marginBottom: spacing.md,
-    textAlign: 'center',
-  },
-  subtitle: {
-    marginBottom: spacing['2xl'],
+    marginBottom: spacing.xl,
     textAlign: 'center',
   },
   options: {
     width: '100%',
     gap: spacing.md,
+  },
+  optionsCompact: {
+    gap: spacing.sm,
   },
   optionCard: {
     flexDirection: 'row',
@@ -173,18 +178,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
     minWidth: 0,
+    minHeight: layout.buttonHeightLg + spacing.lg,
     borderWidth: 1,
     borderCurve: 'continuous',
   },
+  optionCardCompact: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    minHeight: layout.buttonHeightLg,
+  },
   optionCardActive: {
-    backgroundColor: colors.glass.azureCyanHalf,
+    backgroundColor: colors.glass.accentVeil,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   optionCardIdle: {
     backgroundColor: colors.glass.clearFill,
-    borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    borderColor: colors.glass.rimSubtle,
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   iconCircle: {
     width: layout.avatarMd,
@@ -193,8 +204,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconCircleCompact: {
+    width: layout.avatarSm,
+    height: layout.avatarSm,
+  },
   iconCircleActive: {
-    backgroundColor: 'rgba(252, 252, 255, 0.38)',
+    backgroundColor: 'rgba(255, 255, 255, 0.38)',
   },
   iconCircleIdle: {
     backgroundColor: colors.surface.cardElevated,

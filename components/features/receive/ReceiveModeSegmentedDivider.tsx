@@ -197,7 +197,7 @@ const ReceiveModeSegment = memo(function ReceiveModeSegment({
       <View style={styles.segmentInner}>
         <Text
           variant="button"
-          color={selected ? colors.text.onAccent : colors.text.secondary}
+          color={selected ? colors.text.primary : colors.text.tertiary}
           style={[
             styles.segmentText,
             {
@@ -214,10 +214,7 @@ const ReceiveModeSegment = memo(function ReceiveModeSegment({
         </Text>
         {showBadge ? (
           <View
-            style={[
-              styles.badge,
-              selected ? styles.badgeOnSelected : styles.badgeOnUnselected,
-            ]}
+            style={[styles.badge, selected ? styles.badgeOnSelected : styles.badgeOnUnselected]}
             accessibilityLabel={`${badge} pending private payment${badge === 1 ? '' : 's'}`}
           >
             <Text
@@ -252,12 +249,32 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     padding: TRACK_PADDING,
+    backgroundColor: 'rgba(18, 18, 18, 0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    overflow: 'hidden',
+    boxShadow: [
+      'inset 0 2px 6px rgba(0, 0, 0, 0.5)',
+      'inset 0 0 12px rgba(0, 0, 0, 0.25)',
+      'inset 0 -1px 1px rgba(255, 255, 255, 0.08)',
+    ].join(', '),
   },
   thumb: {
     position: 'absolute',
     top: TRACK_PADDING,
     left: TRACK_PADDING,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: 'rgba(62, 62, 62, 0.95)',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.38)',
+      'inset 0 0 10px rgba(255, 255, 255, 0.08)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
+      '0 4px 10px rgba(0, 0, 0, 0.28)',
+    ].join(', '),
   },
   segmentRow: {
     flex: 1,
@@ -299,10 +316,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeOnSelected: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   badgeOnUnselected: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   badgeText: {
     fontFamily: fontFamily.uiSemiBold,

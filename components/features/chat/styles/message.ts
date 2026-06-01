@@ -29,7 +29,7 @@ export const messageStyles = StyleSheet.create({
   },
   userBubble: {
     backgroundColor: colors.brand.deepShadow,
-    borderColor: 'rgba(14, 42, 53, 0.14)',
+    borderColor: 'rgba(16, 16, 16, 0.14)',
   },
   agentBubble: {
     backgroundColor: colors.glass.strongFill,

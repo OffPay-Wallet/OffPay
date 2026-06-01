@@ -48,7 +48,7 @@ const {
   withMainActivity,
 } = require('expo/config-plugins');
 
-const SPLASH_BACKGROUND_COLOR = '#5BC8E8';
+const SPLASH_BACKGROUND_COLOR = '#050505';
 const SPLASH_STYLE_NAME = 'Theme.App.SplashScreen';
 const SPLASH_LOGO_DRAWABLE = 'splashscreen_logo';
 const TRANSPARENT_SPLASH_DRAWABLE = 'splashscreen_transparent';

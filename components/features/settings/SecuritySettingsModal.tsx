@@ -28,7 +28,6 @@ import Animated, {
 import * as Clipboard from 'expo-clipboard';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
@@ -82,13 +81,7 @@ const HEADER_TITLES: Record<Step, string> = {
   revealGate: 'Wallet Keys',
 };
 
-const SHEET_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
-const SHEET_SHADOW =
-  '0 8px 24px rgba(14, 42, 53, 0.14)';
+const SHEET_SHADOW = '0 18px 36px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const NAV_TIMING = { duration: 180, easing: Easing.out(Easing.cubic) } as const;
 const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
 
@@ -617,13 +610,6 @@ export function SecuritySettingsModal({
         <Animated.View
           style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
         >
-          <LinearGradient
-            colors={[...SHEET_GLASS_COLORS]}
-            style={StyleSheet.absoluteFill}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          />
-
           {/* Header */}
           <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
             <View style={styles.headerLeft}>
@@ -640,7 +626,7 @@ export function SecuritySettingsModal({
                   <Ionicons
                     name="chevron-back"
                     size={layout.iconSizeNav}
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                   />
                 </Pressable>
               ) : (
@@ -669,7 +655,7 @@ export function SecuritySettingsModal({
                 <Ionicons
                   name="close"
                   size={layout.iconSizeInline}
-                  color={colors.brand.azureCyan}
+                  color={colors.brand.glossAccent}
                 />
               </Pressable>
             </View>
@@ -783,7 +769,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: SHEET_SHADOW,
   },
   headerRow: {
@@ -806,7 +792,7 @@ const styles = StyleSheet.create({
     height: layout.minTouchTarget,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -814,7 +800,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 8px 18px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
   },
   headerIconPlaceholder: { width: layout.minTouchTarget, height: layout.minTouchTarget },
   body: { flex: 1 },

@@ -2,7 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TransactionActivityRow } from '@/components/features/history/TransactionActivityRow';
@@ -38,10 +45,17 @@ import type { WalletTransactionsResponse } from '@/types/offpay-api';
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const MAX_TOKEN_ACTIVITY_ROWS = 8;
 const TOKEN_DETAIL_CONTENT_MAX_WIDTH = 430;
-const TOKEN_DETAIL_PANEL_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
-const TOKEN_DETAIL_CONTROL_SHADOW =
-  '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+const TOKEN_DETAIL_PANEL_SHADOW = [
+  '0 12px 28px rgba(0, 0, 0, 0.42)',
+  'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+  'inset 0 0 14px rgba(255, 255, 255, 0.03)',
+  'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
+].join(', ');
+const TOKEN_DETAIL_CONTROL_SHADOW = [
+  'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+  'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+  '0 3px 8px rgba(0, 0, 0, 0.18)',
+].join(', ');
 
 type WalletTransaction = WalletTransactionsResponse['transactions'][number];
 type TokenDetailActionId = 'send' | 'receive' | 'swap';
@@ -147,14 +161,14 @@ function TokenActionIcon({
   size: number;
 }): React.JSX.Element {
   if (actionId === 'send') {
-    return <PuffySendIcon size={size} color={colors.brand.azureCyan} />;
+    return <PuffySendIcon size={size} color={colors.text.primary} />;
   }
 
   if (actionId === 'receive') {
-    return <PuffyReceiveIcon size={size} color={colors.brand.azureCyan} />;
+    return <PuffyReceiveIcon size={size} color={colors.text.primary} />;
   }
 
-  return <PuffySwapIcon size={size} color={colors.brand.azureCyan} focused />;
+  return <PuffySwapIcon size={size} color={colors.text.primary} focused />;
 }
 
 function TokenActionButton({
@@ -185,7 +199,7 @@ function TokenActionButton({
       </View>
       <Text
         variant="small"
-        color={colors.brand.deepShadow}
+        color={colors.text.primary}
         style={styles.actionLabel}
         numberOfLines={1}
         adjustsFontSizeToFit
@@ -234,7 +248,7 @@ function DetailRow({
           {value}
         </Text>
         {copyable ? (
-          <Ionicons name="copy-outline" size={16} color={colors.brand.azureCyan} />
+          <Ionicons name="copy-outline" size={16} color={colors.text.primary} />
         ) : null}
       </View>
     </Pressable>
@@ -365,7 +379,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
               <Ionicons
                 name="chevron-back"
                 size={layout.iconSizeNav}
-                color={colors.brand.deepShadow}
+                color={colors.text.primary}
               />
             </HeaderIconButton>
             <Text
@@ -506,12 +520,8 @@ export function TokenDetailsScreen(): React.JSX.Element {
               ) : transactionsQuery.isLoading ||
                 (transactionsQuery.isFetching && transactionsQuery.transactions.length === 0) ? (
                 <View style={styles.emptyActivityCard}>
-                  <ActivityIndicator size="small" color={colors.brand.azureCyan} />
-                  <Text
-                    variant="small"
-                    color={colors.text.secondary}
-                    style={styles.emptyText}
-                  >
+                  <ActivityIndicator size="small" color={colors.brand.glossAccent} />
+                  <Text variant="small" color={colors.text.secondary} style={styles.emptyText}>
                     Loading recent activity…
                   </Text>
                 </View>

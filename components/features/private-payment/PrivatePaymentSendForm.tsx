@@ -69,7 +69,8 @@ export function PrivatePaymentSendForm({
           Send payment
         </Text>
         <Text variant="small" color={colors.text.secondary} style={styles.subtitle}>
-          {providerLabel} protects USDC and USDT transfers. Other tokens can be sent normally, but not privately.
+          {providerLabel} protects USDC and USDT transfers. Other tokens can be sent normally, but
+          not privately.
         </Text>
       </View>
 
@@ -84,7 +85,7 @@ export function PrivatePaymentSendForm({
             placeholder="Solana address"
             placeholderTextColor={colors.text.placeholder}
             style={styles.input}
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             autoCapitalize="none"
             autoCorrect={false}
           />
@@ -94,7 +95,7 @@ export function PrivatePaymentSendForm({
             accessibilityRole="button"
             accessibilityLabel="Paste recipient address"
           >
-            <Text variant="small" color={colors.brand.azureCyan}>
+            <Text variant="small" color={colors.brand.glossAccent}>
               Paste
             </Text>
           </Pressable>
@@ -112,7 +113,7 @@ export function PrivatePaymentSendForm({
             placeholder={effectiveMint ?? 'Paste USDC or USDT mint'}
             placeholderTextColor={colors.text.placeholder}
             style={styles.input}
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             autoCapitalize="none"
             autoCorrect={false}
           />
@@ -122,7 +123,7 @@ export function PrivatePaymentSendForm({
             accessibilityRole="button"
             accessibilityLabel="Paste token mint"
           >
-            <Text variant="small" color={colors.brand.azureCyan}>
+            <Text variant="small" color={colors.brand.glossAccent}>
               Paste
             </Text>
           </Pressable>
@@ -139,14 +140,18 @@ export function PrivatePaymentSendForm({
           placeholder="0"
           placeholderTextColor={colors.text.placeholder}
           style={[styles.input, styles.amountInput]}
-          selectionColor={colors.brand.azureCyan}
+          selectionColor={colors.brand.glossAccent}
           keyboardType="number-pad"
         />
       </View>
 
       <Text
         variant="small"
-        color={disabledReason != null || validationMessage != null ? colors.semantic.warning : colors.text.tertiary}
+        color={
+          disabledReason != null || validationMessage != null
+            ? colors.semantic.warning
+            : colors.text.tertiary
+        }
         style={styles.helperText}
       >
         {helperMessage}

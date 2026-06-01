@@ -1,5 +1,7 @@
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyRefreshIconProps {
   size?: number;
   color?: string;
@@ -7,7 +9,7 @@ export interface PuffyRefreshIconProps {
 
 export function PuffyRefreshIcon({
   size = 16,
-  color = 'currentColor',
+  color = colors.text.primary,
 }: PuffyRefreshIconProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} fill="none" viewBox="0 0 16 16">

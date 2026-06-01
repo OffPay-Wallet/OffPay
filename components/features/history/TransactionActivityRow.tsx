@@ -1,5 +1,4 @@
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { PuffyReceiveArrowIcon } from '@/components/ui/icons/PuffyReceiveArrowIcon';
 import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
@@ -39,21 +38,15 @@ const AMOUNT_COLORS: Record<OffpayDisplayTone, string> = {
   neutral: colors.text.secondary,
   failed: colors.semantic.error,
 };
-// Recent-activity card material: bright frost on top fading to a cool
-// arctic wash so each row feels distinct from the cyan background and
-// reads as its own elevated card. Brighter rim + softer ambient shadow
-// match the new tab-bar treatment.
-const HOME_GLASS_COLORS = [
-  'rgba(252, 252, 255, 0.94)',
-  'rgba(238, 250, 252, 0.86)',
-  'rgba(223, 247, 250, 0.78)',
-] as const;
+// Recent-activity card material: glossy graphite glass with a neutral
+// rim so each row separates from the dark app background without
+// pulling in coloured tints.
 const HOME_CONTAINER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 12px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14)';
 const ACTION_BADGE_SHADOW =
-  '0 2px 5px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.95)';
+  '0 6px 14px rgba(0, 0, 0, 0.36), inset 0 1px 1px rgba(255, 255, 255, 0.22)';
 const ICON_CLUSTER_SHADOW =
-  '0 2px 6px rgba(14, 42, 53, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.9)';
+  '0 8px 18px rgba(0, 0, 0, 0.38), inset 0 1px 1px rgba(255, 255, 255, 0.18)';
 
 const TOKEN_SYMBOL_PATTERN = /(?:^|[\s+-])(?:\d[\d,.]*\s+)?([A-Za-z][A-Za-z0-9]{1,15})$/;
 
@@ -70,7 +63,7 @@ function TransactionActionIcon({
   type: OffpayDisplayTransactionType;
   size: number;
 }): React.JSX.Element {
-  const actionColor = colors.brand.azureBlue;
+  const actionColor = colors.brand.actionFill;
 
   if (type === 'receive') {
     return <PuffyReceiveArrowIcon size={size} color={actionColor} />;
@@ -250,10 +243,7 @@ export function TransactionActivityRow({
       accessibilityRole={onPress == null ? undefined : 'button'}
       accessibilityLabel={`${tx.title}${amountA11y}. ${tx.subtitle}`}
     >
-      <LinearGradient
-        colors={[...HOME_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
+      <View
         style={[
           styles.card,
           variant === 'home' && styles.cardHome,
@@ -354,7 +344,7 @@ export function TransactionActivityRow({
             ) : null}
           </View>
         ) : null}
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -369,8 +359,8 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-    backgroundColor: 'rgba(252, 252, 255, 0.94)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: HOME_CONTAINER_SHADOW,
   },
   shellHome: {
@@ -461,9 +451,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(238, 250, 252, 0.86)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.14)',
   },
   sourceBadgeText: {
     fontSize: 9,

@@ -1,12 +1,11 @@
 import React from 'react';
 import { View, StyleSheet, useWindowDimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { SWAP_GLASS_COLORS, SWAP_PANEL_SHADOW } from './swapGlass';
+import { SWAP_PANEL_SHADOW } from './swapGlass';
 
 interface SwapDetailsCardProps {
   rateLabel: string;
@@ -65,11 +64,11 @@ export function SwapDetailsCard({
   const dense = windowWidth < 350 || windowHeight < 720 || fontScale > 1.18;
 
   return (
-    <LinearGradient
-      colors={[...SWAP_GLASS_COLORS]}
-      start={{ x: 0.04, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[styles.container, compact && styles.containerCompact, dense && styles.containerDense]}
+    <View
+      style={[
+        { backgroundColor: colors.surface.cardElevated },
+        [styles.container, compact && styles.containerCompact, dense && styles.containerDense],
+      ]}
     >
       <DetailRow label="Exchange Rate" value={rateLabel} dense={dense} />
       <View style={styles.divider} />
@@ -80,7 +79,7 @@ export function SwapDetailsCard({
       <DetailRow label="Route" value={routeLabel} dense={dense} />
       <View style={styles.divider} />
       <DetailRow label="Slippage" value={slippageLabel} dense={dense} />
-    </LinearGradient>
+    </View>
   );
 }
 

@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyTwitterXIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyTwitterXIconProps {
 
 export function PuffyTwitterXIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyTwitterXIconProps): React.JSX.Element {
   // Bootstrap `bi-twitter-x` (16x16) path.

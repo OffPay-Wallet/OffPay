@@ -14,7 +14,10 @@ import { spacing } from '@/constants/spacing';
 
 import { payrollStyles as styles } from './styles';
 
-import type { PayrollColumnMapping, PayrollColumnRole } from '@/lib/payroll/parsing/payroll-column-mapping';
+import type {
+  PayrollColumnMapping,
+  PayrollColumnRole,
+} from '@/lib/payroll/parsing/payroll-column-mapping';
 
 interface PayrollColumnMapSheetProps {
   visible: boolean;
@@ -141,7 +144,7 @@ export function PayrollColumnMapSheet({
 const mapStyles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(14, 42, 53, 0.32)',
+    backgroundColor: 'rgba(16, 16, 16, 0.32)',
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -175,7 +178,7 @@ const mapStyles = StyleSheet.create({
     minWidth: 96,
   },
   chipSelected: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     borderColor: colors.brand.deepShadow,
   },
   chipText: {

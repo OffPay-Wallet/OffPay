@@ -53,8 +53,8 @@ const ACTIONS: { id: UmbraVaultAction; title: string }[] = [
   { id: 'shield', title: 'Shield' },
   { id: 'withdraw', title: 'Withdraw' },
 ];
-const ACTION_TRACK_PADDING = 4;
-const ACTION_SEGMENT_GAP = 4;
+const ACTION_TRACK_PADDING = 5;
+const ACTION_SEGMENT_GAP = 3;
 // Snappy spring — the segment thumb slides with a tight, smooth motion.
 // Runs entirely on the UI thread, decoupled from the parent re-render.
 const ACTION_THUMB_SPRING: WithSpringConfig = {
@@ -97,7 +97,7 @@ export function UmbraVaultActionPanel({
   const [actionTrackWidth, setActionTrackWidth] = useState(0);
   const dense = width < 350 || fontScale > 1.18;
   const compact = width < 390 || height < 760 || fontScale > 1.05;
-  const actionSegmentHeight = dense ? 28 : 30;
+  const actionSegmentHeight = dense ? 32 : 34;
   const actionTrackHeight = actionSegmentHeight + ACTION_TRACK_PADDING * 2;
   const actionSegmentWidth = Math.max(
     0,
@@ -125,12 +125,12 @@ export function UmbraVaultActionPanel({
     ? (loadingLabel ?? getButtonLabel(action, token, true))
     : feedbackLabel;
   const submitTextColor = loading
-    ? colors.text.onAccent
+    ? colors.text.primary
     : showDangerFeedback
       ? colors.brand.whiteStream
       : submitBlocked
         ? colors.text.tertiary
-        : colors.text.onAccent;
+        : colors.text.primary;
 
   useEffect(() => {
     actionStride.value = actionSegmentWidth + ACTION_SEGMENT_GAP;
@@ -228,7 +228,7 @@ export function UmbraVaultActionPanel({
               >
                 <Text
                   variant="captionBold"
-                  color={selected ? colors.text.onAccent : colors.text.secondary}
+                  color={selected ? colors.text.primary : colors.text.tertiary}
                   style={styles.segmentText}
                   numberOfLines={1}
                   adjustsFontSizeToFit
@@ -263,7 +263,7 @@ export function UmbraVaultActionPanel({
             >
               <Text
                 variant="captionBold"
-                color={selected ? colors.text.onAccent : colors.text.secondary}
+                color={selected ? colors.text.primary : colors.text.tertiary}
                 style={styles.tokenChipText}
                 numberOfLines={1}
                 adjustsFontSizeToFit
@@ -284,7 +284,7 @@ export function UmbraVaultActionPanel({
             onChangeText={onAmountChange}
             placeholder="Amount"
             placeholderTextColor={colors.text.placeholder}
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             keyboardType="decimal-pad"
             style={[styles.input, dense && styles.inputDense]}
             maxFontSizeMultiplier={1.1}
@@ -305,7 +305,7 @@ export function UmbraVaultActionPanel({
           >
             <Text
               variant="captionBold"
-              color={maxAmount == null ? colors.text.tertiary : colors.brand.navyDepth}
+              color={maxAmount == null ? colors.text.tertiary : colors.text.primary}
               style={styles.maxPillText}
               numberOfLines={1}
               maxFontSizeMultiplier={1}
@@ -374,15 +374,24 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     padding: spacing.lg,
     gap: spacing.md,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+      'inset 0 0 16px rgba(255, 255, 255, 0.03)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
+      '0 8px 20px rgba(0, 0, 0, 0.3)',
+    ].join(', '),
   },
   cardCompact: {
     padding: spacing.md,
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   cardDense: {
     padding: spacing.sm,
@@ -408,9 +417,16 @@ const styles = StyleSheet.create({
   actionGrid: {
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: 'rgba(18, 18, 18, 0.92)',
     padding: ACTION_TRACK_PADDING,
     overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    boxShadow: [
+      'inset 0 2px 6px rgba(0, 0, 0, 0.5)',
+      'inset 0 0 12px rgba(0, 0, 0, 0.25)',
+      'inset 0 -1px 1px rgba(255, 255, 255, 0.08)',
+    ].join(', '),
   },
   actionGridDense: {
     padding: ACTION_TRACK_PADDING,
@@ -419,7 +435,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: ACTION_TRACK_PADDING,
     left: ACTION_TRACK_PADDING,
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: 'rgba(62, 62, 62, 0.95)',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.38)',
+      'inset 0 0 10px rgba(255, 255, 255, 0.08)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
+      '0 4px 10px rgba(0, 0, 0, 0.28)',
+    ].join(', '),
   },
   actionSegmentRow: {
     flex: 1,
@@ -436,7 +463,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   actionSegmentPressed: {
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.glass.clearFill,
   },
   segmentText: {
     fontFamily: fontFamily.uiSemiBold,
@@ -445,31 +472,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   tokenChip: {
     flex: 1,
     minWidth: 64,
-    minHeight: 32,
+    minHeight: 38,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.glass.clearFill,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.1)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   tokenChipDense: {
-    minHeight: 30,
+    minHeight: 34,
     minWidth: 58,
   },
   tokenChipSelected: {
-    backgroundColor: colors.brand.azureCyan,
-    borderColor: colors.brand.azureCyan,
+    backgroundColor: colors.glass.strongFill,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.25)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
+      '0 4px 10px rgba(0, 0, 0, 0.25)',
+    ].join(', '),
   },
   tokenChipPressed: {
     opacity: 0.72,
@@ -497,16 +533,21 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 46,
+    minHeight: 48,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.brand.iceBlue,
-    paddingRight: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
+    borderRightWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(18, 18, 18, 0.92)',
+    paddingRight: 6,
+    boxShadow: [
+      'inset 0 2px 4px rgba(0, 0, 0, 0.4)',
+      'inset 0 0 8px rgba(0, 0, 0, 0.15)',
+      'inset 0 -1px 1px rgba(255, 255, 255, 0.06)',
+    ].join(', '),
   },
   inputWrapDense: {
     minHeight: 42,
@@ -516,8 +557,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   maxPill: {
-    minHeight: 30,
-    paddingHorizontal: spacing.sm,
+    minHeight: 34,
+    paddingHorizontal: spacing.md,
     borderRadius: radii.full,
     borderCurve: 'continuous',
     backgroundColor: colors.glass.strongFill,
@@ -529,6 +570,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: spacing.xs,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.2)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+    ].join(', '),
   },
   maxPillDense: {
     minHeight: 26,
@@ -549,17 +594,25 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     minWidth: 116,
     maxWidth: 168,
-    minHeight: 46,
+    minHeight: 48,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.azureCyan,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.strongFill,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: spacing.xs,
     paddingHorizontal: spacing.md,
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.25)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
+      '0 4px 12px rgba(0, 0, 0, 0.3)',
+    ].join(', '),
   },
   submitButtonDense: {
     minWidth: 104,
@@ -568,15 +621,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   submitButtonDisabled: {
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.glass.clearFill,
+    borderColor: colors.glass.rimSubtle,
     opacity: 0.62,
   },
-  // Solid red — same recipe as the Settings → Reset button. Used
-  // when the panel needs to surface a hard "you can't proceed yet"
-  // state (e.g. vault not set up).
+  // Glossy red — keeps semantic error color with glass treatment.
   submitButtonDanger: {
     backgroundColor: colors.semantic.error,
-    borderColor: colors.semantic.error,
+    borderColor: 'rgba(255, 100, 110, 0.6)',
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.3)',
+      'inset 0 0 12px rgba(255, 77, 90, 0.15)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
+      '0 4px 14px rgba(255, 77, 90, 0.25)',
+    ].join(', '),
   },
   submitButtonPressed: {
     opacity: 0.72,

@@ -185,7 +185,7 @@ export function HomeBalanceModeDivider({
                   >
                     <Text
                       variant="button"
-                      color={selected ? colors.text.onAccent : colors.text.secondary}
+                      color={selected ? colors.text.primary : colors.text.tertiary}
                       style={[
                         styles.segmentText,
                         selected ? styles.segmentTextSelected : undefined,
@@ -212,25 +212,45 @@ export function HomeBalanceModeDivider({
 
 const styles = StyleSheet.create({
   wrapper: {
+    marginTop: spacing.sm,
     marginBottom: spacing.xl,
   },
   wrapperCompact: {
+    marginTop: spacing.xs,
     marginBottom: spacing.lg,
   },
   track: {
     width: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.holdingsCard.pressed,
-    borderWidth: 1,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: 'rgba(18, 18, 18, 0.92)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
+    borderRightWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     overflow: 'hidden',
+    boxShadow: [
+      'inset 0 2px 6px rgba(0, 0, 0, 0.5)',
+      'inset 0 0 12px rgba(0, 0, 0, 0.25)',
+      'inset 0 -1px 1px rgba(255, 255, 255, 0.08)',
+      '0 1px 0 rgba(255, 255, 255, 0.05)',
+    ].join(', '),
   },
   thumb: {
     position: 'absolute',
-    backgroundColor: colors.glass.strongFill,
-    borderWidth: 1,
-    borderColor: colors.glass.rim,
+    backgroundColor: 'rgba(62, 62, 62, 0.95)',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.38)',
+      'inset 0 0 10px rgba(255, 255, 255, 0.08)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
+      '0 4px 12px rgba(0, 0, 0, 0.4)',
+    ].join(', '),
   },
   segmentRow: {
     flex: 1,

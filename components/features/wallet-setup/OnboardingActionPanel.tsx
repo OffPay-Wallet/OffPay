@@ -2,11 +2,11 @@
  * OnboardingActionPanel — bottom action sheet for the onboarding screen.
  *
  * Visual recipe:
- *   - Primary CTA → cyan cap on an azureBlue shelf. The shelf gives
+ *   - Primary CTA -> gloss cap on a graphite shelf. The shelf gives
  *     the button physical depth without resorting to gradients or
  *     drop shadows.
  *   - Every other action (secondary, passkey, X, Google) → white
- *     cap on an iceBlue shelf so the buttons stay readable on the
+ *     cap on a neutral shelf so the buttons stay readable on the
  *     white onboarding sheet without disappearing.
  *   - Press feedback is a Reanimated spring that drops the cap onto
  *     the shelf, then springs it back on release. ~120ms total.
@@ -82,16 +82,16 @@ export function OnboardingActionPanel({
 
   return (
     <View style={[styles.container, { gap: containerGap }]}>
-      {/* Primary CTA — cyan cap on navy shelf. */}
+      {/* Primary CTA - gloss cap on graphite shelf. */}
       <ThreeDPressable
         accessibilityLabel="Create a new wallet"
         accessibilityState={{ busy }}
         onPress={onCreateWallet}
         disabled={busy}
         depth={shelfDepth}
-        surfaceColor={colors.brand.azureCyan}
-        pressedSurfaceColor={colors.brand.azureBlue}
-        shelfColor={colors.brand.navyDepth}
+        surfaceColor={colors.brand.glossAccent}
+        pressedSurfaceColor={colors.brand.whiteStream}
+        shelfColor={colors.brand.graphiteDepth}
         capStyle={{
           minHeight: primaryHeight,
           paddingHorizontal: ctaPaddingX,
@@ -99,11 +99,11 @@ export function OnboardingActionPanel({
         }}
       >
         {busy ? (
-          <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+          <ActivityIndicator size="small" color={colors.text.onAccent} />
         ) : (
           <Text
             variant="button"
-            color={colors.brand.whiteStream}
+            color={colors.text.onAccent}
             align="center"
             numberOfLines={1}
             maxFontSizeMultiplier={1.05}
@@ -123,15 +123,15 @@ export function OnboardingActionPanel({
         )}
       </ThreeDPressable>
 
-      {/* Secondary action — white cap on iceBlue shelf. The shelf is
+      {/* Secondary action - white cap on a neutral shelf. The shelf is
           what makes the button visible on the white sheet. */}
       <ThreeDPressable
         accessibilityLabel="I already have a wallet"
         onPress={onImportWallet}
         depth={shelfDepth}
         surfaceColor={colors.brand.whiteStream}
-        pressedSurfaceColor={colors.brand.iceBlue}
-        shelfColor={colors.brand.azureCyan}
+        pressedSurfaceColor={colors.brand.glassTint}
+        shelfColor={colors.brand.glossAccent}
         borderColor={colors.glass.rim}
         borderWidth={StyleSheet.hairlineWidth}
         capStyle={{
@@ -179,8 +179,8 @@ export function OnboardingActionPanel({
         disabled={anyAuthBusy}
         depth={shelfDepth}
         surfaceColor={colors.brand.whiteStream}
-        pressedSurfaceColor={colors.brand.iceBlue}
-        shelfColor={colors.brand.azureCyan}
+        pressedSurfaceColor={colors.brand.glassTint}
+        shelfColor={colors.brand.glossAccent}
         borderColor={colors.glass.rim}
         borderWidth={StyleSheet.hairlineWidth}
         capStyle={{
@@ -232,8 +232,8 @@ export function OnboardingActionPanel({
           disabled={anyAuthBusy}
           depth={shelfDepth}
           surfaceColor={colors.brand.whiteStream}
-          pressedSurfaceColor={colors.brand.iceBlue}
-          shelfColor={colors.brand.azureCyan}
+          pressedSurfaceColor={colors.brand.glassTint}
+          shelfColor={colors.brand.glossAccent}
           borderColor={colors.glass.rim}
           borderWidth={StyleSheet.hairlineWidth}
           capStyle={{ minHeight: socialHeight }}
@@ -252,8 +252,8 @@ export function OnboardingActionPanel({
           disabled={anyAuthBusy}
           depth={shelfDepth}
           surfaceColor={colors.brand.whiteStream}
-          pressedSurfaceColor={colors.brand.iceBlue}
-          shelfColor={colors.brand.azureCyan}
+          pressedSurfaceColor={colors.brand.glassTint}
+          shelfColor={colors.brand.glossAccent}
           borderColor={colors.glass.rim}
           borderWidth={StyleSheet.hairlineWidth}
           capStyle={{ minHeight: socialHeight }}
@@ -277,7 +277,7 @@ export function OnboardingActionPanel({
         By continuing you accept our{' '}
         <Text
           variant="small"
-          color={colors.brand.azureBlue}
+          color={colors.brand.actionFill}
           style={styles.footerLink}
           onPress={onTermsPress}
           accessibilityRole="link"
@@ -288,7 +288,7 @@ export function OnboardingActionPanel({
         {' & '}
         <Text
           variant="small"
-          color={colors.brand.azureBlue}
+          color={colors.brand.actionFill}
           style={styles.footerLink}
           onPress={onPrivacyPress}
           accessibilityRole="link"

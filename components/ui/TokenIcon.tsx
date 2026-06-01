@@ -49,7 +49,7 @@ function getTokenFallbackPalette(symbol?: string | null): {
   }
 
   return {
-    backgroundColor: colors.glass.azureCyanHalf,
+    backgroundColor: colors.glass.accentVeil,
     borderColor: colors.border.strong,
     textColor: colors.text.primary,
   };

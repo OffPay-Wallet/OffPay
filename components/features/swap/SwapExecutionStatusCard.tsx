@@ -1,13 +1,12 @@
 import React from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { SWAP_CONTROL_SHADOW, SWAP_GLASS_COLORS, SWAP_PANEL_SHADOW } from './swapGlass';
+import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
 import type { OffpayNetwork } from '@/types/offpay-api';
 
@@ -35,12 +34,7 @@ export function SwapExecutionStatusCard({
   const url = buildExplorerUrl(signature, network);
 
   return (
-    <LinearGradient
-      colors={[...SWAP_GLASS_COLORS]}
-      start={{ x: 0.04, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.card}
-    >
+    <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.card]}>
       <View style={styles.iconWrap}>
         <Ionicons name="checkmark" size={layout.iconSizeInline} color={colors.semantic.success} />
       </View>
@@ -65,9 +59,13 @@ export function SwapExecutionStatusCard({
         accessibilityRole="button"
         accessibilityLabel="Open swap in explorer"
       >
-        <Ionicons name="open-outline" size={layout.iconSizeInline} color={colors.brand.azureCyan} />
+        <Ionicons
+          name="open-outline"
+          size={layout.iconSizeInline}
+          color={colors.brand.glossAccent}
+        />
       </Pressable>
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -92,7 +90,7 @@ const styles = StyleSheet.create({
     minHeight: layout.avatarMd,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.cyanWash,
+    backgroundColor: colors.glass.smokeWash,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderRightWidth: StyleSheet.hairlineWidth,

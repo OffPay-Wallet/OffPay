@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import React, {
   createContext,
   useCallback,
@@ -282,16 +281,7 @@ function AppToastHost({
             toast.variant === 'error' || toast.variant === 'warning' ? 'assertive' : 'polite'
           }
         >
-          <LinearGradient
-            colors={[
-              'rgba(252, 252, 255, 0.98)',
-              'rgba(223, 247, 250, 0.96)',
-              'rgba(252, 252, 255, 0.98)',
-            ]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.toastSurface, compact ? styles.toastSurfaceCompact : null]}
-          >
+          <View style={[styles.toastSurface, compact ? styles.toastSurfaceCompact : null]}>
             <Animated.View style={[styles.toastText, { maxWidth: textMaxWidth }, textStyle]}>
               <Text
                 variant="bodyBold"
@@ -314,7 +304,7 @@ function AppToastHost({
                 </Text>
               ) : null}
             </Animated.View>
-          </LinearGradient>
+          </View>
         </Pressable>
       </Animated.View>
     </View>
@@ -342,9 +332,9 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     padding: 0,
-    boxShadow: `0 8px 24px rgba(14, 42, 53, 0.14)`,
+    boxShadow: `0 18px 42px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
   },
   toastSurface: {
     flex: 1,
@@ -352,7 +342,7 @@ const styles = StyleSheet.create({
     minHeight: 58,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     alignItems: 'center',

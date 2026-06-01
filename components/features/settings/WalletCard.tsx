@@ -1,7 +1,6 @@
 import React from 'react';
 import { StyleSheet, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
@@ -15,13 +14,7 @@ interface WalletCardProps {
   dense?: boolean;
 }
 
-const CARD_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
-const CARD_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+const CARD_SHADOW = '0 14px 28px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 
 export function WalletCard({ compact = false, dense = false }: WalletCardProps): React.JSX.Element {
   const accountName = useWalletStore((s) => s.accountName);
@@ -37,12 +30,7 @@ export function WalletCard({ compact = false, dense = false }: WalletCardProps):
 
   return (
     <View style={styles.shell}>
-      <LinearGradient
-        colors={[...CARD_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.card, compact && styles.cardCompact, dense && styles.cardDense]}
-      >
+      <View style={[styles.card, compact && styles.cardCompact, dense && styles.cardDense]}>
         <WalletAvatar size={avatarSize} solidFill />
         <WalletAccountDetails
           name={accountName}
@@ -63,7 +51,7 @@ export function WalletCard({ compact = false, dense = false }: WalletCardProps):
         >
           <Ionicons name="add" size={actionIconSize + 2} color={colors.text.onAccent} />
         </Pressable>
-      </LinearGradient>
+      </View>
     </View>
   );
 }
@@ -78,7 +66,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: CARD_SHADOW,
   },
   card: {
@@ -89,7 +77,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.md,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
   },
   cardCompact: {
     minHeight: 78,
@@ -106,14 +94,14 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     flexShrink: 0,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.88)',
   },
   moreButtonPressed: {
     opacity: 0.72,

@@ -10,7 +10,7 @@ export const drawerStyles = StyleSheet.create({
   drawerRoot: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: 'rgba(14, 42, 53, 0.18)',
+    backgroundColor: 'rgba(16, 16, 16, 0.18)',
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -24,7 +24,7 @@ export const drawerStyles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '12px 0 32px rgba(14, 42, 53, 0.16)',
+    boxShadow: '12px 0 32px rgba(16, 16, 16, 0.16)',
   },
   drawerHeader: {
     minHeight: HEADER_BUTTON_SIZE,
@@ -46,7 +46,7 @@ export const drawerStyles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(14, 42, 53, 0.06)',
+    backgroundColor: 'rgba(16, 16, 16, 0.06)',
   },
   newChatButton: {
     minHeight: 46,
@@ -58,9 +58,9 @@ export const drawerStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: 'rgba(46, 174, 210, 0.12)',
+    backgroundColor: 'rgba(16, 16, 16, 0.12)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(46, 174, 210, 0.22)',
+    borderColor: 'rgba(16, 16, 16, 0.22)',
   },
   newChatLabel: {
     fontFamily: fontFamily.uiSemiBold,
@@ -96,14 +96,14 @@ export const drawerStyles = StyleSheet.create({
     borderCurve: 'continuous',
     flexDirection: 'row',
     alignItems: 'stretch',
-    backgroundColor: 'rgba(14, 42, 53, 0.035)',
+    backgroundColor: 'rgba(16, 16, 16, 0.035)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(14, 42, 53, 0.06)',
+    borderColor: 'rgba(16, 16, 16, 0.06)',
     overflow: 'hidden',
   },
   drawerRowActive: {
-    backgroundColor: 'rgba(46, 174, 210, 0.16)',
-    borderColor: 'rgba(46, 174, 210, 0.28)',
+    backgroundColor: 'rgba(16, 16, 16, 0.16)',
+    borderColor: 'rgba(16, 16, 16, 0.28)',
   },
   drawerRowMain: {
     flex: 1,

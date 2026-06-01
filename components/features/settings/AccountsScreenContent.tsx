@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -23,16 +22,19 @@ const WALLET_REORDER_TRANSITION = LinearTransition.duration(460).easing(
 );
 const SCREEN_MAX_WIDTH = 640;
 const ADD_WALLET_CARD_MAX_WIDTH = 520;
-const CONTROL_SURFACE = colors.brand.whiteStream;
-const CONTROL_BORDER = colors.surface.backgroundAlt;
-const GLASS_PANEL_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
-const HEADER_BUTTON_SHADOW =
-  '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
-const MODAL_CARD_SHADOW = '0 8px 24px rgba(4, 28, 36, 0.18)';
+const CONTROL_SURFACE = colors.surface.cardElevated;
+const CONTROL_BORDER = colors.glass.rim;
+const HEADER_BUTTON_SHADOW = [
+  'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+  'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+  '0 3px 8px rgba(0, 0, 0, 0.18)',
+].join(', ');
+const MODAL_CARD_SHADOW = [
+  '0 12px 28px rgba(0, 0, 0, 0.44)',
+  'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+  'inset 0 0 14px rgba(255, 255, 255, 0.03)',
+  'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
+].join(', ');
 
 export function AccountsScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -175,7 +177,7 @@ export function AccountsScreenContent(): React.JSX.Element {
           </Pressable>
           <Text
             variant={dense ? 'h3' : 'h2'}
-            color={colors.brand.deepShadow}
+            color={colors.text.primary}
             style={styles.title}
             numberOfLines={1}
             adjustsFontSizeToFit
@@ -194,7 +196,7 @@ export function AccountsScreenContent(): React.JSX.Element {
             accessibilityLabel="Add wallet"
             hitSlop={6}
           >
-            <Ionicons name="add" size={headerIconSize} color={colors.brand.deepShadow} />
+            <Ionicons name="add" size={headerIconSize} color={colors.text.primary} />
           </Pressable>
         </View>
 
@@ -208,11 +210,11 @@ export function AccountsScreenContent(): React.JSX.Element {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.sectionHeader}>
-            <Text variant="bodyBold" color={colors.brand.navyDepth} numberOfLines={1}>
+            <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
               Wallets
             </Text>
             <View style={styles.walletCountPill}>
-              <Text variant="small" color={colors.brand.deepShadow}>
+              <Text variant="small" color={colors.text.primary}>
                 {wallets.length}
               </Text>
             </View>
@@ -252,12 +254,7 @@ export function AccountsScreenContent(): React.JSX.Element {
               );
             })
           ) : (
-            <LinearGradient
-              colors={[...GLASS_PANEL_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.emptyState}
-            >
+            <View style={styles.emptyState}>
               <Ionicons
                 name="wallet-outline"
                 size={layout.iconSizeTab}
@@ -280,7 +277,7 @@ export function AccountsScreenContent(): React.JSX.Element {
                   Add wallet
                 </Text>
               </Pressable>
-            </LinearGradient>
+            </View>
           )}
         </ScrollView>
       </View>
@@ -309,12 +306,7 @@ export function AccountsScreenContent(): React.JSX.Element {
             exiting={FadeOut.duration(120).easing(Easing.out(Easing.cubic))}
             style={{ width: modalCardWidth }}
           >
-            <LinearGradient
-              colors={[...GLASS_PANEL_COLORS]}
-              start={{ x: 0.02, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.addWalletCard}
-            >
+            <View style={styles.addWalletCard}>
               <View style={styles.addWalletHeader}>
                 <Text variant="h3" color={colors.text.primary} numberOfLines={1}>
                   Add Wallet
@@ -395,7 +387,7 @@ export function AccountsScreenContent(): React.JSX.Element {
                   />
                 </Pressable>
               </View>
-            </LinearGradient>
+            </View>
           </Animated.View>
         </Animated.View>
       ) : null}
@@ -413,7 +405,7 @@ export function AccountsScreenContent(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.backgroundGradient.base,
   },
   frame: {
     flex: 1,
@@ -436,7 +428,10 @@ const styles = StyleSheet.create({
     backgroundColor: CONTROL_SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: CONTROL_BORDER,
     boxShadow: HEADER_BUTTON_SHADOW,
     flexShrink: 0,
@@ -477,8 +472,12 @@ const styles = StyleSheet.create({
     backgroundColor: CONTROL_SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: CONTROL_BORDER,
+    boxShadow: HEADER_BUTTON_SHADOW,
   },
   emptyState: {
     borderRadius: radii['2xl'],
@@ -492,13 +491,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: MODAL_CARD_SHADOW,
   },
   emptyAddButton: {
     minHeight: layout.buttonHeightSm,
     paddingHorizontal: spacing.lg,
     borderRadius: radii.full,
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
   },
   addWalletBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(3, 28, 35, 0.48)',
+    backgroundColor: 'rgba(0, 0, 0, 0.58)',
   },
   addWalletCard: {
     borderRadius: radii['2xl'],
@@ -527,7 +527,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: MODAL_CARD_SHADOW,
   },
   addWalletHeader: {
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     flexShrink: 0,
   },
   choiceLabel: {

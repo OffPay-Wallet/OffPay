@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -46,59 +45,54 @@ const QUICK_ACTION_ROW_GAP = spacing.md;
 // Material recipes
 // ---------------------------------------------------------------------------
 
-const BAR_TINT = '#FFFFFF';
-// Active-tab pill — soft frosted tint so the highlighted tab reads as a
-// gentle raised shape on the white bar (matches the reference's light
-// pill behind the active item).
-const PILL_TINT = colors.brand.iceBlue;
-// FAB — saturated blue action puck with static gradient layers. The
-// outer frame carries shadow while the inner puck clips the gradients,
-// so depth is visible without animating expensive paint properties.
-const FAB_GRADIENT_COLORS = [
-  colors.brand.azureCyan,
-  colors.brand.azureBlue,
-  colors.brand.azureBlue,
-] as const;
-const FAB_GLOSS_COLORS = [
-  'rgba(252, 252, 255, 0.24)',
-  'rgba(252, 252, 255, 0.07)',
-  'rgba(252, 252, 255, 0)',
-] as const;
-const FAB_DEPTH_COLORS = [
-  'rgba(14, 42, 53, 0)',
-  'rgba(14, 42, 53, 0.14)',
-  'rgba(14, 42, 53, 0.26)',
-] as const;
-const FAB_PRESSED_OVERLAY = 'rgba(14, 42, 53, 0.08)';
+const BAR_TINT = 'rgba(20, 20, 20, 0.9)';
+// Active-tab pill - glossy highlight so the selected tab remains
+// readable on the dark floating bar.
+const PILL_TINT = colors.brand.glossAccent;
+// FAB - solid dark action puck. Gloss comes from inset shadow,
+// not a detached highlight patch or gradient paint.
+const FAB_PRESSED_OVERLAY = 'rgba(255, 255, 255, 0.08)';
 const QUICK_ACTION_PUCK_TINT = '#FFFFFF';
 
-// Tab accent colours — active items take the brand blue, inactive items
-// stay solid dark ink with muted grey labels (reference combination).
-const TAB_ACTIVE_TINT = colors.brand.azureBlue;
-const TAB_INACTIVE_TINT = colors.brand.deepShadow;
-const TAB_ACTIVE_LABEL = colors.brand.azureBlue;
+// Tab accent colours - active items take the strong monochrome action,
+// inactive items stay solid dark ink with muted grey labels.
+const TAB_ACTIVE_TINT = colors.brand.actionFill;
+const TAB_INACTIVE_TINT = colors.text.secondary;
+const TAB_ACTIVE_LABEL = colors.brand.actionFill;
 const TAB_INACTIVE_LABEL = colors.text.secondary;
 
 // Hairline borders — subtle ink edge so the glass surfaces read as
 // distinct shapes lifted off the page rather than melting into the
-// ice-blue backdrop.
-const BAR_BORDER_COLOR = 'rgba(14, 42, 53, 0.12)';
-const PILL_BORDER_COLOR = 'rgba(14, 42, 53, 0.10)';
-const FAB_BORDER_COLOR = 'rgba(46, 174, 210, 0.55)';
+// neutral backdrop.
+const BAR_BORDER_COLOR = 'rgba(255, 255, 255, 0.16)';
+const PILL_BORDER_COLOR = 'rgba(255, 255, 255, 0.24)';
+const FAB_BORDER_COLOR = 'rgba(255, 255, 255, 0.16)';
 const HAIRLINE = StyleSheet.hairlineWidth;
 // Scrim above the screen content while the FAB menu is open. Uses the
-// app's frost ice-blue rather than a dark navy so the underlying UI
-// reads as gently faded out (matching the reference image) instead of
-// dimmed black.
-const SCRIM_COLOR = colors.brand.iceBlue;
+// app's soft neutral tint so the underlying UI reads as gently faded
+// out instead of dimmed black.
+const SCRIM_COLOR = colors.brand.glassTint;
 const SCRIM_OPACITY = 0.82;
 
 // Shadows — neutral lift only, no coloured glow.
-const BAR_SHADOW = '0 12px 24px rgba(14, 42, 53, 0.16), 0 4px 10px rgba(14, 42, 53, 0.10)';
-const FAB_SHADOW = '0 16px 28px rgba(14, 42, 53, 0.22), 0 5px 12px rgba(14, 42, 53, 0.14)';
-const QUICK_ACTION_SHADOW = '0 12px 24px rgba(14, 42, 53, 0.18), 0 4px 10px rgba(14, 42, 53, 0.12)';
-const FAB_INNER_SHADOW =
-  'inset 0 1px 0 rgba(252, 252, 255, 0.34), inset 0 -10px 16px rgba(14, 42, 53, 0.1)';
+const BAR_SHADOW = [
+  '0 10px 24px rgba(0, 0, 0, 0.38)',
+  'inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+  'inset 0 0 12px rgba(255, 255, 255, 0.04)',
+  'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
+].join(', ');
+const PILL_SHADOW = [
+  'inset 0 1px 1px rgba(255, 255, 255, 0.85)',
+  'inset 0 -1px 3px rgba(0, 0, 0, 0.12)',
+  '0 2px 6px rgba(0, 0, 0, 0.1)',
+].join(', ');
+const FAB_PUCK_SHADOW = [
+  '0 8px 20px rgba(0, 0, 0, 0.45)',
+  'inset 0 2px 2px rgba(255, 255, 255, 0.32)',
+  'inset 0 0 14px rgba(255, 255, 255, 0.06)',
+  'inset 0 -2px 4px rgba(0, 0, 0, 0.5)',
+].join(', ');
+const QUICK_ACTION_SHADOW = '0 12px 24px rgba(16, 16, 16, 0.18), 0 4px 10px rgba(16, 16, 16, 0.12)';
 
 // Animations — snappy, symmetric, single curve for open + close so the
 // scrim, menu items, and "+" rotation all feel like one motion.
@@ -401,9 +395,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       style={[styles.container, { height: containerHeight }]}
       pointerEvents={tabBarHidden ? 'none' : 'box-none'}
     >
-      {/* Frost scrim — sits behind the bar/FAB/quick actions and fades
-          everything underneath to the app's ice-blue tone (matches the
-          reference image). Tap-to-dismiss; the negative `top` extends
+      {/* Frost scrim - sits behind the bar/FAB/quick actions and fades
+          everything underneath to the app's neutral tone. Tap-to-dismiss;
+          the negative `top` extends
           the press surface above this absolute-positioned container so
           the entire screen can be tapped to close. */}
       <Animated.View
@@ -539,28 +533,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
             },
           ]}
         >
-          <LinearGradient
-            colors={FAB_GRADIENT_COLORS}
-            start={{ x: 0.2, y: 0 }}
-            end={{ x: 0.84, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <LinearGradient
-            pointerEvents="none"
-            colors={FAB_GLOSS_COLORS}
-            locations={[0, 0.42, 0.78]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={styles.fabTopGloss}
-          />
-          <LinearGradient
-            pointerEvents="none"
-            colors={FAB_DEPTH_COLORS}
-            locations={[0.32, 0.72, 1]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={styles.fabBottomDepth}
-          />
           <Pressable
             style={({ pressed }) => [styles.fabPress, pressed && styles.fabPressed]}
             onPress={handleFabToggle}
@@ -687,7 +659,10 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: 'transparent',
-    borderWidth: HAIRLINE,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: HAIRLINE,
+    borderRightWidth: HAIRLINE,
     borderColor: BAR_BORDER_COLOR,
     boxShadow: BAR_SHADOW,
   },
@@ -725,7 +700,7 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: colors.brand.deepShadow,
-    boxShadow: '0 8px 18px rgba(14, 42, 53, 0.32)',
+    boxShadow: '0 8px 18px rgba(16, 16, 16, 0.32)',
   },
   feedbackToastText: {
     fontSize: 11,
@@ -738,32 +713,33 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: 'transparent',
-    borderWidth: HAIRLINE,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: HAIRLINE,
+    borderRightWidth: HAIRLINE,
     borderColor: PILL_BORDER_COLOR,
   },
   pillTint: {
     ...StyleSheet.absoluteFillObject,
+    boxShadow: PILL_SHADOW,
   },
   fabFrame: {
     position: 'absolute',
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: FAB_SHADOW,
   },
   fabPuck: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
     borderCurve: 'continuous',
-    borderWidth: HAIRLINE,
-    borderColor: FAB_BORDER_COLOR,
-    boxShadow: FAB_INNER_SHADOW,
-  },
-  fabTopGloss: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  fabBottomDepth: {
-    ...StyleSheet.absoluteFillObject,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1.5,
+    borderBottomWidth: HAIRLINE,
+    borderRightWidth: HAIRLINE,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: colors.brand.actionFill,
+    boxShadow: FAB_PUCK_SHADOW,
   },
   fabPress: {
     ...StyleSheet.absoluteFillObject,
@@ -778,8 +754,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: colors.brand.whiteStream,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(252, 252, 255, 0.72)',
-    boxShadow: '0 1px 2px rgba(14, 42, 53, 0.14)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    boxShadow: [
+      '0 0 6px rgba(255, 255, 255, 0.5)',
+      '0 0 14px rgba(255, 255, 255, 0.15)',
+      '0 1px 3px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   fabPressed: {
     backgroundColor: FAB_PRESSED_OVERLAY,
@@ -807,7 +787,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: QUICK_ACTION_PUCK_TINT,
     borderWidth: HAIRLINE,
-    borderColor: 'rgba(14, 42, 53, 0.12)',
+    borderColor: 'rgba(16, 16, 16, 0.12)',
     boxShadow: QUICK_ACTION_SHADOW,
   },
 });

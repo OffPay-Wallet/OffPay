@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 
@@ -16,7 +15,8 @@ import type {
   OffpayHistoryTransactionGroup,
   OffpayHistoryTransactionView,
   TokenLogoLookup,
- OffpayLocalReceiptViewInput } from '@/lib/api/offpay-wallet-data';
+  OffpayLocalReceiptViewInput,
+} from '@/lib/api/offpay-wallet-data';
 import type { UseOffpayWalletTransactionsResult } from '@/hooks/useOffpayWalletTransactions';
 import type { OfflinePaymentReceipt } from '@/store/offlinePaymentStore';
 
@@ -28,13 +28,8 @@ function getQueryErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-const HISTORY_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 const HISTORY_CONTAINER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 16px 34px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 
 interface HistoryListProps {
   transactionsQuery: UseOffpayWalletTransactionsResult;
@@ -43,9 +38,7 @@ interface HistoryListProps {
   onTransactionPress?: (id: string) => void;
 }
 
-function flattenHistorySections(
-  sections: OffpayHistoryTransactionGroup[],
-): HistoryRow[] {
+function flattenHistorySections(sections: OffpayHistoryTransactionGroup[]): HistoryRow[] {
   const rows: HistoryRow[] = [];
   for (const section of sections) {
     rows.push({
@@ -221,12 +214,7 @@ export function HistoryList({
     () => (
       <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
         <View style={styles.emptyStateShell}>
-          <LinearGradient
-            colors={[...HISTORY_GLASS_COLORS]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.emptyState}
-          >
+          <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.emptyState]}>
             <Text
               variant="bodyBold"
               color={colors.text.primary}
@@ -249,7 +237,7 @@ export function HistoryList({
             >
               {emptyMessage}
             </Text>
-          </LinearGradient>
+          </View>
         </View>
       </View>
     ),
@@ -264,10 +252,7 @@ export function HistoryList({
     return (
       <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
         <Pressable
-          style={({ pressed }) => [
-            styles.loadMoreButton,
-            pressed && styles.loadMoreButtonPressed,
-          ]}
+          style={({ pressed }) => [styles.loadMoreButton, pressed && styles.loadMoreButtonPressed]}
           onPress={() => {
             if (!transactionsQuery.isCapabilityEnabled) return;
             void transactionsQuery.fetchNextPage();
@@ -275,12 +260,7 @@ export function HistoryList({
           accessibilityRole="button"
           accessibilityLabel="Load more transactions"
         >
-          <LinearGradient
-            colors={[...HISTORY_GLASS_COLORS]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.loadMoreGlass}
-          >
+          <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.loadMoreGlass]}>
             <Text
               variant="captionBold"
               color={colors.semantic.info}
@@ -290,7 +270,7 @@ export function HistoryList({
             >
               Load more
             </Text>
-          </LinearGradient>
+          </View>
         </Pressable>
       </View>
     );

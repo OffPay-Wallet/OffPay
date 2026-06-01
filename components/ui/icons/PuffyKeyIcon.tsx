@@ -1,13 +1,19 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyKeyIconProps {
   size?: number;
   color?: string;
   focused?: boolean;
 }
 
-export function PuffyKeyIcon({ size = 24, color = '#000', focused = true }: PuffyKeyIconProps) {
+export function PuffyKeyIcon({
+  size = 24,
+  color = colors.text.primary,
+  focused = true,
+}: PuffyKeyIconProps) {
   // Bootstrap `bi-key-fill` (16x16) path.
   // Uses `currentColor` so it automatically matches the native theme color passed in.
   const fillOpacity = focused ? 0.95 : 0.75;

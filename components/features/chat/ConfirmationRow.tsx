@@ -30,7 +30,7 @@ export function ConfirmationRow({
   const valueElement = (
     <Text
       variant="captionBold"
-      color={onPress != null ? colors.brand.azureCyan : colors.text.primary}
+      color={onPress != null ? colors.brand.glossAccent : colors.text.primary}
       style={[
         styles.confirmationRowValue,
         mono === true && styles.monoText,

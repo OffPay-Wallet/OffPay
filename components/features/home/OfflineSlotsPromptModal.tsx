@@ -1,6 +1,5 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   FadeIn,
@@ -93,10 +92,7 @@ export function OfflineSlotsPromptModal({
         showsVerticalScrollIndicator={false}
       >
         <Animated.View entering={cardEntering} exiting={cardExiting} style={styles.cardShell}>
-          <LinearGradient
-            colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <View
             style={[
               styles.card,
               {
@@ -241,7 +237,7 @@ export function OfflineSlotsPromptModal({
                 </Pressable>
               </View>
             </View>
-          </LinearGradient>
+          </View>
         </Animated.View>
       </ScrollView>
     </Animated.View>
@@ -274,8 +270,8 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
-    boxShadow: `0 8px 24px rgba(14, 42, 53, 0.14)`,
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: `0 18px 42px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
   },
   copyBlock: {
     gap: spacing.sm,
@@ -318,14 +314,14 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     paddingHorizontal: spacing.lg,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   buttonPressed: {
     opacity: 0.72,
@@ -354,7 +350,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   buttonText: {
     textAlign: 'center',

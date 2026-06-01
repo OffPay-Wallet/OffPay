@@ -1160,7 +1160,7 @@ function UmbraVaultContentBody({
             <Ionicons
               name="chevron-back"
               size={layout.iconSizeNav}
-              color={colors.brand.azureCyan}
+              color={colors.brand.glossAccent}
             />
           </Pressable>
           <Text
@@ -1175,7 +1175,7 @@ function UmbraVaultContentBody({
             <Ionicons
               name="lock-closed-outline"
               size={layout.iconSizeNav}
-              color={colors.brand.azureCyan}
+              color={colors.brand.glossAccent}
             />
           </View>
         </Animated.View>
@@ -1320,14 +1320,14 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     backgroundColor: colors.brand.whiteStream,
     padding: spacing.xs,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   headerIconBtn: {
     width: layout.minTouchTarget,
     height: layout.minTouchTarget,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
     alignItems: 'center',
     justifyContent: 'center',
   },

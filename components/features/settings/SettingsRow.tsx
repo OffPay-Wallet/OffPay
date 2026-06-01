@@ -41,7 +41,7 @@ export function SettingsRow({
   const iconWellSize = dense ? 24 : compact ? 26 : 28;
   const accessorySize = dense ? 18 : 20;
   const showAccessory = onPress != null && !disabled;
-  const labelColor = destructive ? colors.semantic.error : colors.brand.deepShadow;
+  const labelColor = destructive ? colors.semantic.error : colors.text.primary;
   const accessoryColor = destructive ? colors.semantic.error : colors.text.tertiary;
 
   return (
@@ -110,7 +110,7 @@ export function SettingsRow({
 
         {badgeCount != null ? (
           <View style={styles.badge}>
-            <Text variant="small" color={colors.brand.deepShadow} style={styles.badgeText}>
+            <Text variant="small" color={colors.text.onAccent} style={styles.badgeText}>
               {badgeCount}
             </Text>
           </View>
@@ -214,9 +214,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glossAccent,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.surface.backgroundAlt,
+    borderColor: colors.glass.rim,
   },
   badgeText: {
     fontFamily: fontFamily.semiBold,

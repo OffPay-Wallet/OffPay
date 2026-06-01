@@ -175,7 +175,7 @@ export function SeedPhraseInputGrid({
                 autoCorrect={false}
                 autoComplete="off"
                 spellCheck={false}
-                selectionColor={colors.brand.azureCyan}
+                selectionColor={colors.brand.glossAccent}
                 keyboardAppearance="dark"
                 returnKeyType={cellIdx < wordCount - 1 ? 'next' : 'done'}
                 onSubmitEditing={() => {

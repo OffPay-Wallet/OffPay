@@ -100,7 +100,7 @@ const styles = StyleSheet.create({
     // Flat frosty surface — matches the rest of the onboarding flow
     // (welcome → security-setup → create-wallet → username-setup).
     // No gradient, no shadow.
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
   },
   content: {
     flexGrow: 1,

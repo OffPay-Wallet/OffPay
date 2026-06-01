@@ -164,7 +164,7 @@ export function SettingsScreenContent({
                 <SettingsSectionCard>
                   <SettingsRow
                     iconNode={
-                      <Ionicons name="wallet" size={rowIconSize} color={colors.brand.deepShadow} />
+                      <Ionicons name="wallet" size={rowIconSize} color={colors.text.primary} />
                     }
                     label="Accounts"
                     compact={compact}
@@ -176,7 +176,7 @@ export function SettingsScreenContent({
                       <Ionicons
                         name="person-circle"
                         size={rowIconSize}
-                        color={colors.brand.deepShadow}
+                        color={colors.text.primary}
                       />
                     }
                     label="Username"
@@ -189,7 +189,7 @@ export function SettingsScreenContent({
                   />
                   <SettingsRow
                     iconNode={
-                      <Ionicons name="options" size={rowIconSize} color={colors.brand.deepShadow} />
+                      <Ionicons name="options" size={rowIconSize} color={colors.text.primary} />
                     }
                     label="Preferences"
                     compact={compact}
@@ -204,7 +204,7 @@ export function SettingsScreenContent({
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
-                  color={colors.brand.deepShadow}
+                  color={colors.text.primary}
                   style={styles.sectionTitle}
                   numberOfLines={1}
                   maxFontSizeMultiplier={1.05}
@@ -217,7 +217,7 @@ export function SettingsScreenContent({
                       <Ionicons
                         name="shield-checkmark"
                         size={rowIconSize}
-                        color={colors.brand.deepShadow}
+                        color={colors.text.primary}
                       />
                     }
                     label="Security"
@@ -233,7 +233,7 @@ export function SettingsScreenContent({
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
-                  color={colors.brand.deepShadow}
+                  color={colors.text.primary}
                   style={styles.sectionTitle}
                   numberOfLines={1}
                   maxFontSizeMultiplier={1.05}
@@ -243,7 +243,7 @@ export function SettingsScreenContent({
                 <SettingsSectionCard>
                   <SettingsRow
                     iconNode={
-                      <Ionicons name="mail" size={rowIconSize} color={colors.brand.deepShadow} />
+                      <Ionicons name="mail" size={rowIconSize} color={colors.text.primary} />
                     }
                     label="Support"
                     isExternal
@@ -255,11 +255,7 @@ export function SettingsScreenContent({
                   />
                   <SettingsRow
                     iconNode={
-                      <PuffyTwitterXIcon
-                        size={rowIconSize}
-                        color={colors.brand.deepShadow}
-                        focused
-                      />
+                      <PuffyTwitterXIcon size={rowIconSize} color={colors.text.primary} focused />
                     }
                     label="X (Twitter)"
                     rightValue={X_HANDLE}
@@ -345,7 +341,7 @@ export function SettingsScreenContent({
           <View style={[styles.confirmCard, { maxWidth: dialogMaxWidth }]}>
             <Text
               variant="h3"
-              color={colors.brand.deepShadow}
+              color={colors.text.primary}
               align="center"
               style={[
                 styles.confirmTitle,
@@ -389,7 +385,7 @@ export function SettingsScreenContent({
               >
                 <Text
                   variant="button"
-                  color={colors.brand.deepShadow}
+                  color={colors.text.primary}
                   align="center"
                   numberOfLines={1}
                   maxFontSizeMultiplier={1.05}
@@ -489,17 +485,18 @@ const styles = StyleSheet.create({
   },
   confirmScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    backgroundColor: 'rgba(0, 0, 0, 0.58)',
   },
   confirmCard: {
     width: '100%',
     borderRadius: radii.xl,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.surface.backgroundAlt,
+    borderColor: colors.glass.rim,
     padding: spacing.xl,
     gap: spacing.md,
+    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 36px rgba(0, 0, 0, 0.44)',
   },
   confirmTitle: {
     textAlign: 'center',
@@ -526,12 +523,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   confirmCancelButton: {
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.surface.backgroundAlt,
+    borderColor: colors.glass.rim,
   },
   confirmCancelButtonPressed: {
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
   },
   confirmResetButton: {
     backgroundColor: colors.semantic.error,

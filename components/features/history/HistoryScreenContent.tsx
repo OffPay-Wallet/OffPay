@@ -4,7 +4,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -102,13 +101,8 @@ function mapAgenticPrivateReceiptToHistoryInput(
   };
 }
 
-const HEADER_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 const HEADER_CONTAINER_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 
 export function HistoryScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -213,18 +207,15 @@ export function HistoryScreenContent(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <LinearGradient
-              colors={[...HEADER_GLASS_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.headerIconGlass}
+            <View
+              style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconGlass]}
             >
               <Ionicons
                 name="chevron-back"
                 size={layout.iconSizeNav}
-                color={colors.brand.azureCyan}
+                color={colors.brand.glossAccent}
               />
-            </LinearGradient>
+            </View>
           </Pressable>
           <Text
             variant="h2"
@@ -252,11 +243,8 @@ export function HistoryScreenContent(): React.JSX.Element {
               disabled: !transactionsQuery.isCapabilityEnabled || transactionsQuery.isRefetching,
             }}
           >
-            <LinearGradient
-              colors={[...HEADER_GLASS_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.headerIconGlass}
+            <View
+              style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconGlass]}
             >
               {transactionsQuery.isRefetching ? (
                 <Animated.View
@@ -265,7 +253,7 @@ export function HistoryScreenContent(): React.JSX.Element {
                   exiting={FadeOut.duration(80)}
                   style={styles.refreshLoader}
                 >
-                  <LazyLoadingSpinner size={refreshIconSize} color={colors.brand.azureCyan} />
+                  <LazyLoadingSpinner size={refreshIconSize} color={colors.brand.glossAccent} />
                 </Animated.View>
               ) : (
                 <Animated.View
@@ -278,13 +266,13 @@ export function HistoryScreenContent(): React.JSX.Element {
                     size={refreshIconSize}
                     color={
                       transactionsQuery.isCapabilityEnabled
-                        ? colors.brand.azureCyan
+                        ? colors.brand.glossAccent
                         : colors.text.tertiary
                     }
                   />
                 </Animated.View>
               )}
-            </LinearGradient>
+            </View>
           </Pressable>
         </Animated.View>
       </View>

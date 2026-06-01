@@ -46,7 +46,7 @@ export function SelectableCard({
           <View style={styles.titleRow}>
             <Text
               variant="body"
-              color={selected ? colors.brand.azureCyan : colors.text.primary}
+              color={selected ? colors.brand.glossAccent : colors.text.primary}
               style={styles.title}
               numberOfLines={1}
               ellipsizeMode="tail"
@@ -84,8 +84,8 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   cardActive: {
-    borderColor: colors.brand.azureCyan,
-    backgroundColor: colors.glass.cyanWash,
+    borderColor: colors.brand.glossAccent,
+    backgroundColor: colors.glass.smokeWash,
   },
   disabled: {
     opacity: 0.45,
@@ -123,11 +123,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
-  radioActive: { borderColor: colors.brand.azureCyan },
+  radioActive: { borderColor: colors.brand.glossAccent },
   radioDot: {
     width: spacing.md,
     height: spacing.md,
     borderRadius: radii.full,
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
 });

@@ -1,13 +1,19 @@
 import React from 'react';
 import Svg, { Path, Rect, Circle, Mask, Defs } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyIconProps {
   size?: number;
   color?: string;
   focused?: boolean;
 }
 
-export function PuffyHistoryIcon({ size = 24, color = '#000', focused = false }: PuffyIconProps) {
+export function PuffyHistoryIcon({
+  size = 24,
+  color = colors.text.primary,
+  focused = false,
+}: PuffyIconProps) {
   // Ultra-thick, solid document with overlapping clock, featuring a pristine transparent cutout gap
   const opacity = focused ? 1 : 0.4; // Fades naturally into glassmorphism when inactive
 

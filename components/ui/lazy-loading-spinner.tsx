@@ -63,7 +63,7 @@ interface LazyLoadingSpinnerProps {
 
 export function LazyLoadingSpinner({
   size = 32,
-  color = colors.brand.deepShadow,
+  color = colors.text.primary,
 }: LazyLoadingSpinnerProps): React.JSX.Element {
   const rotation = useSharedValue(0);
 

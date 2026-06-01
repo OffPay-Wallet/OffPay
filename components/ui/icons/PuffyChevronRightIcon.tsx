@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyChevronRightIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyChevronRightIconProps {
 
 export function PuffyChevronRightIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyChevronRightIconProps): React.JSX.Element {
   const strokeOpacity = focused ? 0.84 : 0.58;

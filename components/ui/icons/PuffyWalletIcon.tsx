@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyWalletIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyWalletIconProps {
 
 export function PuffyWalletIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyWalletIconProps): React.JSX.Element {
   const strokeOpacity = focused ? 0.9 : 0.66;

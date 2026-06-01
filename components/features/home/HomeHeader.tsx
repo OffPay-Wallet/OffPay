@@ -228,15 +228,15 @@ function HomeHeaderComponent({
     transform: [{ translateX: toggleProgress.value * toggleTravel }],
   }));
 
-  // Animated track color — soft translucent white when online
-  // (connected), muted grey when offline so it separates from the cyan
-  // background instead of blending into it. The solid-white knob stays
-  // distinct against both.
+  // Animated track color - soft translucent white when online
+  // (connected), muted grey when offline so it separates from the
+  // dark background instead of blending into it. The solid-white knob
+  // stays distinct against both.
   const trackStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(
       toggleProgress.value,
       [0, 1],
-      [colors.glass.clearFill, colors.text.tertiary],
+      [colors.surface.cardElevated, colors.glass.strongFill],
     ),
   }));
 
@@ -493,7 +493,10 @@ const styles = StyleSheet.create({
   },
   walletProfileIcon: {
     overflow: 'hidden',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.35)',
   },
   walletTextBlock: {
     flexShrink: 1,
@@ -556,16 +559,29 @@ const styles = StyleSheet.create({
   toggleTrack: {
     justifyContent: 'center',
     backgroundColor: colors.glass.clearFill,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     overflow: 'hidden',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.2)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 6px 14px rgba(0, 0, 0, 0.32)',
+    ].join(', '),
   },
   toggleKnob: {
     backgroundColor: colors.brand.whiteStream,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    borderColor: 'rgba(255, 255, 255, 0.82)',
+    boxShadow: [
+      '0 3px 8px rgba(0, 0, 0, 0.3)',
+      'inset 0 1px 0 rgba(255, 255, 255, 0.95)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.08)',
+    ].join(', '),
   },
   toggleIconLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -577,10 +593,19 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.glass.clearFill,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.surface.cardElevated,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     overflow: 'visible',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 0 8px rgba(255, 255, 255, 0.04)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
+      '0 6px 14px rgba(0, 0, 0, 0.32)',
+    ].join(', '),
   },
   notificationTouch: {
     borderRadius: radii.full,
@@ -603,7 +628,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: colors.brand.iceBlue,
+    borderColor: colors.brand.glassTint,
     zIndex: 2,
   },
   notificationBadgeText: {

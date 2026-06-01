@@ -519,16 +519,16 @@ const styles = StyleSheet.create({
   sheet: {
     width: '100%',
     borderRadius: radii['2xl'],
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 8px 24px rgba(14, 42, 53, 0.14)`,
+    boxShadow: `0 18px 42px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
     gap: spacing.md,
     overflow: 'hidden',
   },
   sheetTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
   },
   header: {
     flexDirection: 'row',

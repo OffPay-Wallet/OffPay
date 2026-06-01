@@ -15,11 +15,7 @@
 
 import React, { type RefObject } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import Animated, {
-  FadeOut,
-  LinearTransition,
-  ZoomIn,
-} from 'react-native-reanimated';
+import Animated, { FadeOut, LinearTransition, ZoomIn } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors } from '@/constants/colors';
@@ -226,7 +222,7 @@ function ComposerCard({
                 size={22}
                 color={
                   speech.state !== 'idle'
-                    ? colors.brand.azureBlue
+                    ? colors.brand.actionFill
                     : speech.muted
                       ? colors.text.tertiary
                       : colors.brand.deepShadow
@@ -362,7 +358,10 @@ function VoiceCard({ voice }: { voice: ChatVoiceControl }): React.JSX.Element {
           <Pressable
             onPress={isReview ? voice.onAccept : voice.onPress}
             disabled={isReview && !canAccept}
-            style={[styles.voiceControlPrimary, isReview && !canAccept && styles.voiceControlDisabled]}
+            style={[
+              styles.voiceControlPrimary,
+              isReview && !canAccept && styles.voiceControlDisabled,
+            ]}
             accessibilityRole="button"
             accessibilityLabel={isReview ? 'Send voice input' : 'Stop and transcribe'}
             hitSlop={8}

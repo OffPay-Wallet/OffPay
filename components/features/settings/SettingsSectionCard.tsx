@@ -28,13 +28,14 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.surface.backgroundAlt,
+    borderColor: colors.glass.rim,
+    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 10px 22px rgba(0, 0, 0, 0.34)',
   },
   divider: {
     height: StyleSheet.hairlineWidth,
     marginLeft: spacing['4xl'],
-    backgroundColor: colors.surface.backgroundAlt,
+    backgroundColor: colors.glass.rimSubtle,
   },
 });

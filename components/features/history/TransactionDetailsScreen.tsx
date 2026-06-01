@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
 import {
@@ -70,17 +69,12 @@ interface TransactionProgramInfo {
 }
 
 const TRANSACTION_DETAIL_CONTENT_MAX_WIDTH = 430;
-const DETAIL_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
 const DETAIL_PANEL_SHADOW =
-  '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 18px 42px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const DETAIL_CONTROL_SHADOW =
-  '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+  '0 14px 30px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const ACTION_BADGE_SHADOW =
-  '0 2px 5px rgba(14, 42, 53, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.82)';
+  '0 10px 22px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const TOKEN_SYMBOL_PATTERN = /(?:^|[\s+-])(?:\d[\d,.]*\s+)?([A-Za-z][A-Za-z0-9]{1,15})$/;
 
 const AMOUNT_COLORS: Record<OffpayDisplayTone, string> = {
@@ -371,7 +365,7 @@ function TransactionActionIcon({
   }
 
   if (type === 'swap') {
-    return <PuffySwapIcon size={size} color={colors.brand.azureCyan} focused />;
+    return <PuffySwapIcon size={size} color={colors.brand.glossAccent} focused />;
   }
 
   return <PuffySendIcon size={size} />;
@@ -394,14 +388,9 @@ function HeaderIconButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <LinearGradient
-        colors={[...DETAIL_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerIconGlass}
-      >
+      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconGlass]}>
         {children}
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -536,7 +525,7 @@ function InfoTile({
           {value}
         </Text>
         {copyable ? (
-          <Ionicons name="copy-outline" size={16} color={colors.brand.azureCyan} />
+          <Ionicons name="copy-outline" size={16} color={colors.brand.glossAccent} />
         ) : null}
       </View>
     </Pressable>
@@ -898,7 +887,7 @@ export function TransactionDetailsScreen(): React.JSX.Element {
             <Ionicons
               name="chevron-back"
               size={layout.iconSizeNav}
-              color={colors.brand.azureCyan}
+              color={colors.brand.glossAccent}
             />
           </HeaderIconButton>
           <Text
@@ -936,11 +925,11 @@ export function TransactionDetailsScreen(): React.JSX.Element {
         ) : (
           <StaggerRevealGroup itemStyle={styles.contentFrame}>
             <View style={styles.summaryShell}>
-              <LinearGradient
-                colors={[...DETAIL_GLASS_COLORS]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.summaryCard, { padding: heroPadding }]}
+              <View
+                style={[
+                  { backgroundColor: colors.surface.cardElevated },
+                  [styles.summaryCard, { padding: heroPadding }],
+                ]}
               >
                 <View style={styles.summaryTopRow}>
                   <TransactionTokenCluster tx={view} size={iconSize} tokenLogos={tokenLogos} />
@@ -1036,10 +1025,10 @@ export function TransactionDetailsScreen(): React.JSX.Element {
                       accessibilityRole="link"
                       accessibilityLabel="Open transaction in Solscan"
                     >
-                      <Ionicons name="open-outline" size={18} color={colors.brand.azureCyan} />
+                      <Ionicons name="open-outline" size={18} color={colors.brand.glossAccent} />
                       <Text
                         variant="small"
-                        color={colors.brand.deepShadow}
+                        color={colors.text.primary}
                         style={styles.explorerLabel}
                         numberOfLines={1}
                         maxFontSizeMultiplier={1}
@@ -1087,7 +1076,7 @@ export function TransactionDetailsScreen(): React.JSX.Element {
                     </View>
                   ) : null}
                 </View>
-              </LinearGradient>
+              </View>
             </View>
 
             <View style={styles.infoPanel}>

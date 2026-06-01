@@ -5,14 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
-import {
-  SWAP_CONTROL_SHADOW,
-  SWAP_GLASS_COLORS,
-  SWAP_PANEL_SHADOW,
-} from '@/components/features/swap/swapGlass';
+import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from '@/components/features/swap/swapGlass';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { Text } from '@/components/ui/Text';
@@ -49,16 +44,6 @@ interface ScanAlertState {
 const QR_ABSENCE_CLEAR_MS = 1400;
 const CAMERA_STOP_DELAY_MS = 180;
 const SCANNER_CONTENT_MAX_WIDTH = 430;
-const SCANNER_CARD_COLORS = [
-  colors.brand.whiteStream,
-  colors.brand.iceBlue,
-  colors.brand.whiteStream,
-] as const;
-const CAMERA_TINT_COLORS = [
-  'rgba(14, 42, 53, 0.22)',
-  'rgba(14, 42, 53, 0.04)',
-  'rgba(14, 42, 53, 0.28)',
-] as const;
 
 function HeaderIconButton({
   children,
@@ -77,14 +62,9 @@ function HeaderIconButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <LinearGradient
-        colors={[...SWAP_GLASS_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerButtonSurface}
-      >
+      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerButtonSurface]}>
         {children}
-      </LinearGradient>
+      </View>
     </Pressable>
   );
 }
@@ -99,7 +79,7 @@ function buildScanAlertKey(rawValue: string, title: string, message: string): st
 
 function scanAlertColor(variant: ScanAlertState['variant']): string {
   if (variant === 'error') return colors.semantic.error;
-  if (variant === 'info') return colors.brand.azureCyan;
+  if (variant === 'info') return colors.brand.glossAccent;
   return colors.semantic.warning;
 }
 
@@ -150,10 +130,7 @@ function parsePaymentQr(rawValue: string): ScannedPaymentRequest {
  * on the receiving screen receives them as strings — coercing here
  * would just round-trip them.
  */
-function buildSendRoute(params: {
-  request: ScannedPaymentRequest;
-  fallbackMint: string;
-}): Href {
+function buildSendRoute(params: { request: ScannedPaymentRequest; fallbackMint: string }): Href {
   const search: Record<string, string> = {
     mode: 'send',
     recipient: params.request.recipient,
@@ -435,11 +412,12 @@ export function ScannerScreen(): React.JSX.Element {
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
             onBarcodeScanned={hasScanned ? undefined : handleCameraQr}
           />
-          <LinearGradient
+          <View
             pointerEvents="none"
-            colors={[...CAMERA_TINT_COLORS]}
-            locations={[0, 0.5, 1]}
-            style={StyleSheet.absoluteFill}
+            style={[
+              { backgroundColor: colors.backgroundGradient.blobShadow },
+              StyleSheet.absoluteFill,
+            ]}
           />
         </Animated.View>
       ) : (
@@ -447,15 +425,15 @@ export function ScannerScreen(): React.JSX.Element {
           exiting={FadeOut.duration(140)}
           style={[styles.permissionFallback, { paddingHorizontal: horizontalPadding }]}
         >
-          <LinearGradient
-            colors={[...SCANNER_CARD_COLORS]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.permissionCard, { maxWidth: contentMaxWidth }]}
+          <View
+            style={[
+              { backgroundColor: colors.surface.cardElevated },
+              [styles.permissionCard, { maxWidth: contentMaxWidth }],
+            ]}
           >
             <StaggerRevealGroup>
               <View style={styles.permissionIcon}>
-                <PuffyQRIcon size={layout.iconSizeTab} color={colors.brand.azureCyan} />
+                <PuffyQRIcon size={layout.iconSizeTab} color={colors.brand.glossAccent} />
               </View>
               <Text variant="bodyBold" color={colors.text.primary} align="center">
                 Camera ready
@@ -474,19 +452,19 @@ export function ScannerScreen(): React.JSX.Element {
                 accessibilityRole="button"
                 accessibilityLabel="Open camera scanner"
               >
-                <LinearGradient
-                  colors={[colors.brand.azureCyan, colors.glass.azureCyanHalf, colors.glass.cyanWash]}
-                  start={{ x: 0.04, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.permissionButtonSurface}
+                <View
+                  style={[
+                    { backgroundColor: colors.brand.glossAccent },
+                    styles.permissionButtonSurface,
+                  ]}
                 >
-                  <Text variant="button" color={colors.text.primary}>
+                  <Text variant="button" color={colors.text.onAccent}>
                     Open Scanner
                   </Text>
-                </LinearGradient>
+                </View>
               </Pressable>
             </StaggerRevealGroup>
-          </LinearGradient>
+          </View>
         </Animated.View>
       )}
 
@@ -498,11 +476,7 @@ export function ScannerScreen(): React.JSX.Element {
       >
         <View style={[styles.header, { paddingHorizontal: horizontalPadding }]}>
           <HeaderIconButton onPress={handleBack} accessibilityLabel="Go back">
-            <Ionicons
-              name="chevron-back"
-              size={layout.iconSizeNav}
-              color={colors.brand.deepShadow}
-            />
+            <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
           </HeaderIconButton>
           <Text
             variant="h2"
@@ -516,11 +490,7 @@ export function ScannerScreen(): React.JSX.Element {
             Scan QR
           </Text>
           <HeaderIconButton onPress={handleOpenCamera} accessibilityLabel="Restart scanner">
-            <Ionicons
-              name="scan-outline"
-              size={layout.iconSizeNav}
-              color={colors.brand.deepShadow}
-            />
+            <Ionicons name="scan-outline" size={layout.iconSizeNav} color={colors.text.primary} />
           </HeaderIconButton>
         </View>
 
@@ -561,11 +531,8 @@ export function ScannerScreen(): React.JSX.Element {
                   exiting={FadeOut.duration(120)}
                   style={[styles.bottomHintContent, { maxWidth: contentMaxWidth }]}
                 >
-                  <LinearGradient
-                    colors={[...SCANNER_CARD_COLORS]}
-                    start={{ x: 0.04, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.scanAlertCard}
+                  <View
+                    style={[{ backgroundColor: colors.surface.cardElevated }, styles.scanAlertCard]}
                   >
                     <View
                       style={[
@@ -581,19 +548,19 @@ export function ScannerScreen(): React.JSX.Element {
                         {scanAlert.message}
                       </Text>
                     </View>
-                  </LinearGradient>
+                  </View>
                 </Animated.View>
               ) : (
-                <LinearGradient
-                  colors={[...SCANNER_CARD_COLORS]}
-                  start={{ x: 0.04, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[styles.statusPill, { maxWidth: contentMaxWidth }]}
+                <View
+                  style={[
+                    { backgroundColor: colors.surface.cardElevated },
+                    [styles.statusPill, { maxWidth: contentMaxWidth }],
+                  ]}
                 >
                   <Text variant="captionBold" color={colors.text.primary} align="center">
                     {hasScanned ? 'Opening Send' : helperText}
                   </Text>
-                </LinearGradient>
+                </View>
               )}
             </View>
           </>
@@ -628,7 +595,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     padding: spacing.xl,
     alignItems: 'center',
     gap: spacing.md,
@@ -639,7 +606,7 @@ const styles = StyleSheet.create({
     height: layout.avatarLg,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.cyanWash,
+    backgroundColor: colors.glass.smokeWash,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -657,7 +624,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -694,7 +661,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -721,9 +688,9 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(252, 252, 255, 0.28)',
-    backgroundColor: 'rgba(252, 252, 255, 0.04)',
-    boxShadow: `inset 0 1px 1px rgba(255, 255, 255, 0.42), inset 0 -12px 28px rgba(14, 42, 53, 0.08)`,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    boxShadow: `inset 0 1px 1px rgba(255, 255, 255, 0.42), inset 0 -12px 28px rgba(16, 16, 16, 0.08)`,
   },
   scanCorner: {
     position: 'absolute',
@@ -733,7 +700,7 @@ const styles = StyleSheet.create({
     height: 64,
     borderTopWidth: 4,
     borderLeftWidth: 4,
-    borderColor: colors.brand.azureCyan,
+    borderColor: colors.brand.glossAccent,
     borderTopLeftRadius: radii.lg,
   },
   scanCornerRight: {
@@ -775,7 +742,7 @@ const styles = StyleSheet.create({
     minHeight: 76,
     borderRadius: radii.xl,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -793,7 +760,7 @@ const styles = StyleSheet.create({
     minHeight: layout.buttonHeightSm,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,

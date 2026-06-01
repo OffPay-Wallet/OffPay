@@ -1,5 +1,7 @@
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffySendIconProps {
   size?: number;
   color?: string;
@@ -7,7 +9,7 @@ export interface PuffySendIconProps {
 
 export function PuffySendIcon({
   size = 24,
-  color = '#00c7fc',
+  color = colors.text.primary,
 }: PuffySendIconProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

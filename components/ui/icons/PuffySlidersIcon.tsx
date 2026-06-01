@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffySlidersIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffySlidersIconProps {
 
 export function PuffySlidersIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffySlidersIconProps): React.JSX.Element {
   // Bootstrap `bi-sliders2-vertical` (16x16) path.

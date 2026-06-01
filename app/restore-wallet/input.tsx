@@ -286,7 +286,7 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
                   autoCorrect={false}
                   autoComplete="off"
                   spellCheck={false}
-                  selectionColor={colors.brand.azureCyan}
+                  selectionColor={colors.brand.glossAccent}
                   keyboardAppearance="dark"
                 />
               </View>

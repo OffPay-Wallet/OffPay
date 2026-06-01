@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
@@ -10,17 +9,7 @@ import { fontFamily } from '@/constants/typography';
 import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 
 import { PrivateRouteSelector } from './PrivateRouteSelector';
-import type { PrivatePaymentRoute, PrivatePaymentRouteOption } from './types';
-
-// Hero gradient mirrors the home portfolio card: soft frost at the top
-// easing into the arctic cyan field, no card elevation.
-const AMOUNT_HERO_GRADIENT = [
-  colors.brand.iceBlue,
-  colors.surface.backgroundAlt,
-  colors.brand.azureCyan,
-] as const;
-
-import type { SendTokenOption } from './types';
+import type { PrivatePaymentRoute, PrivatePaymentRouteOption, SendTokenOption } from './types';
 
 const MIN_AMOUNT_FONT_SIZE = 12;
 const AMOUNT_INPUT_BREATHING_ROOM = 8;
@@ -148,13 +137,7 @@ export function SendAmountStep({
         </Pressable>
       </View>
 
-      <LinearGradient
-        colors={[...AMOUNT_HERO_GRADIENT]}
-        locations={[0, 0.6, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={styles.amountHero}
-      >
+      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.amountHero]}>
         <View
           style={styles.amountInputRow}
           onLayout={(event) => {
@@ -175,7 +158,7 @@ export function SendAmountStep({
                 lineHeight: amountTextStyle.lineHeight,
               },
             ]}
-            selectionColor={colors.brand.azureCyan}
+            selectionColor={colors.brand.glossAccent}
             keyboardType="decimal-pad"
             inputMode="decimal"
             autoCapitalize="none"
@@ -202,7 +185,7 @@ export function SendAmountStep({
         <Text variant="h3" color={colors.text.secondary} align="center" style={styles.metaLabel}>
           {amountMetaLabel}
         </Text>
-      </LinearGradient>
+      </View>
 
       <View style={styles.availableCard}>
         <View>
@@ -291,7 +274,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   editButton: {
     minHeight: 36,
@@ -360,7 +343,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   maxButton: {
     minHeight: 44,

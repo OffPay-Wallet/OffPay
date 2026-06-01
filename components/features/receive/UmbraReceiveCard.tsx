@@ -1,6 +1,5 @@
 import React, { memo, useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
@@ -22,11 +21,6 @@ import type { UmbraPendingClaimUtxo } from '@/lib/umbra/umbra-execution';
  * screen owns all SDK calls and state; this file is pure presentation.
  */
 
-const PRIVATE_CARD_COLORS = [
-  colors.brand.whiteStream,
-  colors.brand.iceBlue,
-  colors.brand.whiteStream,
-] as const;
 const CLAIM_PREVIEW_DEFAULT_LIMIT = 2;
 
 type StatusTone = 'neutral' | 'success' | 'warning' | 'error';
@@ -111,12 +105,7 @@ const SetupSection = memo(function SetupSection({
 }: SetupSectionProps): React.JSX.Element {
   return (
     <Animated.View layout={LinearTransition.duration(200)}>
-      <LinearGradient
-        colors={[...PRIVATE_CARD_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.bodyCard}
-      >
+      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
         <Text
           variant="bodyBold"
           color={colors.text.primary}
@@ -155,7 +144,7 @@ const SetupSection = memo(function SetupSection({
               <View style={styles.setupActiveBadge}>
                 <Text
                   variant="bodyBold"
-                  color={colors.brand.whiteStream}
+                  color={colors.text.onAccent}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.78}
@@ -165,7 +154,7 @@ const SetupSection = memo(function SetupSection({
                   Active
                 </Text>
                 <View style={styles.setupActiveIconWrap}>
-                  <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
+                  <Ionicons name="checkmark" size={14} color={colors.text.primary} />
                 </View>
               </View>
             ) : (
@@ -215,7 +204,7 @@ const SetupSection = memo(function SetupSection({
             )}
           </View>
         </View>
-      </LinearGradient>
+      </View>
     </Animated.View>
   );
 });
@@ -269,7 +258,7 @@ const ClaimPreviewRow = memo(function ClaimPreviewRow({
   return (
     <View style={styles.claimPreviewRow}>
       <View style={styles.claimPreviewIcon}>
-        <Ionicons name="lock-closed" size={13} color={colors.brand.deepShadow} />
+        <Ionicons name="lock-closed" size={13} color={colors.text.primary} />
       </View>
       <View style={styles.claimPreviewTextBlock}>
         <Text
@@ -332,12 +321,7 @@ const ClaimSection = memo(function ClaimSection({
 
   return (
     <Animated.View layout={LinearTransition.duration(200)}>
-      <LinearGradient
-        colors={[...PRIVATE_CARD_COLORS]}
-        start={{ x: 0.04, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.bodyCard}
-      >
+      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
         <View style={styles.claimHeaderRow}>
           {/* Left — PENDING chip with count when active. */}
           <View style={styles.setupStatusChip}>
@@ -367,14 +351,14 @@ const ClaimSection = memo(function ClaimSection({
             >
               <Text
                 variant="captionBold"
-                color={colors.brand.azureBlue}
+                color={colors.text.primary}
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.1}
                 style={styles.claimViewAllText}
               >
                 View all
               </Text>
-              <Ionicons name="chevron-forward" size={14} color={colors.brand.azureBlue} />
+              <Ionicons name="chevron-forward" size={14} color={colors.text.primary} />
             </Pressable>
           ) : null}
         </View>
@@ -481,7 +465,7 @@ const ClaimSection = memo(function ClaimSection({
             )}
           </Pressable>
         </View>
-      </LinearGradient>
+      </View>
     </Animated.View>
   );
 });
@@ -506,12 +490,7 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
         {/* Unavailable */}
         {unavailableMessage != null ? (
           <Animated.View entering={FadeIn.duration(180)}>
-            <LinearGradient
-              colors={[...PRIVATE_CARD_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.bodyCard}
-            >
+            <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
               <Text
                 variant="caption"
                 color={colors.text.tertiary}
@@ -530,7 +509,7 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
               >
                 {unavailableMessage}
               </Text>
-            </LinearGradient>
+            </View>
           </Animated.View>
         ) : null}
 
@@ -621,7 +600,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: [
+      '0 12px 28px rgba(0, 0, 0, 0.42)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+      'inset 0 0 14px rgba(255, 255, 255, 0.03)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
+    ].join(', '),
   },
 
   // Setup row — equal-width left/right columns. Each cell flexes
@@ -644,7 +628,7 @@ const styles = StyleSheet.create({
   setupDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     opacity: 0.6,
     marginVertical: spacing.xs,
   },
@@ -654,15 +638,19 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: radii.md,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.azureBlue,
+    backgroundColor: colors.brand.actionFill,
     borderWidth: 1.5,
-    borderColor: colors.brand.azureBlue,
+    borderColor: colors.brand.actionFill,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
     flexShrink: 1,
     maxWidth: '100%',
-    boxShadow: `0 8px 18px rgba(46, 174, 210, 0.34), inset 0 1px 1px rgba(255, 255, 255, 0.45)`,
+    boxShadow: [
+      '0 6px 14px rgba(16, 16, 16, 0.34)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.38)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
+    ].join(', '),
   },
   setupStatusChipText: {
     fontFamily: fontFamily.uiSemiBold,
@@ -681,8 +669,12 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     maxWidth: '100%',
     // Faint red accent — small ambient halo, no bloom.
-    boxShadow:
-      '0 0 6px rgba(199, 58, 58, 0.35), 0 6px 14px rgba(154, 36, 36, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      '0 0 6px rgba(199, 58, 58, 0.35)',
+      '0 6px 14px rgba(154, 36, 36, 0.22)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.3)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+    ].join(', '),
   },
   setupActionText: {
     fontFamily: fontFamily.semiBold,
@@ -716,7 +708,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.brand.deepShadow,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -763,8 +755,15 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderCurve: 'continuous',
     backgroundColor: colors.glass.frostFill,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.1)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   claimPreviewIcon: {
     width: 28,
@@ -772,10 +771,17 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.whiteStream,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.surface.cardElevated,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     flexShrink: 0,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.15)',
+      'inset 0 -1px 1px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   claimPreviewTextBlock: {
     flex: 1,
@@ -816,12 +822,16 @@ const styles = StyleSheet.create({
     minWidth: 200,
     paddingHorizontal: spacing['3xl'],
     borderRadius: radii.full,
-    backgroundColor: colors.brand.azureBlue,
+    backgroundColor: colors.brand.actionFill,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 1,
     maxWidth: '100%',
-    boxShadow: `0 10px 22px rgba(46, 174, 210, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.42)`,
+    boxShadow: [
+      '0 8px 18px rgba(16, 16, 16, 0.32)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.38)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
+    ].join(', '),
   },
 
   // Shared CTA helpers (used by Setup + Claim action buttons).

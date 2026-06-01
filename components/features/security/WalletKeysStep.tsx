@@ -231,7 +231,7 @@ export function WalletKeysStep({
           <Ionicons
             name="shield-checkmark-outline"
             size={layout.iconSizeInline}
-            color={colors.brand.azureCyan}
+            color={colors.brand.glossAccent}
           />
           <Text variant="small" color={colors.text.secondary} style={styles.privyNoticeText}>
             Privy manages this embedded wallet. OffPay cannot export a recovery phrase or private
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     maxWidth: '100%',
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   keysBadgeText: {
     fontFamily: fontFamily.medium,
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   privyNoticeText: {
     flex: 1,
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     gap: spacing.sm,
-    boxShadow: '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   secretTitleRow: {
     flexDirection: 'row',
@@ -395,7 +395,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     flexShrink: 0,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   secretValueBox: {
     minHeight: 36,
@@ -404,12 +404,12 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(252, 252, 255, 0.44)',
+    backgroundColor: 'rgba(255, 255, 255, 0.44)',
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(252, 252, 255, 0.62)',
+    borderColor: 'rgba(255, 255, 255, 0.62)',
     boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.82)',
   },
   secretValue: {
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 226, 122, 0.7)',
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   warningIcon: {
     width: layout.buttonHeightSm,

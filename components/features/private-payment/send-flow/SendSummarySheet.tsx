@@ -122,9 +122,13 @@ export function SendSummarySheet({
       progress.value = withTiming(1, { duration: OPEN_DURATION_MS, easing: OPEN_EASING });
       return;
     }
-    progress.value = withTiming(0, { duration: CLOSE_DURATION_MS, easing: CLOSE_EASING }, (done) => {
-      if (done) runOnJS(setMounted)(false);
-    });
+    progress.value = withTiming(
+      0,
+      { duration: CLOSE_DURATION_MS, easing: CLOSE_EASING },
+      (done) => {
+        if (done) runOnJS(setMounted)(false);
+      },
+    );
   }, [dragY, progress, visible]);
 
   // Spin the progress ring only while sending.
@@ -154,8 +158,7 @@ export function SendSummarySheet({
       },
       onPanResponderRelease: (_evt, gesture) => {
         const height = sheetHeightRef.current || 1;
-        const shouldDismiss =
-          gesture.dy > height * DISMISS_DRAG_RATIO || gesture.vy > 1.1;
+        const shouldDismiss = gesture.dy > height * DISMISS_DRAG_RATIO || gesture.vy > 1.1;
         if (shouldDismiss && !lockedRef.current) {
           runOnJS(onCancel)();
           return;
@@ -247,12 +250,7 @@ export function SendSummarySheet({
                   entering={FadeIn.duration(PHASE_FADE_MS)}
                   style={styles.statusInner}
                 >
-                  <LottieView
-                    source={successLottie}
-                    autoPlay
-                    loop={false}
-                    style={styles.lottie}
-                  />
+                  <LottieView source={successLottie} autoPlay loop={false} style={styles.lottie} />
                 </Animated.View>
               )}
             </View>
@@ -319,10 +317,7 @@ export function SendSummarySheet({
             {isSuccess ? (
               <SummaryRow label="Amount" value={`${result?.amount ?? amount} ${symbol}`} />
             ) : null}
-            <SummaryRow
-              label="Network"
-              value={network === 'devnet' ? 'Solana Devnet' : 'Solana'}
-            />
+            <SummaryRow label="Network" value={network === 'devnet' ? 'Solana Devnet' : 'Solana'} />
             {isSuccess ? (
               <SummaryRow
                 label={queued ? 'Offline id' : 'Transaction'}
@@ -370,7 +365,7 @@ export function SendSummarySheet({
                 accessibilityRole="button"
                 accessibilityLabel={resultActionLabel}
               >
-                <Text variant="button" color={colors.brand.azureBlue}>
+                <Text variant="button" color={colors.brand.actionFill}>
                   {resultActionLabel}
                 </Text>
               </Pressable>
@@ -429,7 +424,7 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(14, 42, 53, 0.42)',
+    backgroundColor: 'rgba(16, 16, 16, 0.42)',
   },
   sheet: {
     position: 'absolute',
@@ -445,7 +440,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     gap: spacing.md,
-    boxShadow: '0 -8px 28px rgba(14, 42, 53, 0.18)',
+    boxShadow: '0 -8px 28px rgba(16, 16, 16, 0.18)',
   },
   grabberZone: {
     alignItems: 'center',
@@ -478,10 +473,10 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: CIRCLE_SIZE / 2,
     borderWidth: RING_THICKNESS,
-    borderColor: colors.glass.cyanWash,
+    borderColor: colors.glass.smokeWash,
     // The "moving" arc of the ring — one bright edge sweeps around.
-    borderTopColor: colors.brand.azureCyan,
-    borderRightColor: colors.brand.azureBlue,
+    borderTopColor: colors.brand.glossAccent,
+    borderRightColor: colors.brand.actionFill,
   },
   statusInner: {
     width: CIRCLE_SIZE - RING_THICKNESS * 2,
@@ -573,7 +568,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     alignItems: 'center',
     justifyContent: 'center',
   },

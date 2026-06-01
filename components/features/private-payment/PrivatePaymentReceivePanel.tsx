@@ -39,7 +39,7 @@ export function PrivatePaymentReceivePanel({
     <View style={styles.card}>
       <View style={styles.header}>
         <View style={styles.iconWrap}>
-          <Ionicons name="arrow-down" size={layout.iconSizeTab} color={colors.brand.azureCyan} />
+          <Ionicons name="arrow-down" size={layout.iconSizeTab} color={colors.brand.glossAccent} />
         </View>
         <View style={styles.headerText}>
           <Text variant="h3" color={colors.text.primary} style={styles.title}>

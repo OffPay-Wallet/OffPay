@@ -36,7 +36,7 @@ export function SettingsLineItem({
   compact = false,
   dense = false,
 }: SettingsLineItemProps): React.JSX.Element {
-  const iconSize = dense ? 24 : compact ? 26 : 28;
+  const iconSize = dense ? 32 : compact ? 36 : 40;
 
   return (
     <Pressable
@@ -64,7 +64,7 @@ export function SettingsLineItem({
         <View style={styles.text}>
           <Text
             variant="body"
-            color={colors.brand.deepShadow}
+            color={colors.text.primary}
             style={[styles.title, compact && styles.titleCompact, dense && styles.titleDense]}
             numberOfLines={1}
             ellipsizeMode="tail"
@@ -115,13 +115,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     gap: spacing.sm,
   },
-  pressed: { backgroundColor: colors.brand.iceBlue },
+  pressed: { backgroundColor: 'rgba(255, 255, 255, 0.04)' },
   disabled: { opacity: 0.4 },
   left: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1, minWidth: 0 },
   icon: {
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+    borderRadius: 12,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.1)',
+      'inset 0 -1px 1px rgba(0, 0, 0, 0.15)',
+    ].join(', '),
   },
   iconAccent: {
     opacity: 0.92,

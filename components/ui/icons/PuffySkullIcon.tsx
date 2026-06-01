@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffySkullIconProps {
   size?: number;
   color?: string;
@@ -13,7 +15,7 @@ export interface PuffySkullIconProps {
  */
 export function PuffySkullIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffySkullIconProps): React.JSX.Element {
   const fillOpacity = focused ? 0.95 : 0.75;

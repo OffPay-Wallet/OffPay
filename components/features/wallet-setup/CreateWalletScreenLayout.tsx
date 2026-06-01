@@ -1,7 +1,7 @@
 /**
  * Create-wallet flow layout: explicit top/bottom safe area, header, vertically centered body, pinned footer.
  *
- * Uses a flat `brand.iceBlue` background — the wallet-setup screens
+ * Uses a flat `brand.glassTint` background — the wallet-setup screens
  * deliberately opt out of the global `GradientBackground` so the
  * frosty surface stays consistent across the entire onboarding flow
  * (welcome → security-setup → create/restore-wallet → privy-wallet).
@@ -71,10 +71,7 @@ export function CreateWalletScreenLayout({
       <View style={[styles.headerZone, { paddingHorizontal: hPad }]}>{header}</View>
       {body}
       <View
-        style={[
-          styles.footerZone,
-          { paddingHorizontal: hPad, paddingBottom: footerBottomPadding },
-        ]}
+        style={[styles.footerZone, { paddingHorizontal: hPad, paddingBottom: footerBottomPadding }]}
       >
         {footer}
       </View>
@@ -85,7 +82,7 @@ export function CreateWalletScreenLayout({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.brand.iceBlue,
+    backgroundColor: colors.brand.glassTint,
   },
   headerZone: {
     flexShrink: 0,

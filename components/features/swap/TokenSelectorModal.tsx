@@ -11,7 +11,6 @@ import {
   FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useSharedValue,
@@ -27,7 +26,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { SWAP_CONTROL_SHADOW, SWAP_GLASS_COLORS, SWAP_PANEL_SHADOW } from './swapGlass';
+import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
 import type { SwapTokenOption } from './types';
 
@@ -124,10 +123,13 @@ export function TokenSelectorModal({
     opacity.value = withTiming(0, { duration: 250 });
   };
 
-  const handleSelect = useCallback((token: SwapTokenOption) => {
-    onSelect(token);
-    onClose();
-  }, [onClose, onSelect]);
+  const handleSelect = useCallback(
+    (token: SwapTokenOption) => {
+      onSelect(token);
+      onClose();
+    },
+    [onClose, onSelect],
+  );
 
   const renderTokenRow = useCallback(
     ({ item: token }: { item: SwapTokenOption }) => (
@@ -159,7 +161,7 @@ export function TokenSelectorModal({
                 <Ionicons
                   name="checkmark-circle"
                   size={layout.iconSizeInline}
-                  color={colors.brand.azureCyan}
+                  color={colors.brand.glossAccent}
                 />
               ) : null}
             </View>
@@ -211,11 +213,11 @@ export function TokenSelectorModal({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <Animated.View style={[styles.sheet, sheetStyle]}>
-          <LinearGradient
-            colors={[...SWAP_GLASS_COLORS]}
-            style={[StyleSheet.absoluteFill, styles.sheetGradient]}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <View
+            style={[
+              { backgroundColor: colors.surface.cardElevated },
+              [StyleSheet.absoluteFill, styles.sheetSurface],
+            ]}
           />
           <View style={styles.headerRow}>
             <Text
@@ -232,7 +234,7 @@ export function TokenSelectorModal({
               accessibilityRole="button"
               accessibilityLabel="Close token selector"
             >
-              <Ionicons name="close" size={layout.iconSizeNav} color={colors.brand.deepShadow} />
+              <Ionicons name="close" size={layout.iconSizeNav} color={colors.text.primary} />
             </Pressable>
           </View>
 
@@ -244,7 +246,7 @@ export function TokenSelectorModal({
               onChangeText={setSearchQuery}
               placeholder="Search ticker, name, or contract"
               placeholderTextColor={colors.text.tertiary}
-              selectionColor={colors.brand.azureCyan}
+              selectionColor={colors.brand.glossAccent}
             />
           </View>
 
@@ -310,7 +312,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.strongFill,
     boxShadow: SWAP_PANEL_SHADOW,
   },
-  sheetGradient: {
+  sheetSurface: {
     borderRadius: radii['2xl'],
   },
   headerRow: {
@@ -388,7 +390,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   tokenRowPressed: {
     backgroundColor: colors.glass.textBacking,

@@ -10,7 +10,6 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppToast } from '@/components/ui/AppToast';
@@ -32,16 +31,6 @@ import { useWalletStore } from '@/store/walletStore';
 
 import type { UmbraExecutionResult, UmbraPendingClaimUtxo } from '@/lib/umbra/umbra-execution';
 
-const HEADER_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
-const ROW_CARD_COLORS = [
-  colors.brand.whiteStream,
-  colors.brand.iceBlue,
-  colors.brand.whiteStream,
-] as const;
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 384;
 
 const ROW_BORDER = {
@@ -103,12 +92,7 @@ const ClaimRow = memo(function ClaimRow({
   onCopyId,
 }: ClaimRowProps): React.JSX.Element {
   return (
-    <LinearGradient
-      colors={[...ROW_CARD_COLORS]}
-      start={{ x: 0.04, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.rowCard}
-    >
+    <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.rowCard]}>
       <View style={styles.rowHeader}>
         <View style={styles.rowKindChip}>
           <Text
@@ -149,10 +133,10 @@ const ClaimRow = memo(function ClaimRow({
           hitSlop={6}
           style={({ pressed }) => [styles.rowSecondaryButton, pressed && styles.pressed]}
         >
-          <Ionicons name="copy-outline" size={14} color={colors.brand.deepShadow} />
+          <Ionicons name="copy-outline" size={14} color={colors.text.primary} />
           <Text
             variant="captionBold"
-            color={colors.brand.deepShadow}
+            color={colors.text.primary}
             numberOfLines={1}
             maxFontSizeMultiplier={1.1}
             style={styles.rowSecondaryButtonText}
@@ -199,7 +183,7 @@ const ClaimRow = memo(function ClaimRow({
           )}
         </Pressable>
       </View>
-    </LinearGradient>
+    </View>
   );
 });
 
@@ -488,7 +472,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => void runScan('refresh')}
-            tintColor={colors.brand.deepShadow}
+            tintColor={colors.text.primary}
           />
         }
       >
@@ -500,18 +484,11 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <LinearGradient
-              colors={[...HEADER_GLASS_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.headerIconSurface}
+            <View
+              style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}
             >
-              <Ionicons
-                name="chevron-back"
-                size={layout.iconSizeNav}
-                color={colors.brand.deepShadow}
-              />
-            </LinearGradient>
+              <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
+            </View>
           </Pressable>
           <Text
             variant="h2"
@@ -530,7 +507,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
 
         {scanning && utxos.length === 0 ? (
           <View style={styles.emptyState}>
-            <LazyLoadingSpinner size={28} color={colors.brand.deepShadow} />
+            <LazyLoadingSpinner size={28} color={colors.text.primary} />
             <Text
               variant="small"
               color={colors.text.secondary}
@@ -595,15 +572,11 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               ]}
             >
               {deepScanning ? (
-                <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
+                <LazyLoadingSpinner size={18} color={colors.text.primary} />
               ) : (
-                <Ionicons name="search" size={16} color={colors.brand.deepShadow} />
+                <Ionicons name="search" size={16} color={colors.text.primary} />
               )}
-              <Text
-                variant="captionBold"
-                color={colors.brand.deepShadow}
-                maxFontSizeMultiplier={1.1}
-              >
+              <Text variant="captionBold" color={colors.text.primary} maxFontSizeMultiplier={1.1}>
                 {deepScanning ? 'Deep scanning…' : 'Scan for older payments'}
               </Text>
             </Pressable>
@@ -703,7 +676,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 18px 42px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
   },
   rowHeader: {
     flexDirection: 'row',
@@ -716,7 +689,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 4,
     borderRadius: radii.md,
-    backgroundColor: colors.brand.azureBlue,
+    backgroundColor: colors.brand.actionFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -767,7 +740,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radii.full,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
   },
@@ -778,7 +751,7 @@ const styles = StyleSheet.create({
     minHeight: 38,
     paddingHorizontal: spacing.xl,
     borderRadius: radii.full,
-    backgroundColor: colors.brand.azureBlue,
+    backgroundColor: colors.brand.actionFill,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

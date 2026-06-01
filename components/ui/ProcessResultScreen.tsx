@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import LottieView, { type AnimationObject } from 'lottie-react-native';
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -305,7 +304,7 @@ export function ProcessResultScreen({
                   >
                     <Text
                       variant="bodyBold"
-                      color={colors.brand.azureCyan}
+                      color={colors.brand.glossAccent}
                       align="center"
                       numberOfLines={1}
                       adjustsFontSizeToFit
@@ -320,12 +319,7 @@ export function ProcessResultScreen({
             </View>
 
             {tokenLegs.length > 0 ? (
-              <LinearGradient
-                colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.panel}
-              >
+              <View style={styles.panel}>
                 {tokenLegs.map((leg, index) => (
                   <React.Fragment key={`${leg.label}-${leg.symbol}-${index}`}>
                     <ResultTokenRow leg={leg} compact={compact} />
@@ -333,23 +327,18 @@ export function ProcessResultScreen({
                       <View style={styles.tokenDivider}>
                         <View style={styles.dividerLine} />
                         <View style={styles.arrowBadge}>
-                          <Ionicons name="arrow-down" size={16} color={colors.brand.deepShadow} />
+                          <Ionicons name="arrow-down" size={16} color={colors.text.primary} />
                         </View>
                         <View style={styles.dividerLine} />
                       </View>
                     ) : null}
                   </React.Fragment>
                 ))}
-              </LinearGradient>
+              </View>
             ) : null}
 
             {detailRows.length > 0 ? (
-              <LinearGradient
-                colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.clearFill]}
-                start={{ x: 0.04, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.detailsPanel}
-              >
+              <View style={styles.detailsPanel}>
                 {detailRows.map((row, index) => (
                   <React.Fragment key={`${row.label}-${index}`}>
                     <View style={styles.detailRow}>
@@ -376,7 +365,7 @@ export function ProcessResultScreen({
                     {index < detailRows.length - 1 ? <View style={styles.divider} /> : null}
                   </React.Fragment>
                 ))}
-              </LinearGradient>
+              </View>
             ) : null}
           </View>
         </ScrollView>
@@ -405,7 +394,7 @@ export function ProcessResultScreen({
               >
                 <Text
                   variant="button"
-                  color={colors.brand.whiteStream}
+                  color={colors.text.onAccent}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.82}
@@ -471,7 +460,8 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: `0 18px 42px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
   },
@@ -504,7 +494,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
   },
   tokenRow: {
     minHeight: 54,
@@ -552,7 +542,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: `0 14px 34px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.12)`,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
   },
@@ -601,13 +592,13 @@ const styles = StyleSheet.create({
     height: layout.buttonHeightLg,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
   },
   primaryButtonPressed: {
-    backgroundColor: colors.brand.azureBlue,
+    opacity: 0.82,
   },
   primaryButtonText: {
     textAlign: 'center',

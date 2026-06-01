@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';
 
+import { colors } from '@/constants/colors';
+
 export interface PuffyBellIconProps {
   size?: number;
   color?: string;
@@ -9,7 +11,7 @@ export interface PuffyBellIconProps {
 
 export function PuffyBellIcon({
   size = 24,
-  color = '#000',
+  color = colors.text.primary,
   focused = true,
 }: PuffyBellIconProps): React.JSX.Element {
   // Bootstrap `bi-bell-fill` (16x16) path.

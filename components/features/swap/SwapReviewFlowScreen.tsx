@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -12,7 +11,6 @@ import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { SWAP_GLASS_COLORS } from './swapGlass';
 
 export interface SwapReviewDetailRow {
   label: string;
@@ -101,18 +99,18 @@ export function SwapReviewFlowScreen({
                 accessibilityLabel="Back to swap"
                 accessibilityState={{ disabled: busy }}
               >
-                <LinearGradient
-                  colors={[...SWAP_GLASS_COLORS]}
-                  start={{ x: 0.04, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.headerIconSurface}
+                <View
+                  style={[
+                    { backgroundColor: colors.surface.cardElevated },
+                    styles.headerIconSurface,
+                  ]}
                 >
                   <Ionicons
                     name="chevron-back"
                     size={layout.iconSizeNav}
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                   />
-                </LinearGradient>
+                </View>
               </Pressable>
               <Text
                 variant="h2"
@@ -140,11 +138,11 @@ export function SwapReviewFlowScreen({
               </View>
             </View>
 
-            <LinearGradient
-              colors={[...SWAP_GLASS_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.summaryPanel, dense && styles.summaryPanelDense]}
+            <View
+              style={[
+                { backgroundColor: colors.surface.cardElevated },
+                [styles.summaryPanel, dense && styles.summaryPanelDense],
+              ]}
             >
               <Text
                 variant="captionBold"
@@ -156,31 +154,27 @@ export function SwapReviewFlowScreen({
                 Swap
               </Text>
               <View style={styles.legs}>
-                {payLeg != null ? (
-                  <TokenLegRow leg={payLeg} dense={dense} />
-                ) : null}
+                {payLeg != null ? <TokenLegRow leg={payLeg} dense={dense} /> : null}
                 <View style={styles.legDivider}>
                   <View style={styles.dividerLine} />
                   <View style={[styles.arrowBadge, dense && styles.arrowBadgeDense]}>
                     <Ionicons
                       name="arrow-down"
                       size={dense ? 15 : 17}
-                      color={colors.brand.deepShadow}
+                      color={colors.text.primary}
                     />
                   </View>
                   <View style={styles.dividerLine} />
                 </View>
-                {receiveLeg != null ? (
-                  <TokenLegRow leg={receiveLeg} dense={dense} />
-                ) : null}
+                {receiveLeg != null ? <TokenLegRow leg={receiveLeg} dense={dense} /> : null}
               </View>
-            </LinearGradient>
+            </View>
 
-            <LinearGradient
-              colors={[...SWAP_GLASS_COLORS]}
-              start={{ x: 0.04, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.detailsPanel, dense && styles.detailsPanelDense]}
+            <View
+              style={[
+                { backgroundColor: colors.surface.cardElevated },
+                [styles.detailsPanel, dense && styles.detailsPanelDense],
+              ]}
             >
               {detailRows.map((row, index) => (
                 <React.Fragment key={`${row.label}-${index}`}>
@@ -212,7 +206,7 @@ export function SwapReviewFlowScreen({
                   {index < detailRows.length - 1 ? <View style={styles.divider} /> : null}
                 </React.Fragment>
               ))}
-            </LinearGradient>
+            </View>
           </View>
         </ScrollView>
 
@@ -239,12 +233,7 @@ export function SwapReviewFlowScreen({
               accessibilityLabel={cancelLabel}
               accessibilityState={{ disabled: busy }}
             >
-              <LinearGradient
-                colors={[colors.glass.strongFill, colors.glass.frostFill, colors.glass.cyanWash]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.actionSurface}
-              >
+              <View style={[{ backgroundColor: colors.glass.strongFill }, styles.actionSurface]}>
                 <Text
                   variant="button"
                   color={busy ? colors.text.tertiary : colors.text.primary}
@@ -256,7 +245,7 @@ export function SwapReviewFlowScreen({
                 >
                   {cancelLabel}
                 </Text>
-              </LinearGradient>
+              </View>
             </Pressable>
             <Pressable
               style={({ pressed }) => [
@@ -270,20 +259,15 @@ export function SwapReviewFlowScreen({
               accessibilityLabel={busy ? busyLabel : confirmLabel}
               accessibilityState={{ busy, disabled: busy }}
             >
-              <LinearGradient
-                colors={[colors.brand.azureCyan, colors.glass.azureCyanHalf, colors.glass.cyanWash]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.actionSurface}
-              >
+              <View style={[{ backgroundColor: colors.brand.glossAccent }, styles.actionSurface]}>
                 {busy ? (
                   <View style={styles.loadingContent}>
-                    <LazyLoadingSpinner size={24} color={colors.brand.deepShadow} />
+                    <LazyLoadingSpinner size={24} color={colors.text.onAccent} />
                   </View>
                 ) : (
                   <Text
                     variant="button"
-                    color={colors.brand.deepShadow}
+                    color={colors.text.onAccent}
                     style={styles.actionText}
                     numberOfLines={1}
                     adjustsFontSizeToFit
@@ -293,7 +277,7 @@ export function SwapReviewFlowScreen({
                     {confirmLabel}
                   </Text>
                 )}
-              </LinearGradient>
+              </View>
             </Pressable>
           </View>
         </View>
@@ -312,12 +296,7 @@ function TokenLegRow({
   return (
     <View style={[styles.legRow, dense && styles.legRowDense]}>
       <View style={styles.legLeft}>
-        <TokenIcon
-          symbol={leg.symbol}
-          name={leg.name}
-          logoUri={leg.logo}
-          size={dense ? 30 : 34}
-        />
+        <TokenIcon symbol={leg.symbol} name={leg.name} logoUri={leg.logo} size={dense ? 30 : 34} />
         <View style={styles.legTokenText}>
           <Text
             variant="small"
@@ -597,13 +576,13 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: `0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   cancelButton: {
     backgroundColor: colors.glass.strongFill,
   },
   confirmButton: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: colors.brand.glossAccent,
   },
   actionSurface: {
     minHeight: 52,

@@ -66,7 +66,7 @@ export function SendRecipientStep({
           placeholder="@handle, .sol, or wallet"
           placeholderTextColor={colors.text.placeholder}
           style={styles.recipientInput}
-          selectionColor={colors.brand.azureCyan}
+          selectionColor={colors.brand.glossAccent}
           autoCapitalize="none"
           autoCorrect={false}
           maxFontSizeMultiplier={1}
@@ -86,7 +86,7 @@ export function SendRecipientStep({
           accessibilityLabel="Paste wallet address"
           hitSlop={8}
         >
-          <Ionicons name="clipboard-outline" size={20} color={colors.brand.azureCyan} />
+          <Ionicons name="clipboard-outline" size={20} color={colors.brand.glossAccent} />
         </Pressable>
       </View>
 
@@ -150,7 +150,7 @@ export function SendRecipientStep({
               accessibilityLabel="Clear recent wallet history"
               hitSlop={6}
             >
-              <Text variant="captionBold" color={colors.brand.deepShadow}>
+              <Text variant="captionBold" color={colors.text.primary}>
                 Clear
               </Text>
             </Pressable>
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   recipientInput: {
     flex: 1,
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   clipboardCard: {
     borderRadius: radii['2xl'],
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     gap: spacing.xs,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   recentBlock: {
     gap: spacing.md,
@@ -314,7 +314,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     justifyContent: 'center',
     gap: 2,
-    boxShadow: `0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
   },
   // Reserves vertical room for up to ~3 lines of helper copy. The
   // helper carries advisory hints (handle not registered, online-mode

@@ -27,7 +27,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
@@ -71,13 +70,12 @@ const HEADER_TITLES: Record<Step, string> = {
   network: 'Network',
 };
 
-const SHEET_GLASS_COLORS = [
-  colors.glass.strongFill,
-  colors.glass.frostFill,
-  colors.glass.clearFill,
-] as const;
-const SHEET_SHADOW =
-  '0 8px 24px rgba(14, 42, 53, 0.14)';
+const SHEET_SHADOW = [
+  '0 18px 36px rgba(0, 0, 0, 0.5)',
+  'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
+  'inset 0 0 16px rgba(255, 255, 255, 0.03)',
+  'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
+].join(', ');
 const NAV_TIMING = { duration: 180, easing: Easing.out(Easing.cubic) } as const;
 const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
 const NETWORK_SWITCH_SETTLE_OPTIONS = {
@@ -354,13 +352,6 @@ export function PreferencesModal({
         <Animated.View
           style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
         >
-          <LinearGradient
-            colors={[...SHEET_GLASS_COLORS]}
-            style={StyleSheet.absoluteFill}
-            start={{ x: 0.04, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          />
-
           {/* Header */}
           <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
             <View style={styles.headerLeft}>
@@ -375,7 +366,7 @@ export function PreferencesModal({
                   <Ionicons
                     name="chevron-back"
                     size={layout.iconSizeNav}
-                    color={colors.brand.deepShadow}
+                    color={colors.text.primary}
                   />
                 </Pressable>
               ) : (
@@ -404,7 +395,7 @@ export function PreferencesModal({
                 <Ionicons
                   name="close"
                   size={layout.iconSizeInline}
-                  color={colors.brand.azureCyan}
+                  color={colors.text.primary}
                 />
               </Pressable>
             </View>
@@ -564,8 +555,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     boxShadow: SHEET_SHADOW,
+    paddingBottom: spacing.md,
   },
   headerRow: {
     flexDirection: 'row',
@@ -582,7 +574,7 @@ const styles = StyleSheet.create({
     height: layout.minTouchTarget,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.cardElevated,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -590,7 +582,11 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 3px 8px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   headerIconPlaceholder: { width: layout.minTouchTarget, height: layout.minTouchTarget },
   headerTitle: { flex: 1, minWidth: 0, textAlign: 'center' },
@@ -619,7 +615,8 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.holdingsCard.divider,
-    marginHorizontal: spacing.md,
+    backgroundColor: colors.glass.rim,
+    marginHorizontal: spacing.lg,
+    opacity: 0.5,
   },
 });
