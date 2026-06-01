@@ -506,6 +506,37 @@ export async function setStoredActiveWallet(walletId: string): Promise<StoredWal
   return toPublicSnapshot(nextSnapshot);
 }
 
+export async function setStoredWalletName(
+  walletId: string,
+  name: string,
+): Promise<StoredWalletSnapshot> {
+  const snapshot = await getSnapshotPayload();
+  const trimmedName = name.trim();
+
+  if (snapshot == null || trimmedName.length === 0) {
+    throw new Error('Wallet not found.');
+  }
+
+  const walletExists = snapshot.wallets.some((wallet) => wallet.id === walletId);
+  if (!walletExists) {
+    throw new Error('Wallet not found.');
+  }
+
+  const nextSnapshot = normalizeSnapshot({
+    ...snapshot,
+    wallets: snapshot.wallets.map((wallet) =>
+      wallet.id === walletId ? { ...wallet, name: trimmedName } : wallet,
+    ),
+  });
+
+  if (nextSnapshot == null) {
+    throw new Error('Failed to update the wallet name.');
+  }
+
+  await writeSnapshot(nextSnapshot);
+  return toPublicSnapshot(nextSnapshot);
+}
+
 export async function removeStoredWallet(walletId: string): Promise<StoredWalletSnapshot> {
   const snapshot = await getSnapshotPayload();
 

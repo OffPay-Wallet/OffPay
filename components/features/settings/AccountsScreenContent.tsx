@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -12,16 +12,19 @@ import {
 } from '@/components/features/settings/AccountActionDialog';
 import { AccountListCard } from '@/components/features/settings/AccountListCard';
 import { Text } from '@/components/ui/Text';
-import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { WalletAccount } from '@/store/walletStore';
 
-const WALLET_REORDER_TRANSITION = LinearTransition.duration(320).easing(Easing.out(Easing.cubic));
+const WALLET_REORDER_TRANSITION = LinearTransition.duration(460).easing(
+  Easing.bezier(0.16, 1, 0.3, 1),
+);
 const SCREEN_MAX_WIDTH = 640;
 const ADD_WALLET_CARD_MAX_WIDTH = 520;
+const CONTROL_SURFACE = colors.brand.whiteStream;
+const CONTROL_BORDER = colors.surface.backgroundAlt;
 const GLASS_PANEL_COLORS = [
   colors.glass.strongFill,
   colors.glass.frostFill,
@@ -29,8 +32,7 @@ const GLASS_PANEL_COLORS = [
 ] as const;
 const HEADER_BUTTON_SHADOW =
   '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
-const MODAL_CARD_SHADOW =
-  '0 8px 24px rgba(4, 28, 36, 0.18)';
+const MODAL_CARD_SHADOW = '0 8px 24px rgba(4, 28, 36, 0.18)';
 
 export function AccountsScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -38,7 +40,9 @@ export function AccountsScreenContent(): React.JSX.Element {
   const { width, height, fontScale } = useWindowDimensions();
   const wallets = useWalletStore((s) => s.wallets);
   const activeWalletId = useWalletStore((s) => s.activeWalletId);
+  const setPrimaryWallet = useWalletStore((s) => s.setPrimaryWallet);
   const removeWallet = useWalletStore((s) => s.removeWallet);
+  const [optimisticPrimaryWalletId, setOptimisticPrimaryWalletId] = useState<string | null>(null);
   const [isAddWalletCardOpen, setIsAddWalletCardOpen] = useState(false);
   const [openActionWalletId, setOpenActionWalletId] = useState<string | null>(null);
   const [actionDialog, setActionDialog] = useState<AccountActionDialogState | null>(null);
@@ -53,6 +57,19 @@ export function AccountsScreenContent(): React.JSX.Element {
     Math.max(width - horizontalPadding * 2, 0),
     ADD_WALLET_CARD_MAX_WIDTH,
   );
+  const effectivePrimaryWalletId = optimisticPrimaryWalletId ?? activeWalletId;
+  const displayedWallets = useMemo(() => {
+    if (effectivePrimaryWalletId == null) return wallets;
+    const primaryWallet = wallets.find((wallet) => wallet.id === effectivePrimaryWalletId);
+    if (primaryWallet == null) return wallets;
+    return [primaryWallet, ...wallets.filter((wallet) => wallet.id !== effectivePrimaryWalletId)];
+  }, [effectivePrimaryWalletId, wallets]);
+
+  useEffect(() => {
+    if (optimisticPrimaryWalletId != null && activeWalletId === optimisticPrimaryWalletId) {
+      setOptimisticPrimaryWalletId(null);
+    }
+  }, [activeWalletId, optimisticPrimaryWalletId]);
 
   const navigateWithTransition = useCallback(
     (pathname: '/create-wallet' | '/restore-wallet'): void => {
@@ -83,6 +100,22 @@ export function AccountsScreenContent(): React.JSX.Element {
       router.push({ pathname: '/security', params: { action: 'exportKeys' } });
     },
     [activeWalletId, router],
+  );
+
+  const handleSetPrimaryWallet = useCallback(
+    (wallet: WalletAccount): void => {
+      if (wallet.id === effectivePrimaryWalletId) return;
+
+      setOpenActionWalletId(null);
+      setOptimisticPrimaryWalletId(wallet.id);
+
+      void setPrimaryWallet(wallet.id).catch((error: unknown) => {
+        setOptimisticPrimaryWalletId(null);
+        const message = error instanceof Error ? error.message : 'Failed to set primary wallet';
+        Alert.alert('Unable to update wallet', message);
+      });
+    },
+    [effectivePrimaryWalletId, setPrimaryWallet],
   );
 
   const handleRequestRemoveWallet = useCallback(
@@ -142,7 +175,7 @@ export function AccountsScreenContent(): React.JSX.Element {
           </Pressable>
           <Text
             variant={dense ? 'h3' : 'h2'}
-            color={colors.text.primary}
+            color={colors.brand.deepShadow}
             style={styles.title}
             numberOfLines={1}
             adjustsFontSizeToFit
@@ -161,7 +194,7 @@ export function AccountsScreenContent(): React.JSX.Element {
             accessibilityLabel="Add wallet"
             hitSlop={6}
           >
-            <Ionicons name="add" size={headerIconSize} color={colors.text.onAccent} />
+            <Ionicons name="add" size={headerIconSize} color={colors.brand.deepShadow} />
           </Pressable>
         </View>
 
@@ -175,24 +208,25 @@ export function AccountsScreenContent(): React.JSX.Element {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.sectionHeader}>
-            <Text variant="bodyBold" color={colors.text.secondary} numberOfLines={1}>
+            <Text variant="bodyBold" color={colors.brand.navyDepth} numberOfLines={1}>
               Wallets
             </Text>
             <View style={styles.walletCountPill}>
-              <Text variant="small" color={colors.text.secondary}>
+              <Text variant="small" color={colors.brand.deepShadow}>
                 {wallets.length}
               </Text>
             </View>
           </View>
 
           {wallets.length > 0 ? (
-            wallets.map((wallet, index) => {
+            displayedWallets.map((wallet, index) => {
               const actionsOpen = openActionWalletId === wallet.id;
 
               return (
-                <StaggerRevealItem
+                <Animated.View
                   key={wallet.id}
-                  index={index}
+                  entering={FadeIn.duration(180).easing(Easing.out(Easing.cubic))}
+                  layout={WALLET_REORDER_TRANSITION}
                   style={[
                     styles.walletCardLayer,
                     {
@@ -200,22 +234,21 @@ export function AccountsScreenContent(): React.JSX.Element {
                     },
                   ]}
                 >
-                  <Animated.View layout={WALLET_REORDER_TRANSITION}>
-                    <AccountListCard
-                      wallet={wallet}
-                      isPrimary={wallet.id === activeWalletId}
-                      isOnlyWallet={wallets.length === 1}
-                      compact={compact}
-                      dense={dense}
-                      actionsMenuOpen={actionsOpen}
-                      onActionsMenuOpenChange={(open) =>
-                        setOpenActionWalletId(open ? wallet.id : null)
-                      }
-                      onRequestExportKeys={handleRequestExportKeys}
-                      onRequestRemoveWallet={handleRequestRemoveWallet}
-                    />
-                  </Animated.View>
-                </StaggerRevealItem>
+                  <AccountListCard
+                    wallet={wallet}
+                    isPrimary={wallet.id === effectivePrimaryWalletId}
+                    isOnlyWallet={displayedWallets.length === 1}
+                    compact={compact}
+                    dense={dense}
+                    actionsMenuOpen={actionsOpen}
+                    onActionsMenuOpenChange={(open) =>
+                      setOpenActionWalletId(open ? wallet.id : null)
+                    }
+                    onRequestExportKeys={handleRequestExportKeys}
+                    onRequestRemoveWallet={handleRequestRemoveWallet}
+                    onRequestSetPrimary={handleSetPrimaryWallet}
+                  />
+                </Animated.View>
               );
             })
           ) : (
@@ -380,7 +413,7 @@ export function AccountsScreenContent(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.surface.background,
+    backgroundColor: colors.brand.iceBlue,
   },
   frame: {
     flex: 1,
@@ -400,19 +433,16 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     borderRadius: radii.full,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: CONTROL_SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: CONTROL_BORDER,
     boxShadow: HEADER_BUTTON_SHADOW,
     flexShrink: 0,
   },
   iconBtnAccent: {
-    backgroundColor: colors.brand.azureCyan,
+    backgroundColor: CONTROL_SURFACE,
   },
   iconBtnPressed: {
     opacity: 0.72,
@@ -444,11 +474,11 @@ const styles = StyleSheet.create({
     height: 28,
     paddingHorizontal: spacing.sm,
     borderRadius: radii.full,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: CONTROL_SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    borderColor: CONTROL_BORDER,
   },
   emptyState: {
     borderRadius: radii['2xl'],

@@ -1,8 +1,12 @@
-import { PuffyAvatarIcon } from '@/components/ui/icons/PuffyAvatarIcon';
+import React from 'react';
+import { ImageSourcePropType, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
+
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+
+const WALLET_PROFILE_ICON =
+  require('../../../assets/wallet_icons/wallet_profile.png') as ImageSourcePropType;
 
 interface WalletAvatarProps {
   count?: number;
@@ -10,21 +14,17 @@ interface WalletAvatarProps {
   solidFill?: boolean;
 }
 
-export function WalletAvatar({
-  count,
-  size = 48,
-  solidFill = false,
-}: WalletAvatarProps): React.JSX.Element {
+export function WalletAvatar({ count, size = 48 }: WalletAvatarProps): React.JSX.Element {
   const badgeSize = Math.max(20, size * 0.4);
   const avatar = (
-    <PuffyAvatarIcon
-      size={size}
-      // Match the username-setup avatar tint (brand cyan) so the
-      // header silhouette reads as the same identity glyph across
-      // the app.
-      color={colors.brand.azureCyan}
-      focused
-      solidFill={solidFill}
+    <Image
+      source={WALLET_PROFILE_ICON}
+      style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      priority="high"
+      transition={0}
+      accessible={false}
     />
   );
 
@@ -50,6 +50,9 @@ export function WalletAvatar({
 }
 
 const styles = StyleSheet.create({
+  avatar: {
+    backgroundColor: colors.brand.iceBlue,
+  },
   container: {
     position: 'relative',
   },

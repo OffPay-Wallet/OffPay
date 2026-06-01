@@ -7,9 +7,11 @@ import { UsernameSetupForm } from '@/components/features/onboarding/username-set
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 import { useAppStore } from '@/store/app';
+import { useWalletStore } from '@/store/walletStore';
 
-function getSource(value: string | string[] | undefined): 'accounts' | 'onboarding' {
+function getSource(value: string | string[] | undefined): 'accounts' | 'onboarding' | 'settings' {
   const source = Array.isArray(value) ? value[0] : value;
+  if (source === 'settings') return 'settings';
   return source === 'accounts' ? 'accounts' : 'onboarding';
 }
 
@@ -19,24 +21,39 @@ export default function UsernameSetupScreen(): React.JSX.Element {
   const username = useAppStore((state) => state.username);
   const setHasOnboarded = useAppStore((state) => state.setHasOnboarded);
   const setUsername = useAppStore((state) => state.setUsername);
+  const setActiveWalletName = useWalletStore((state) => state.setActiveWalletName);
   const source = getSource(params.source);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = useCallback((nextUsername: string): void => {
-    if (submitting) return;
-    setSubmitting(true);
-    setUsername(nextUsername);
+  const handleSubmit = useCallback(
+    (nextUsername: string): void => {
+      if (submitting) return;
+      setSubmitting(true);
+      setUsername(nextUsername);
 
-    requestAnimationFrame(() => {
-      if (source === 'accounts') {
-        router.dismissTo('/accounts');
-        return;
-      }
+      void setActiveWalletName(nextUsername)
+        .catch((error: unknown) => {
+          console.warn('[UsernameSetup] Failed to persist wallet display name:', error);
+        })
+        .finally(() => {
+          requestAnimationFrame(() => {
+            if (source === 'accounts') {
+              router.dismissTo('/accounts');
+              return;
+            }
 
-      setHasOnboarded(true);
-      router.replace('/(tabs)');
-    });
-  }, [setHasOnboarded, setUsername, source, submitting]);
+            if (source === 'settings') {
+              router.dismissTo('/(tabs)/settings' as never);
+              return;
+            }
+
+            setHasOnboarded(true);
+            router.replace('/(tabs)');
+          });
+        });
+    },
+    [setActiveWalletName, setHasOnboarded, setUsername, source, submitting],
+  );
 
   const handleBack = useCallback((): void => {
     if (submitting) return;
@@ -45,8 +62,13 @@ export default function UsernameSetupScreen(): React.JSX.Element {
       return;
     }
 
+    if (source === 'settings') {
+      router.replace('/(tabs)/settings' as never);
+      return;
+    }
+
     router.replace('/onboarding');
-  }, [submitting]);
+  }, [source, submitting]);
 
   return (
     <ScrollView

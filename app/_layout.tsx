@@ -33,6 +33,7 @@ import {
   privatePaymentScreenOptions,
   transactionDetailsScreenOptions,
 } from '@/constants/navigation';
+import { formatOffpayUsername } from '@/lib/api/offpay-username';
 import { AppProviders } from '@/providers';
 import { useAppStore } from '@/store/app';
 import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
@@ -89,6 +90,10 @@ const OffPayTheme: Theme = {
 const BOOT_TIMER_LABEL = 'boot';
 let bootTimerEnded = false;
 
+function isGeneratedAccountName(name: string): boolean {
+  return /^Account \d+$/.test(name);
+}
+
 if (__DEV__) {
   console.time(BOOT_TIMER_LABEL);
 }
@@ -105,11 +110,15 @@ export const unstable_settings = {
 
 export default function RootLayout(): React.JSX.Element | null {
   const hasOnboarded = useAppStore((s) => s.hasOnboarded);
+  const username = useAppStore((s) => s.username);
   const setHasOnboarded = useAppStore((s) => s.setHasOnboarded);
+  const setUsername = useAppStore((s) => s.setUsername);
   const hydrateWallet = useWalletStore((s) => s.hydrate);
   const walletHydrated = useWalletStore((s) => s.isHydrated);
   const walletCount = useWalletStore((s) => s.wallets.length);
   const walletAddress = useWalletStore((s) => s.publicKey);
+  const accountName = useWalletStore((s) => s.accountName);
+  const setActiveWalletName = useWalletStore((s) => s.setActiveWalletName);
   const walletDisplayHydratedAt = useOffpayLaunchStore((s) => s.walletDisplayHydratedAt);
   const router = useRouter();
   const segments = useSegments();
@@ -151,8 +160,7 @@ export default function RootLayout(): React.JSX.Element | null {
   // inside `CreateWalletScreenLayout`. We opt those routes out of
   // the screen-wide gradient so the design stays one calm tint
   // across the full flow — no gradients, no shadows, no rims.
-  const inFlatFlow =
-    inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
+  const inFlatFlow = inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
   const showGradient = inAuthFlow && !inFlatFlow;
   const hasStoredWallet = walletHydrated && walletCount > 0;
   const effectiveHasOnboarded = hasOnboarded || hasStoredWallet;
@@ -174,6 +182,28 @@ export default function RootLayout(): React.JSX.Element | null {
       setHasOnboarded(true);
     }
   }, [hasOnboarded, hasStoredWallet, setHasOnboarded]);
+
+  // Backfill wallet metadata for users who already completed
+  // username setup before wallet display names were persisted.
+  useEffect(() => {
+    if (username == null || !hasStoredWallet || !isGeneratedAccountName(accountName)) return;
+
+    void setActiveWalletName(username).catch((error: unknown) => {
+      console.warn('[RootLayout] Failed to backfill wallet display name:', error);
+    });
+  }, [accountName, hasStoredWallet, setActiveWalletName, username]);
+
+  // If app-state loses the username during a cold-start storage
+  // migration, recover it from the SecureStore-backed active wallet
+  // display name. Generated account labels are not usernames.
+  useEffect(() => {
+    if (username != null || !hasStoredWallet || isGeneratedAccountName(accountName)) return;
+
+    const restoredUsername = formatOffpayUsername(accountName);
+    if (restoredUsername != null) {
+      setUsername(restoredUsername);
+    }
+  }, [accountName, hasStoredWallet, setUsername, username]);
 
   // Resolve onboarding routing before the native splash fades away.
   useEffect(() => {

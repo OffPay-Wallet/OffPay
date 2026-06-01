@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -51,8 +51,25 @@ const BAR_TINT = '#FFFFFF';
 // gentle raised shape on the white bar (matches the reference's light
 // pill behind the active item).
 const PILL_TINT = colors.brand.iceBlue;
-// FAB — solid blue puck with a white "+" (reference accent button).
-const FAB_TINT = colors.brand.azureBlue;
+// FAB — saturated blue action puck with static gradient layers. The
+// outer frame carries shadow while the inner puck clips the gradients,
+// so depth is visible without animating expensive paint properties.
+const FAB_GRADIENT_COLORS = [
+  colors.brand.azureCyan,
+  colors.brand.azureBlue,
+  colors.brand.azureBlue,
+] as const;
+const FAB_GLOSS_COLORS = [
+  'rgba(252, 252, 255, 0.24)',
+  'rgba(252, 252, 255, 0.07)',
+  'rgba(252, 252, 255, 0)',
+] as const;
+const FAB_DEPTH_COLORS = [
+  'rgba(14, 42, 53, 0)',
+  'rgba(14, 42, 53, 0.14)',
+  'rgba(14, 42, 53, 0.26)',
+] as const;
+const FAB_PRESSED_OVERLAY = 'rgba(14, 42, 53, 0.08)';
 const QUICK_ACTION_PUCK_TINT = '#FFFFFF';
 
 // Tab accent colours — active items take the brand blue, inactive items
@@ -77,10 +94,11 @@ const SCRIM_COLOR = colors.brand.iceBlue;
 const SCRIM_OPACITY = 0.82;
 
 // Shadows — neutral lift only, no coloured glow.
-const BAR_SHADOW =
-  '0 12px 24px rgba(14, 42, 53, 0.16), 0 4px 10px rgba(14, 42, 53, 0.10)';
-const FAB_SHADOW =
-  '0 12px 24px rgba(14, 42, 53, 0.18), 0 4px 10px rgba(14, 42, 53, 0.12)';
+const BAR_SHADOW = '0 12px 24px rgba(14, 42, 53, 0.16), 0 4px 10px rgba(14, 42, 53, 0.10)';
+const FAB_SHADOW = '0 16px 28px rgba(14, 42, 53, 0.22), 0 5px 12px rgba(14, 42, 53, 0.14)';
+const QUICK_ACTION_SHADOW = '0 12px 24px rgba(14, 42, 53, 0.18), 0 4px 10px rgba(14, 42, 53, 0.12)';
+const FAB_INNER_SHADOW =
+  'inset 0 1px 0 rgba(252, 252, 255, 0.34), inset 0 -10px 16px rgba(14, 42, 53, 0.1)';
 
 // Animations — snappy, symmetric, single curve for open + close so the
 // scrim, menu items, and "+" rotation all feel like one motion.
@@ -173,9 +191,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [state.routes],
   );
 
-  const visualActiveOriginalIndex = tabBarHidden
-    ? lastVisibleTabIndexRef.current
-    : state.index;
+  const visualActiveOriginalIndex = tabBarHidden ? lastVisibleTabIndexRef.current : state.index;
   const visualActivePrimaryIndex = primaryRoutes.findIndex(
     (entry) => entry.originalIndex === visualActiveOriginalIndex,
   );
@@ -286,7 +302,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const labelFontSize = denseTabs ? 10 : compactTabs ? 11 : 11;
   const labelLineHeight = labelFontSize + 3;
   const iconSize = denseTabs ? 19 : compactTabs ? 20 : 22;
-  const fabIconSize = denseTabs ? 22 : 26;
+  const fabPlusSize = denseTabs ? 22 : 26;
+  const fabPlusThickness = denseTabs ? 2.7 : 3;
   const quickActionIconSize = denseTabs ? 18 : 20;
   const bottomGap = Math.max(spacing.md, insets.bottom + spacing.xs);
   // Vertical room for the labelled action rows above the FAB.
@@ -464,9 +481,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                       {
                         fontSize: labelFontSize,
                         lineHeight: labelLineHeight,
-                        fontFamily: visuallyFocused
-                          ? fontFamily.uiSemiBold
-                          : fontFamily.uiMedium,
+                        fontFamily: visuallyFocused ? fontFamily.uiSemiBold : fontFamily.uiMedium,
                       },
                     ]}
                     numberOfLines={1}
@@ -505,7 +520,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       {/* Floating "+" button */}
       <Animated.View
         style={[
-          styles.fab,
+          styles.fabFrame,
           {
             bottom: bottomGap + (barHeight - fabSize) / 2,
             left: fabCenterX - fabSize / 2,
@@ -516,19 +531,70 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
           barStyle,
         ]}
       >
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: FAB_TINT }]} />
-        <Pressable
-          style={({ pressed }) => [styles.fabPress, pressed && styles.fabPressed]}
-          onPress={handleFabToggle}
-          accessibilityRole="button"
-          accessibilityLabel={fabExpanded ? 'Close quick actions' : 'Open quick actions'}
-          accessibilityState={{ expanded: fabExpanded }}
-          hitSlop={6}
+        <View
+          style={[
+            styles.fabPuck,
+            {
+              borderRadius: fabSize / 2,
+            },
+          ]}
         >
-          <Animated.View style={fabIconStyle}>
-            <Ionicons name="add" size={fabIconSize} color={colors.brand.whiteStream} />
-          </Animated.View>
-        </Pressable>
+          <LinearGradient
+            colors={FAB_GRADIENT_COLORS}
+            start={{ x: 0.2, y: 0 }}
+            end={{ x: 0.84, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          <LinearGradient
+            pointerEvents="none"
+            colors={FAB_GLOSS_COLORS}
+            locations={[0, 0.42, 0.78]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={styles.fabTopGloss}
+          />
+          <LinearGradient
+            pointerEvents="none"
+            colors={FAB_DEPTH_COLORS}
+            locations={[0.32, 0.72, 1]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={styles.fabBottomDepth}
+          />
+          <Pressable
+            style={({ pressed }) => [styles.fabPress, pressed && styles.fabPressed]}
+            onPress={handleFabToggle}
+            accessibilityRole="button"
+            accessibilityLabel={fabExpanded ? 'Close quick actions' : 'Open quick actions'}
+            accessibilityState={{ expanded: fabExpanded }}
+            hitSlop={6}
+          >
+            <Animated.View style={fabIconStyle}>
+              <View style={[styles.fabPlus, { width: fabPlusSize, height: fabPlusSize }]}>
+                <View
+                  style={[
+                    styles.fabPlusBar,
+                    {
+                      width: fabPlusSize,
+                      height: fabPlusThickness,
+                      borderRadius: fabPlusThickness / 2,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.fabPlusBar,
+                    {
+                      width: fabPlusThickness,
+                      height: fabPlusSize,
+                      borderRadius: fabPlusThickness / 2,
+                    },
+                  ]}
+                />
+              </View>
+            </Animated.View>
+          </Pressable>
+        </View>
       </Animated.View>
 
       {offlineSwapNoticeVisible ? (
@@ -536,11 +602,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
           pointerEvents="none"
           style={[styles.feedbackToast, { bottom: bottomGap + barHeight + spacing.sm }]}
         >
-          <Text
-            variant="small"
-            color={colors.brand.whiteStream}
-            style={styles.feedbackToastText}
-          >
+          <Text variant="small" color={colors.brand.whiteStream} style={styles.feedbackToastText}>
             Swap is unavailable offline
           </Text>
         </View>
@@ -682,24 +744,45 @@ const styles = StyleSheet.create({
   pillTint: {
     ...StyleSheet.absoluteFillObject,
   },
-  fab: {
+  fabFrame: {
     position: 'absolute',
-    overflow: 'hidden',
-    borderCurve: 'continuous',
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: FAB_SHADOW,
+  },
+  fabPuck: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
     borderWidth: HAIRLINE,
     borderColor: FAB_BORDER_COLOR,
-    boxShadow: FAB_SHADOW,
+    boxShadow: FAB_INNER_SHADOW,
+  },
+  fabTopGloss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  fabBottomDepth: {
+    ...StyleSheet.absoluteFillObject,
   },
   fabPress: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  fabPlus: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabPlusBar: {
+    position: 'absolute',
+    backgroundColor: colors.brand.whiteStream,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(252, 252, 255, 0.72)',
+    boxShadow: '0 1px 2px rgba(14, 42, 53, 0.14)',
+  },
   fabPressed: {
-    opacity: 0.78,
+    backgroundColor: FAB_PRESSED_OVERLAY,
   },
   quickActionStack: {
     position: 'absolute',
@@ -725,6 +808,6 @@ const styles = StyleSheet.create({
     backgroundColor: QUICK_ACTION_PUCK_TINT,
     borderWidth: HAIRLINE,
     borderColor: 'rgba(14, 42, 53, 0.12)',
-    boxShadow: FAB_SHADOW,
+    boxShadow: QUICK_ACTION_SHADOW,
   },
 });

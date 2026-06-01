@@ -55,6 +55,25 @@ describe('walletStore hydration lock state', () => {
     expect(useWalletStore.getState().wallets[0]?.publicKey).toBe(WALLET_ADDRESS);
   });
 
+  it('persists the active wallet display name across hydration', async () => {
+    await storeWalletWithPrivateKey({
+      privateKey: 'test-private-key',
+      publicKey: WALLET_ADDRESS,
+    });
+    await useWalletStore.getState().hydrate();
+
+    await useWalletStore.getState().setActiveWalletName('karan');
+
+    expect(useWalletStore.getState().accountName).toBe('karan');
+    expect(useWalletStore.getState().wallets[0]?.name).toBe('karan');
+
+    resetWalletStore();
+    await useWalletStore.getState().hydrate();
+
+    expect(useWalletStore.getState().accountName).toBe('karan');
+    expect(useWalletStore.getState().wallets[0]?.name).toBe('karan');
+  });
+
   it('activates a Privy embedded wallet without local signing material', async () => {
     await useWalletStore.getState().importFromPrivyEmbeddedWallet(WALLET_ADDRESS);
 

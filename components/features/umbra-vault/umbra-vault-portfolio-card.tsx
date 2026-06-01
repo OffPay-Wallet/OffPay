@@ -73,21 +73,22 @@ function VaultRefreshButton({
   onPress: () => void;
 }): React.JSX.Element {
   const iconSize = compact ? 15 : 16;
+  const buttonDisabled = disabled || loading;
   const buttonLabel = loading ? 'Checking' : (label ?? 'Refresh');
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Refresh shielded balance"
-      accessibilityState={{ busy: loading, disabled }}
-      disabled={disabled || loading}
+      accessibilityState={{ busy: loading, disabled: buttonDisabled }}
+      disabled={buttonDisabled}
       hitSlop={6}
       onPress={onPress}
       style={({ pressed }) => [
         styles.smallAction,
         compact && styles.smallActionCompact,
         disabled && styles.disabled,
-        pressed && !disabled && !loading && styles.pressed,
+        pressed && !buttonDisabled && styles.pressed,
       ]}
     >
       <View style={[styles.refreshIconSlot, { width: iconSize, height: iconSize }]}>

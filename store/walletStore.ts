@@ -11,6 +11,7 @@ import {
   getStoredWalletSnapshot,
   removeStoredWallet,
   setStoredActiveWallet,
+  setStoredWalletName,
   storePrivyEmbeddedWallet,
   storeWalletWithMnemonic,
   storeWalletWithPrivateKey,
@@ -72,6 +73,7 @@ interface WalletState {
   clearWallet: () => Promise<void>;
   clearError: () => void;
   setPrimaryWallet: (walletId: string) => Promise<void>;
+  setActiveWalletName: (name: string) => Promise<void>;
   removeWallet: (walletId: string) => Promise<void>;
 }
 
@@ -332,6 +334,25 @@ export const useWalletStore = create<WalletState>()((set, get) => ({
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to set primary wallet';
       set({ error: message, isLoading: false });
+      throw error;
+    }
+  },
+
+  setActiveWalletName: async (name) => {
+    const { activeWalletId } = get();
+    if (activeWalletId == null) return;
+
+    try {
+      const snapshot = await setStoredWalletName(activeWalletId, name);
+      const nextPublicKey = resolvePublicKeyForSnapshot(get(), snapshot);
+
+      set({
+        ...buildWalletStateFromSnapshot(snapshot, nextPublicKey),
+        error: null,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to rename wallet';
+      set({ error: message });
       throw error;
     }
   },

@@ -17,21 +17,17 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
-import { WalletCard } from '@/components/features/settings/WalletCard';
 import { PreferencesModal } from '@/components/features/settings/PreferencesModal';
 import { SecuritySettingsModal } from '@/components/features/settings/SecuritySettingsModal';
 import { useAppToast } from '@/components/ui/AppToast';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
-import { PuffyInfoCircleIcon } from '@/components/ui/icons/PuffyInfoCircleIcon';
-import { PuffyShieldIcon } from '@/components/ui/icons/PuffyShieldIcon';
-import { PuffySlidersIcon } from '@/components/ui/icons/PuffySlidersIcon';
-import { PuffySupportIcon } from '@/components/ui/icons/PuffySupportIcon';
 import { PuffyTwitterXIcon } from '@/components/ui/icons/PuffyTwitterXIcon';
 import { colors } from '@/constants/colors';
-import { layout, radii, spacing } from '@/constants/spacing';
+import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { resetForgottenWallet } from '@/lib/wallet/wallet-reset';
+import { useAppStore } from '@/store/app';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 
 const SUPPORT_EMAIL = 'hello@offpay.app';
@@ -50,15 +46,17 @@ export function SettingsScreenContent({
   const queryClient = useQueryClient();
   const { showToast } = useAppToast();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
-  const aboutSubtitle = [Constants.expoConfig?.name, Constants.expoConfig?.version]
-    .filter((value): value is string => value != null && value.length > 0)
-    .join(' ');
+  const username = useAppStore((state) => state.username);
+  const appVersion = Constants.expoConfig?.version?.trim();
+  const versionLabel =
+    appVersion != null && appVersion.length > 0 ? `Version ${appVersion}` : 'Version';
+  const usernameLabel = username != null ? `@${username}` : 'Set';
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
   const contentFrameWidth = Math.min(430, Math.max(0, windowWidth - horizontalPadding * 2));
-  const sectionGap = dense ? spacing.xs : compact ? spacing.sm : spacing.md;
-  const rowIconSize = dense ? 18 : compact ? 19 : layout.iconSizeInline;
+  const sectionGap = dense ? spacing.md : compact ? spacing.lg : spacing.xl;
+  const rowIconSize = dense ? 18 : 20;
   const dialogMaxWidth = Math.min(360, Math.max(280, windowWidth - horizontalPadding * 2));
   // Density tokens for the reset confirmation modal. We size both
   // buttons identically (flex: 1 + matching height/padding) so the
@@ -123,9 +121,7 @@ export function SettingsScreenContent({
         router.replace('/onboarding');
       } catch (error) {
         const message =
-          error instanceof Error
-            ? error.message
-            : 'Could not reset this device. Try again.';
+          error instanceof Error ? error.message : 'Could not reset this device. Try again.';
         showToast({
           title: 'Reset failed',
           message,
@@ -153,123 +149,176 @@ export function SettingsScreenContent({
         keyboardShouldPersistTaps="handled"
       >
         <View style={[styles.contentFrame, { width: contentFrameWidth, gap: sectionGap }]}>
-          <StaggerRevealItem index={0}>
-            <WalletCard compact={compact} dense={dense} />
-          </StaggerRevealItem>
-
           <View style={[styles.sections, { gap: sectionGap }]}>
+            <StaggerRevealItem index={0}>
+              <View style={styles.sectionBlock}>
+                <Text
+                  variant="captionBold"
+                  color={colors.text.secondary}
+                  style={styles.sectionTitle}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.05}
+                >
+                  General
+                </Text>
+                <SettingsSectionCard>
+                  <SettingsRow
+                    iconNode={
+                      <Ionicons name="wallet" size={rowIconSize} color={colors.brand.deepShadow} />
+                    }
+                    label="Accounts"
+                    compact={compact}
+                    dense={dense}
+                    onPress={() => router.push('/accounts')}
+                  />
+                  <SettingsRow
+                    iconNode={
+                      <Ionicons
+                        name="person-circle"
+                        size={rowIconSize}
+                        color={colors.brand.deepShadow}
+                      />
+                    }
+                    label="Username"
+                    rightValue={usernameLabel}
+                    compact={compact}
+                    dense={dense}
+                    onPress={() =>
+                      router.push({ pathname: '/username-setup', params: { source: 'settings' } })
+                    }
+                  />
+                  <SettingsRow
+                    iconNode={
+                      <Ionicons name="options" size={rowIconSize} color={colors.brand.deepShadow} />
+                    }
+                    label="Preferences"
+                    compact={compact}
+                    dense={dense}
+                    onPress={() => setPreferencesVisible(true)}
+                  />
+                </SettingsSectionCard>
+              </View>
+            </StaggerRevealItem>
+
             <StaggerRevealItem index={1}>
-              <SettingsSectionCard>
-                <SettingsRow
-                  iconNode={
-                    <PuffySlidersIcon size={rowIconSize} color={colors.text.primary} focused />
-                  }
-                  label="Preferences"
-                  subtitle="Wallet mode, offline payments, network"
-                  compact={compact}
-                  dense={dense}
-                  onPress={() => setPreferencesVisible(true)}
-                />
-              </SettingsSectionCard>
+              <View style={styles.sectionBlock}>
+                <Text
+                  variant="captionBold"
+                  color={colors.brand.deepShadow}
+                  style={styles.sectionTitle}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.05}
+                >
+                  Security
+                </Text>
+                <SettingsSectionCard>
+                  <SettingsRow
+                    iconNode={
+                      <Ionicons
+                        name="shield-checkmark"
+                        size={rowIconSize}
+                        color={colors.brand.deepShadow}
+                      />
+                    }
+                    label="Security"
+                    compact={compact}
+                    dense={dense}
+                    onPress={() => setSecurityVisible(true)}
+                  />
+                </SettingsSectionCard>
+              </View>
             </StaggerRevealItem>
 
             <StaggerRevealItem index={2}>
-              <SettingsSectionCard>
-                <SettingsRow
-                  iconNode={
-                    <PuffyShieldIcon size={rowIconSize} color={colors.text.primary} focused />
-                  }
-                  label="Security"
-                  subtitle="Fingerprint, passcode, wallet keys"
-                  compact={compact}
-                  dense={dense}
-                  onPress={() => setSecurityVisible(true)}
-                />
-              </SettingsSectionCard>
+              <View style={styles.sectionBlock}>
+                <Text
+                  variant="captionBold"
+                  color={colors.brand.deepShadow}
+                  style={styles.sectionTitle}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.05}
+                >
+                  Help
+                </Text>
+                <SettingsSectionCard>
+                  <SettingsRow
+                    iconNode={
+                      <Ionicons name="mail" size={rowIconSize} color={colors.brand.deepShadow} />
+                    }
+                    label="Support"
+                    isExternal
+                    compact={compact}
+                    dense={dense}
+                    onPress={() => {
+                      void Linking.openURL(SUPPORT_EMAIL_URL);
+                    }}
+                  />
+                  <SettingsRow
+                    iconNode={
+                      <PuffyTwitterXIcon
+                        size={rowIconSize}
+                        color={colors.brand.deepShadow}
+                        focused
+                      />
+                    }
+                    label="X (Twitter)"
+                    rightValue={X_HANDLE}
+                    isExternal
+                    compact={compact}
+                    dense={dense}
+                    onPress={() => {
+                      void Linking.openURL(X_PROFILE_URL);
+                    }}
+                  />
+                </SettingsSectionCard>
+              </View>
             </StaggerRevealItem>
 
             <StaggerRevealItem index={3}>
-              <SettingsSectionCard>
-                <SettingsRow
-                  iconNode={
-                    <PuffySupportIcon size={rowIconSize} color={colors.text.primary} focused />
-                  }
-                  label="Support"
-                  subtitle={SUPPORT_EMAIL}
-                  isExternal
-                  compact={compact}
-                  dense={dense}
-                  onPress={() => {
-                    void Linking.openURL(SUPPORT_EMAIL_URL);
-                  }}
-                />
-              </SettingsSectionCard>
+              <View style={styles.sectionBlock}>
+                <Text
+                  variant="captionBold"
+                  color={colors.semantic.error}
+                  style={styles.sectionTitle}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.05}
+                >
+                  Danger Zone
+                </Text>
+                <SettingsSectionCard>
+                  <SettingsRow
+                    iconNode={
+                      <Ionicons name="trash" size={rowIconSize} color={colors.semantic.error} />
+                    }
+                    label={destroying ? 'Resetting wallet' : 'Reset wallet'}
+                    rightNode={
+                      destroying ? (
+                        <ActivityIndicator size="small" color={colors.semantic.error} />
+                      ) : undefined
+                    }
+                    destructive
+                    disabled={destroying}
+                    compact={compact}
+                    dense={dense}
+                    onPress={handleOpenConfirm}
+                  />
+                </SettingsSectionCard>
+              </View>
             </StaggerRevealItem>
 
             <StaggerRevealItem index={4}>
-              <SettingsSectionCard>
-                <SettingsRow
-                  iconNode={
-                    <PuffyTwitterXIcon size={rowIconSize} color={colors.text.primary} focused />
-                  }
-                  label="X (Twitter)"
-                  subtitle={X_HANDLE}
-                  isExternal
-                  compact={compact}
-                  dense={dense}
-                  onPress={() => {
-                    void Linking.openURL(X_PROFILE_URL);
-                  }}
-                />
-              </SettingsSectionCard>
+              <View style={styles.versionFooter}>
+                <Text
+                  variant="small"
+                  color={colors.text.tertiary}
+                  align="center"
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.05}
+                >
+                  {versionLabel}
+                </Text>
+              </View>
             </StaggerRevealItem>
-
-            <StaggerRevealItem index={5}>
-              <SettingsSectionCard>
-                <SettingsRow
-                  iconNode={
-                    <PuffyInfoCircleIcon size={rowIconSize} color={colors.text.primary} focused />
-                  }
-                  label="About"
-                  subtitle={aboutSubtitle}
-                  compact={compact}
-                  dense={dense}
-                />
-              </SettingsSectionCard>
-            </StaggerRevealItem>
-
-            {/* Danger zone — single centered Reset button. Tap opens
-                the confirmation modal so a single press can never wipe
-                the device by itself. */}
-            <View style={styles.dangerZone}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Reset wallet — wipe wallets, keys, and history"
-                accessibilityState={{ disabled: destroying, busy: destroying }}
-                onPress={handleOpenConfirm}
-                disabled={destroying}
-                style={({ pressed }) => [
-                  styles.resetButton,
-                  pressed && !destroying ? styles.resetButtonPressed : null,
-                  destroying ? styles.resetButtonDisabled : null,
-                ]}
-              >
-                {destroying ? (
-                  <ActivityIndicator size="small" color={colors.brand.whiteStream} />
-                ) : (
-                  <Text
-                    variant="button"
-                    color={colors.brand.whiteStream}
-                    align="center"
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1.05}
-                    style={styles.resetButtonLabel}
-                  >
-                    Reset
-                  </Text>
-                )}
-              </Pressable>
-            </View>
           </View>
         </View>
       </ScrollView>
@@ -296,7 +345,7 @@ export function SettingsScreenContent({
           <View style={[styles.confirmCard, { maxWidth: dialogMaxWidth }]}>
             <Text
               variant="h3"
-              color={colors.text.primary}
+              color={colors.brand.deepShadow}
               align="center"
               style={[
                 styles.confirmTitle,
@@ -370,11 +419,7 @@ export function SettingsScreenContent({
                   <ActivityIndicator size="small" color={colors.brand.whiteStream} />
                 ) : (
                   <View style={styles.confirmResetContent}>
-                    <Ionicons
-                      name="trash"
-                      size={dialogIconSize}
-                      color={colors.brand.whiteStream}
-                    />
+                    <Ionicons name="trash" size={dialogIconSize} color={colors.brand.whiteStream} />
                     <Text
                       variant="button"
                       color={colors.brand.whiteStream}
@@ -393,22 +438,16 @@ export function SettingsScreenContent({
         </View>
       </Modal>
 
-      <PreferencesModal
-        visible={preferencesVisible}
-        onClose={() => setPreferencesVisible(false)}
-      />
+      <PreferencesModal visible={preferencesVisible} onClose={() => setPreferencesVisible(false)} />
 
-      <SecuritySettingsModal
-        visible={securityVisible}
-        onClose={() => setSecurityVisible(false)}
-      />
+      <SecuritySettingsModal visible={securityVisible} onClose={() => setSecurityVisible(false)} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
   content: {
-    paddingTop: spacing.sm,
+    paddingTop: spacing.xs,
     alignItems: 'center',
   },
   contentFrame: {
@@ -419,35 +458,25 @@ const styles = StyleSheet.create({
   sections: {
     gap: spacing.md,
   },
-
-  // Danger zone — single centered Reset pill. Distinct from the
-  // regular settings card stack so the user has to mentally switch
-  // contexts before tapping it.
-  dangerZone: {
-    marginTop: spacing.md,
-    alignItems: 'center',
+  sectionBlock: {
+    gap: spacing.sm,
   },
-  resetButton: {
-    alignSelf: 'center',
-    minHeight: layout.minTouchTarget,
-    paddingHorizontal: spacing['3xl'],
-    paddingVertical: spacing.sm,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    backgroundColor: colors.semantic.error,
+  sectionTitle: {
+    paddingHorizontal: spacing.lg,
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  versionFooter: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
     alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 160,
-    boxShadow: '0 12px 24px rgba(154, 36, 36, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.32)',
   },
   resetButtonPressed: {
-    backgroundColor: colors.notificationIcon.errorInk,
+    backgroundColor: colors.semantic.error,
   },
   resetButtonDisabled: {
-    backgroundColor: colors.notificationIcon.errorInk,
-  },
-  resetButtonLabel: {
-    fontFamily: fontFamily.uiSemiBold,
+    backgroundColor: colors.semantic.error,
   },
 
   // Confirm modal.
@@ -460,21 +489,17 @@ const styles = StyleSheet.create({
   },
   confirmScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(14, 42, 53, 0.46)',
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
   },
   confirmCard: {
     width: '100%',
     borderRadius: radii.xl,
     borderCurve: 'continuous',
     backgroundColor: colors.brand.whiteStream,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.surface.backgroundAlt,
     padding: spacing.xl,
     gap: spacing.md,
-    boxShadow: `0 8px 24px rgba(14, 42, 53, 0.18)`,
   },
   confirmTitle: {
     textAlign: 'center',
@@ -503,14 +528,13 @@ const styles = StyleSheet.create({
   confirmCancelButton: {
     backgroundColor: colors.brand.iceBlue,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderColor: colors.surface.backgroundAlt,
   },
   confirmCancelButtonPressed: {
-    backgroundColor: colors.glass.cyanWash,
+    backgroundColor: colors.brand.iceBlue,
   },
   confirmResetButton: {
     backgroundColor: colors.semantic.error,
-    boxShadow: '0 12px 24px rgba(154, 36, 36, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.32)',
   },
   confirmButtonLabel: {
     fontFamily: fontFamily.uiSemiBold,

@@ -1,8 +1,16 @@
 /**
  * HomeHeader — wallet identity, connectivity toggle, and notifications.
  */
-import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
-import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  InteractionManager,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+  type ImageSourcePropType,
+} from 'react-native';
+import { Image } from 'expo-image';
 import Animated, {
   Easing,
   interpolate,
@@ -11,7 +19,6 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { PuffyBellIcon } from '@/components/ui/icons/PuffyBellIcon';
 import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
@@ -45,6 +52,26 @@ const NotificationCenterModal = lazy(NOTIFICATION_MODAL_IMPORT);
 // ---------------------------------------------------------------------------
 
 const TOGGLE_TIMING = { duration: 150, easing: Easing.out(Easing.cubic) };
+const WALLET_PROFILE_ICON =
+  require('../../../assets/wallet_icons/wallet_profile.png') as ImageSourcePropType;
+
+const HeaderWalletProfileIcon = memo(function HeaderWalletProfileIcon({
+  size,
+}: {
+  size: number;
+}): React.JSX.Element {
+  return (
+    <Image
+      source={WALLET_PROFILE_ICON}
+      style={[styles.walletProfileIcon, { width: size, height: size, borderRadius: size / 2 }]}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      priority="high"
+      transition={0}
+      accessible={false}
+    />
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Props
@@ -84,6 +111,7 @@ function HomeHeaderComponent({
   const unreadNotifications = useNotificationStore((s) => s.unreadCount);
   const markAllNotificationsRead = useNotificationStore((s) => s.markAllRead);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Animation values
   const toggleProgress = useSharedValue(isOffline ? 1 : 0);
@@ -92,7 +120,7 @@ function HomeHeaderComponent({
   const denseHeader = windowWidth < 340 || fontScale > 1.18;
   const showWalletAddress = publicKey != null || privacyHidden;
   const avatarSize = denseHeader ? 36 : ultraCompactHeader ? 38 : compactHeader ? 40 : 44;
-  const actionButtonSize = denseHeader ? 36 : ultraCompactHeader ? 38 : compactHeader ? 40 : 44;
+  const actionButtonSize = denseHeader ? 40 : ultraCompactHeader ? 42 : compactHeader ? 44 : 46;
   const toggleWidth = denseHeader ? 48 : ultraCompactHeader ? 52 : compactHeader ? 58 : 66;
   const toggleHeight = denseHeader ? 30 : ultraCompactHeader ? 32 : compactHeader ? 34 : 36;
   const toggleKnobSize = denseHeader ? 24 : ultraCompactHeader ? 26 : compactHeader ? 28 : 30;
@@ -112,7 +140,9 @@ function HomeHeaderComponent({
   const headerFrameWidth = Math.min(430, windowWidth - screenHorizontalPadding * 2);
   const actionGap = denseHeader || ultraCompactHeader ? 2 : spacing.xs;
   const actionClusterWidth =
-    Math.max(layout.minTouchTarget, toggleWidth) + actionButtonSize + actionGap + spacing.xs * 2;
+    Math.max(layout.minTouchTarget, toggleWidth) +
+    Math.max(layout.minTouchTarget, actionButtonSize) +
+    actionGap;
   const walletTextTargetWidth = denseHeader
     ? 84
     : ultraCompactHeader
@@ -145,6 +175,15 @@ function HomeHeaderComponent({
     return () => handle.cancel();
   }, []);
 
+  useEffect(
+    () => () => {
+      if (markReadTimerRef.current != null) {
+        clearTimeout(markReadTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const handleToggle = useCallback((): void => {
     const next = !isOffline;
 
@@ -161,15 +200,28 @@ function HomeHeaderComponent({
   }, []);
 
   const handleOpenNotifications = useCallback((): void => {
-    setNotificationsVisible(true);
+    if (notificationsVisible) return;
+
     // Defer the store mutation until after the entrance animation has
     // a chance to start. Marking-all-read writes to the notification
     // store and re-renders every consumer (badge, header), which we
     // want off the same frame the modal is mounting.
-    setTimeout(() => {
-      markAllNotificationsRead();
-    }, 260);
-  }, [markAllNotificationsRead]);
+    if (markReadTimerRef.current != null) {
+      clearTimeout(markReadTimerRef.current);
+    }
+    if (unreadNotifications > 0) {
+      markReadTimerRef.current = setTimeout(() => {
+        markReadTimerRef.current = null;
+        markAllNotificationsRead();
+      }, 360);
+    }
+
+    setNotificationsVisible(true);
+  }, [markAllNotificationsRead, notificationsVisible, unreadNotifications]);
+
+  const handleCloseNotifications = useCallback((): void => {
+    setNotificationsVisible(false);
+  }, []);
 
   // Animated knob position
   const knobStyle = useAnimatedStyle(() => ({
@@ -231,7 +283,7 @@ function HomeHeaderComponent({
                 styles.toggleTouch,
                 {
                   width: Math.max(layout.minTouchTarget, toggleWidth),
-                  height: Math.max(40, toggleHeight),
+                  height: layout.minTouchTarget,
                 },
               ]}
             >
@@ -245,149 +297,168 @@ function HomeHeaderComponent({
   }
 
   return (
-    <View style={[styles.header, { paddingTop: headerTopPadding, marginBottom: headerBottomGap }]}>
-      <Pressable
-        style={({ pressed }) => [
-          styles.walletPressable,
-          { marginRight: headerGap },
-          pressed ? styles.walletPressed : null,
-        ]}
-        onPress={onPressWalletDetails}
-        disabled={onPressWalletDetails == null}
-        accessibilityRole="button"
-        accessibilityLabel="Open accounts"
+    <>
+      <View
+        style={[styles.header, { paddingTop: headerTopPadding, marginBottom: headerBottomGap }]}
       >
-        <View style={[styles.walletIdentity, { gap: walletGap }]}>
-          <WalletAvatar size={avatarSize} solidFill />
-          <View style={[styles.walletTextBlock, { width: walletTextWidth }]}>
-            <Text
-              variant="bodyBold"
-              color={colors.text.primary}
-              style={[styles.walletName, denseHeader && styles.walletNameDense]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              adjustsFontSizeToFit
-              minimumFontScale={0.84}
-              maxFontSizeMultiplier={1.05}
-            >
-              {walletDisplayName}
-            </Text>
-            {showWalletAddress && privacyHidden ? (
-              <View style={styles.walletAddressRow}>
-                <Text
-                  variant="small"
-                  color={colors.text.secondary}
-                  style={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={1}
-                >
-                  ****
-                </Text>
-              </View>
-            ) : showWalletAddress ? (
-              <View style={styles.walletAddressRow}>
-                <CopyableAddress
-                  address={publicKey ?? ''}
-                  color={colors.text.secondary}
-                  iconSize={denseHeader ? 12 : 14}
-                  maxFontSizeMultiplier={1.05}
-                  textStyle={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
-                />
-              </View>
-            ) : null}
+        <Pressable
+          style={({ pressed }) => [
+            styles.walletPressable,
+            { marginRight: headerGap },
+            pressed ? styles.walletPressed : null,
+          ]}
+          onPress={onPressWalletDetails}
+          disabled={onPressWalletDetails == null}
+          accessibilityRole="button"
+          accessibilityLabel="Open accounts"
+        >
+          <View style={[styles.walletIdentity, { gap: walletGap }]}>
+            <HeaderWalletProfileIcon size={avatarSize} />
+            <View style={[styles.walletTextBlock, { width: walletTextWidth }]}>
+              <Text
+                variant="bodyBold"
+                color={colors.text.primary}
+                style={[styles.walletName, denseHeader && styles.walletNameDense]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                adjustsFontSizeToFit
+                minimumFontScale={0.84}
+                maxFontSizeMultiplier={1.05}
+              >
+                {walletDisplayName}
+              </Text>
+              {showWalletAddress && privacyHidden ? (
+                <View style={styles.walletAddressRow}>
+                  <Text
+                    variant="small"
+                    color={colors.text.secondary}
+                    style={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                  >
+                    ****
+                  </Text>
+                </View>
+              ) : showWalletAddress ? (
+                <View style={styles.walletAddressRow}>
+                  <CopyableAddress
+                    address={publicKey ?? ''}
+                    color={colors.text.secondary}
+                    iconSize={denseHeader ? 12 : 14}
+                    maxFontSizeMultiplier={1.05}
+                    textStyle={[styles.walletAddress, denseHeader && styles.walletAddressDense]}
+                  />
+                </View>
+              ) : null}
+            </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
 
-      <View style={[styles.actions, { gap: actionGap }]}>
-        <View style={styles.toggleContainer}>
-          <Pressable
-            style={[
-              styles.toggleTouch,
-              {
-                width: Math.max(layout.minTouchTarget, toggleWidth),
-                height: Math.max(40, toggleHeight),
-              },
-            ]}
-            onPress={handleToggle}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: isOffline }}
-            accessibilityLabel={
-              isOffline ? 'Switch to online payments' : 'Switch to offline payments'
-            }
-          >
-            <Animated.View
+        <View style={[styles.actions, { gap: actionGap }]}>
+          <View style={styles.toggleContainer}>
+            <Pressable
               style={[
-                styles.toggleTrack,
+                styles.toggleTouch,
                 {
-                  width: toggleWidth,
-                  height: toggleHeight,
-                  borderRadius: toggleHeight / 2,
-                  padding: togglePadding,
+                  width: Math.max(layout.minTouchTarget, toggleWidth),
+                  height: layout.minTouchTarget,
                 },
-                trackStyle,
               ]}
+              onPress={handleToggle}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: isOffline }}
+              accessibilityLabel={
+                isOffline ? 'Switch to online payments' : 'Switch to offline payments'
+              }
             >
               <Animated.View
                 style={[
-                  styles.toggleKnob,
+                  styles.toggleTrack,
                   {
-                    width: toggleKnobSize,
-                    height: toggleKnobSize,
-                    borderRadius: toggleKnobSize / 2,
+                    width: toggleWidth,
+                    height: toggleHeight,
+                    borderRadius: toggleHeight / 2,
+                    padding: togglePadding,
                   },
-                  knobStyle,
+                  trackStyle,
                 ]}
               >
                 <Animated.View
-                  pointerEvents="none"
-                  style={[styles.toggleIconLayer, onlineIconStyle]}
+                  style={[
+                    styles.toggleKnob,
+                    {
+                      width: toggleKnobSize,
+                      height: toggleKnobSize,
+                      borderRadius: toggleKnobSize / 2,
+                    },
+                    knobStyle,
+                  ]}
                 >
-                  <PuffyWifiIcon size={toggleIconSize} color={colors.brand.deepShadow} />
-                </Animated.View>
-                <Animated.View
-                  pointerEvents="none"
-                  style={[styles.toggleIconLayer, offlineIconStyle]}
-                >
-                  <PuffyWifiIcon off size={toggleIconSize} color={colors.brand.deepShadow} />
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.toggleIconLayer, onlineIconStyle]}
+                  >
+                    <PuffyWifiIcon size={toggleIconSize} color={colors.brand.deepShadow} />
+                  </Animated.View>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.toggleIconLayer, offlineIconStyle]}
+                  >
+                    <PuffyWifiIcon off size={toggleIconSize} color={colors.brand.deepShadow} />
+                  </Animated.View>
                 </Animated.View>
               </Animated.View>
-            </Animated.View>
+            </Pressable>
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.notificationTouch,
+              {
+                width: Math.max(layout.minTouchTarget, actionButtonSize),
+                height: Math.max(layout.minTouchTarget, actionButtonSize),
+              },
+              pressed ? styles.actionControlPressed : null,
+            ]}
+            onPress={handleOpenNotifications}
+            onPressIn={handlePrefetchNotifications}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            accessibilityState={{ expanded: notificationsVisible }}
+          >
+            <View
+              style={[
+                styles.notificationGlass,
+                { width: actionButtonSize, height: actionButtonSize },
+              ]}
+            >
+              <PuffyBellIcon size={actionIconSize} color={colors.text.primary} />
+              {unreadNotifications > 0 ? (
+                <View style={styles.notificationBadge}>
+                  <Text
+                    variant="small"
+                    color={colors.brand.whiteStream}
+                    style={styles.notificationBadgeText}
+                  >
+                    {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </Pressable>
         </View>
-
-        {/* Notification bell */}
-        <Pressable
-          style={[styles.notificationGlass, { width: actionButtonSize, height: actionButtonSize }]}
-          onPress={handleOpenNotifications}
-          onPressIn={handlePrefetchNotifications}
-          hitSlop={6}
-          accessibilityLabel="Notifications"
-        >
-          <PuffyBellIcon size={actionIconSize} color={colors.text.primary} />
-          {unreadNotifications > 0 ? (
-            <View style={styles.notificationBadge}>
-              <Text
-                variant="small"
-                color={colors.text.onAccent}
-                style={styles.notificationBadgeText}
-              >
-                {unreadNotifications > 9 ? '9+' : unreadNotifications}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
       </View>
       <Suspense fallback={null}>
         {notificationsVisible ? (
           <NotificationCenterModal
             visible={notificationsVisible}
-            onClose={() => setNotificationsVisible(false)}
+            onClose={handleCloseNotifications}
             sheetTopOffset={notificationSheetTopOffset}
           />
         ) : null}
       </Suspense>
-    </View>
+    </>
   );
 }
 
@@ -419,6 +490,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     minWidth: 0,
+  },
+  walletProfileIcon: {
+    overflow: 'hidden',
+    backgroundColor: colors.brand.azureCyan,
   },
   walletTextBlock: {
     flexShrink: 1,
@@ -460,9 +535,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
     flexShrink: 0,
-    minHeight: layout.minTouchTarget + spacing.xs,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.xs,
+    minHeight: layout.minTouchTarget,
     borderRadius: radii.full,
     borderCurve: 'continuous',
   },
@@ -477,15 +550,22 @@ const styles = StyleSheet.create({
   toggleTouch: {
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
   },
   toggleTrack: {
     justifyContent: 'center',
     backgroundColor: colors.glass.clearFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    overflow: 'hidden',
   },
   toggleKnob: {
     backgroundColor: colors.brand.whiteStream,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
   },
   toggleIconLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -494,23 +574,41 @@ const styles = StyleSheet.create({
   },
   notificationGlass: {
     borderRadius: radii.full,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.glass.clearFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    overflow: 'visible',
   },
-  notificationBadge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    minWidth: 16,
-    height: 16,
+  notificationTouch: {
     borderRadius: radii.full,
-    paddingHorizontal: 3,
-    backgroundColor: colors.semantic.error,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  actionControlPressed: {
+    backgroundColor: colors.surface.pressed,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: radii.full,
+    paddingHorizontal: 4,
+    backgroundColor: colors.semantic.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.brand.iceBlue,
+    zIndex: 2,
+  },
   notificationBadgeText: {
+    fontSize: 10,
     lineHeight: 12,
+    fontFamily: fontFamily.uiBold,
   },
 });

@@ -35,7 +35,8 @@ const MODES: { id: HomeBalanceMode; label: string; accessibilityLabel: string }[
   { id: 'default', label: 'Portfolio', accessibilityLabel: 'Show portfolio wallet view' },
   { id: 'shielded', label: 'Shielded', accessibilityLabel: 'Show shielded wallet view' },
 ];
-const TRACK_PADDING = 4;
+const TRACK_VERTICAL_PADDING = 5;
+const TRACK_HORIZONTAL_PADDING = 5;
 const SEGMENT_GAP = 2;
 
 // Timing-only thumb motion: smooth and predictable, with no spring settle.
@@ -61,7 +62,7 @@ export function HomeBalanceModeDivider({
   const dense = width < 340 || fontScale > 1.18;
   const compact = width < 390 || height < 760 || fontScale > 1.08;
   const trackHeight = dense ? 44 : compact ? 46 : 50;
-  const segmentHeight = trackHeight - TRACK_PADDING * 2;
+  const segmentHeight = trackHeight - TRACK_VERTICAL_PADDING * 2;
   const labelFontSize = compact ? 14 : 15;
   const labelLineHeight = compact ? 18 : 20;
   const trackWidth = useSharedValue(0);
@@ -88,7 +89,8 @@ export function HomeBalanceModeDivider({
     if (trackWidth.value <= 0) return 0;
     return Math.max(
       0,
-      (trackWidth.value - TRACK_PADDING * 2 - SEGMENT_GAP * (MODES.length - 1)) / MODES.length,
+      (trackWidth.value - TRACK_HORIZONTAL_PADDING * 2 - SEGMENT_GAP * (MODES.length - 1)) /
+        MODES.length,
     );
   });
 
@@ -120,10 +122,26 @@ export function HomeBalanceModeDivider({
     >
       <View style={[styles.track, { height: trackHeight }]} onLayout={handleTrackLayout}>
         {!loading ? (
-          <Animated.View pointerEvents="none" style={[styles.thumb, thumbStyle]} />
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.thumb,
+              {
+                top: TRACK_VERTICAL_PADDING,
+                left: TRACK_HORIZONTAL_PADDING,
+              },
+              thumbStyle,
+            ]}
+          />
         ) : null}
         <View
-          style={styles.segmentRow}
+          style={[
+            styles.segmentRow,
+            {
+              paddingVertical: TRACK_VERTICAL_PADDING,
+              paddingHorizontal: TRACK_HORIZONTAL_PADDING,
+            },
+          ]}
           accessibilityElementsHidden={loading}
           importantForAccessibility={loading ? 'no-hide-descendants' : 'auto'}
         >
@@ -203,7 +221,6 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    padding: TRACK_PADDING,
     backgroundColor: colors.surface.pressed,
     borderWidth: 1,
     borderColor: colors.border.subtle,
@@ -211,8 +228,6 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
-    top: TRACK_PADDING,
-    left: TRACK_PADDING,
     backgroundColor: colors.glass.strongFill,
     borderWidth: 1,
     borderColor: colors.glass.rim,

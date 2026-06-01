@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
+  Easing,
   interpolate,
   useAnimatedStyle,
   useSharedValue,
@@ -16,7 +17,6 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { formatLamportsAsSol } from '@/lib/api/offpay-wallet-data';
-import { useWalletStore } from '@/store/walletStore';
 
 import type { WalletAccount } from '@/store/walletStore';
 
@@ -30,9 +30,9 @@ interface AccountListCardProps {
   onActionsMenuOpenChange?: (open: boolean) => void;
   onRequestExportKeys?: (wallet: WalletAccount) => void;
   onRequestRemoveWallet?: (wallet: WalletAccount) => void;
+  onRequestSetPrimary?: (wallet: WalletAccount) => void;
 }
 
-const MENU_OPEN_HEIGHT = layout.buttonHeightMd * 2;
 const ACCOUNT_CARD_COLORS = [
   colors.glass.strongFill,
   colors.glass.frostFill,
@@ -40,6 +40,12 @@ const ACCOUNT_CARD_COLORS = [
 ] as const;
 const ACCOUNT_CARD_SHADOW =
   '0 2px 8px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)';
+const MENU_ANIMATION_CONFIG = {
+  duration: 120,
+  easing: Easing.out(Easing.cubic),
+} as const;
+const ACTION_BUTTON_SURFACE = colors.brand.iceBlue;
+const ACTION_BUTTON_BORDER = colors.surface.backgroundAlt;
 
 export function AccountListCard({
   wallet,
@@ -50,39 +56,76 @@ export function AccountListCard({
   onActionsMenuOpenChange,
   onRequestExportKeys,
   onRequestRemoveWallet,
+  onRequestSetPrimary,
 }: AccountListCardProps): React.JSX.Element {
-  const setPrimaryWallet = useWalletStore((s) => s.setPrimaryWallet);
   const balanceQuery = useOffpayWalletBalance(wallet.publicKey);
 
-  const [localActionsMenuOpen, setLocalActionsMenuOpen] = useState(false);
-  const menuAnim = useSharedValue(0);
+  const [localActionsMenuOpen, setLocalActionsMenuOpen] = useState(Boolean(actionsMenuOpen));
+  const menuAnim = useSharedValue(actionsMenuOpen ? 1 : 0);
+  const parentNotifyFrameRef = useRef<number | null>(null);
+  const openedFromPressInRef = useRef(false);
   const avatarSize = dense ? 44 : compact ? 50 : layout.avatarLg;
   const actionButtonSize = dense ? 38 : compact ? 40 : 42;
   const actionIconSize = dense ? 18 : layout.iconSizeInline;
-  const isMenuOpen = actionsMenuOpen ?? localActionsMenuOpen;
-  const setActionsMenuOpen = (open: boolean): void => {
-    if (actionsMenuOpen == null) {
+  const isMenuOpen = localActionsMenuOpen;
+
+  const animateMenu = useCallback(
+    (open: boolean): void => {
+      menuAnim.value = withTiming(open ? 1 : 0, MENU_ANIMATION_CONFIG);
+    },
+    [menuAnim],
+  );
+
+  const setActionsMenuOpen = useCallback(
+    (open: boolean): void => {
       setLocalActionsMenuOpen(open);
-    }
-    onActionsMenuOpenChange?.(open);
-  };
+      animateMenu(open);
+
+      if (parentNotifyFrameRef.current != null) {
+        cancelAnimationFrame(parentNotifyFrameRef.current);
+        parentNotifyFrameRef.current = null;
+      }
+
+      if (open) {
+        parentNotifyFrameRef.current = requestAnimationFrame(() => {
+          parentNotifyFrameRef.current = null;
+          onActionsMenuOpenChange?.(true);
+        });
+        return;
+      }
+
+      onActionsMenuOpenChange?.(false);
+    },
+    [animateMenu, onActionsMenuOpenChange],
+  );
 
   useEffect(() => {
-    menuAnim.value = withTiming(isMenuOpen ? 1 : 0, { duration: 200 });
-  }, [isMenuOpen, menuAnim]);
+    if (actionsMenuOpen == null) return;
+
+    setLocalActionsMenuOpen(actionsMenuOpen);
+    animateMenu(actionsMenuOpen);
+  }, [actionsMenuOpen, animateMenu]);
+
+  useEffect(
+    () => () => {
+      if (parentNotifyFrameRef.current != null) {
+        cancelAnimationFrame(parentNotifyFrameRef.current);
+      }
+    },
+    [],
+  );
 
   const menuStyle = useAnimatedStyle(() => ({
-    height: interpolate(menuAnim.value, [0, 1], [0, MENU_OPEN_HEIGHT]),
-    opacity: interpolate(menuAnim.value, [0, 0.08, 1], [0, 1, 1]),
+    opacity: menuAnim.value,
+    transform: [
+      { translateY: interpolate(menuAnim.value, [0, 1], [-4, 0]) },
+      { scale: interpolate(menuAnim.value, [0, 1], [0.98, 1]) },
+    ],
   }));
 
   const handleSetPrimary = (): void => {
     if (isPrimary) return;
-
-    void setPrimaryWallet(wallet.id).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : 'Failed to set primary wallet';
-      Alert.alert('Unable to update wallet', message);
-    });
+    onRequestSetPrimary?.(wallet);
   };
 
   const handleExportKeys = (): void => {
@@ -93,6 +136,21 @@ export function AccountListCard({
   const handleRemoveWallet = (): void => {
     setActionsMenuOpen(false);
     onRequestRemoveWallet?.(wallet);
+  };
+
+  const handleActionsPressIn = (): void => {
+    if (isMenuOpen) return;
+    openedFromPressInRef.current = true;
+    setActionsMenuOpen(true);
+  };
+
+  const handleActionsPress = (): void => {
+    if (openedFromPressInRef.current) {
+      openedFromPressInRef.current = false;
+      return;
+    }
+
+    setActionsMenuOpen(!isMenuOpen);
   };
 
   const liveBalanceLabel =
@@ -188,7 +246,8 @@ export function AccountListCard({
                 styles.actionRoundButton,
                 { width: actionButtonSize, height: actionButtonSize },
               ]}
-              onPress={() => setActionsMenuOpen(!isMenuOpen)}
+              onPressIn={handleActionsPressIn}
+              onPress={handleActionsPress}
               accessibilityRole="button"
               accessibilityLabel={isMenuOpen ? 'Close wallet actions' : 'Open wallet actions'}
               hitSlop={6}
@@ -300,14 +359,11 @@ const styles = StyleSheet.create({
   },
   actionRoundButton: {
     borderRadius: radii.full,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: ACTION_BUTTON_SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: ACTION_BUTTON_BORDER,
     boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   accountName: {
@@ -347,29 +403,28 @@ const styles = StyleSheet.create({
   dropdownMenu: {
     position: 'absolute',
     top: layout.buttonHeightSm + spacing.sm,
-    right: 0,
-    minWidth: layout.avatarLg + spacing['4xl'],
-    backgroundColor: colors.brand.whiteStream,
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    right: -spacing.sm,
+    minWidth: 168,
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
   dropdownContent: {
-    padding: spacing.xs,
     width: '100%',
-    backgroundColor: colors.brand.whiteStream,
+    gap: spacing.xs,
+    backgroundColor: 'transparent',
   },
   dropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.sm,
-    padding: spacing.sm,
-    borderRadius: radii.md,
+    minHeight: layout.buttonHeightMd,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
     backgroundColor: colors.brand.whiteStream,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.surface.backgroundAlt,
   },
 });

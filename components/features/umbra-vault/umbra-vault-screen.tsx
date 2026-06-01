@@ -19,7 +19,7 @@ import { UmbraVaultActionPanel } from '@/components/features/umbra-vault/umbra-v
 import { UmbraVaultPortfolioCard } from '@/components/features/umbra-vault/umbra-vault-portfolio-card';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
-import { StaggerRevealGroup } from '@/components/ui/StaggerReveal';
+import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -1181,35 +1181,35 @@ function UmbraVaultContentBody({
         </Animated.View>
       ) : null}
 
-      <StaggerRevealGroup>
-        <UmbraVaultPortfolioCard
-          balances={balances}
-          tokens={supportedTokens}
-          balanceLoadState={encryptedBalanceLoadState}
-          balanceStatusMessage={encryptedBalanceStatusMessage}
-          vaultRegistered={vaultRegistered}
-          loading={encryptedBalancesQuery.isFetching}
-          disabled={!canUseVault}
-          disabledMessage={disabledMessage}
-          networkLabel={networkLabel}
-          setupLoading={
-            registerMutation.isPending ||
-            setupInFlight ||
-            vaultSetupChecking ||
-            setupConfirmationPending
-          }
-          setupDisabled={vaultSetupChecking || setupConfirmationPending}
-          setupLabel={
-            setupConfirmationPending ? 'Confirming' : vaultSetupChecking ? 'Checking' : undefined
-          }
-          repairLoading={repairKeyMutation.isPending}
-          repairAvailable={hasUmbraKeyMismatch}
-          tokenLogos={tokenLogoMap}
-          onSetup={handleSetup}
-          onRepair={handleRepairVaultKey}
-          onRefresh={() => refreshBalances(false)}
-        />
+      <UmbraVaultPortfolioCard
+        balances={balances}
+        tokens={supportedTokens}
+        balanceLoadState={encryptedBalanceLoadState}
+        balanceStatusMessage={encryptedBalanceStatusMessage}
+        vaultRegistered={vaultRegistered}
+        loading={encryptedBalancesQuery.isFetching}
+        disabled={!canUseVault}
+        disabledMessage={disabledMessage}
+        networkLabel={networkLabel}
+        setupLoading={
+          registerMutation.isPending ||
+          setupInFlight ||
+          vaultSetupChecking ||
+          setupConfirmationPending
+        }
+        setupDisabled={vaultSetupChecking || setupConfirmationPending}
+        setupLabel={
+          setupConfirmationPending ? 'Confirming' : vaultSetupChecking ? 'Checking' : undefined
+        }
+        repairLoading={repairKeyMutation.isPending}
+        repairAvailable={hasUmbraKeyMismatch}
+        tokenLogos={tokenLogoMap}
+        onSetup={handleSetup}
+        onRepair={handleRepairVaultKey}
+        onRefresh={() => refreshBalances(false)}
+      />
 
+      <StaggerRevealItem index={0}>
         <UmbraVaultActionPanel
           action={action}
           token={token}
@@ -1239,7 +1239,7 @@ function UmbraVaultContentBody({
           }}
           onSubmit={handleSubmitAction}
         />
-      </StaggerRevealGroup>
+      </StaggerRevealItem>
     </View>
   );
 }

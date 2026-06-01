@@ -8,7 +8,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
-import { radii, spacing } from '@/constants/spacing';
+import { spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
 import type { ReactNode } from 'react';
@@ -36,7 +36,7 @@ export function SettingsLineItem({
   compact = false,
   dense = false,
 }: SettingsLineItemProps): React.JSX.Element {
-  const iconSize = dense ? 36 : compact ? 38 : 42;
+  const iconSize = dense ? 24 : compact ? 26 : 28;
 
   return (
     <Pressable
@@ -64,7 +64,7 @@ export function SettingsLineItem({
         <View style={styles.text}>
           <Text
             variant="body"
-            color={colors.text.primary}
+            color={colors.brand.deepShadow}
             style={[styles.title, compact && styles.titleCompact, dense && styles.titleDense]}
             numberOfLines={1}
             ellipsizeMode="tail"
@@ -100,40 +100,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 70,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
+    minHeight: 58,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
     gap: spacing.md,
     minWidth: 0,
   },
   rowCompact: {
-    minHeight: 64,
+    minHeight: 54,
     paddingVertical: spacing.sm,
   },
   rowDense: {
-    minHeight: 58,
-    paddingHorizontal: spacing.sm,
+    minHeight: 50,
+    paddingHorizontal: spacing.md,
     gap: spacing.sm,
   },
-  pressed: { backgroundColor: colors.holdingsCard.pressed },
+  pressed: { backgroundColor: colors.brand.iceBlue },
   disabled: { opacity: 0.4 },
   left: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1, minWidth: 0 },
   icon: {
-    borderRadius: radii.full,
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   iconAccent: {
-    backgroundColor: colors.glass.cyanWash,
-    borderColor: colors.glass.azureCyanHalf,
+    opacity: 0.92,
   },
   text: { flex: 1, minWidth: 0, gap: 2 },
   title: {

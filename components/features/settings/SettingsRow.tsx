@@ -14,8 +14,11 @@ interface SettingsRowProps {
   label: string;
   subtitle?: string;
   rightValue?: string;
+  rightNode?: ReactNode;
   badgeCount?: number;
   isExternal?: boolean;
+  destructive?: boolean;
+  disabled?: boolean;
   compact?: boolean;
   dense?: boolean;
   onPress?: () => void;
@@ -26,15 +29,20 @@ export function SettingsRow({
   label,
   subtitle,
   rightValue,
+  rightNode,
   badgeCount,
   isExternal = false,
+  destructive = false,
+  disabled = false,
   compact = false,
   dense = false,
   onPress,
 }: SettingsRowProps): React.JSX.Element {
-  const iconWellSize = dense ? 36 : compact ? 38 : 42;
-  const accessorySize = dense ? 19 : 21;
-  const showAccessory = onPress != null;
+  const iconWellSize = dense ? 24 : compact ? 26 : 28;
+  const accessorySize = dense ? 18 : 20;
+  const showAccessory = onPress != null && !disabled;
+  const labelColor = destructive ? colors.semantic.error : colors.brand.deepShadow;
+  const accessoryColor = destructive ? colors.semantic.error : colors.text.tertiary;
 
   return (
     <Pressable
@@ -42,12 +50,14 @@ export function SettingsRow({
         styles.row,
         compact && styles.rowCompact,
         dense && styles.rowDense,
-        pressed && styles.pressed,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.disabled,
       ]}
-      onPress={onPress}
-      disabled={onPress == null}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled || onPress == null}
       accessibilityRole={onPress == null ? undefined : 'button'}
       accessibilityLabel={label}
+      accessibilityState={disabled ? { disabled: true } : undefined}
     >
       <View style={styles.left}>
         <View style={[styles.iconWrap, { width: iconWellSize, height: iconWellSize }]}>
@@ -56,7 +66,7 @@ export function SettingsRow({
         <View style={styles.textCol}>
           <Text
             variant="body"
-            color={colors.text.primary}
+            color={labelColor}
             style={[styles.label, compact && styles.labelCompact, dense && styles.labelDense]}
             numberOfLines={1}
             ellipsizeMode="tail"
@@ -84,6 +94,8 @@ export function SettingsRow({
       </View>
 
       <View style={styles.right}>
+        {rightNode != null ? rightNode : null}
+
         {rightValue != null ? (
           <Text
             variant="small"
@@ -98,7 +110,7 @@ export function SettingsRow({
 
         {badgeCount != null ? (
           <View style={styles.badge}>
-            <Text variant="small" color={colors.text.primary} style={styles.badgeText}>
+            <Text variant="small" color={colors.brand.deepShadow} style={styles.badgeText}>
               {badgeCount}
             </Text>
           </View>
@@ -106,9 +118,9 @@ export function SettingsRow({
 
         {showAccessory ? (
           isExternal ? (
-            <PuffyExternalLinkIcon size={accessorySize} color={colors.text.tertiary} focused />
+            <PuffyExternalLinkIcon size={accessorySize} color={accessoryColor} focused />
           ) : (
-            <PuffyChevronRightIcon size={accessorySize} color={colors.text.tertiary} focused />
+            <PuffyChevronRightIcon size={accessorySize} color={accessoryColor} focused />
           )
         ) : null}
       </View>
@@ -121,24 +133,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 70,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
+    minHeight: 58,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
     backgroundColor: 'transparent',
-    gap: spacing.md,
+    gap: spacing.sm,
     minWidth: 0,
   },
   rowCompact: {
-    minHeight: 64,
+    minHeight: 54,
     paddingVertical: spacing.sm,
   },
   rowDense: {
-    minHeight: 58,
-    paddingHorizontal: spacing.sm,
+    minHeight: 50,
+    paddingHorizontal: spacing.md,
     gap: spacing.sm,
   },
   pressed: {
-    backgroundColor: colors.holdingsCard.pressed,
+    backgroundColor: colors.surface.pressed,
+  },
+  disabled: {
+    opacity: 0.5,
   },
   left: {
     flexDirection: 'row',
@@ -148,17 +163,9 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   iconWrap: {
-    borderRadius: radii.full,
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   textCol: {
     flex: 1,
@@ -197,6 +204,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
     textAlign: 'right',
+    fontSize: 13,
+    lineHeight: 18,
   },
   badge: {
     minWidth: layout.iconSizeInline + spacing.xs,
@@ -205,12 +214,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: colors.brand.iceBlue,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.surface.backgroundAlt,
   },
   badgeText: {
     fontFamily: fontFamily.semiBold,

@@ -7,10 +7,10 @@ import React from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GradientBackground } from '@/components/ui/GradientBackground';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
-import { layout, radii, spacing } from '@/constants/spacing';
+import { layout, spacing } from '@/constants/spacing';
+import { fontFamily } from '@/constants/typography';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { SettingsScreenContent } from '@/components/features/settings/SettingsScreenContent';
 
@@ -36,7 +36,6 @@ export default function SettingsScreen(): React.JSX.Element {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <GradientBackground />
       <View style={[styles.headerOuter, { paddingHorizontal: horizontalPadding }]}>
         <View style={[styles.header, { width: headerFrameWidth }]}>
           <Pressable
@@ -53,8 +52,8 @@ export default function SettingsScreen(): React.JSX.Element {
             />
           </Pressable>
           <Text
-            variant="h2"
-            color={colors.text.inverse}
+            variant="h3"
+            color={colors.brand.deepShadow}
             style={[styles.headerTitle, compact && styles.headerTitleCompact]}
             numberOfLines={1}
             adjustsFontSizeToFit
@@ -75,12 +74,12 @@ export default function SettingsScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundGradient.base,
+    backgroundColor: colors.brand.iceBlue,
   },
   headerOuter: {
-    paddingTop: spacing.xl,
+    paddingTop: spacing.sm,
     alignItems: 'center',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.lg,
   },
   header: {
     flexDirection: 'row',
@@ -91,17 +90,8 @@ const styles = StyleSheet.create({
   headerIconBtn: {
     width: layout.minTouchTarget,
     height: layout.minTouchTarget,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 2px 6px rgba(14, 42, 53, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   headerIconPressed: {
     opacity: 0.72,
@@ -114,9 +104,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     textAlign: 'center',
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   headerTitleCompact: {
-    fontSize: 23,
-    lineHeight: 30,
+    fontSize: 19,
+    lineHeight: 25,
   },
 });

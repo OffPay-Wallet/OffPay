@@ -167,6 +167,7 @@ export function HomeScreenContent(): React.JSX.Element {
   const getScreenSignal = useScreenAbortSignal();
   const [privacyHidden, setPrivacyHidden] = useState(false);
   const [homeBalanceMode, setHomeBalanceMode] = useState<HomeBalanceMode>('default');
+  const [shieldedPaneMounted, setShieldedPaneMounted] = useState(false);
   const [slotPromptVisible, setSlotPromptVisible] = useState(false);
   const [homeRefreshPending, setHomeRefreshPending] = useState(false);
   const slotPromptAutoShownRef = useRef<string | null>(null);
@@ -497,11 +498,19 @@ export function HomeScreenContent(): React.JSX.Element {
     prefetchUmbraVaultContent('press-in');
   }, []);
 
+  const handleChangeHomeBalanceMode = useCallback((mode: HomeBalanceMode): void => {
+    if (mode === 'shielded') {
+      setShieldedPaneMounted(true);
+    }
+    setHomeBalanceMode(mode);
+  }, []);
+
   // Warm the Umbra vault chunk the moment the user switches to the
   // Shielded segment. Kept in an effect (not inline in render) so the
   // dynamic `import()` side effect never runs during the render pass.
   useEffect(() => {
     if (homeBalanceMode === 'shielded') {
+      setShieldedPaneMounted(true);
       prefetchUmbraVaultContent('render');
     }
   }, [homeBalanceMode]);
@@ -975,6 +984,8 @@ export function HomeScreenContent(): React.JSX.Element {
       ? spacing.lg
       : spacing['2xl'];
   const sectionGap = compactHome ? spacing.lg : spacing.xl;
+  const shieldedPaneActive = homeBalanceMode === 'shielded';
+  const shouldRenderShieldedPane = shieldedPaneMounted || shieldedPaneActive;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -1004,77 +1015,95 @@ export function HomeScreenContent(): React.JSX.Element {
         <View style={styles.homeContentFrame}>
           <HomeBalanceModeDivider
             selectedMode={homeBalanceMode}
-            onChangeMode={setHomeBalanceMode}
+            onChangeMode={handleChangeHomeBalanceMode}
             onShieldedPressIn={handlePrefetchUmbraVaultContent}
           />
         </View>
 
-        {homeBalanceMode === 'shielded' ? (
-          <View key="shielded-mode" style={[styles.homeContentFrame, styles.shieldedSection]}>
+        {shouldRenderShieldedPane ? (
+          <View
+            style={[
+              styles.homeContentFrame,
+              styles.shieldedSection,
+              !shieldedPaneActive && styles.inactiveModePane,
+            ]}
+            pointerEvents={shieldedPaneActive ? 'auto' : 'none'}
+            accessibilityElementsHidden={!shieldedPaneActive}
+            importantForAccessibility={shieldedPaneActive ? 'auto' : 'no-hide-descendants'}
+          >
             <Suspense fallback={null}>
               <UmbraVaultContent showHeader={false} tokenLogoMap={tokenLogoMap} />
             </Suspense>
           </View>
-        ) : (
-          <View key="portfolio-mode" style={[styles.homeContentFrame, styles.modeContent]}>
-            <Animated.View
-              style={[styles.balanceSection, { marginBottom: sectionGap }, balanceStyle]}
-            >
-              <BalanceCard
-                publicKey={publicKey}
-                networkLabel={networkLabel}
-                offlineSlotsLabel={offlineSlotsLabel}
-                portfolioValueLabel={portfolioValueLabel}
-                portfolioValueLoading={
-                  portfolioValueLabel == null &&
-                  (portfolioValuationQuery.isLoading ||
-                    balanceQuery.isLoading ||
-                    balanceQuery.isCapabilitiesPending)
-                }
-                selectedCurrency={currency}
-                onCurrencyChange={setCurrency}
-                onRefresh={handleRefreshHomeData}
-                refreshing={homeRefreshPending}
-                privacyHidden={privacyHidden}
-                onTogglePrivacy={handleTogglePrivacy}
-                balanceTicker="Portfolio"
-                balanceLabel={balanceLabel}
-                onAction={handleAction}
-                disabledActionIds={
-                  isOffline ? OFFLINE_DISABLED_ACTION_IDS : EMPTY_DISABLED_ACTION_IDS
-                }
-              />
-            </Animated.View>
+        ) : null}
 
-            <StaggerRevealItem index={0} trigger={homeBalanceMode} style={tokensStyle}>
-              <TokenHoldingsCard
-                holdings={previewHoldings}
-                onTokenPress={handleTokenPress}
-                onViewAll={handleViewAllHoldings}
-                emptyTitle={holdingsEmptyTitle}
-                emptySubtitle={holdingsEmptySubtitle}
-                hiddenSpamTokenCount={countSpamTokens(balanceQuery.data)}
-                privacyHidden={privacyHidden}
-                valuations={portfolioValuationQuery.data?.tokenValues}
-                loading={holdingsLoading}
-              />
-            </StaggerRevealItem>
+        <View
+          style={[
+            styles.homeContentFrame,
+            styles.modeContent,
+            shieldedPaneActive && styles.inactiveModePane,
+          ]}
+          pointerEvents={shieldedPaneActive ? 'none' : 'auto'}
+          accessibilityElementsHidden={shieldedPaneActive}
+          importantForAccessibility={shieldedPaneActive ? 'no-hide-descendants' : 'auto'}
+        >
+          <Animated.View
+            style={[styles.balanceSection, { marginBottom: sectionGap }, balanceStyle]}
+          >
+            <BalanceCard
+              publicKey={publicKey}
+              networkLabel={networkLabel}
+              offlineSlotsLabel={offlineSlotsLabel}
+              portfolioValueLabel={portfolioValueLabel}
+              portfolioValueLoading={
+                portfolioValueLabel == null &&
+                (portfolioValuationQuery.isLoading ||
+                  balanceQuery.isLoading ||
+                  balanceQuery.isCapabilitiesPending)
+              }
+              selectedCurrency={currency}
+              onCurrencyChange={setCurrency}
+              onRefresh={handleRefreshHomeData}
+              refreshing={homeRefreshPending}
+              privacyHidden={privacyHidden}
+              onTogglePrivacy={handleTogglePrivacy}
+              balanceTicker="Portfolio"
+              balanceLabel={balanceLabel}
+              onAction={handleAction}
+              disabledActionIds={
+                isOffline ? OFFLINE_DISABLED_ACTION_IDS : EMPTY_DISABLED_ACTION_IDS
+              }
+            />
+          </Animated.View>
 
-            <StaggerRevealItem index={1} trigger={homeBalanceMode} style={tokensStyle}>
-              <RecentActivityCard
-                transactions={recentActivity}
-                onTransactionPress={handleActivityPress}
-                onViewAll={() => navigateToTab('/(tabs)/history')}
-                statusLabel={streamStatusLabel}
-                emptyTitle={activityEmptyTitle}
-                emptySubtitle={activityEmptySubtitle}
-                privacyHidden={privacyHidden}
-                loading={activityLoading}
-                tokenLogos={tokenLogoMap}
-              />
-            </StaggerRevealItem>
-          </View>
-        )}
+          <StaggerRevealItem index={0} style={tokensStyle}>
+            <TokenHoldingsCard
+              holdings={previewHoldings}
+              onTokenPress={handleTokenPress}
+              onViewAll={handleViewAllHoldings}
+              emptyTitle={holdingsEmptyTitle}
+              emptySubtitle={holdingsEmptySubtitle}
+              hiddenSpamTokenCount={countSpamTokens(balanceQuery.data)}
+              privacyHidden={privacyHidden}
+              valuations={portfolioValuationQuery.data?.tokenValues}
+              loading={holdingsLoading}
+            />
+          </StaggerRevealItem>
+
+          <StaggerRevealItem index={1} style={tokensStyle}>
+            <RecentActivityCard
+              transactions={recentActivity}
+              onTransactionPress={handleActivityPress}
+              onViewAll={() => navigateToTab('/(tabs)/history')}
+              statusLabel={streamStatusLabel}
+              emptyTitle={activityEmptyTitle}
+              emptySubtitle={activityEmptySubtitle}
+              privacyHidden={privacyHidden}
+              loading={activityLoading}
+              tokenLogos={tokenLogoMap}
+            />
+          </StaggerRevealItem>
+        </View>
       </ScrollView>
 
       {slotPromptVisible ? (
@@ -1118,6 +1147,9 @@ const styles = StyleSheet.create({
   },
   modeContent: {
     width: '100%',
+  },
+  inactiveModePane: {
+    display: 'none',
   },
   balanceSection: {
     width: '100%',
