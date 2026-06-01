@@ -14,6 +14,7 @@ import {
   withMasterSeedScheme,
 } from '@umbra-privacy/sdk/master-seed-schemes';
 import type { MasterSeedScheme } from '@umbra-privacy/sdk/master-seed-schemes';
+import { getAesDecryptor } from '@umbra-privacy/sdk/crypto/aes';
 import { getMintEncryptionKeyRotatorFunction } from '@umbra-privacy/sdk/account';
 import {
   getBurnableStealthPoolNoteScannerFunction as getClaimableUtxoScannerFunction,
@@ -23,7 +24,6 @@ import {
 import {
   getATAIntoETADirectDepositorFunction as getPublicBalanceToEncryptedBalanceDirectDepositorFunction,
   getATAIntoReceiverBurnableStealthPoolNoteCreatorFunction as getPublicBalanceToReceiverClaimableUtxoCreatorFunction,
-  getATAIntoSelfBurnableStealthPoolNoteCreatorFunction as getPublicBalanceToSelfClaimableUtxoCreatorFunction,
   getETAIntoReceiverBurnableStealthPoolNoteCreatorFunction as getEncryptedBalanceToReceiverClaimableUtxoCreatorFunction,
 } from '@umbra-privacy/sdk/deposit';
 import {
@@ -32,7 +32,6 @@ import {
   getMintEncryptionKeyRotatorFunction as getLegacyMintEncryptionKeyRotatorFunction,
   getPublicBalanceToEncryptedBalanceDirectDepositorFunction as getLegacyPublicBalanceToEncryptedBalanceDirectDepositorFunction,
   getPublicBalanceToReceiverClaimableUtxoCreatorFunction as getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction,
-  getPublicBalanceToSelfClaimableUtxoCreatorFunction as getLegacyPublicBalanceToSelfClaimableUtxoCreatorFunction,
   getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction as getLegacyReceiverClaimableUtxoToEncryptedBalanceClaimerFunction,
   getSelfClaimableUtxoToEncryptedBalanceClaimerFunction as getLegacySelfClaimableUtxoToEncryptedBalanceClaimerFunction,
   getUserAccountQuerierFunction as getLegacyUserAccountQuerierFunction,
@@ -65,14 +64,12 @@ import {
   isUmbraInstructionFallbackNotFound,
   sleep,
 } from '@/lib/umbra/umbra-tx-helpers';
-import {
-  createNobleUmbraSigner,
-  deriveSigningSeedForUmbra,
-} from '@/lib/umbra/umbra-signer';
+import { createNobleUmbraSigner, deriveSigningSeedForUmbra } from '@/lib/umbra/umbra-signer';
 import {
   assertUmbraClaimCompleted,
   createOffpayUmbraBatchMerkleProofFetcher,
   createOffpayUmbraClaimRelayer,
+  createOffpayUmbraTreeSummaryFetcher,
   createOffpayUmbraUtxoDataFetcher,
   getUtxoInsertionIndexAsNumber,
   isBenignAlreadyClaimedFailure,
@@ -80,9 +77,9 @@ import {
 } from '@/lib/umbra/umbra-indexer-adapter';
 import {
   getRnClaimReceiverClaimableUtxoIntoEncryptedBalanceProver,
+  getRnClaimSelfClaimableUtxoIntoEncryptedBalanceProver,
   getRnCreateReceiverClaimableUtxoFromEncryptedBalanceProver,
   getRnCreateReceiverClaimableUtxoFromPublicBalanceProver,
-  getRnCreateSelfClaimableUtxoFromPublicBalanceProver,
   getRnUserRegistrationProver,
 } from '@/lib/umbra/umbra-rn-zk-prover';
 import {
@@ -103,6 +100,8 @@ import {
   type UmbraTokenSymbol,
 } from '@/lib/umbra/umbra-supported-tokens';
 import { decimalInputToAtomicAmount, formatAtomicAmount } from '@/lib/policy/token-amounts';
+import { mark, measure } from '@/lib/perf/perf-marks';
+import { yieldToUiIfNeeded } from '@/lib/perf/ui-work-scheduler';
 import {
   byteArraysEqual,
   encodeU128LeBytes,
@@ -112,6 +111,7 @@ import {
 
 import type { OffpayNetwork } from '@/types/offpay-api';
 import type { IUmbraClient } from '@umbra-privacy/sdk/client';
+import type { TreeSummaryFetcherFunction } from '@umbra-privacy/sdk/indexer';
 import type {
   IUmbraClient as LegacyUmbraClient,
   IUmbraSigner as LegacyUmbraSigner,
@@ -150,6 +150,16 @@ interface UmbraRuntime {
   rpc: ReturnType<typeof createOffpayUmbraSdkDeps>;
   network: OffpayNetwork;
   dispose: () => void;
+  /**
+   * The master-seed scheme id that matched this wallet's on-chain
+   * registration, if it could be determined. The claim scanner narrows
+   * its per-note decrypt loop to this single scheme on the fast path
+   * instead of trying all registered schemes (current + legacy v4/v2/v1),
+   * which is the dominant JS-thread cost during a scan. `null` when the
+   * registered scheme could not be resolved (e.g. unregistered wallet) —
+   * the scanner then falls back to all schemes so notes are never missed.
+   */
+  activeMasterSeedSchemeId: string | null;
 }
 
 interface LegacyUmbraRuntime {
@@ -176,6 +186,8 @@ const UMBRA_AWAIT_COMPUTATION_FINALIZATION = {
   safetyTimeoutMs: 120_000,
   reclaimComputationRent: false,
 } as const;
+const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 32n;
+const UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT = 384n;
 const U64_MAX = (1n << 64n) - 1n;
 const ENCRYPTED_USER_STATUS_BIT_MVK_KEY_REGISTERED = 2;
 const ENCRYPTED_USER_STATUS_BIT_TOKEN_KEY_REGISTERED = 4;
@@ -186,6 +198,151 @@ type UmbraSdkEncryptedBalanceEntry = {
   state: string;
   balance?: bigint;
 };
+
+type UmbraClaimScanMode = 'recent' | 'deep' | 'range';
+
+type UmbraClaimScanParams = {
+  treeIndex?: number;
+  startInsertionIndex?: number;
+  endInsertionIndex?: number;
+  scanMode?: UmbraClaimScanMode;
+  recentLeafLimit?: number | bigint;
+  signal?: AbortSignal | null;
+  pageLimit?: number | bigint;
+};
+
+type UmbraUtxoDataStore = NonNullable<IUmbraClient['utxoDataStore']>;
+
+type UmbraTreeSummary = Awaited<ReturnType<TreeSummaryFetcherFunction>>[number];
+
+type UmbraClaimScanWindow = {
+  mode: UmbraClaimScanMode;
+  treeIndex: bigint;
+  start: bigint;
+  end: bigint;
+  totalLeaves: bigint;
+  leafCount: bigint;
+  summaries: readonly UmbraTreeSummary[];
+  fakeProgressStore: UmbraUtxoDataStore | undefined;
+};
+
+function normalizePositiveBigint(value: number | bigint | undefined, fallback: bigint): bigint {
+  if (value == null) return fallback;
+  const normalized =
+    typeof value === 'bigint' ? value : BigInt(Math.max(1, Math.trunc(value)));
+  return normalized > 0n ? normalized : fallback;
+}
+
+function createPreScannedUmbraUtxoDataStore(start: bigint): UmbraUtxoDataStore | undefined {
+  if (start <= 0n) return undefined;
+
+  const progress = {
+    ranges: [{ start: 0n, end: start - 1n }],
+    highWaterMark: start - 1n,
+  };
+
+  return {
+    put: async () => undefined,
+    get: async () => null,
+    query: async () => [],
+    count: async () => 0,
+    remove: async () => undefined,
+    getScanProgress: async () => progress as never,
+    addScannedRange: async () => undefined,
+    onError: (error, operation) => {
+      if (__DEV__) {
+        console.warn('[umbra-claims] bounded scan progress store error', {
+          operation,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  } as UmbraUtxoDataStore;
+}
+
+async function resolveUmbraClaimScanWindow(
+  network: OffpayNetwork,
+  params: UmbraClaimScanParams,
+): Promise<UmbraClaimScanWindow> {
+  const fetchTreeSummary = createOffpayUmbraTreeSummaryFetcher(network);
+  const allSummaries = await fetchTreeSummary();
+  const requestedTreeIndex = BigInt(params.treeIndex ?? 0);
+  const selectedSummary =
+    allSummaries.find((summary) => BigInt(summary.treeIndex) === requestedTreeIndex) ??
+    allSummaries[0];
+
+  if (selectedSummary == null) {
+    return {
+      mode: params.scanMode ?? 'recent',
+      treeIndex: requestedTreeIndex,
+      start: 0n,
+      end: -1n,
+      totalLeaves: 0n,
+      leafCount: 0n,
+      summaries: [],
+      fakeProgressStore: undefined,
+    };
+  }
+
+  const totalLeaves = BigInt(selectedSummary.numLeaves);
+  if (totalLeaves <= 0n) {
+    return {
+      mode: params.scanMode ?? 'recent',
+      treeIndex: BigInt(selectedSummary.treeIndex),
+      start: 0n,
+      end: -1n,
+      totalLeaves: 0n,
+      leafCount: 0n,
+      summaries: [{ ...selectedSummary, numLeaves: 0n as never }],
+      fakeProgressStore: undefined,
+    };
+  }
+
+  const maxIndex = totalLeaves - 1n;
+  const explicitStart =
+    params.startInsertionIndex == null ? null : BigInt(Math.max(0, params.startInsertionIndex));
+  const explicitEnd =
+    params.endInsertionIndex == null ? null : BigInt(Math.max(0, params.endInsertionIndex));
+  const mode: UmbraClaimScanMode =
+    explicitStart != null || explicitEnd != null ? 'range' : (params.scanMode ?? 'recent');
+
+  let start: bigint;
+  let end: bigint;
+  if (mode === 'deep') {
+    start = 0n;
+    end = maxIndex;
+  } else if (mode === 'range') {
+    start = explicitStart ?? 0n;
+    end = explicitEnd ?? maxIndex;
+  } else {
+    const recentLeafLimit = normalizePositiveBigint(
+      params.recentLeafLimit,
+      UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT,
+    );
+    end = maxIndex;
+    start = end >= recentLeafLimit ? end - recentLeafLimit + 1n : 0n;
+  }
+
+  if (start > maxIndex) start = maxIndex;
+  if (end > maxIndex) end = maxIndex;
+  if (end < start) end = start;
+
+  const boundedSummary = {
+    ...selectedSummary,
+    numLeaves: end + 1n,
+  } as UmbraTreeSummary;
+
+  return {
+    mode,
+    treeIndex: BigInt(selectedSummary.treeIndex),
+    start,
+    end,
+    totalLeaves,
+    leafCount: end >= start ? end - start + 1n : 0n,
+    summaries: [boundedSummary],
+    fakeProgressStore: createPreScannedUmbraUtxoDataStore(start),
+  };
+}
 
 interface NormalizedUmbraEncryptedBalance {
   state: string;
@@ -293,6 +450,59 @@ function getCurrentUmbraMasterSeedScheme(client: IUmbraClient): MasterSeedScheme
 function getUmbraClientForMasterSeedScheme(client: IUmbraClient, schemeId: string): IUmbraClient {
   const currentScheme = getCurrentUmbraMasterSeedScheme(client);
   return schemeId === currentScheme.id ? client : withMasterSeedScheme(client, schemeId);
+}
+
+/**
+ * Build a scanner client whose `masterSeedSchemes` registry contains only the
+ * one scheme that matched this wallet's on-chain registration.
+ *
+ * The SDK claim scanner loops `client.masterSeedSchemes` and runs a full
+ * X25519 shared-secret + keccak + AES-GCM decrypt attempt per note *per
+ * scheme* — with the default 4-scheme registry (current + legacy v4/v2/v1)
+ * that is ~4× the per-note crypto. Narrowing the registry to the active
+ * scheme is the single biggest JS-thread saving on the scan hot path.
+ *
+ * Safe because the SDK's internal `getSchemeMasterSeed` closure resolves
+ * against its own private scheme array, not the exposed `masterSeedSchemes`
+ * field — so narrowing the exposed array does not break key derivation. When
+ * `schemeId` is null (registration not resolvable) the full client is returned
+ * unchanged so the scanner still tries every scheme and never misses a note.
+ */
+function narrowUmbraClientToScheme(
+  client: IUmbraClient,
+  schemeId: string | null,
+): IUmbraClient {
+  if (schemeId == null) return client;
+  const schemes = Array.isArray(client.masterSeedSchemes) ? client.masterSeedSchemes : [];
+  const matched = schemes.find((scheme) => scheme.id === schemeId);
+  if (matched == null || schemes.length <= 1) return client;
+  return {
+    ...client,
+    masterSeedSchemes: [matched] as unknown as IUmbraClient['masterSeedSchemes'],
+  };
+}
+
+/**
+ * Wrap the SDK AES-GCM decryptor so the scan loop yields to the UI thread when
+ * a frame budget is exceeded.
+ *
+ * The SDK calls `x25519GetSharedSecret` synchronously (its return value is
+ * hashed immediately), so that hook must stay synchronous — wrapping it in a
+ * Promise would break decryption. But the SDK `await`s `aesDecryptor`, which
+ * runs right after each (expensive) X25519 op. Yielding there breaks the
+ * otherwise-uninterruptible per-note decrypt loop into UI-friendly slices.
+ *
+ * We yield via `yieldToUiIfNeeded`, which only pays the ~1-frame round-trip
+ * cost once the accumulated synchronous work crosses `budgetMs`, so throughput
+ * stays high while the JS thread still gets regular frames.
+ */
+function createYieldingUmbraAesDecryptor(budgetMs = 8) {
+  const baseDecryptor = getAesDecryptor();
+  let sliceStartedAt = Date.now();
+  return async (key: Uint8Array, ciphertext: Uint8Array): Promise<Uint8Array> => {
+    sliceStartedAt = await yieldToUiIfNeeded(sliceStartedAt, budgetMs);
+    return baseDecryptor(key as never, ciphertext as never) as Promise<Uint8Array>;
+  };
 }
 
 const UMBRA_STRUCT_TEXT_ENCODER = new TextEncoder();
@@ -408,14 +618,14 @@ async function selectUmbraClientForRegisteredMasterSeedScheme(params: {
   client: IUmbraClient;
   rpc: ReturnType<typeof createOffpayUmbraSdkDeps>;
   walletAddress: string;
-}): Promise<IUmbraClient> {
+}): Promise<{ client: IUmbraClient; schemeId: string | null }> {
   const schemes = Array.isArray(params.client.masterSeedSchemes)
     ? params.client.masterSeedSchemes
     : [];
-  if (schemes.length === 0) return params.client;
+  if (schemes.length === 0) return { client: params.client, schemeId: null };
 
   const userAccount = await fetchDecodedUmbraUserAccountForSchemeCheck(params);
-  if (userAccount == null) return params.client;
+  if (userAccount == null) return { client: params.client, schemeId: null };
 
   for (const scheme of schemes) {
     if (
@@ -425,11 +635,14 @@ async function selectUmbraClientForRegisteredMasterSeedScheme(params: {
         userAccount: userAccount.decoded,
       })
     ) {
-      return getUmbraClientForMasterSeedScheme(params.client, scheme.id);
+      return {
+        client: getUmbraClientForMasterSeedScheme(params.client, scheme.id),
+        schemeId: scheme.id,
+      };
     }
   }
 
-  return params.client;
+  return { client: params.client, schemeId: null };
 }
 
 async function findNullifierSetPdas(
@@ -555,7 +768,7 @@ async function createUmbraRuntime(params: UmbraWalletExecutionParams): Promise<U
       deferMasterSeedSignature: true,
     });
     const rpc = createOffpayUmbraSdkDeps(params.network);
-    const client = await selectUmbraClientForRegisteredMasterSeedScheme({
+    const { client, schemeId } = await selectUmbraClientForRegisteredMasterSeedScheme({
       client: baseClient,
       rpc,
       walletAddress,
@@ -566,6 +779,7 @@ async function createUmbraRuntime(params: UmbraWalletExecutionParams): Promise<U
       rpc,
       network: params.network,
       dispose,
+      activeMasterSeedSchemeId: schemeId,
     };
   } catch (error) {
     dispose();
@@ -1418,8 +1632,8 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
 
   const runLegacyPublicPrivateP2P = (): Promise<UmbraExecutionResult> =>
     withLegacyUmbraRuntime(params, async (runtime) => {
-      const isSelfPayment = recipient === walletAddress;
-      if (!isSelfPayment) {
+      const recipientIsSender = recipient === walletAddress;
+      if (!recipientIsSender) {
         const receiverRegistrationStatus = await queryLegacyUmbraVaultRegistrationStatus(
           runtime,
           recipient,
@@ -1436,53 +1650,36 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
         walletAddress,
         { autoSetup: params.autoSetupSender === true },
       );
-      let result: unknown;
-
-      if (isSelfPayment) {
-        const createUtxo = getLegacyPublicBalanceToSelfClaimableUtxoCreatorFunction(
-          { client: runtime.client },
-          {
-            zkProver: getRnCreateSelfClaimableUtxoFromPublicBalanceProver(),
-            rpc: buildLegacyRpcDeps(runtime),
-          } as never,
-        );
-        result = await createUtxo(
-          {
-            amount: BigInt(token.amountAtomic) as never,
-            destinationAddress: recipient as never,
-            mint: token.metadata.mint as never,
-          } as never,
-          {
-            optionalData: new Uint8Array(32) as never,
-          } as never,
-        );
-      } else {
-        const createUtxo = getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction(
-          { client: runtime.client },
-          {
-            zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
-            rpc: buildLegacyRpcDeps(runtime),
-          } as never,
-        );
-        result = await createUtxo(
-          {
-            amount: BigInt(token.amountAtomic) as never,
-            destinationAddress: recipient as never,
-            mint: token.metadata.mint as never,
-          } as never,
-          {
-            optionalData: new Uint8Array(32) as never,
-          } as never,
+      if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
+        throw new Error(
+          'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
         );
       }
+      const createUtxo = getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+        { client: runtime.client },
+        {
+          zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
+          rpc: buildLegacyRpcDeps(runtime),
+        } as never,
+      );
+      const result = await createUtxo(
+        {
+          amount: BigInt(token.amountAtomic) as never,
+          destinationAddress: recipient as never,
+          mint: token.metadata.mint as never,
+        } as never,
+        {
+          optionalData: new Uint8Array(32) as never,
+        } as never,
+      );
 
       return buildResult(result, senderRegistrationStatus);
     });
 
   const runCurrentPublicPrivateP2P = (): Promise<UmbraExecutionResult> =>
     withUmbraRuntime(params, async (runtime) => {
-      const isSelfPayment = recipient === walletAddress;
-      if (!isSelfPayment) {
+      const recipientIsSender = recipient === walletAddress;
+      if (!recipientIsSender) {
         const receiverRegistrationStatus = await queryUmbraVaultRegistrationStatus(
           runtime,
           recipient,
@@ -1500,50 +1697,28 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
         params,
         { autoSetup: params.autoSetupSender === true },
       );
-      if (isSelfPayment && !senderRegistrationStatus.mixerRegistered) {
+      if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
         throw new Error(
           'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
         );
       }
-      let result: unknown;
-
-      if (isSelfPayment) {
-        const createUtxo = getPublicBalanceToSelfClaimableUtxoCreatorFunction(
-          { client: runtime.client },
-          {
-            zkProver: getRnCreateSelfClaimableUtxoFromPublicBalanceProver(),
-            rpc: buildRpcDeps(runtime),
-          } as never,
-        );
-        result = await createUtxo(
-          {
-            amount: BigInt(token.amountAtomic) as never,
-            destinationAddress: recipient as never,
-            mint: token.metadata.mint as never,
-          } as never,
-          {
-            optionalData: new Uint8Array(32) as never,
-          } as never,
-        );
-      } else {
-        const createUtxo = getPublicBalanceToReceiverClaimableUtxoCreatorFunction(
-          { client: runtime.client },
-          {
-            zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
-            rpc: buildRpcDeps(runtime),
-          } as never,
-        );
-        result = await createUtxo(
-          {
-            amount: BigInt(token.amountAtomic) as never,
-            destinationAddress: recipient as never,
-            mint: token.metadata.mint as never,
-          } as never,
-          {
-            optionalData: new Uint8Array(32) as never,
-          } as never,
-        );
-      }
+      const createUtxo = getPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+        { client: runtime.client },
+        {
+          zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
+          rpc: buildRpcDeps(runtime),
+        } as never,
+      );
+      const result = await createUtxo(
+        {
+          amount: BigInt(token.amountAtomic) as never,
+          destinationAddress: recipient as never,
+          mint: token.metadata.mint as never,
+        } as never,
+        {
+          optionalData: new Uint8Array(32) as never,
+        } as never,
+      );
 
       return buildResult(result, senderRegistrationStatus);
     });
@@ -1702,21 +1877,49 @@ export async function sendUmbraPrivateP2PFromEncryptedBalance(
 async function scanUmbraPrivateP2PUtxos(
   runtime: UmbraRuntime,
   network: OffpayNetwork,
-  params: {
-    treeIndex?: number;
-    startInsertionIndex?: number;
-    endInsertionIndex?: number;
-  },
+  params: UmbraClaimScanParams,
 ) {
-  const fetchUtxoData = createOffpayUmbraUtxoDataFetcher(network);
+  const pageLimit =
+    params.pageLimit == null
+      ? UMBRA_CLAIM_SCAN_PAGE_LIMIT
+      : typeof params.pageLimit === 'bigint'
+        ? params.pageLimit
+        : BigInt(Math.max(1, Math.trunc(params.pageLimit)));
+  const window = await resolveUmbraClaimScanWindow(network, params);
+  const fetchUtxoData = createOffpayUmbraUtxoDataFetcher(network, {
+    maxLimit: pageLimit,
+    signal: params.signal,
+    yieldAfterPage: true,
+  });
+  // Deep scans intentionally try every registered master-seed scheme so older
+  // notes created under a legacy scheme are still discovered. Recent/range
+  // (the auto/fast paths) narrow to the wallet's active scheme to cut the
+  // dominant per-note X25519 cost ~4×.
+  const scanClient =
+    window.mode === 'deep'
+      ? runtime.client
+      : narrowUmbraClientToScheme(runtime.client, runtime.activeMasterSeedSchemeId);
+  const schemeCount = Array.isArray(scanClient.masterSeedSchemes)
+    ? scanClient.masterSeedSchemes.length
+    : 0;
   const clientWithIndexer = {
-    ...runtime.client,
+    ...scanClient,
     fetchUtxoData,
+    fetchTreeSummary: async () => window.summaries,
+    ...(window.fakeProgressStore == null ? {} : { utxoDataStore: window.fakeProgressStore }),
   } as IUmbraClient;
   const scanner = getClaimableUtxoScannerFunction({ client: clientWithIndexer }, {
     fetchUtxoData,
+    aesDecryptor: createYieldingUmbraAesDecryptor(),
   } as never);
+  const startedAt = mark();
   const scanResult = (await scanner()) as {
+    etaToStealthPoolReceiverBurnable?: readonly unknown[];
+    ataToStealthPoolReceiverBurnable?: readonly unknown[];
+    networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress?: readonly unknown[];
+    etaToStealthPoolSelfBurnable?: readonly unknown[];
+    ataToStealthPoolSelfBurnable?: readonly unknown[];
+    networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress?: readonly unknown[];
     etaIntoReceiverBurnable?: readonly unknown[];
     ataIntoReceiverBurnable?: readonly unknown[];
     etaIntoSelfBurnable?: readonly unknown[];
@@ -1739,17 +1942,49 @@ async function scanUmbraPrivateP2PUtxos(
     scanResult.nextScanStartIndex ??
     selectedProgress?.scannedRange?.end ??
     BigInt(params.startInsertionIndex ?? 0);
+  measure('umbra.claims.sdkScan', startedAt, {
+    network,
+    scanMode: window.mode,
+    schemeCount,
+    pageLimit: Number(pageLimit),
+    treeIndex: Number(window.treeIndex),
+    startInsertionIndex: window.start.toString(),
+    endInsertionIndex: window.end.toString(),
+    leafCount: Number(window.leafCount),
+    totalLeaves: window.totalLeaves.toString(),
+    receiverCount:
+      (scanResult.etaToStealthPoolReceiverBurnable?.length ?? 0) +
+      (scanResult.ataToStealthPoolReceiverBurnable?.length ?? 0) +
+      (scanResult.networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress?.length ?? 0) +
+      (scanResult.etaIntoReceiverBurnable?.length ?? scanResult.received?.length ?? 0) +
+      (scanResult.ataIntoReceiverBurnable?.length ?? scanResult.publicReceived?.length ?? 0),
+    selfCount:
+      (scanResult.etaToStealthPoolSelfBurnable?.length ?? 0) +
+      (scanResult.ataToStealthPoolSelfBurnable?.length ?? 0) +
+      (scanResult.networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress?.length ?? 0) +
+      (scanResult.etaIntoSelfBurnable?.length ?? scanResult.selfBurnable?.length ?? 0) +
+      (scanResult.ataIntoSelfBurnable?.length ?? scanResult.publicSelfBurnable?.length ?? 0),
+  });
 
   return {
     receiverClaimableUtxos: [
+      ...(scanResult.etaToStealthPoolReceiverBurnable ?? []),
+      ...(scanResult.ataToStealthPoolReceiverBurnable ?? []),
+      ...(scanResult.networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress ?? []),
       ...(scanResult.etaIntoReceiverBurnable ?? scanResult.received ?? []),
       ...(scanResult.ataIntoReceiverBurnable ?? scanResult.publicReceived ?? []),
     ],
     selfClaimableUtxos: [
+      ...(scanResult.etaToStealthPoolSelfBurnable ?? []),
+      ...(scanResult.ataToStealthPoolSelfBurnable ?? []),
+      ...(scanResult.networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress ?? []),
       ...(scanResult.etaIntoSelfBurnable ?? scanResult.selfBurnable ?? []),
       ...(scanResult.ataIntoSelfBurnable ?? scanResult.publicSelfBurnable ?? []),
     ],
     nextScanStartIndex: String(nextScanStartIndex),
+    scanMode: window.mode,
+    scanStartInsertionIndex: Number(window.start),
+    scanEndInsertionIndex: Number(window.end),
   };
 }
 
@@ -1987,16 +2222,38 @@ function filterClaimableUtxos<T>(
   });
 }
 
+export function getUmbraClaimScanRangeForInsertionIndices(
+  insertionIndices: readonly number[] | null | undefined,
+): Pick<UmbraClaimScanParams, 'scanMode' | 'startInsertionIndex' | 'endInsertionIndex'> {
+  const validIndices = (insertionIndices ?? []).filter(
+    (value) => Number.isSafeInteger(value) && value >= 0,
+  );
+  if (validIndices.length === 0) {
+    return { scanMode: 'recent' };
+  }
+
+  return {
+    scanMode: 'range',
+    startInsertionIndex: Math.min(...validIndices),
+    endInsertionIndex: Math.max(...validIndices),
+  };
+}
+
 export async function scanUmbraPrivateP2PClaims(
   params: UmbraWalletExecutionParams & {
     treeIndex?: number;
     startInsertionIndex?: number;
     endInsertionIndex?: number;
+    scanMode?: UmbraClaimScanMode;
+    recentLeafLimit?: number | bigint;
     excludedInsertionIndices?: ReadonlySet<number> | readonly number[] | null;
+    signal?: AbortSignal | null;
+    pageLimit?: number | bigint;
   },
 ): Promise<UmbraExecutionResult> {
   assertUmbraNetworkSupported(params.network);
   const walletAddress = assertWalletAddress(params.walletAddress);
+  const startedAt = mark();
   await verifyOffpayUmbraRpcReadiness(params.network);
 
   const excluded =
@@ -2006,47 +2263,92 @@ export async function scanUmbraPrivateP2PClaims(
         ? (params.excludedInsertionIndices as ReadonlySet<number>)
         : new Set(params.excludedInsertionIndices as readonly number[]);
 
-  return withUmbraRuntime(params, async (runtime) => {
-    const registrationStatus = await queryUmbraVaultRegistrationStatus(runtime, walletAddress);
-    const scanResult = await scanUmbraPrivateP2PUtxos(runtime, params.network, params);
-    const onChainClaimedIndices = await getOnChainClaimedUmbraInsertionIndexSet(
-      runtime,
-      params.treeIndex,
-      [...scanResult.receiverClaimableUtxos, ...scanResult.selfClaimableUtxos],
-    );
-    const effectiveExcluded =
-      excluded == null || excluded.size === 0
-        ? onChainClaimedIndices
-        : new Set([...excluded, ...onChainClaimedIndices]);
-    const receiverClaimableUtxos = filterClaimableUtxos(
-      scanResult.receiverClaimableUtxos,
-      effectiveExcluded,
-    );
-    const selfClaimableUtxos = filterClaimableUtxos(
-      scanResult.selfClaimableUtxos,
-      effectiveExcluded,
-    );
-    const nextScanStartIndex = scanResult.nextScanStartIndex;
-    const pendingClaimCount = receiverClaimableUtxos.length + selfClaimableUtxos.length;
-    const pendingClaimUtxoInsertionIndices = [...receiverClaimableUtxos, ...selfClaimableUtxos]
-      .map(getUtxoInsertionIndexAsNumber)
-      .filter((value): value is number => value != null);
-    const pendingClaimUtxoDetails: UmbraPendingClaimUtxo[] = [
-      ...receiverClaimableUtxos
-        .map((utxo) => projectPendingClaimUtxo(utxo, 'receiver'))
-        .filter((value): value is UmbraPendingClaimUtxo => value != null),
-      ...selfClaimableUtxos
-        .map((utxo) => projectPendingClaimUtxo(utxo, 'self'))
-        .filter((value): value is UmbraPendingClaimUtxo => value != null),
-    ];
+  try {
+    return await withUmbraRuntime(params, async (runtime) => {
+      const registrationStatus = await queryUmbraVaultRegistrationStatus(runtime, walletAddress);
+      const scanResult = await scanUmbraPrivateP2PUtxos(runtime, params.network, params);
+      const onChainClaimedIndices = await getOnChainClaimedUmbraInsertionIndexSet(
+        runtime,
+        params.treeIndex,
+        [...scanResult.receiverClaimableUtxos, ...scanResult.selfClaimableUtxos],
+      );
+      const effectiveExcluded =
+        excluded == null || excluded.size === 0
+          ? onChainClaimedIndices
+          : new Set([...excluded, ...onChainClaimedIndices]);
+      const receiverClaimableUtxos = filterClaimableUtxos(
+        scanResult.receiverClaimableUtxos,
+        effectiveExcluded,
+      );
+      const selfClaimableUtxos = filterClaimableUtxos(
+        scanResult.selfClaimableUtxos,
+        effectiveExcluded,
+      );
+      const nextScanStartIndex = scanResult.nextScanStartIndex;
+      const pendingClaimCount = receiverClaimableUtxos.length + selfClaimableUtxos.length;
+      const pendingClaimUtxoInsertionIndices = [...receiverClaimableUtxos, ...selfClaimableUtxos]
+        .map(getUtxoInsertionIndexAsNumber)
+        .filter((value): value is number => value != null);
+      const pendingClaimUtxoDetails: UmbraPendingClaimUtxo[] = [
+        ...receiverClaimableUtxos
+          .map((utxo) => projectPendingClaimUtxo(utxo, 'receiver'))
+          .filter((value): value is UmbraPendingClaimUtxo => value != null),
+        ...selfClaimableUtxos
+          .map((utxo) => projectPendingClaimUtxo(utxo, 'self'))
+          .filter((value): value is UmbraPendingClaimUtxo => value != null),
+      ];
 
-    if (!registrationStatus.mixerRegistered && receiverClaimableUtxos.length > 0) {
+      if (!registrationStatus.mixerRegistered && receiverClaimableUtxos.length > 0) {
+        return {
+          action: 'claim',
+          walletAddress,
+          network: params.network,
+          title: 'Umbra setup required',
+          subtitle: 'Register Umbra privacy before claiming receiver private P2P payments.',
+          signatures: [],
+          pendingClaimCount,
+          claimedUtxoCount: 0,
+          pendingClaimUtxoInsertionIndices,
+          pendingClaimUtxoDetails,
+          nextScanStartIndex,
+          vaultState: registrationStatus.vaultState,
+          vaultRegistered: registrationStatus.vaultRegistered,
+          vaultCanShield: registrationStatus.vaultCanShield,
+          mixerRegistered: registrationStatus.mixerRegistered,
+        };
+      }
+
+      if (!registrationStatus.vaultCanShield && selfClaimableUtxos.length > 0) {
+        return {
+          action: 'claim',
+          walletAddress,
+          network: params.network,
+          title: 'Umbra vault setup required',
+          subtitle: 'Set up your Umbra vault before claiming private payments to your wallet.',
+          signatures: [],
+          pendingClaimCount,
+          claimedUtxoCount: 0,
+          pendingClaimUtxoInsertionIndices,
+          pendingClaimUtxoDetails,
+          nextScanStartIndex,
+          vaultState: registrationStatus.vaultState,
+          vaultRegistered: registrationStatus.vaultRegistered,
+          vaultCanShield: registrationStatus.vaultCanShield,
+          mixerRegistered: registrationStatus.mixerRegistered,
+        };
+      }
+
       return {
         action: 'claim',
         walletAddress,
         network: params.network,
-        title: 'Umbra setup required',
-        subtitle: 'Register Umbra privacy before claiming receiver private P2P payments.',
+        title: pendingClaimCount === 0 ? 'No private payments found' : 'Private payment ready',
+        subtitle:
+          pendingClaimCount === 0
+            ? 'There are no claimable Umbra UTXOs for this wallet.'
+            : `${pendingClaimCount} Umbra UTXO${
+                pendingClaimCount === 1 ? '' : 's'
+              } ready to claim into encrypted balance.`,
         signatures: [],
         pendingClaimCount,
         claimedUtxoCount: 0,
@@ -2058,51 +2360,15 @@ export async function scanUmbraPrivateP2PClaims(
         vaultCanShield: registrationStatus.vaultCanShield,
         mixerRegistered: registrationStatus.mixerRegistered,
       };
-    }
-
-    if (!registrationStatus.vaultCanShield && selfClaimableUtxos.length > 0) {
-      return {
-        action: 'claim',
-        walletAddress,
-        network: params.network,
-        title: 'Umbra vault setup required',
-        subtitle: 'Set up your Umbra vault before claiming private payments to your wallet.',
-        signatures: [],
-        pendingClaimCount,
-        claimedUtxoCount: 0,
-        pendingClaimUtxoInsertionIndices,
-        pendingClaimUtxoDetails,
-        nextScanStartIndex,
-        vaultState: registrationStatus.vaultState,
-        vaultRegistered: registrationStatus.vaultRegistered,
-        vaultCanShield: registrationStatus.vaultCanShield,
-        mixerRegistered: registrationStatus.mixerRegistered,
-      };
-    }
-
-    return {
-      action: 'claim',
-      walletAddress,
+    });
+  } finally {
+    measure('umbra.claims.scan', startedAt, {
       network: params.network,
-      title: pendingClaimCount === 0 ? 'No private payments found' : 'Private payment ready',
-      subtitle:
-        pendingClaimCount === 0
-          ? 'There are no claimable Umbra UTXOs for this wallet.'
-          : `${pendingClaimCount} Umbra UTXO${
-              pendingClaimCount === 1 ? '' : 's'
-            } ready to claim into encrypted balance.`,
-      signatures: [],
-      pendingClaimCount,
-      claimedUtxoCount: 0,
-      pendingClaimUtxoInsertionIndices,
-      pendingClaimUtxoDetails,
-      nextScanStartIndex,
-      vaultState: registrationStatus.vaultState,
-      vaultRegistered: registrationStatus.vaultRegistered,
-      vaultCanShield: registrationStatus.vaultCanShield,
-      mixerRegistered: registrationStatus.mixerRegistered,
-    };
-  });
+      scanMode: params.scanMode ?? (params.startInsertionIndex != null ? 'range' : 'recent'),
+      pageLimit:
+        params.pageLimit == null ? Number(UMBRA_CLAIM_SCAN_PAGE_LIMIT) : Number(params.pageLimit),
+    });
+  }
 }
 
 export async function claimUmbraPrivateP2PToEncryptedBalance(
@@ -2110,7 +2376,11 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
     treeIndex?: number;
     startInsertionIndex?: number;
     endInsertionIndex?: number;
+    scanMode?: UmbraClaimScanMode;
+    recentLeafLimit?: number | bigint;
     excludedInsertionIndices?: ReadonlySet<number> | readonly number[] | null;
+    signal?: AbortSignal | null;
+    pageLimit?: number | bigint;
     /**
      * Called synchronously as soon as the SDK confirms the on-chain
      * nullifier is set for a UTXO (relayer status `completed` or
@@ -2214,10 +2484,27 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
                 } as never,
               );
         try {
-          const result = await claimReceiver(
-            receiverClaimableUtxos as never,
-            new Uint8Array(32) as never,
-          );
+          const claimStartedAt = mark();
+          let result: unknown;
+          try {
+            result = await claimReceiver(
+              receiverClaimableUtxos as never,
+              new Uint8Array(32) as never,
+            );
+            measure('umbra.claims.claimReceiver', claimStartedAt, {
+              network: params.network,
+              utxoCount: receiverClaimableUtxos.length,
+              ok: true,
+            });
+          } catch (claimCallError) {
+            measure('umbra.claims.claimReceiver', claimStartedAt, {
+              network: params.network,
+              utxoCount: receiverClaimableUtxos.length,
+              ok: false,
+              error: claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
+            });
+            throw claimCallError;
+          }
           const classified = assertUmbraClaimCompleted(result);
           for (const index of classified.resolvedInsertionIndices) {
             resolvedReceiverIndices.add(index);
@@ -2299,18 +2586,35 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
                 {
                   fetchBatchMerkleProof: createOffpayUmbraBatchMerkleProofFetcher(params.network),
                   relayer: createOffpayUmbraClaimRelayer(params.network),
-                  zkProver: getRnClaimReceiverClaimableUtxoIntoEncryptedBalanceProver(),
+                  zkProver: getRnClaimSelfClaimableUtxoIntoEncryptedBalanceProver(),
                   awaitCompletion: true,
                 } as never,
               )
             : getSelfClaimableUtxoToEncryptedBalanceClaimerFunction({ client: runtime.client }, {
                 fetchBatchMerkleProof: createOffpayUmbraBatchMerkleProofFetcher(params.network),
                 relayer: createOffpayUmbraClaimRelayer(params.network),
-                zkProver: getRnClaimReceiverClaimableUtxoIntoEncryptedBalanceProver(),
+                zkProver: getRnClaimSelfClaimableUtxoIntoEncryptedBalanceProver(),
                 awaitCompletion: true,
               } as never);
         try {
-          const result = await claimSelf(selfClaimableUtxos as never, new Uint8Array(32) as never);
+          const claimStartedAt = mark();
+          let result: unknown;
+          try {
+            result = await claimSelf(selfClaimableUtxos as never, new Uint8Array(32) as never);
+            measure('umbra.claims.claimSelf', claimStartedAt, {
+              network: params.network,
+              utxoCount: selfClaimableUtxos.length,
+              ok: true,
+            });
+          } catch (claimCallError) {
+            measure('umbra.claims.claimSelf', claimStartedAt, {
+              network: params.network,
+              utxoCount: selfClaimableUtxos.length,
+              ok: false,
+              error: claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
+            });
+            throw claimCallError;
+          }
           const classified = assertUmbraClaimCompleted(result);
           for (const index of classified.resolvedInsertionIndices) {
             resolvedSelfIndices.add(index);
@@ -2322,10 +2626,12 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
           // as the receiver path above. When the relayer reports
           // `completed` we trust the on-chain nullifier landed for
           // every UTXO we submitted, even if the SDK didn't surface
-          // per-UTXO ids. Without this we'd lose the exclusion record
-          // and the scanner would resurface the same UTXO forever.
+          // per-UTXO ids. Guarded by `failureReason == null` so a failed
+          // batch (e.g. UnableToVerifyGroth16Proof) can never be silently
+          // marked as resolved here.
           if (
             classified.outcome === 'completed' &&
+            classified.failureReason == null &&
             resolvedSelfIndices.size === 0 &&
             unresolvedSelfIndices.size === 0
           ) {
@@ -2396,8 +2702,15 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
       // indices so they don't show up as pending again.
       const sawPartialFailure =
         claimedUtxoInsertionIndices.length > 0 && unresolvedInsertionIndices.length > 0;
+      // Total failure: nothing landed on-chain. We detect this from the
+      // unresolved index set OR from a captured relayer failure reason — the
+      // latter is the authoritative signal, because a relayer that omits the
+      // per-batch UTXO ids on a failed batch would otherwise leave the
+      // unresolved set empty and make a hard on-chain failure
+      // (e.g. UnableToVerifyGroth16Proof) look like a success.
       const sawTotalFailure =
-        claimedUtxoInsertionIndices.length === 0 && unresolvedInsertionIndices.length > 0;
+        claimedUtxoInsertionIndices.length === 0 &&
+        (unresolvedInsertionIndices.length > 0 || firstFailureReason != null);
 
       if (sawTotalFailure) {
         // No batches resolved on-chain. Throw with the relayer's failure

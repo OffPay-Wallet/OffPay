@@ -10,13 +10,7 @@
  * Uses OffPay backend wallet and activity surfaces.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import {
-  InteractionManager,
-  ScrollView,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -42,7 +36,7 @@ import { GradientBackground } from '@/components/ui/GradientBackground';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { OFFLINE_PAYMENT_SLOT_DEFAULT } from '@/constants/offline-payment-slots';
-import { layout, radii, spacing } from '@/constants/spacing';
+import { layout, spacing } from '@/constants/spacing';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useWalletModeState } from '@/hooks/useWalletModeState';
@@ -56,6 +50,7 @@ import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { formatFiatCurrency } from '@/lib/currency-rates';
 import { formatLamportsAsExactSol } from '@/lib/crypto/solana-amounts';
 import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
 import {
   buildStablecoinMetadataLookup,
@@ -79,21 +74,36 @@ import type { ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import type { WalletMode } from '@/store/preferencesStore';
 
 // Lazy-load the Umbra vault surface so the heavy `@umbra-privacy/sdk`
-// graph stays out of the cold-start bundle. We prefetch the chunk
-// once Home settles (and again on press-in of the Shielded segment)
-// so the very first toggle never waits on a dynamic `import()`.
-const UMBRA_VAULT_CONTENT_IMPORT = (): Promise<{
+// graph stays out of the cold-start bundle. Do not auto-prefetch this
+// chunk on Home mount: in development it pulls in ~2k modules and can
+// stall reload / navigation. We only warm it when the user presses the
+// Shielded segment.
+type UmbraVaultContentModule = {
   default: typeof import('@/components/features/umbra-vault/umbra-vault-screen').UmbraVaultContent;
-}> =>
-  import('@/components/features/umbra-vault/umbra-vault-screen').then((module) => ({
-    default: module.UmbraVaultContent,
-  }));
-let umbraVaultContentPrefetch: Promise<unknown> | null = null;
-function prefetchUmbraVaultContent(): void {
-  if (umbraVaultContentPrefetch != null) return;
-  umbraVaultContentPrefetch = UMBRA_VAULT_CONTENT_IMPORT();
+};
+
+let umbraVaultContentImportPromise: Promise<UmbraVaultContentModule> | null = null;
+function loadUmbraVaultContent(reason: 'press-in' | 'render'): Promise<UmbraVaultContentModule> {
+  if (umbraVaultContentImportPromise != null) return umbraVaultContentImportPromise;
+  const startedAt = mark();
+  umbraVaultContentImportPromise = import('@/components/features/umbra-vault/umbra-vault-screen')
+    .then((module) => {
+      return {
+        default: module.UmbraVaultContent,
+      };
+    })
+    .finally(() => {
+      measure('home.umbraVault.import', startedAt, { reason });
+    });
+
+  return umbraVaultContentImportPromise;
 }
-const UmbraVaultContent = lazy(UMBRA_VAULT_CONTENT_IMPORT);
+
+function prefetchUmbraVaultContent(reason: 'press-in' | 'render'): void {
+  void loadUmbraVaultContent(reason);
+}
+
+const UmbraVaultContent = lazy(() => loadUmbraVaultContent('render'));
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -483,20 +493,18 @@ export function HomeScreenContent(): React.JSX.Element {
     router.prefetch('/private-payment?mode=send' as never);
   }, [balanceQuery.data, router]);
 
-  // Prefetch the Umbra vault chunk after the home screen settles. Most
-  // users will eventually flip the segmented control to Shielded; if
-  // we wait until then to start the dynamic `import()`, the user sees
-  // a long Suspense fallback that's mostly chunk-load time.
-  useEffect(() => {
-    const handle = InteractionManager.runAfterInteractions(() => {
-      prefetchUmbraVaultContent();
-    });
-    return () => handle.cancel();
+  const handlePrefetchUmbraVaultContent = useCallback((): void => {
+    prefetchUmbraVaultContent('press-in');
   }, []);
 
-  const handlePrefetchUmbraVaultContent = useCallback((): void => {
-    prefetchUmbraVaultContent();
-  }, []);
+  // Warm the Umbra vault chunk the moment the user switches to the
+  // Shielded segment. Kept in an effect (not inline in render) so the
+  // dynamic `import()` side effect never runs during the render pass.
+  useEffect(() => {
+    if (homeBalanceMode === 'shielded') {
+      prefetchUmbraVaultContent('render');
+    }
+  }, [homeBalanceMode]);
 
   const handleToggleOffline = useCallback((newOfflineState: boolean) => {
     const context = offlineToggleContextRef.current;
@@ -1002,19 +1010,13 @@ export function HomeScreenContent(): React.JSX.Element {
         </View>
 
         {homeBalanceMode === 'shielded' ? (
-          <View
-            key="shielded-mode"
-            style={[styles.homeContentFrame, styles.shieldedSection]}
-          >
+          <View key="shielded-mode" style={[styles.homeContentFrame, styles.shieldedSection]}>
             <Suspense fallback={null}>
               <UmbraVaultContent showHeader={false} tokenLogoMap={tokenLogoMap} />
             </Suspense>
           </View>
         ) : (
-          <View
-            key="portfolio-mode"
-            style={[styles.homeContentFrame, styles.modeContent]}
-          >
+          <View key="portfolio-mode" style={[styles.homeContentFrame, styles.modeContent]}>
             <Animated.View
               style={[styles.balanceSection, { marginBottom: sectionGap }, balanceStyle]}
             >

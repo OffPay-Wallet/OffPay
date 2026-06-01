@@ -3,7 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { fetchUmbraVaultRegistrationStatus } from '@/lib/umbra/umbra-execution';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import { useWalletStore } from '@/store/walletStore';
@@ -20,18 +24,22 @@ const UMBRA_REGISTRATION_STALE_TIME_MS = 0;
  * "already set up") so that Private P2P state persists across app restarts
  * rather than depending on in-memory mutation state.
  */
-export function useUmbraVaultRegistrationStatus() {
+export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } = {}) {
+  const enabledByCaller = options.enabled ?? true;
   const walletAddress = useWalletStore((state) => state.publicKey);
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
-  const { capabilities, isCapabilitiesPending } = useOffpayCapabilities();
+  const { capabilities, isCapabilitiesPending } = useOffpayCapabilities({
+    enabled: enabledByCaller,
+  });
   const capability = getOffpayFeatureCapability(capabilities, 'umbra.execution');
   const capabilityAvailable = isOffpayFeatureAvailable(capabilities, 'umbra.execution');
 
   const enabled =
     walletAddress != null &&
     network != null &&
+    enabledByCaller &&
     canUseNetwork &&
     isUmbraNetworkSupported(network) &&
     capabilityAvailable;
@@ -42,10 +50,13 @@ export function useUmbraVaultRegistrationStatus() {
       if (walletAddress == null || network == null) {
         throw new Error('Umbra vault registration requires an active wallet.');
       }
+      const startedAt = mark();
       return fetchUmbraVaultRegistrationStatus({
         walletAddress,
         walletId,
         network,
+      }).finally(() => {
+        measure('umbra.registrationStatus.query', startedAt, { network });
       });
     },
     enabled,
@@ -73,7 +84,7 @@ export function useUmbraVaultRegistrationStatus() {
     walletAddress,
     network,
     capability,
-    isCapabilitiesPending: canUseNetwork && isCapabilitiesPending,
+    isCapabilitiesPending: enabledByCaller && canUseNetwork && isCapabilitiesPending,
     isCapabilityEnabled: capabilityAvailable || enabled,
   };
 }

@@ -119,6 +119,7 @@ function getUmbraRpcUrl(network: OffpayNetwork): string {
 
 const UMBRA_VAULT_UNAVAILABLE_MESSAGE =
   'Umbra vault is not enabled for this token/network yet. A required protocol fee account is missing or has an incompatible layout.';
+const UMBRA_COMPACT_FEE_VAULT_SIZE = 368;
 
 const UMBRA_PROGRAM_ID_BY_NETWORK: Partial<Record<OffpayNetwork, string>> = {
   mainnet: 'UMBRAD2ishebJTcgCLkTkNUx1v3GyoAgpTRPeWoLykh',
@@ -397,7 +398,7 @@ function getExpectedFeeAccountLayout(kind: UmbraVaultFeeAccountCheck['kind']): {
 
   return {
     discriminator: getFeeVaultDiscriminatorBytes(),
-    minimumSize: getFeeVaultSize(),
+    minimumSize: Math.min(getFeeVaultSize(), UMBRA_COMPACT_FEE_VAULT_SIZE),
     label: 'FeeVault',
   };
 }

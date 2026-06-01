@@ -1,9 +1,10 @@
 import React, { memo, useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
@@ -53,6 +54,7 @@ interface UmbraReceiveCardProps {
     loadingLabel?: string;
     disabled: boolean;
     loading: boolean;
+    allowEmptyAction?: boolean;
     onPress: () => void;
     onViewAllPress?: () => void;
     accessibilityLabel: string;
@@ -153,23 +155,23 @@ const SetupSection = memo(function SetupSection({
           {/* Right column — Active pill or Set up action. */}
           <View style={[styles.setupCell, styles.setupCellEnd]}>
             {completed ? (
-            <View style={styles.setupActiveBadge}>
-              <Text
-                variant="bodyBold"
-                color={colors.brand.whiteStream}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.78}
-                maxFontSizeMultiplier={1.1}
-                style={styles.setupActiveText}
-              >
-                Active
-              </Text>
-              <View style={styles.setupActiveIconWrap}>
-                <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
+              <View style={styles.setupActiveBadge}>
+                <Text
+                  variant="bodyBold"
+                  color={colors.brand.whiteStream}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.78}
+                  maxFontSizeMultiplier={1.1}
+                  style={styles.setupActiveText}
+                >
+                  Active
+                </Text>
+                <View style={styles.setupActiveIconWrap}>
+                  <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
+                </View>
               </View>
-            </View>
-          ) : (
+            ) : (
               <Pressable
                 onPress={onPress}
                 disabled={disabled || loading}
@@ -184,7 +186,7 @@ const SetupSection = memo(function SetupSection({
               >
                 {loading ? (
                   <View style={styles.ctaButtonContent}>
-                    <ActivityIndicator size="small" color={colors.text.inverse} />
+                    <LazyLoadingSpinner size={18} color={colors.text.inverse} />
                     {loadingLabel != null && loadingLabel.length > 0 ? (
                       <Text
                         variant="button"
@@ -234,6 +236,7 @@ interface ClaimSectionProps {
   onViewAllPress?: () => void;
   disabled: boolean;
   loading: boolean;
+  allowEmptyAction?: boolean;
   accessibilityLabel: string;
   pendingCount: number;
 }
@@ -247,12 +250,13 @@ const ClaimSection = memo(function ClaimSection({
   onViewAllPress,
   disabled,
   loading,
+  allowEmptyAction = false,
   accessibilityLabel,
   pendingCount,
 }: ClaimSectionProps): React.JSX.Element {
   const statusColor = statusToneColor(statusTone);
   const hasPending = pendingCount > 0;
-  const claimDisabled = !hasPending || disabled;
+  const claimDisabled = (!hasPending && !allowEmptyAction) || disabled;
 
   return (
     <Animated.View layout={LinearTransition.duration(200)}>
@@ -287,10 +291,7 @@ const ClaimSection = memo(function ClaimSection({
               accessibilityRole="button"
               accessibilityLabel="View all pending Umbra claims"
               hitSlop={8}
-              style={({ pressed }) => [
-                styles.claimViewAllPressable,
-                pressed && styles.pressed,
-              ]}
+              style={({ pressed }) => [styles.claimViewAllPressable, pressed && styles.pressed]}
             >
               <Text
                 variant="captionBold"
@@ -301,11 +302,7 @@ const ClaimSection = memo(function ClaimSection({
               >
                 View all
               </Text>
-              <Ionicons
-                name="chevron-forward"
-                size={14}
-                color={colors.brand.azureBlue}
-              />
+              <Ionicons name="chevron-forward" size={14} color={colors.brand.azureBlue} />
             </Pressable>
           ) : null}
         </View>
@@ -334,7 +331,7 @@ const ClaimSection = memo(function ClaimSection({
           </Text>
         )}
 
-        {hasPending && status != null && status.length > 0 ? (
+        {status != null && status.length > 0 ? (
           <Text
             variant="small"
             color={statusColor}
@@ -353,7 +350,7 @@ const ClaimSection = memo(function ClaimSection({
             disabled={claimDisabled || loading}
             accessibilityRole="button"
             accessibilityLabel={accessibilityLabel}
-            accessibilityState={{ disabled: claimDisabled, busy: loading }}
+            accessibilityState={{ disabled: claimDisabled || loading, busy: loading }}
             style={({ pressed }) => [
               styles.claimActionButton,
               (claimDisabled || loading) && styles.ctaButtonDisabled,
@@ -362,7 +359,7 @@ const ClaimSection = memo(function ClaimSection({
           >
             {loading ? (
               <View style={styles.ctaButtonContent}>
-                <ActivityIndicator size="small" color={colors.text.inverse} />
+                <LazyLoadingSpinner size={18} color={colors.text.inverse} />
                 {loadingLabel != null && loadingLabel.length > 0 ? (
                   <Text
                     variant="button"
@@ -551,6 +548,7 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
               onViewAllPress={pendingClaimPanel.onViewAllPress}
               disabled={pendingClaimPanel.disabled}
               loading={pendingClaimPanel.loading}
+              allowEmptyAction={pendingClaimPanel.allowEmptyAction}
               accessibilityLabel={pendingClaimPanel.accessibilityLabel}
               pendingCount={pendingClaimPanel.pendingCount}
             />
@@ -582,10 +580,7 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
                     accessibilityRole="button"
                     accessibilityLabel="View all private receive activity"
                     hitSlop={8}
-                    style={({ pressed }) => [
-                      styles.viewAllPressable,
-                      pressed && styles.pressed,
-                    ]}
+                    style={({ pressed }) => [styles.viewAllPressable, pressed && styles.pressed]}
                   >
                     <Text
                       variant="captionBold"
@@ -596,11 +591,7 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
                     >
                       View all
                     </Text>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={14}
-                      color={colors.brand.deepShadow}
-                    />
+                    <Ionicons name="chevron-forward" size={14} color={colors.brand.deepShadow} />
                   </Pressable>
                 ) : null}
               </View>

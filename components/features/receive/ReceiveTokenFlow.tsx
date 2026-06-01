@@ -1,12 +1,5 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  Share,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { Pressable, ScrollView, Share, StyleSheet, View, useWindowDimensions } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -41,10 +34,16 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { useUmbraVaultRegistrationStatus } from '@/hooks/useUmbraVaultRegistrationStatus';
+import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildOffpayReceiveRequestQr } from '@/lib/offline/offline-payments';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { offpayWalletBalanceQueryKey } from '@/lib/api/offpay-wallet-query-keys';
+import { mark, measure } from '@/lib/perf/perf-marks';
+import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import {
   isRnZkProverNativeModuleAvailable,
@@ -74,6 +73,7 @@ const RECEIVE_QR_LOGO = require('../../../assets/appIcons/android/playstore-icon
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_ROUTE_MINT = 'native-sol';
 const RECEIVE_CONTENT_MAX_WIDTH = 430;
+const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 32;
 // Fade-out timing for the standard / private content swap. The
 // outgoing content fades quickly (the user has already committed to
 // the new mode); the incoming content is revealed by the per-component
@@ -149,9 +149,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const accountName = useWalletStore((state) => state.accountName);
   const username = useAppStore((state) => state.username);
   const { network, unsupportedReason } = useOffpayNetwork();
+  const getScreenSignal = useScreenAbortSignal();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const { mixerRegisterMutation } = useUmbraExecution();
-  const umbraVaultRegistrationQuery = useUmbraVaultRegistrationStatus();
   const offlineReceipts = useOfflinePaymentStore((state) => state.receipts);
   const claimedUtxoInsertionRecord = useUmbraPrivacyStore(
     (state) => state.claimedUtxoInsertionIndices,
@@ -184,8 +184,10 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const [_setupError, setSetupError] = useState<string | null>(null);
   const [pendingClaimResult, setPendingClaimResult] = useState<UmbraExecutionResult | null>(null);
   const [scanningUmbraClaims, setScanningUmbraClaims] = useState(false);
+  const [hasCheckedUmbraClaims, setHasCheckedUmbraClaims] = useState(false);
   const scanningUmbraClaimsRef = useRef(false);
   const pendingClaimToastRef = useRef<string | null>(null);
+  const pendingClaimAutoScanKeyRef = useRef<string | null>(null);
   const umbraCacheInvalidator = useUmbraCacheInvalidator();
   const requestedMint = getSearchParam(params.mint);
   const requestedToken = getSearchParam(params.token);
@@ -211,6 +213,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     walletId != null &&
     network != null &&
     isUmbraNetworkSupported(network);
+  const umbraVaultRegistrationQuery = useUmbraVaultRegistrationStatus({
+    enabled: canShowUmbraReceiveRoute && receiveMode === 'private',
+  });
   const canUseUmbraNativeProver = isRnZkProverNativeModuleAvailable();
   const capabilities = capabilitiesQuery.capabilities;
   const umbraPrivateP2pCapability = getOffpayFeatureCapability(
@@ -459,14 +464,16 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     }
     if (scanningUmbraClaimsRef.current) return;
 
+    const signal = getScreenSignal();
     scanningUmbraClaimsRef.current = true;
     setScanningUmbraClaims(true);
     void (async () => {
+      const startedAt = mark();
       const { scanUmbraPrivateP2PClaims } = await import('@/lib/umbra/umbra-execution');
+      if (signal.aborted) return;
       const latestClaimedUmbraIndexSet = getClaimedUmbraUtxoIndexSet(
         {
-          claimedUtxoInsertionIndices:
-            useUmbraPrivacyStore.getState().claimedUtxoInsertionIndices,
+          claimedUtxoInsertionIndices: useUmbraPrivacyStore.getState().claimedUtxoInsertionIndices,
         },
         network,
         walletAddress,
@@ -475,10 +482,20 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         walletAddress,
         walletId,
         network,
+        scanMode: 'recent',
         excludedInsertionIndices: latestClaimedUmbraIndexSet,
+        signal,
+        pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
       });
+      if (signal.aborted) return;
       const count = result.pendingClaimCount ?? 0;
       setPendingClaimResult(count > 0 ? result : null);
+      setHasCheckedUmbraClaims(true);
+      measure('receive.umbraClaims.scan', startedAt, {
+        network,
+        pendingCount: count,
+        pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+      });
       if (count > 0) {
         if (canUseUmbraClaim) {
           setReceiveRoute('umbra');
@@ -498,16 +515,21 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         }
       }
     })()
-      .catch(() => {
+      .catch((error) => {
+        if (error instanceof Error && error.name === 'AbortError') return;
         setPendingClaimResult(null);
+        setHasCheckedUmbraClaims(true);
       })
       .finally(() => {
         scanningUmbraClaimsRef.current = false;
-        setScanningUmbraClaims(false);
+        if (!signal.aborted) {
+          setScanningUmbraClaims(false);
+        }
       });
   }, [
     canScanUmbraClaims,
     canUseUmbraClaim,
+    getScreenSignal,
     network,
     showToast,
     walletAddress,
@@ -515,10 +537,8 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   ]);
 
   // Latch the latest `scanUmbraPendingClaims` callback in a ref so the
-  // polling effect below only re-runs when the on/off switch flips. The
-  // earlier shape rebuilt the entire backoff cascade whenever
-  // `claimedUmbraIndexSet`, `showToast`, or any other dep of the
-  // callback changed, which kept the indexer warm for nothing.
+  // deferred private-tab scan can stay cancellable without re-scheduling
+  // the heavy Umbra SDK import on every render.
   const scanLatestRef = useRef(scanUmbraPendingClaims);
   useEffect(() => {
     scanLatestRef.current = scanUmbraPendingClaims;
@@ -537,38 +557,25 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   useEffect(() => {
     if (!canScanUmbraClaims) {
       setPendingClaimResult(null);
+      setHasCheckedUmbraClaims(false);
+      pendingClaimAutoScanKeyRef.current = null;
       return;
     }
+    if (!isUmbraSurfaceVisible || walletAddress == null || network == null) return;
 
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    // Fresh UTXOs take a few seconds to land on the indexer after the deposit
-    // transaction confirms. Poll aggressively for the first minute to catch
-    // them, then back off so we don't hammer the API indefinitely.
-    const SCAN_INTERVALS_MS = [
-      5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 120_000, 120_000,
-    ] as const;
-    let intervalIndex = 0;
+    const key = `${network}:${walletAddress}`;
+    if (pendingClaimAutoScanKeyRef.current === key) return;
+    pendingClaimAutoScanKeyRef.current = key;
 
-    const scheduleNext = (): void => {
-      if (cancelled) return;
-      const delay = SCAN_INTERVALS_MS[Math.min(intervalIndex, SCAN_INTERVALS_MS.length - 1)];
-      intervalIndex += 1;
-      timer = setTimeout(() => {
+    const scheduled = scheduleUiWorkAfterFirstPaint(
+      () => {
         scanLatestRef.current();
-        scheduleNext();
-      }, delay);
-    };
+      },
+      { fallbackDelayMs: 700, timeoutMs: 3000 },
+    );
 
-    // Kick off an immediate scan, then schedule follow-ups on the backoff curve.
-    scanLatestRef.current();
-    scheduleNext();
-
-    return () => {
-      cancelled = true;
-      if (timer != null) clearTimeout(timer);
-    };
-  }, [canScanUmbraClaims]);
+    return () => scheduled.cancel();
+  }, [canScanUmbraClaims, isUmbraSurfaceVisible, network, walletAddress]);
 
   const handleClaimUmbraPayments = useCallback(() => {
     if (walletAddress == null || walletId == null || network == null || !canUseUmbraClaim) {
@@ -587,8 +594,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     setClaimError(null);
     setClaimResult(null);
     void (async () => {
-      const { claimUmbraPrivateP2PToEncryptedBalance, isBenignAlreadyClaimedFailure } =
-        await import('@/lib/umbra/umbra-execution');
+      const {
+        claimUmbraPrivateP2PToEncryptedBalance,
+        getUmbraClaimScanRangeForInsertionIndices,
+        isBenignAlreadyClaimedFailure,
+      } = await import('@/lib/umbra/umbra-execution');
       const { isTransientRelayerFailure } = await import('@/lib/umbra/umbra-error-messages');
 
       // Bounded auto-retry on transient relayer failures. The Umbra
@@ -608,11 +618,16 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         }
 
         try {
+          const pendingScanRange = getUmbraClaimScanRangeForInsertionIndices(
+            pendingClaimResult?.pendingClaimUtxoInsertionIndices,
+          );
           result = await claimUmbraPrivateP2PToEncryptedBalance({
             walletAddress,
             walletId,
             network,
+            ...pendingScanRange,
             excludedInsertionIndices: claimedUmbraIndexSet,
+            pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
             // Synchronous persistence callback. The SDK invokes this
             // the moment a UTXO's on-chain nullifier is confirmed,
             // BEFORE this promise resolves. That closes the timing
@@ -678,10 +693,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           // Transient relayer / Solana-RPC failure — no nullifier was
           // inserted on-chain, the buffer was closed, the user's UTXOs
           // are still legitimately pending. Retry up to the bound.
-          if (
-            isTransientRelayerFailure(error) &&
-            attempt + 1 < TRANSIENT_RETRY_DELAYS_MS.length
-          ) {
+          if (isTransientRelayerFailure(error) && attempt + 1 < TRANSIENT_RETRY_DELAYS_MS.length) {
             lastTransientError = error;
             continue;
           }
@@ -911,23 +923,24 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               style={[styles.standardLayout, isUmbraSurfaceVisible && styles.modeHidden]}
               pointerEvents={isUmbraSurfaceVisible ? 'none' : 'auto'}
               accessibilityElementsHidden={isUmbraSurfaceVisible}
-              importantForAccessibility={
-                isUmbraSurfaceVisible ? 'no-hide-descendants' : 'auto'
-              }
+              importantForAccessibility={isUmbraSurfaceVisible ? 'no-hide-descendants' : 'auto'}
             >
               {latestReceivedReceipt != null ? (
                 <StaggerRevealItem index={0} trigger={renderedReceiveMode}>
                   <View style={styles.receivedPill}>
                     <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
                     <Text variant="captionBold" color={colors.text.primary} numberOfLines={1}>
-                      Received{' '}
-                      {latestReceivedReceipt.amountLabel?.replace(/^\+/, '') ?? 'payment'}
+                      Received {latestReceivedReceipt.amountLabel?.replace(/^\+/, '') ?? 'payment'}
                     </Text>
                   </View>
                 </StaggerRevealItem>
               ) : null}
 
-              <StaggerRevealItem index={1} trigger={renderedReceiveMode} style={styles.identityBlock}>
+              <StaggerRevealItem
+                index={1}
+                trigger={renderedReceiveMode}
+                style={styles.identityBlock}
+              >
                 <Text
                   variant="bodyBold"
                   color={colors.text.primary}
@@ -998,7 +1011,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 </Text>
               ) : null}
 
-              <StaggerRevealItem index={4} trigger={renderedReceiveMode} style={styles.addressActionRow}>
+              <StaggerRevealItem
+                index={4}
+                trigger={renderedReceiveMode}
+                style={styles.addressActionRow}
+              >
                 <Pressable
                   onPress={handleCopyAddress}
                   disabled={walletAddress == null}
@@ -1056,66 +1073,71 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               style={[!isUmbraSurfaceVisible && styles.modeHidden]}
               pointerEvents={!isUmbraSurfaceVisible ? 'none' : 'auto'}
               accessibilityElementsHidden={!isUmbraSurfaceVisible}
-              importantForAccessibility={
-                !isUmbraSurfaceVisible ? 'no-hide-descendants' : 'auto'
-              }
+              importantForAccessibility={!isUmbraSurfaceVisible ? 'no-hide-descendants' : 'auto'}
             >
               <UmbraReceiveCard
-              unavailableMessage={
-                canUseUmbraReceiveRoute ? null : (umbraReceiveDisabledReason ?? null)
-              }
-              setupPanel={
-                canUseUmbraReceiveRoute
-                  ? {
-                      title: 'Umbra Claims',
-                      buttonLabel: 'Set up',
-                      loadingLabel: 'Setting up',
-                      onPress: handleSetupUmbraPrivateP2P,
-                      disabled:
-                        !canUseUmbraReceiveRoute || mixerRegisterMutation.isPending,
-                      loading: mixerRegisterMutation.isPending,
-                      accessibilityLabel: 'Set up Umbra private P2P',
-                      completed: umbraAlreadyMixerRegistered,
-                    }
-                  : undefined
-              }
-              pendingClaimPanel={{
-                pendingCount: pendingClaimCount,
-                status:
-                  pendingClaimCount > 0
-                    ? claimError
-                    : (claimError ??
-                      claimResult?.subtitle ??
-                      (scanningUmbraClaims ? 'Checking for pending private payments.' : null)),
-                statusTone:
-                  claimError != null
-                    ? 'error'
-                    : pendingClaimCount > 0
-                      ? 'success'
-                      : claimResult != null
+                unavailableMessage={
+                  canUseUmbraReceiveRoute ? null : (umbraReceiveDisabledReason ?? null)
+                }
+                setupPanel={
+                  canUseUmbraReceiveRoute
+                    ? {
+                        title: 'Umbra Claims',
+                        buttonLabel: 'Set up',
+                        loadingLabel: 'Setting up',
+                        onPress: handleSetupUmbraPrivateP2P,
+                        disabled: !canUseUmbraReceiveRoute || mixerRegisterMutation.isPending,
+                        loading: mixerRegisterMutation.isPending,
+                        accessibilityLabel: 'Set up Umbra private P2P',
+                        completed: umbraAlreadyMixerRegistered,
+                      }
+                    : undefined
+                }
+                pendingClaimPanel={{
+                  pendingCount: pendingClaimCount,
+                  status:
+                    pendingClaimCount > 0
+                      ? claimError
+                      : (claimError ??
+                        claimResult?.subtitle ??
+                        (scanningUmbraClaims
+                          ? 'Checking for pending private payments.'
+                          : hasCheckedUmbraClaims
+                            ? 'No pending private payments found.'
+                            : 'Check for pending private payments when needed.')),
+                  statusTone:
+                    claimError != null
+                      ? 'error'
+                      : pendingClaimCount > 0
                         ? 'success'
-                        : 'neutral',
-                buttonLabel: 'Claim all',
-                loadingLabel: 'Claiming',
-                onPress: handleClaimUmbraPayments,
-                onViewAllPress: handleViewAllPendingClaims,
-                // The card always shows the Claim button now; gate
-                // enablement on the SDK-provided pending count so
-                // taps never fire a no-op network round-trip.
-                disabled: !canUseUmbraClaim || claimingUmbra || pendingClaimCount === 0,
-                loading: claimingUmbra,
-                accessibilityLabel:
-                  pendingClaimCount > 0
-                    ? 'Claim all pending Umbra private payments'
-                    : 'No pending Umbra private payments to claim',
-              }}
-              history={umbraHistoryForCurrentNetwork}
-              historyLimit={3}
-              onViewAllHistory={
-                umbraHistoryForCurrentNetwork.length > 0 ? handleOpenHistoryTab : undefined
-              }
-              revealKey={renderedReceiveMode}
-            />
+                        : claimResult != null
+                          ? 'success'
+                          : 'neutral',
+                  buttonLabel:
+                    pendingClaimCount > 0
+                      ? 'Claim all'
+                      : hasCheckedUmbraClaims
+                        ? 'Check again'
+                        : 'Check pending',
+                  loadingLabel: pendingClaimCount > 0 ? 'Claiming' : 'Checking',
+                  onPress:
+                    pendingClaimCount > 0 ? handleClaimUmbraPayments : scanUmbraPendingClaims,
+                  onViewAllPress: handleViewAllPendingClaims,
+                  allowEmptyAction: true,
+                  disabled: !canUseUmbraClaim || claimingUmbra || scanningUmbraClaims,
+                  loading: claimingUmbra || scanningUmbraClaims,
+                  accessibilityLabel:
+                    pendingClaimCount > 0
+                      ? 'Claim all pending Umbra private payments'
+                      : 'Check for pending Umbra private payments',
+                }}
+                history={umbraHistoryForCurrentNetwork}
+                historyLimit={3}
+                onViewAllHistory={
+                  umbraHistoryForCurrentNetwork.length > 0 ? handleOpenHistoryTab : undefined
+                }
+                revealKey={renderedReceiveMode}
+              />
             </View>
           </Animated.View>
         </View>

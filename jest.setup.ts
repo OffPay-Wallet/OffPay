@@ -158,6 +158,16 @@ jest.mock('expo-file-system', () => {
       return new TextEncoder().encode(mockFileSystemValues.get(this.uri) ?? '').length;
     }
 
+    info(): { exists: boolean; uri: string; size?: number } {
+      const exists = mockFileSystemValues.has(this.uri);
+      if (!exists) return { exists: false, uri: this.uri };
+      return {
+        exists: true,
+        uri: this.uri,
+        size: new TextEncoder().encode(mockFileSystemValues.get(this.uri) ?? '').length,
+      };
+    }
+
     create(): void {
       mockDirectories.add(mockGetParentDirectory(this.uri));
       if (!mockFileSystemValues.has(this.uri)) {
@@ -183,6 +193,14 @@ jest.mock('expo-file-system', () => {
 
     delete(): void {
       mockFileSystemValues.delete(this.uri);
+    }
+
+    move(destination: { uri: string }): void {
+      const content = mockFileSystemValues.get(this.uri) ?? '';
+      mockFileSystemValues.delete(this.uri);
+      mockFileSystemValues.set(destination.uri, content);
+      mockDirectories.add(mockGetParentDirectory(destination.uri));
+      this.uri = destination.uri;
     }
 
     static downloadFileAsync = mockDownloadFileAsync;

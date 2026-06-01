@@ -1,12 +1,17 @@
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 
+import { mark, measure } from '@/lib/perf/perf-marks';
+
 import type { Groth16ProofA, Groth16ProofB, Groth16ProofC } from '@umbra-privacy/sdk/zk-prover';
 
 type NativeRnZkProver = typeof import('@umbra-privacy/rn-zk-prover');
+type NativeCircomProofResult = Awaited<ReturnType<NativeRnZkProver['generateCircomProof']>>;
 type NativeCircomProof = Awaited<ReturnType<NativeRnZkProver['generateCircomProof']>>['proof'];
+type NativeProofLib = NativeRnZkProver['ProofLib'][keyof NativeRnZkProver['ProofLib']];
 type NativeMoproBinding = {
   generateCircomProof: NativeRnZkProver['generateCircomProof'];
+  verifyCircomProof: NativeRnZkProver['verifyCircomProof'];
 };
 type ClaimBatchSize = 1 | 2 | 3 | 4;
 type UmbraProofResult = {
@@ -26,6 +31,10 @@ type ZkProverForSelfClaimableUtxoFromPublicBalance = {
 };
 type IZkProverForClaimReceiverClaimableUtxoIntoEncryptedBalance = {
   prove: (inputs: unknown, nLeaves: ClaimBatchSize) => Promise<UmbraProofResult>;
+};
+type IZkProverForClaimSelfClaimableUtxoIntoEncryptedBalance = {
+  readonly maxUtxoCapacity: 1;
+  prove: (inputs: unknown) => Promise<UmbraProofResult>;
 };
 type ZKeyType =
   | 'userRegistration'
@@ -51,10 +60,13 @@ type LocalZkAssetManifest = {
 type MoproInputs = Record<string, string[]>;
 
 // The on-device native crate inside @umbra-privacy/rn-zk-prover must match the
-// proving assets expected by the deployed Umbra programs. Keep the cache keyed
-// by Umbra's remote manifest so a zkey rotation replaces stale local files.
+// proving assets expected by the deployed Umbra programs. rn-zk-prover@5.x
+// ships v5 native witness code, so do not use the root manifest (currently
+// v3). Keep the cache keyed by the matching versioned manifest so a zkey
+// rotation replaces stale local files.
 const UMBRA_ZK_ASSET_BASE_URL = 'https://zk.api.umbraprivacy.com';
-const UMBRA_ZK_MANIFEST_PATH = 'manifest.json';
+const UMBRA_RN_ZK_ASSET_VERSION = 'v5';
+const UMBRA_ZK_MANIFEST_PATH = `${UMBRA_RN_ZK_ASSET_VERSION}/manifest.json`;
 const UMBRA_ZK_ASSET_MANIFEST_URL = `${UMBRA_ZK_ASSET_BASE_URL}/${UMBRA_ZK_MANIFEST_PATH}`;
 const UMBRA_ZK_ASSET_DIRECTORY = new Directory(Paths.cache, 'offpay-umbra-zk-assets');
 const UMBRA_ZK_ASSET_LOCAL_MANIFEST_FILENAME = 'manifest.json';
@@ -161,7 +173,8 @@ function getNativeMoproBinding(nativeProver: NativeRnZkProver): NativeMoproBindi
   if (
     binding == null ||
     typeof binding !== 'object' ||
-    typeof (binding as Partial<NativeMoproBinding>).generateCircomProof !== 'function'
+    typeof (binding as Partial<NativeMoproBinding>).generateCircomProof !== 'function' ||
+    typeof (binding as Partial<NativeMoproBinding>).verifyCircomProof !== 'function'
   ) {
     throw new Error(
       'Umbra private P2P prover binding is unavailable. Rebuild the app with a compatible @umbra-privacy/rn-zk-prover package.',
@@ -323,14 +336,52 @@ function fileUriToNativePath(uri: string): string {
 }
 
 function isNonEmptyZkeyFile(file: File): boolean {
-  return file.exists && file.size >= MIN_ZKEY_BYTES;
+  const size = statZkeyFileSize(file);
+  return file.exists && size != null && size >= MIN_ZKEY_BYTES;
+}
+
+/**
+ * Read a file's on-disk size robustly. `File.size` is a native getter that can
+ * return `null`/`undefined` on a stale handle (e.g. immediately after a
+ * streamed Android download via a pre-download handle). Prefer the live
+ * `info().size`, fall back to the `size` getter, and normalize anything
+ * non-finite to `null` so callers can distinguish "unknown" from "zero".
+ */
+function statZkeyFileSize(file: File): number | null {
+  if (!file.exists) return null;
+  try {
+    const info = file.info();
+    if (info.exists && typeof info.size === 'number' && Number.isFinite(info.size)) {
+      return info.size;
+    }
+  } catch {
+    // `info()` may throw if the handle cannot be read; fall through to `size`.
+  }
+  const rawSize = (file as { size?: number | null }).size;
+  return typeof rawSize === 'number' && Number.isFinite(rawSize) ? rawSize : null;
+}
+
+/**
+ * Validate a zkey's completeness from an already-resolved size. zkeys feed the
+ * Groth16 prover, so when the server advertised an exact `content-length` we
+ * require an exact match — extra or missing bytes must fail. Only when the
+ * expected size is unknown do we fall back to the conservative minimum-size
+ * heuristic.
+ */
+function isCompleteZkeyFileSize(
+  exists: boolean,
+  actualSize: number | null,
+  expectedSize: number | null,
+): boolean {
+  if (!exists) return false;
+  if (actualSize == null) return false;
+  if (actualSize < MIN_ZKEY_BYTES) return false;
+  if (expectedSize != null) return actualSize === expectedSize;
+  return true;
 }
 
 function isCompleteZkeyFile(file: File, expectedSize?: number | null): boolean {
-  if (!file.exists) return false;
-  if (file.size < MIN_ZKEY_BYTES) return false;
-  if (expectedSize != null && file.size !== expectedSize) return false;
-  return true;
+  return isCompleteZkeyFileSize(file.exists, statZkeyFileSize(file), expectedSize ?? null);
 }
 
 export async function resolveUmbraZkeyPath(
@@ -404,18 +455,46 @@ export async function resolveUmbraZkeyPath(
   const expectedSize = await fetchContentLength(downloadUrl);
 
   if (target.exists) target.delete();
-  await File.downloadFileAsync(downloadUrl, target, { idempotent: true });
-  if (!isCompleteZkeyFile(target, expectedSize ?? null)) {
-    target.delete();
+  // `File.downloadFileAsync` resolves to the *downloaded* `File`; its `uri`
+  // (and the filename derived from response headers) can differ from the
+  // pre-download `target` handle. On Android the body streams into the
+  // destination and the original handle's cached native peer does not reflect
+  // the post-download size — reading `target.size` here returns a stale/`null`
+  // value even though the bytes landed. Always re-stat through the returned
+  // handle (falling back to a fresh handle on the resolved uri) before
+  // validating, so the completeness check sees the real on-disk size.
+  const downloaded = await File.downloadFileAsync(downloadUrl, target, { idempotent: true });
+  let persisted = new File(downloaded?.uri ?? target.uri);
+  const persistedSize = statZkeyFileSize(persisted);
+  if (!isCompleteZkeyFileSize(persisted.exists, persistedSize, expectedSize ?? null)) {
+    if (persisted.exists) persisted.delete();
     throw new Error(
-      `Umbra ZK asset ${type}${variant == null ? '' : `/${variant}`} is incomplete (got ${target.size} bytes${
-        expectedSize != null ? `, expected ${expectedSize}` : ''
-      }).`,
+      `Umbra ZK asset ${type}${variant == null ? '' : `/${variant}`} is incomplete (got ${
+        persistedSize == null ? 'null' : String(persistedSize)
+      } bytes${expectedSize != null ? `, expected ${expectedSize}` : ''}).`,
     );
+  }
+
+  // Normalize the downloaded file back to the deterministic `target` path. If
+  // `downloadFileAsync` resolved the body to a different uri (Android can
+  // derive the filename from response headers), future cache reuse — which
+  // requires `localAsset.localPath === target.uri` — and offline reuse would
+  // otherwise miss and force a re-download every run. Move it onto the
+  // canonical path so the cache key is stable.
+  if (persisted.uri !== target.uri) {
+    try {
+      if (target.exists) target.delete();
+      persisted.move(target);
+      persisted = new File(target.uri);
+    } catch {
+      // If the move fails we still have a valid file at `persisted.uri`;
+      // fall back to persisting that path so this run succeeds.
+    }
   }
 
   const existingManifest = await readLocalManifest();
   const manifestVersion = manifest.version ?? entry.version ?? 'unknown';
+  const finalSize = statZkeyFileSize(persisted);
   await writeLocalManifest({
     manifestVersion,
     downloadedAt: Date.now(),
@@ -423,13 +502,13 @@ export async function resolveUmbraZkeyPath(
       ...(existingManifest?.manifestVersion === manifestVersion ? existingManifest.assets : {}),
       [getManifestAssetKey(type, variant)]: {
         version: getManifestAssetVersion(manifest, entry),
-        localPath: target.uri,
-        size: target.size,
+        localPath: persisted.uri,
+        size: finalSize ?? undefined,
       },
     },
   });
 
-  return fileUriToNativePath(target.uri);
+  return fileUriToNativePath(persisted.uri);
 }
 
 function toMoproStringArray(value: unknown): string[] {
@@ -489,6 +568,25 @@ function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
   return output;
 }
 
+type NativeProofLibCandidate = {
+  readonly name: 'Rapidsnark' | 'Arkworks';
+  readonly value: NativeProofLib;
+};
+
+function getNativeProofLibCandidates(nativeProver: NativeRnZkProver): readonly NativeProofLibCandidate[] {
+  const candidates: NativeProofLibCandidate[] = [];
+  const proofLib = nativeProver.ProofLib;
+
+  if (proofLib.Rapidsnark != null) {
+    candidates.push({ name: 'Rapidsnark', value: proofLib.Rapidsnark });
+  }
+  if (proofLib.Arkworks != null) {
+    candidates.push({ name: 'Arkworks', value: proofLib.Arkworks });
+  }
+
+  return candidates;
+}
+
 export function convertNativeCircomProofToUmbraProofBytes(proof: NativeCircomProof): {
   proofA: Groth16ProofA;
   proofB: Groth16ProofB;
@@ -518,20 +616,74 @@ export function convertNativeCircomProofToUmbraProofBytes(proof: NativeCircomPro
   };
 }
 
+async function generateAndVerifyNativeCircomProof(
+  mopro: NativeMoproBinding,
+  nativeProver: NativeRnZkProver,
+  zkeyPath: string,
+  serializedInputs: string,
+  assetLabel: string,
+): Promise<UmbraProofResult> {
+  const candidates = getNativeProofLibCandidates(nativeProver);
+  const failures: string[] = [];
+
+  for (const candidate of candidates) {
+    const proofStartedAt = mark();
+    try {
+      const result: NativeCircomProofResult = await mopro.generateCircomProof(
+        zkeyPath,
+        serializedInputs,
+        candidate.value,
+      );
+      const locallyVerified = mopro.verifyCircomProof(zkeyPath, result, candidate.value);
+      measure('umbra.zkProver.generateProof', proofStartedAt, {
+        asset: assetLabel,
+        proofLib: candidate.name,
+        ok: locallyVerified,
+        localVerified: locallyVerified,
+      });
+
+      if (!locallyVerified) {
+        failures.push(`${candidate.name}: native proof did not verify locally`);
+        continue;
+      }
+
+      return convertNativeCircomProofToUmbraProofBytes(result.proof);
+    } catch (proofError) {
+      const message = proofError instanceof Error ? proofError.message : String(proofError);
+      measure('umbra.zkProver.generateProof', proofStartedAt, {
+        asset: assetLabel,
+        proofLib: candidate.name,
+        ok: false,
+        localVerified: false,
+        error: message,
+      });
+      failures.push(`${candidate.name}: ${message}`);
+    }
+  }
+
+  throw new Error(`Umbra ${assetLabel} native proof failed: ${failures.join('; ')}`);
+}
+
 async function proveCircom(type: ZKeyType, inputs: unknown, variant?: ClaimVariant) {
+  const label = variant == null ? type : `${type}/${variant}`;
+  const zkeyStartedAt = mark();
   const [nativeProver, zkeyPath] = await Promise.all([
     getNativeProver(),
     resolveUmbraZkeyPath(type, variant),
   ]);
+  // Non-secret zkey diagnostics for the Umbra team's claim-failure bundle:
+  // which asset/variant was used and its on-disk byte size (so we can confirm
+  // the v5 zkey downloaded intact and matches the expected proving key).
+  const resolvedZkeyFile = new File(zkeyPath.startsWith('file://') ? zkeyPath : `file://${zkeyPath}`);
+  measure('umbra.zkProver.resolveZkey', zkeyStartedAt, {
+    asset: label,
+    zkeyFileName: getUmbraZkeyCacheFileName(type, variant),
+    zkeyBytes: statZkeyFileSize(resolvedZkeyFile) ?? -1,
+  });
   const serializedInputs = serializeUmbraCircuitInputsForNativeProver(inputs);
   const mopro = getNativeMoproBinding(nativeProver);
   const generateProof = async (path: string) => {
-    const result = await mopro.generateCircomProof(
-      path,
-      serializedInputs,
-      nativeProver.ProofLib.Arkworks,
-    );
-    return convertNativeCircomProofToUmbraProofBytes(result.proof);
+    return generateAndVerifyNativeCircomProof(mopro, nativeProver, path, serializedInputs, label);
   };
 
   try {
@@ -583,5 +735,12 @@ export function getRnClaimReceiverClaimableUtxoIntoEncryptedBalanceProver(): IZk
   return {
     prove: (inputs: unknown, nLeaves: ClaimBatchSize) =>
       proveCircom('claimDepositIntoConfidentialAmount', inputs, `n${nLeaves}`),
+  };
+}
+
+export function getRnClaimSelfClaimableUtxoIntoEncryptedBalanceProver(): IZkProverForClaimSelfClaimableUtxoIntoEncryptedBalance {
+  return {
+    maxUtxoCapacity: 1,
+    prove: (inputs: unknown) => proveCircom('claimDepositIntoConfidentialAmount', inputs, 'n1'),
   };
 }

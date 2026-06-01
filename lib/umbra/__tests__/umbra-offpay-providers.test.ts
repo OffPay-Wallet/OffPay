@@ -623,7 +623,7 @@ describe('umbra-offpay-providers', () => {
     });
   });
 
-  it('blocks vault actions when a current fee vault still has the old layout', async () => {
+  it('allows private P2P from public when the current fee vault uses the compact layout', async () => {
     const accounts = await deriveUmbraProtocolFeeAccounts({
       action: 'privateP2pFromPublic',
       mint: DEVNET_DUSDC_MINT,
@@ -645,6 +645,35 @@ describe('umbra-offpay-providers', () => {
         network: 'devnet',
       }),
     ).resolves.toMatchObject({
+      available: true,
+      message: null,
+      missingAccounts: [],
+      protocolVersion: 'current',
+    });
+  });
+
+  it('blocks vault actions when a fee vault is smaller than the compact layout', async () => {
+    const accounts = await deriveUmbraProtocolFeeAccounts({
+      action: 'privateP2pFromPublic',
+      mint: DEVNET_DUSDC_MINT,
+      network: 'devnet',
+    });
+    mockGetRpcAccounts.mockResolvedValueOnce({
+      network: 'devnet',
+      accounts: accounts.map((account) =>
+        account.kind === 'feeVault'
+          ? feeAccountRecord(account, DEVNET_UMBRA_PROGRAM_ID, 367)
+          : feeAccountRecord(account, DEVNET_UMBRA_PROGRAM_ID),
+      ),
+    });
+
+    await expect(
+      verifyOffpayUmbraVaultFeeAccountReadiness({
+        action: 'privateP2pFromPublic',
+        mint: DEVNET_DUSDC_MINT,
+        network: 'devnet',
+      }),
+    ).resolves.toMatchObject({
       available: false,
       message:
         'Umbra vault is not enabled for this token/network yet. A required protocol fee account is missing or has an incompatible layout.',
@@ -652,7 +681,7 @@ describe('umbra-offpay-providers', () => {
         expect.objectContaining({
           exists: false,
           kind: 'feeVault',
-          validationError: 'FeeVault layout is 368 bytes, expected at least 396',
+          validationError: 'FeeVault layout is 367 bytes, expected at least 368',
         }),
       ],
       protocolVersion: null,

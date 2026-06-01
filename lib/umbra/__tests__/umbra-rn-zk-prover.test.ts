@@ -110,6 +110,68 @@ describe('umbra-rn-zk-prover', () => {
     expect(shouldRefreshUmbraZkeyAfterProofError(new Error('invalid witness input'))).toBe(false);
   });
 
+  it('validates the downloaded zkey via the returned handle and normalizes it back to the canonical path', async () => {
+    // Reproduces the device bug: on Android the response streams into the
+    // destination and `File.downloadFileAsync` resolves to the *downloaded*
+    // handle, whose uri can differ from the pre-download target. The resolver
+    // must validate the returned handle, then move it back onto the
+    // deterministic target path so future cache reuse (keyed by target.uri)
+    // and offline reuse work without re-downloading.
+    (NativeModules as Record<string, unknown>).MoproFfi = {};
+    mockManifestFetch(buildManifest('v3'));
+    const downloadFileAsync = File.downloadFileAsync as jest.Mock;
+    downloadFileAsync.mockImplementationOnce(async (_url: string, destination: { uri: string }) => {
+      const resolvedUri = `${destination.uri}.partial-resolved`;
+      const resolved = new File(resolvedUri);
+      resolved.write('x'.repeat(10_000_001));
+      return resolved;
+    });
+
+    // Resolves to the canonical cache path, not the transient download uri.
+    await expect(resolveUmbraZkeyPath('userRegistration')).resolves.toBe(
+      '/cache/offpay-umbra-zk-assets/userregistration.zkey',
+    );
+    expect(downloadFileAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the cached zkey on a second resolve after a different-uri download (no re-download)', async () => {
+    // Guards the cache-key normalization: a download that resolved to a
+    // non-canonical uri must still be reused next run instead of re-downloading
+    // the ~76MB asset every time.
+    (NativeModules as Record<string, unknown>).MoproFfi = {};
+    mockManifestFetch(buildManifest('v3'));
+    const downloadFileAsync = File.downloadFileAsync as jest.Mock;
+    downloadFileAsync.mockImplementationOnce(async (_url: string, destination: { uri: string }) => {
+      const resolved = new File(`${destination.uri}.partial-resolved`);
+      resolved.write('x'.repeat(10_000_001));
+      return resolved;
+    });
+
+    await resolveUmbraZkeyPath('userRegistration');
+    await resolveUmbraZkeyPath('userRegistration');
+
+    // Second resolve must hit the normalized cache, not download again.
+    expect(downloadFileAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a truncated zkey download against the advertised content-length', async () => {
+    // The HEAD response advertises 10_000_001 bytes (see mockManifestFetch),
+    // but the download lands fewer bytes. Exact-size validation must fail and
+    // the error must report the real byte count, never "null".
+    (NativeModules as Record<string, unknown>).MoproFfi = {};
+    mockManifestFetch(buildManifest('v3'));
+    const downloadFileAsync = File.downloadFileAsync as jest.Mock;
+    downloadFileAsync.mockImplementationOnce(async (_url: string, destination: { uri: string }) => {
+      const resolved = new File(destination.uri);
+      resolved.write('x'.repeat(9_000_000));
+      return resolved;
+    });
+
+    await expect(resolveUmbraZkeyPath('userRegistration')).rejects.toThrow(
+      /is incomplete \(got 9000000 bytes, expected 10000001\)/,
+    );
+  });
+
   it('reuses a cached zkey only while the manifest asset version still matches', async () => {
     (NativeModules as Record<string, unknown>).MoproFfi = {};
     const fetchMock = mockManifestFetch(buildManifest('v3'));
@@ -124,6 +186,9 @@ describe('umbra-rn-zk-prover', () => {
 
     // Manifest fetch for each resolve (2) + a single HEAD for the only download.
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      'https://zk.api.umbraprivacy.com/v5/manifest.json',
+    );
     expect(downloadFileAsync).toHaveBeenCalledTimes(1);
   });
 

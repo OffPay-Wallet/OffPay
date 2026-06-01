@@ -1,6 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -16,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -23,6 +23,8 @@ import { fontFamily } from '@/constants/typography';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
+import { mark, measure } from '@/lib/perf/perf-marks';
+import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
 import { getClaimedUmbraUtxoIndexSet, useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
@@ -40,6 +42,7 @@ const ROW_CARD_COLORS = [
   colors.brand.iceBlue,
   colors.brand.whiteStream,
 ] as const;
+const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 32;
 
 const ROW_BORDER = {
   borderTopWidth: 1,
@@ -135,11 +138,7 @@ const ClaimRow = memo(function ClaimRow({
         <MetaRow label="Tree" value={String(utxo.treeIndex)} mono />
         <MetaRow label="Sender" value={shortenAddress(utxo.senderBase58)} mono />
         <MetaRow label="Mint" value={shortenAddress(utxo.mintBase58)} mono />
-        <MetaRow
-          label="Commitment"
-          value={shortenHex(utxo.finalCommitmentHex)}
-          mono
-        />
+        <MetaRow label="Commitment" value={shortenHex(utxo.finalCommitmentHex)} mono />
       </View>
 
       <View style={styles.rowActions}>
@@ -175,7 +174,7 @@ const ClaimRow = memo(function ClaimRow({
           ]}
         >
           {busy ? (
-            <ActivityIndicator size="small" color={colors.text.inverse} />
+            <LazyLoadingSpinner size={18} color={colors.text.inverse} />
           ) : (
             <Text
               variant="button"
@@ -258,6 +257,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
 
   const [scanning, setScanning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deepScanning, setDeepScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [utxos, setUtxos] = useState<UmbraPendingClaimUtxo[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -269,15 +269,17 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   const getScreenSignal = useScreenAbortSignal();
 
   const runScan = useCallback(
-    async (kind: 'initial' | 'refresh'): Promise<void> => {
+    async (kind: 'initial' | 'refresh' | 'deep'): Promise<void> => {
       if (!canScan || walletAddress == null || walletId == null || network == null) return;
       if (scanInFlightRef.current) return;
       const signal = getScreenSignal();
       scanInFlightRef.current = true;
       if (kind === 'initial') setScanning(true);
+      else if (kind === 'deep') setDeepScanning(true);
       else setRefreshing(true);
       try {
         if (signal.aborted) return;
+        const startedAt = mark();
         const { scanUmbraPrivateP2PClaims } = await import('@/lib/umbra/umbra-execution');
         if (signal.aborted) return;
         const latestExcluded = getClaimedUmbraUtxoIndexSet(
@@ -288,27 +290,37 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           network,
           walletAddress,
         );
+        // Deep scan walks the whole tree with every master-seed scheme so
+        // older payments (outside the fast recent window / created under a
+        // legacy scheme) are discovered. It is slower and only ever runs on
+        // explicit user request. The recent scan stays the bounded fast path.
+        const isDeep = kind === 'deep';
         const result: UmbraExecutionResult = await scanUmbraPrivateP2PClaims({
           walletAddress,
           walletId,
           network,
+          scanMode: isDeep ? 'deep' : 'recent',
           excludedInsertionIndices: latestExcluded,
+          signal,
+          pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
         });
         if (signal.aborted) return;
         setUtxos(result.pendingClaimUtxoDetails ?? []);
         setError(null);
+        measure(isDeep ? 'receive.umbraClaims.deepScan' : 'receive.umbraClaims.fullScreenScan', startedAt, {
+          network,
+          pendingCount: result.pendingClaimCount ?? 0,
+          pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+        });
       } catch (scanError) {
         if (signal.aborted) return;
-        setError(
-          scanError instanceof Error
-            ? scanError.message
-            : 'Unable to load pending claims.',
-        );
+        setError(scanError instanceof Error ? scanError.message : 'Unable to load pending claims.');
       } finally {
         scanInFlightRef.current = false;
         if (!signal.aborted) {
           setScanning(false);
           setRefreshing(false);
+          setDeepScanning(false);
         }
       }
     },
@@ -316,7 +328,13 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   );
 
   useEffect(() => {
-    void runScan('initial');
+    const scheduled = scheduleUiWorkAfterFirstPaint(
+      () => {
+        void runScan('initial');
+      },
+      { fallbackDelayMs: 700, timeoutMs: 3000 },
+    );
+    return () => scheduled.cancel();
   }, [runScan]);
 
   const handleClaim = useCallback(
@@ -335,6 +353,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
         try {
           const {
             claimUmbraPrivateP2PToEncryptedBalance,
+            getUmbraClaimScanRangeForInsertionIndices,
             isBenignAlreadyClaimedFailure,
           } = await import('@/lib/umbra/umbra-execution');
           // To claim a single UTXO we tell the SDK to skip every
@@ -344,17 +363,16 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           const otherPendingIndices = utxos
             .filter((entry) => entry.id !== utxo.id)
             .map((entry) => entry.insertionIndex);
-          const exclusionSet = new Set<number>([
-            ...claimedIndexSet,
-            ...otherPendingIndices,
-          ]);
+          const exclusionSet = new Set<number>([...claimedIndexSet, ...otherPendingIndices]);
 
           try {
             const result = await claimUmbraPrivateP2PToEncryptedBalance({
               walletAddress,
               walletId,
               network,
+              ...getUmbraClaimScanRangeForInsertionIndices([utxo.insertionIndex]),
               excludedInsertionIndices: exclusionSet,
+              pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
               onUtxoClaimedOnChain: (insertionIndices) => {
                 markUmbraUtxosClaimed({
                   network,
@@ -497,7 +515,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
 
         {scanning && utxos.length === 0 ? (
           <View style={styles.emptyState}>
-            <ActivityIndicator size="small" color={colors.brand.deepShadow} />
+            <LazyLoadingSpinner size={28} color={colors.brand.deepShadow} />
             <Text
               variant="small"
               color={colors.text.secondary}
@@ -550,6 +568,30 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
             >
               New private payments will show up here.
             </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Deep scan for older private payments"
+              disabled={deepScanning || scanning || refreshing}
+              onPress={() => void runScan('deep')}
+              style={({ pressed }) => [
+                styles.deepScanButton,
+                (deepScanning || scanning || refreshing) && styles.deepScanButtonDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              {deepScanning ? (
+                <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
+              ) : (
+                <Ionicons name="search" size={16} color={colors.brand.deepShadow} />
+              )}
+              <Text
+                variant="captionBold"
+                color={colors.brand.deepShadow}
+                maxFontSizeMultiplier={1.1}
+              >
+                {deepScanning ? 'Deep scanning…' : 'Scan for older payments'}
+              </Text>
+            </Pressable>
           </View>
         ) : (
           <View style={styles.list}>
@@ -617,6 +659,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing['4xl'],
     gap: spacing.sm,
+  },
+  deepScanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.full,
+    backgroundColor: colors.glass.frostFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+  },
+  deepScanButtonDisabled: {
+    opacity: 0.6,
   },
   statusText: {
     maxWidth: 320,

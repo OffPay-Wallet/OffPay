@@ -35,8 +35,21 @@ const mockPoseidonHasher = jest.fn();
 const mockPoseidonPrivateKeyDeriver = jest.fn();
 const mockEphemeralUtxoPoseidonPrivateKeyDeriver = jest.fn();
 const mockClaimableScanner = jest.fn();
+const mockSdkFetchUtxoData = jest.fn();
+const mockGetUtxoDataFetcher = jest.fn(() => mockSdkFetchUtxoData);
+const mockReadServiceClientGetUtxoDataColumnar = jest.fn();
+const mockReadServiceClient = jest.fn(function MockReadServiceClient() {
+  return {
+    getUtxoDataColumnar: mockReadServiceClientGetUtxoDataColumnar,
+  };
+});
+const mockSdkFetchTreeSummary = jest.fn();
+const mockGetTreeSummaryFetcher = jest.fn(() => mockSdkFetchTreeSummary);
+const mockSdkBatchMerkleProofFetcher = jest.fn();
+const mockGetBatchMerkleProofFetcher = jest.fn(() => mockSdkBatchMerkleProofFetcher);
 const mockMmkvValues = new Map<string, string>();
 let mockClaimableScannerDeps: { fetchUtxoData?: unknown } | null = null;
+let mockClaimableScannerArgs: { client?: unknown } | null = null;
 let mockCapturedUmbraSigner: {
   address: string;
   signMessage: (
@@ -78,6 +91,7 @@ jest.mock('@umbra-privacy/sdk/account', () => ({
 jest.mock('@umbra-privacy/sdk/burn', () => ({
   __esModule: true,
   getBurnableStealthPoolNoteScannerFunction: jest.fn((_args, deps) => {
+    mockClaimableScannerArgs = _args;
     mockClaimableScannerDeps = deps;
     return mockClaimableScanner;
   }),
@@ -145,6 +159,34 @@ jest.mock('@umbra-privacy/sdk/crypto/key-derivation', () => ({
 jest.mock('@umbra-privacy/sdk/crypto/poseidon', () => ({
   __esModule: true,
   getPoseidonHasher: jest.fn(() => mockPoseidonHasher),
+}));
+
+jest.mock('@umbra-privacy/sdk/indexer', () => ({
+  __esModule: true,
+  IndexerError: class IndexerError extends Error {
+    stage: string;
+    operation: string;
+    statusCode: number | undefined;
+
+    constructor(
+      stage: string,
+      message: string,
+      options: { operation: string; statusCode?: number; cause?: Error },
+    ) {
+      super(message);
+      this.name = 'IndexerError';
+      this.stage = stage;
+      this.operation = options.operation;
+      this.statusCode = options.statusCode;
+      if (options.cause != null) {
+        (this as { cause?: Error }).cause = options.cause;
+      }
+    }
+  },
+  ReadServiceClient: mockReadServiceClient,
+  getBatchMerkleProofFetcher: mockGetBatchMerkleProofFetcher,
+  getTreeSummaryFetcher: mockGetTreeSummaryFetcher,
+  getUtxoDataFetcher: mockGetUtxoDataFetcher,
 }));
 
 jest.mock('@umbra-privacy/umbra-codama', () => ({
@@ -297,6 +339,10 @@ function makeU128LeBytes(value: number): Uint8Array {
   return bytes;
 }
 
+function makeBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64');
+}
+
 function makeMockNullifierFieldValue(seed: number): bigint {
   return BigInt(seed);
 }
@@ -411,6 +457,14 @@ describe('umbra-execution', () => {
       mockPoseidonPrivateKeyDeriver,
       mockEphemeralUtxoPoseidonPrivateKeyDeriver,
       mockClaimableScanner,
+      mockSdkFetchUtxoData,
+      mockGetUtxoDataFetcher,
+      mockReadServiceClientGetUtxoDataColumnar,
+      mockReadServiceClient,
+      mockSdkFetchTreeSummary,
+      mockGetTreeSummaryFetcher,
+      mockSdkBatchMerkleProofFetcher,
+      mockGetBatchMerkleProofFetcher,
       mockSdkDeps.accountInfoProvider,
       mockSdkDeps.blockhashProvider,
       mockSdkDeps.transactionForwarder,
@@ -419,8 +473,14 @@ describe('umbra-execution', () => {
     ].forEach((mock) => mock.mockReset());
     mockCapturedUmbraSigner = null;
     mockClaimableScannerDeps = null;
+    mockClaimableScannerArgs = null;
     mockMmkvValues.clear();
     resetUmbraPrivacyStore();
+    mockReadServiceClient.mockImplementation(function MockReadServiceClient() {
+      return {
+        getUtxoDataColumnar: mockReadServiceClientGetUtxoDataColumnar,
+      };
+    });
     mockAssertUmbraVaultFeeAccountsReady.mockResolvedValue({
       available: true,
       checkedAccounts: [],
@@ -446,6 +506,28 @@ describe('umbra-execution', () => {
       network: 'devnet',
       utxos: [],
       cursor: null,
+    });
+    mockGetUtxoDataFetcher.mockImplementation(() => mockSdkFetchUtxoData);
+    mockGetTreeSummaryFetcher.mockImplementation(() => mockSdkFetchTreeSummary);
+    mockGetBatchMerkleProofFetcher.mockImplementation(() => mockSdkBatchMerkleProofFetcher);
+    mockSdkFetchUtxoData.mockResolvedValue({
+      items: new Map(),
+      hasMore: false,
+      totalCount: 0n,
+    });
+    mockReadServiceClientGetUtxoDataColumnar.mockResolvedValue({
+      columns: null,
+      count: 0n,
+      has_more: false,
+      next_cursor: null,
+      total_count: 0n,
+      start_index: 0n,
+      end_index: null,
+    });
+    mockSdkFetchTreeSummary.mockResolvedValue([{ treeIndex: 0n, numLeaves: 1_000n }]);
+    mockSdkBatchMerkleProofFetcher.mockResolvedValue({
+      root: new Uint8Array(32),
+      proofs: new Map(),
     });
     mockClaimableScanner.mockResolvedValue({
       selfBurnable: [],
@@ -1052,7 +1134,7 @@ describe('umbra-execution', () => {
     expect(mockGetRpcSignatureStatuses).not.toHaveBeenCalled();
   });
 
-  it('uses a self-claimable public-balance UTXO for private sends to the same wallet', async () => {
+  it('uses a receiver-claimable public-balance UTXO for private sends to the same wallet', async () => {
     mockQueryUser.mockResolvedValue({
       state: 'exists',
       data: {
@@ -1062,9 +1144,9 @@ describe('umbra-execution', () => {
         isActiveForAnonymousUsage: true,
       },
     });
-    mockCreatePublicSelfUtxo.mockResolvedValueOnce({
-      createProofAccountSignature: 'self-create-proof-sig',
-      createUtxoSignature: 'self-create-utxo-sig',
+    mockCreatePublicReceiverUtxo.mockResolvedValueOnce({
+      createProofAccountSignature: 'self-receiver-create-proof-sig',
+      createUtxoSignature: 'self-receiver-create-utxo-sig',
     });
 
     const result = await sendUmbraPrivateP2PFromPublicBalance({
@@ -1083,8 +1165,7 @@ describe('umbra-execution', () => {
       mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
       network: 'devnet',
     });
-    expect(getPublicBalanceToReceiverClaimableUtxoCreatorFunction).not.toHaveBeenCalled();
-    expect(getPublicBalanceToSelfClaimableUtxoCreatorFunction).toHaveBeenCalledWith(
+    expect(getPublicBalanceToReceiverClaimableUtxoCreatorFunction).toHaveBeenCalledWith(
       { client: mockClient },
       expect.objectContaining({
         rpc: expect.objectContaining({
@@ -1092,8 +1173,10 @@ describe('umbra-execution', () => {
         }),
       }),
     );
+    expect(getPublicBalanceToSelfClaimableUtxoCreatorFunction).not.toHaveBeenCalled();
+    expect(getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction).not.toHaveBeenCalled();
     expect(getLegacyPublicBalanceToSelfClaimableUtxoCreatorFunction).not.toHaveBeenCalled();
-    expect(mockCreatePublicSelfUtxo).toHaveBeenCalledWith(
+    expect(mockCreatePublicReceiverUtxo).toHaveBeenCalledWith(
       {
         amount: 1000000n,
         destinationAddress: mockWalletAddress,
@@ -1106,8 +1189,8 @@ describe('umbra-execution', () => {
     expect(result).toMatchObject({
       action: 'private-p2p',
       p2pSource: 'public-balance',
-      primarySignature: 'self-create-utxo-sig',
-      signatures: ['self-create-proof-sig', 'self-create-utxo-sig'],
+      primarySignature: 'self-receiver-create-utxo-sig',
+      signatures: ['self-receiver-create-proof-sig', 'self-receiver-create-utxo-sig'],
     });
   });
 
@@ -1259,7 +1342,7 @@ describe('umbra-execution', () => {
     expect(mockLegacyCreatePublicReceiverUtxo).not.toHaveBeenCalled();
   });
 
-  it('caps Umbra UTXO scans to the backend page-size limit', async () => {
+  it('bounds default Umbra claim scans to the recent wallet-key decrypt window', async () => {
     mockQueryUser.mockResolvedValue({
       state: 'exists',
       data: {
@@ -1269,11 +1352,32 @@ describe('umbra-execution', () => {
         isActiveForAnonymousUsage: true,
       },
     });
-    mockClaimableScanner.mockImplementationOnce(async (_treeIndex, _startIndex, _endIndex) => {
+    mockClaimableScanner.mockImplementationOnce(async () => {
+      const client = mockClaimableScannerArgs?.client as
+        | {
+            fetchTreeSummary?: () => Promise<readonly { treeIndex: bigint; numLeaves: bigint }[]>;
+            utxoDataStore?: {
+              getScanProgress: (
+                network: string,
+                signerAddress: string,
+                treeIndex: bigint,
+              ) => Promise<{ ranges: readonly { start: bigint; end: bigint }[] } | null>;
+            };
+          }
+        | undefined;
+      await expect(client?.fetchTreeSummary?.()).resolves.toEqual([
+        { treeIndex: 0n, numLeaves: 1000n },
+      ]);
+      await expect(
+        client?.utxoDataStore?.getScanProgress('devnet', mockWalletAddress, 0n),
+      ).resolves.toEqual({
+        ranges: [{ start: 0n, end: 615n }],
+        highWaterMark: 615n,
+      });
       const fetchUtxoData = mockClaimableScannerDeps?.fetchUtxoData as
         | ((start: bigint, end?: bigint, limit?: bigint) => Promise<unknown>)
         | undefined;
-      await fetchUtxoData?.(0n, 999n, 1000n);
+      await fetchUtxoData?.(616n, 999n, 1000n);
 
       return {
         selfBurnable: [],
@@ -1290,11 +1394,166 @@ describe('umbra-execution', () => {
       network: 'devnet',
     });
 
-    expect(mockGetUmbraUtxos).toHaveBeenCalledWith(
-      expect.objectContaining({
-        limit: 1000,
-      }),
-    );
+    expect(mockReadServiceClientGetUtxoDataColumnar).toHaveBeenCalledWith({
+      start: 616n,
+      end: 999n,
+      limit: 32n,
+    });
+  });
+
+  it('uses exact insertion ranges when the claim scan is seeded by pending indices', async () => {
+    configureRegisteredUmbraVault();
+    mockClaimableScanner.mockImplementationOnce(async () => {
+      const client = mockClaimableScannerArgs?.client as
+        | {
+            fetchTreeSummary?: () => Promise<readonly { treeIndex: bigint; numLeaves: bigint }[]>;
+            utxoDataStore?: {
+              getScanProgress: (
+                network: string,
+                signerAddress: string,
+                treeIndex: bigint,
+              ) => Promise<{ ranges: readonly { start: bigint; end: bigint }[] } | null>;
+            };
+          }
+        | undefined;
+      await expect(client?.fetchTreeSummary?.()).resolves.toEqual([
+        { treeIndex: 0n, numLeaves: 778n },
+      ]);
+      await expect(
+        client?.utxoDataStore?.getScanProgress('devnet', mockWalletAddress, 0n),
+      ).resolves.toEqual({
+        ranges: [{ start: 0n, end: 776n }],
+        highWaterMark: 776n,
+      });
+      const fetchUtxoData = mockClaimableScannerDeps?.fetchUtxoData as
+        | ((start: bigint, end?: bigint, limit?: bigint) => Promise<unknown>)
+        | undefined;
+      await fetchUtxoData?.(777n, 777n, 1000n);
+
+      return {
+        selfBurnable: [],
+        received: [],
+        publicSelfBurnable: [],
+        publicReceived: [],
+        nextScanStartIndex: 778n,
+      };
+    });
+
+    await scanUmbraPrivateP2PClaims({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      startInsertionIndex: 777,
+      endInsertionIndex: 777,
+    });
+
+    expect(mockReadServiceClientGetUtxoDataColumnar).toHaveBeenCalledWith({
+      start: 777n,
+      end: 777n,
+      limit: 32n,
+    });
+  });
+
+  it('normalizes current indexer columnar UTXO values before scanning claims', async () => {
+    configureRegisteredUmbraVault();
+    let fetchedResult:
+      | {
+          items: Map<
+            bigint,
+            {
+              absoluteIndex: bigint;
+              treeIndex: bigint;
+              insertionIndex: bigint;
+              h1Components: {
+                version: bigint;
+                commitmentIndex: bigint;
+                relayerFixedSolFees: bigint;
+                poolVolumeSpl: bigint;
+                poolVolumeSol: bigint;
+                timestamp: {
+                  year: bigint;
+                  month: bigint;
+                  day: bigint;
+                  hour: bigint;
+                  minute: bigint;
+                  second: bigint;
+                };
+              };
+              timestamp: bigint;
+              slot: bigint;
+            }
+          >;
+        }
+      | undefined;
+
+    mockReadServiceClientGetUtxoDataColumnar.mockResolvedValueOnce({
+      columns: {
+        absolute_index: ['0'],
+        tree_index: ['0'],
+        insertion_index: ['42'],
+        final_commitment: [makeBase64(makeU256LeBytes(101n))],
+        h1_version: [makeBase64(makeU128LeBytes(1))],
+        h1_commitment_index: [makeBase64(makeU128LeBytes(42))],
+        h1_sender_address: [makeBase64(bs58.decode(mockWalletAddress))],
+        h1_mint_address: [makeBase64(bs58.decode(mockRecipientAddress))],
+        h1_relayer_fixed_sol_fees: ['17'],
+        h1_year: ['2026'],
+        h1_month: ['5'],
+        h1_day: ['31'],
+        h1_hour: ['8'],
+        h1_minute: ['9'],
+        h1_second: ['10'],
+        h1_pool_volume_spl: ['5000000'],
+        h1_pool_volume_sol: ['7000'],
+        h1_hash: [makeBase64(makeU256LeBytes(102n))],
+        h2_hash: [makeBase64(makeU256LeBytes(103n))],
+        aes_encrypted_data: [makeBase64(Uint8Array.of(1, 2, 3, 4))],
+        depositor_x25519_public_key: [
+          makeBase64(Uint8Array.from({ length: 32 }, (_, index) => index)),
+        ],
+        timestamp: ['1780000000'],
+        slot: ['12345'],
+        event_type: ['deposit'],
+      },
+      count: 1n,
+      has_more: false,
+      next_cursor: null,
+      total_count: 1n,
+      start_index: 0n,
+      end_index: 42n,
+    });
+    mockClaimableScanner.mockImplementationOnce(async () => {
+      const fetchUtxoData = mockClaimableScannerDeps?.fetchUtxoData as
+        | ((start: bigint, end?: bigint, limit?: bigint) => Promise<typeof fetchedResult>)
+        | undefined;
+      fetchedResult = await fetchUtxoData?.(0n, 42n, 10n);
+      return {
+        selfBurnable: [],
+        received: [],
+        publicSelfBurnable: [],
+        publicReceived: [],
+        nextScanStartIndex: 0n,
+      };
+    });
+
+    await scanUmbraPrivateP2PClaims({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+    });
+
+    const item = fetchedResult?.items.get(42n);
+    expect(item?.absoluteIndex).toBe(0n);
+    expect(item?.treeIndex).toBe(0n);
+    expect(item?.insertionIndex).toBe(42n);
+    expect(item?.h1Components.version).toBe(1n);
+    expect(item?.h1Components.commitmentIndex).toBe(42n);
+    expect(item?.h1Components.relayerFixedSolFees).toBe(17n);
+    expect(item?.h1Components.poolVolumeSpl).toBe(5_000_000n);
+    expect(item?.h1Components.poolVolumeSol).toBe(7_000n);
+    expect(item?.h1Components.timestamp.year).toBe(2026n);
+    expect(item?.timestamp).toBe(1_780_000_000n);
+    expect(item?.slot).toBe(12_345n);
   });
 
   it('filters scan results by excludedInsertionIndices so locally-claimed UTXOs are not re-surfaced', async () => {
@@ -1355,6 +1614,64 @@ describe('umbra-execution', () => {
     });
 
     expect(result.pendingClaimCount).toBe(2);
+  });
+
+  it('surfaces pending claims from current SDK v5 scanner buckets', async () => {
+    configureRegisteredUmbraVault();
+    mockClaimableScanner.mockResolvedValueOnce({
+      etaToStealthPoolReceiverBurnable: [makeClaimableUtxo(3101, 31)],
+      ataToStealthPoolReceiverBurnable: [makeClaimableUtxo(3102, 32)],
+      networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress: [
+        makeClaimableUtxo(3103, 33),
+      ],
+      etaToStealthPoolSelfBurnable: [makeClaimableUtxo(3104, 34)],
+      ataToStealthPoolSelfBurnable: [makeClaimableUtxo(3105, 35)],
+      networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress: [makeClaimableUtxo(3106, 36)],
+      scannedTrees: [
+        {
+          treeIndex: 0n,
+          scannedRange: { start: 0n, end: 3106n },
+          totalLeaves: 3107n,
+          fullyScanned: true,
+        },
+      ],
+    });
+
+    const result = await scanUmbraPrivateP2PClaims({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      excludedInsertionIndices: [],
+    });
+
+    expect(result.pendingClaimCount).toBe(6);
+    expect(result.pendingClaimUtxoInsertionIndices).toEqual([3101, 3102, 3103, 3104, 3105, 3106]);
+    expect(result.pendingClaimUtxoDetails).toHaveLength(6);
+  });
+
+  it('injects a yielding aesDecryptor into the SDK claim scanner', async () => {
+    // The scanner decrypts every note synchronously per scheme; the OffPay
+    // adapter must hand it an async `aesDecryptor` that yields to the UI
+    // thread so a large window cannot freeze the JS thread. We only assert the
+    // dependency is wired (an async function), not its internal scheduling.
+    configureRegisteredUmbraVault();
+    mockClaimableScanner.mockResolvedValueOnce({
+      selfBurnable: [],
+      received: [],
+      publicSelfBurnable: [],
+      publicReceived: [],
+      nextScanStartIndex: 0n,
+    });
+
+    await scanUmbraPrivateP2PClaims({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      excludedInsertionIndices: [],
+    });
+
+    const deps = mockClaimableScannerDeps as { aesDecryptor?: unknown } | null;
+    expect(typeof deps?.aesDecryptor).toBe('function');
   });
 
   it('filters cold-boot scan results by on-chain Umbra nullifier-set membership', async () => {

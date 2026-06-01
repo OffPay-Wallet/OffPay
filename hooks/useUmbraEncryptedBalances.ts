@@ -5,7 +5,11 @@ import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { fetchUmbraEncryptedBalances } from '@/lib/umbra/umbra-execution';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -15,12 +19,18 @@ import type { UmbraVaultTokenConfig } from '@/components/features/umbra-vault/ty
 const UMBRA_BALANCE_STALE_TIME_MS = 0;
 const UMBRA_BALANCE_GC_TIME_MS = 1000 * 60 * 30;
 
-export function useUmbraEncryptedBalances(tokens: UmbraVaultTokenConfig[]) {
+export function useUmbraEncryptedBalances(
+  tokens: UmbraVaultTokenConfig[],
+  options: { enabled?: boolean } = {},
+) {
+  const enabledByCaller = options.enabled ?? true;
   const walletAddress = useWalletStore((state) => state.publicKey);
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
-  const { capabilities, isCapabilitiesPending } = useOffpayCapabilities();
+  const { capabilities, isCapabilitiesPending } = useOffpayCapabilities({
+    enabled: enabledByCaller,
+  });
   const capability = getOffpayFeatureCapability(capabilities, 'umbra.execution');
   const tokenSymbols = useMemo(() => tokens.map((token) => token.symbol), [tokens]);
   const tokenScopeKey = tokenSymbols.join('|');
@@ -28,6 +38,7 @@ export function useUmbraEncryptedBalances(tokens: UmbraVaultTokenConfig[]) {
   const enabled =
     walletAddress != null &&
     network != null &&
+    enabledByCaller &&
     canUseNetwork &&
     isUmbraNetworkSupported(network) &&
     tokenSymbols.length > 0 &&
@@ -40,11 +51,17 @@ export function useUmbraEncryptedBalances(tokens: UmbraVaultTokenConfig[]) {
         throw new Error('Umbra balances require an active wallet and supported token set.');
       }
 
+      const startedAt = mark();
       return fetchUmbraEncryptedBalances({
         walletAddress,
         walletId,
         network,
         tokens: tokenSymbols,
+      }).finally(() => {
+        measure('umbra.encryptedBalances.query', startedAt, {
+          network,
+          tokenCount: tokenSymbols.length,
+        });
       });
     },
     enabled,
@@ -75,7 +92,7 @@ export function useUmbraEncryptedBalances(tokens: UmbraVaultTokenConfig[]) {
     walletAddress,
     network,
     capability,
-    isCapabilitiesPending: canUseNetwork && isCapabilitiesPending,
+    isCapabilitiesPending: enabledByCaller && canUseNetwork && isCapabilitiesPending,
     isCapabilityEnabled: capabilityAvailable || enabled,
   };
 }

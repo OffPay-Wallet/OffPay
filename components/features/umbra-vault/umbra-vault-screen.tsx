@@ -28,6 +28,7 @@ import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
+import { useFirstPaintReady } from '@/hooks/useFirstPaintReady';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { useUmbraEncryptedBalances } from '@/hooks/useUmbraEncryptedBalances';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
@@ -41,7 +42,10 @@ import {
   sanitizeDecimalInput,
 } from '@/lib/policy/token-amounts';
 import { getUmbraFriendlyError } from '@/lib/umbra/umbra-error-messages';
-import { getUmbraSupportedTokens, isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
+import {
+  getUmbraSupportedTokens,
+  isUmbraNetworkSupported,
+} from '@/lib/umbra/umbra-supported-tokens';
 import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -427,8 +431,23 @@ function UmbraVaultContentBody({
     () => (network == null ? [] : getUmbraSupportedTokens(network)),
     [network],
   );
-  const encryptedBalancesQuery = useUmbraEncryptedBalances(supportedTokens);
-  const vaultRegistrationQuery = useUmbraVaultRegistrationStatus();
+  const disabledMessage = getVaultDisabledMessage({
+    walletAddress,
+    network,
+    canUseNetwork,
+    capabilityAvailable: umbraExecutionCapability.available,
+    capabilityMessage: umbraExecutionCapability.message,
+    umbraNetworkSupported: network != null && isUmbraNetworkSupported(network),
+  });
+  const canUseVault = disabledMessage == null;
+  const umbraQueriesReady = useFirstPaintReady({ fallbackDelayMs: 700, timeoutMs: 3000 });
+  const umbraQueriesEnabled = umbraQueriesReady && canUseVault;
+  const encryptedBalancesQuery = useUmbraEncryptedBalances(supportedTokens, {
+    enabled: umbraQueriesEnabled,
+  });
+  const vaultRegistrationQuery = useUmbraVaultRegistrationStatus({
+    enabled: umbraQueriesEnabled && encryptedBalancesQuery.isError,
+  });
   const [action, setAction] = useState<UmbraVaultAction>('shield');
   const [token, setToken] = useState<UmbraVaultToken>(() => supportedTokens[0]?.symbol ?? 'USDC');
   const [amount, setAmount] = useState('');
@@ -440,15 +459,6 @@ function UmbraVaultContentBody({
   const compact = width < 390 || height < 760 || fontScale > 1.05;
   const dense = width < 350 || fontScale > 1.18;
 
-  const disabledMessage = getVaultDisabledMessage({
-    walletAddress,
-    network,
-    canUseNetwork,
-    capabilityAvailable: umbraExecutionCapability.available,
-    capabilityMessage: umbraExecutionCapability.message,
-    umbraNetworkSupported: network != null && isUmbraNetworkSupported(network),
-  });
-  const canUseVault = disabledMessage == null;
   const isActionSubmitting =
     shieldMutation.isPending || unshieldMutation.isPending || repairKeyMutation.isPending;
   const activeVaultKey =
