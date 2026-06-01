@@ -221,9 +221,9 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.surface.pressed,
+    backgroundColor: colors.holdingsCard.pressed,
     borderWidth: 1,
-    borderColor: colors.border.subtle,
+    borderColor: colors.glass.rimSubtle,
     overflow: 'hidden',
   },
   thumb: {
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   segmentPressed: {
-    backgroundColor: colors.surface.pressed,
+    backgroundColor: colors.glass.clearFill,
   },
   segmentText: {
     fontFamily: fontFamily.uiSemiBold,

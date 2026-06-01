@@ -13,8 +13,7 @@ import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { buildSolanaPayRequestQr } from '@/lib/offline/offline-payments';
 
-const PRIVATE_RECEIVE_QR_LOGO =
-  require('../../../assets/appIcons/android/playstore-icon.png') as number;
+const PRIVATE_RECEIVE_QR_LOGO = require('../../../assets/AppIcons/playstore.png') as number;
 
 interface PrivatePaymentReceivePanelProps {
   walletAddress: string | null;
@@ -58,12 +57,12 @@ export function PrivatePaymentReceivePanel({
             value={payload}
             size={layout.avatarLg * 3}
             color={colors.brand.deepShadow}
-            backgroundColor={colors.text.primary}
+            backgroundColor={colors.brand.whiteStream}
             ecl="H"
             quietZone={6}
             logo={PRIVATE_RECEIVE_QR_LOGO}
             logoSize={layout.avatarSm}
-            logoBackgroundColor={colors.brand.whiteStream}
+            logoBackgroundColor={colors.brand.deepShadow}
             logoBorderRadius={12}
             logoMargin={4}
           />

@@ -31,7 +31,8 @@ import Svg, {
 } from 'react-native-svg';
 // `qrcode` ships JS only and has no ESM build, so a `require()`
 // keeps the bundle smaller than a wildcard interop import.
-const qrcode = require('qrcode') as { // eslint-disable-line @typescript-eslint/no-require-imports
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const qrcode = require('qrcode') as {
   create: (
     data: string,
     options?: { errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H' },
@@ -51,6 +52,8 @@ export interface DottedQRCodeProps {
   backgroundColor?: string;
   /** Optional logo image source rendered in the centre. */
   logo?: number;
+  /** Background plate behind the centre logo. */
+  logoPlateColor?: string;
   /** Override automatic logo size (defaults to ~22% of QR size). */
   logoSize?: number;
   /** Container style. */
@@ -227,6 +230,7 @@ function DottedQRCodeImpl({
   color = '#000000',
   backgroundColor = '#FFFFFF',
   logo,
+  logoPlateColor,
   logoSize,
   style,
 }: DottedQRCodeProps): React.JSX.Element | null {
@@ -302,7 +306,12 @@ function DottedQRCodeImpl({
           <>
             {/* White circular plate behind the logo so the punched-out QR area
                 reads cleanly even before the bitmap loads. */}
-            <SvgCircle cx={logoCenter} cy={logoCenter} r={logoRadius} fill={backgroundColor} />
+            <SvgCircle
+              cx={logoCenter}
+              cy={logoCenter}
+              r={logoRadius}
+              fill={logoPlateColor ?? backgroundColor}
+            />
             {logoUri != null ? (
               <SvgImage
                 href={{ uri: logoUri }}

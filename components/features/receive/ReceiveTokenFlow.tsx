@@ -69,7 +69,7 @@ const ReceiveInfoModal = lazy(() =>
   })),
 );
 
-const RECEIVE_QR_LOGO = require('../../../assets/appIcons/android/playstore-icon.png') as number;
+const RECEIVE_QR_LOGO = require('../../../assets/AppIcons/playstore.png') as number;
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_ROUTE_MINT = 'native-sol';
 const RECEIVE_CONTENT_MAX_WIDTH = 430;
@@ -919,6 +919,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                       color={colors.brand.deepShadow}
                       backgroundColor={colors.brand.whiteStream}
                       logo={RECEIVE_QR_LOGO}
+                      logoPlateColor={colors.brand.deepShadow}
                       logoSize={Math.max(42, qrSize * 0.12)}
                     />
                   ) : (

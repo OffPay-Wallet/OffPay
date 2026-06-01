@@ -6,13 +6,12 @@ const APP_VERSION = '1.0.0';
 const APP_SCHEME = 'offpay';
 const IOS_BUNDLE_IDENTIFIER = 'com.offpay.app';
 const ANDROID_PACKAGE = 'com.offpay.app';
-const APP_ICON_PATH = './assets/appIcons/ios/iTunesArtwork@2x.png';
-const ANDROID_ICON_PATH = './assets/appIcons/android/playstore-icon.png';
-const ANDROID_ADAPTIVE_FOREGROUND_PATH =
-  './assets/appIcons/android/mipmap-xxxhdpi/ic_launcher_foreground.png';
+const APP_ICON_PATH = './assets/AppIcons/appstore.png';
+const ANDROID_ICON_PATH = './assets/AppIcons/playstore.png';
+const ANDROID_ADAPTIVE_ICON_FOREGROUND_PATH = './assets/AppIcons/playstore.png';
 /** Matches colors.backgroundGradient.base from constants/colors.ts — Arctic Mist */
 const BRAND_BACKGROUND_COLOR = '#5BC8E8';
-const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = '#ffffff';
+const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = BRAND_BACKGROUND_COLOR;
 
 export default function appConfig(_context: ConfigContext): ExpoConfig {
   return {
@@ -44,7 +43,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
       icon: ANDROID_ICON_PATH,
       adaptiveIcon: {
         backgroundColor: ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR,
-        foregroundImage: ANDROID_ADAPTIVE_FOREGROUND_PATH,
+        foregroundImage: ANDROID_ADAPTIVE_ICON_FOREGROUND_PATH,
+        monochromeImage: ANDROID_ADAPTIVE_ICON_FOREGROUND_PATH,
       },
       permissions: [
         'android.permission.BLUETOOTH',
