@@ -1,15 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  type GestureResponderEvent,
   Pressable,
   ScrollView,
   StyleSheet,
   useWindowDimensions,
   View,
 } from 'react-native';
+import Svg, {
+  Circle,
+  Defs,
+  LinearGradient,
+  Line,
+  Path,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TransactionActivityRow } from '@/components/features/history/TransactionActivityRow';
@@ -25,7 +36,10 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
-import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
+import {
+  TOKEN_PRICE_HISTORY_TIMEFRAMES,
+  useOffpayTokenPriceHistory,
+} from '@/hooks/useOffpayTokenPriceHistory';
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayTokenValuations } from '@/hooks/useOffpayTokenValuations';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
@@ -40,11 +54,22 @@ import { formatLamportsAsExactSolLabel } from '@/lib/crypto/solana-amounts';
 import { usePreferencesStore } from '@/store/preferencesStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
+import type {
+  ConvertedTokenPriceHistorySample,
+  TokenPriceHistoryTimeframeId,
+} from '@/hooks/useOffpayTokenPriceHistory';
 import type { WalletTransactionsResponse } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const MAX_TOKEN_ACTIVITY_ROWS = 8;
-const TOKEN_DETAIL_CONTENT_MAX_WIDTH = 430;
+const PRICE_CHART_VIEWBOX_WIDTH = 320;
+const PRICE_CHART_VIEWBOX_HEIGHT = 140;
+const PRICE_CHART_LEFT = 0;
+const PRICE_CHART_RIGHT = PRICE_CHART_VIEWBOX_WIDTH;
+const PRICE_CHART_TOP = 12;
+const PRICE_CHART_BOTTOM = 130;
+const TOKEN_COPY_FEEDBACK_MS = 1800;
+
 const TOKEN_DETAIL_PANEL_SHADOW = [
   '0 12px 28px rgba(0, 0, 0, 0.42)',
   'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
@@ -59,6 +84,15 @@ const TOKEN_DETAIL_CONTROL_SHADOW = [
 
 type WalletTransaction = WalletTransactionsResponse['transactions'][number];
 type TokenDetailActionId = 'send' | 'receive' | 'swap';
+type TokenActivityItem = {
+  transaction: WalletTransaction;
+  view: ReturnType<typeof mapWalletTransactionForHistory>;
+};
+type PriceChartPoint = {
+  x: number;
+  y: number;
+  sample: ConvertedTokenPriceHistorySample;
+};
 
 const TOKEN_DETAIL_ACTIONS: { id: TokenDetailActionId; label: string }[] = [
   { id: 'send', label: 'Send' },
@@ -212,46 +246,430 @@ function TokenActionButton({
   );
 }
 
-function DetailRow({
-  label,
-  value,
-  copyable,
+function VerifiedBadge(): React.JSX.Element {
+  return (
+    <View
+      style={styles.verifiedBadge}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel="Verified token"
+    >
+      <Ionicons name="checkmark" size={13} color={colors.brand.deepShadow} />
+    </View>
+  );
+}
+
+function TokenNameCopyButton({
+  name,
+  mint,
+  dense,
   onCopy,
 }: {
-  label: string;
-  value: string;
-  copyable?: boolean;
-  onCopy?: () => void;
+  name: string;
+  mint: string | null;
+  dense: boolean;
+  onCopy: () => void;
 }): React.JSX.Element {
+  const copyable = mint != null;
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
+
+  const handleCopyPress = useCallback((): void => {
+    if (!copyable) return;
+    onCopy();
+    setCopied(true);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), TOKEN_COPY_FEEDBACK_MS);
+  }, [copyable, onCopy]);
+
   return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.detailRow,
-        copyable && pressed ? styles.detailRowPressed : null,
-      ]}
-      disabled={!copyable}
-      onPress={onCopy}
-      accessibilityRole={copyable ? 'button' : undefined}
-      accessibilityLabel={copyable ? `Copy ${label}` : `${label}: ${value}`}
-    >
-      <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-        {label}
+    <View style={styles.tokenNameButton}>
+      <Text
+        variant="h2"
+        color={colors.text.primary}
+        style={[styles.tokenName, dense && styles.tokenNameDense]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.72}
+        maxFontSizeMultiplier={1.05}
+      >
+        {name}
       </Text>
-      <View style={styles.detailValueRow}>
-        <Text
-          variant="captionBold"
-          color={colors.text.primary}
-          style={styles.detailValue}
-          numberOfLines={1}
-          ellipsizeMode="middle"
+      {copyable ? (
+        <Pressable
+          style={({ pressed }) => [styles.tokenCopyButton, pressed ? styles.controlPressed : null]}
+          onPress={handleCopyPress}
+          accessibilityRole="button"
+          accessibilityLabel={`Copy ${name} contract address`}
+          hitSlop={6}
         >
-          {value}
-        </Text>
-        {copyable ? (
-          <Ionicons name="copy-outline" size={16} color={colors.text.primary} />
+          <Ionicons
+            name={copied ? 'checkmark' : 'copy-outline'}
+            size={18}
+            color={copied ? colors.text.primary : colors.text.secondary}
+          />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function formatPercentChange(value: number): string {
+  const normalized = Object.is(value, -0) ? 0 : value;
+  const sign = normalized > 0 ? '+' : '';
+  return `${sign}${normalized.toFixed(Math.abs(normalized) >= 100 ? 1 : 2)}%`;
+}
+
+function formatFiatValue(value: number, currencyCode: string, compact = false): string {
+  if (!Number.isFinite(value)) return '--';
+  const absolute = Math.abs(value);
+  const maximumFractionDigits = compact ? (absolute >= 1000 ? 1 : 0) : absolute >= 1 ? 2 : 4;
+
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currencyCode,
+      notation: compact && absolute >= 1000 ? 'compact' : 'standard',
+      maximumFractionDigits,
+      minimumFractionDigits: compact ? 0 : absolute >= 1 ? 2 : 0,
+    }).format(Object.is(value, -0) ? 0 : value);
+  } catch {
+    return `${value.toFixed(maximumFractionDigits)} ${currencyCode}`;
+  }
+}
+
+function buildChartPath(samples: ConvertedTokenPriceHistorySample[]): {
+  linePath: string;
+  areaPath: string;
+  grid: { y: number; label: string }[];
+  points: PriceChartPoint[];
+} | null {
+  if (samples.length < 2) return null;
+
+  const chartWidth = PRICE_CHART_RIGHT - PRICE_CHART_LEFT;
+  const chartHeight = PRICE_CHART_BOTTOM - PRICE_CHART_TOP;
+  const minPrice = Math.min(...samples.map((sample) => sample.price));
+  const maxPrice = Math.max(...samples.map((sample) => sample.price));
+  const rawRange = maxPrice - minPrice;
+  const range = rawRange <= 0 ? Math.max(maxPrice * 0.1, 1) : rawRange;
+  const paddedMin = Math.max(0, minPrice - range * 0.14);
+  const paddedMax = maxPrice + range * 0.14;
+  const paddedRange = paddedMax - paddedMin;
+  const points = samples.map((sample, index) => {
+    const x = PRICE_CHART_LEFT + (index / Math.max(samples.length - 1, 1)) * chartWidth;
+    const y =
+      paddedRange <= 0
+        ? PRICE_CHART_TOP + chartHeight / 2
+        : PRICE_CHART_BOTTOM - ((sample.price - paddedMin) / paddedRange) * chartHeight;
+    return { x, y, sample };
+  });
+  const linePath = points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(' ');
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+
+  if (firstPoint == null || lastPoint == null) return null;
+
+  return {
+    linePath,
+    areaPath: `${linePath} L${lastPoint.x.toFixed(2)} ${PRICE_CHART_BOTTOM} L${firstPoint.x.toFixed(2)} ${PRICE_CHART_BOTTOM} Z`,
+    grid: [],
+    points,
+  };
+}
+
+function PriceLineChart({
+  samples,
+  currency,
+  loading,
+  resetKey,
+}: {
+  samples: ConvertedTokenPriceHistorySample[];
+  currency: string;
+  loading: boolean;
+  resetKey: string | number;
+}): React.JSX.Element {
+  const [chartWidth, setChartWidth] = useState(0);
+  const [inspectedIndex, setInspectedIndex] = useState<number | null>(null);
+  const chartPath = useMemo(() => buildChartPath(samples), [samples]);
+  const activePoint =
+    chartPath?.points[
+      Math.min(inspectedIndex ?? chartPath.points.length - 1, chartPath.points.length - 1)
+    ] ?? null;
+
+  const updateInspectedPoint = useCallback(
+    (event: GestureResponderEvent): void => {
+      if (chartPath == null || chartWidth <= 0) return;
+
+      const viewBoxX = (event.nativeEvent.locationX / chartWidth) * PRICE_CHART_VIEWBOX_WIDTH;
+      let nearestIndex = 0;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+
+      chartPath.points.forEach((point, index) => {
+        const distance = Math.abs(point.x - viewBoxX);
+        if (distance < nearestDistance) {
+          nearestIndex = index;
+          nearestDistance = distance;
+        }
+      });
+
+      setInspectedIndex(nearestIndex);
+    },
+    [chartPath, chartWidth],
+  );
+  const resetInspectedPoint = useCallback((): void => {
+    setInspectedIndex(null);
+  }, []);
+
+  useEffect(() => {
+    resetInspectedPoint();
+  }, [resetInspectedPoint, resetKey]);
+
+  const canInspect = chartPath != null && chartPath.points.length > 1;
+
+  if (chartPath == null) {
+    return (
+      <View style={styles.chartInteractiveFrame}>
+        <View style={styles.chartEmptyLine} />
+        {loading ? (
+          <View style={styles.chartLoadingOverlay} pointerEvents="none">
+            <ActivityIndicator size="small" color={colors.brand.glossAccent} />
+          </View>
         ) : null}
       </View>
-    </Pressable>
+    );
+  }
+
+  return (
+    <View
+      style={styles.chartInteractiveFrame}
+      onLayout={(event) => setChartWidth(event.nativeEvent.layout.width)}
+      onStartShouldSetResponder={() => canInspect}
+      onMoveShouldSetResponder={() => canInspect}
+      onResponderGrant={updateInspectedPoint}
+      onResponderMove={updateInspectedPoint}
+    >
+      <Svg
+        width="100%"
+        height={PRICE_CHART_VIEWBOX_HEIGHT}
+        viewBox={`0 0 ${PRICE_CHART_VIEWBOX_WIDTH} ${PRICE_CHART_VIEWBOX_HEIGHT}`}
+      >
+        <Defs>
+          <LinearGradient id="tokenPriceChartFill" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={colors.text.primary} stopOpacity="0.22" />
+            <Stop offset="1" stopColor={colors.text.primary} stopOpacity="0.02" />
+          </LinearGradient>
+        </Defs>
+        <Path d={chartPath.areaPath} fill="url(#tokenPriceChartFill)" />
+        {activePoint != null ? (
+          <>
+            <Line
+              x1={activePoint.x}
+              y1={activePoint.y}
+              x2={activePoint.x}
+              y2={PRICE_CHART_BOTTOM}
+              stroke="rgba(255, 255, 255, 0.25)"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+            />
+            <Rect
+              x={Math.max(4, Math.min(220, activePoint.x - 48))}
+              y={2}
+              width={96}
+              height={28}
+              rx={8}
+              fill={colors.surface.cardElevated}
+              stroke="rgba(255, 255, 255, 0.18)"
+              strokeWidth={0.5}
+            />
+            <SvgText
+              x={Math.max(4, Math.min(220, activePoint.x - 48)) + 48}
+              y={21}
+              fill={colors.text.primary}
+              fontSize={13}
+              fontFamily={fontFamily.uiSemiBold}
+              textAnchor="middle"
+            >
+              {formatFiatValue(activePoint.sample.price, currency)}
+            </SvgText>
+          </>
+        ) : null}
+        <Path
+          d={chartPath.linePath}
+          fill="none"
+          stroke={colors.text.primary}
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {activePoint != null ? (
+          <Circle
+            cx={activePoint.x}
+            cy={activePoint.y}
+            r={4.5}
+            fill={colors.text.primary}
+            stroke={colors.glass.strongFill}
+            strokeWidth={2}
+          />
+        ) : null}
+      </Svg>
+      {loading ? (
+        <View style={styles.chartLoadingOverlay} pointerEvents="none">
+          <ActivityIndicator size="small" color={colors.brand.glossAccent} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function TokenPriceHistoryCard({
+  priceHistory,
+  selectedTimeframe,
+  onTimeframeChange,
+  holding,
+  valuation,
+  mintForDisplay,
+  onCopyMint,
+  dense,
+  compact,
+}: {
+  priceHistory: ReturnType<typeof useOffpayTokenPriceHistory>;
+  selectedTimeframe: TokenPriceHistoryTimeframeId;
+  onTimeframeChange: (timeframe: TokenPriceHistoryTimeframeId) => void;
+  holding: TokenHolding;
+  valuation?: { fiatValueLabel: string; unitPriceLabel: string } | null;
+  mintForDisplay: string | null;
+  onCopyMint: () => void;
+  dense: boolean;
+  compact: boolean;
+}): React.JSX.Element {
+  const data = priceHistory.data;
+  const chartSamples = data?.samples ?? [];
+  const change = data?.change ?? null;
+  const currencyCode = data?.currency ?? 'USD';
+  const [chartResetKey, setChartResetKey] = useState(0);
+  const chartLoading =
+    priceHistory.isLoading ||
+    (priceHistory.isFetching && (data == null || data.timeframe !== selectedTimeframe));
+  const resetChartInspection = useCallback((): void => {
+    setChartResetKey((value) => value + 1);
+  }, []);
+  const handleTimeframePress = useCallback(
+    (timeframe: TokenPriceHistoryTimeframeId): void => {
+      resetChartInspection();
+      onTimeframeChange(timeframe);
+    },
+    [onTimeframeChange, resetChartInspection],
+  );
+
+  return (
+    <View style={[styles.priceCard, compact && styles.priceCardCompact]}>
+      <View style={styles.overviewResetZone} onTouchStart={resetChartInspection}>
+        <View style={styles.overviewIdentityRow}>
+          <TokenIcon
+            symbol={holding.symbol}
+            name={holding.name}
+            logoUri={holding.logo}
+            size={compact ? 36 : 42}
+          />
+          <View style={styles.overviewTokenCopy}>
+            <View style={styles.nameRow}>
+              <TokenNameCopyButton
+                name={holding.name}
+                mint={mintForDisplay}
+                dense={dense}
+                onCopy={onCopyMint}
+              />
+              {holding.verified ? <VerifiedBadge /> : null}
+            </View>
+            <Text variant="captionBold" color={colors.text.secondary} numberOfLines={1}>
+              {holding.symbol}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.overviewHero}>
+          <Text
+            variant="h1"
+            color={colors.text.primary}
+            style={[styles.overviewBalanceValue, compact && styles.overviewBalanceValueCompact]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.42}
+            maxFontSizeMultiplier={1}
+          >
+            {holding.balance}
+          </Text>
+          <View style={styles.overviewSubRow}>
+            <Text
+              variant="body"
+              color={colors.text.secondary}
+              style={styles.overviewSubText}
+              numberOfLines={1}
+            >
+              {valuation?.fiatValueLabel ?? '--'}
+            </Text>
+            {change != null ? (
+              <Text
+                variant="bodyBold"
+                color={change.tone === 'negative' ? colors.semantic.error : colors.text.primary}
+                style={styles.overviewSubText}
+                numberOfLines={1}
+              >
+                {formatPercentChange(change.percent)}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.chartFrame}>
+        <PriceLineChart
+          samples={chartSamples}
+          currency={currencyCode}
+          loading={chartLoading}
+          resetKey={`${selectedTimeframe}:${chartResetKey}`}
+        />
+      </View>
+
+      <View
+        style={[styles.timeframeRow, compact && styles.timeframeRowCompact]}
+        onTouchStart={resetChartInspection}
+      >
+        {TOKEN_PRICE_HISTORY_TIMEFRAMES.map((timeframe) => {
+          const selected = timeframe.id === selectedTimeframe;
+          return (
+            <Pressable
+              key={timeframe.id}
+              style={({ pressed }) => [
+                styles.timeframeButton,
+                selected && styles.timeframeButtonActive,
+                pressed ? styles.controlPressed : null,
+              ]}
+              onPress={() => handleTimeframePress(timeframe.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Show ${timeframe.label} token price chart`}
+            >
+              <Text
+                variant="captionBold"
+                color={selected ? colors.text.primary : colors.text.tertiary}
+                numberOfLines={1}
+              >
+                {timeframe.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -265,7 +683,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const params = useLocalSearchParams<{ mint?: string }>();
   const requestedMint = getSearchParam(params.mint);
   const currency = usePreferencesStore((state) => state.currency);
-  const { network } = useOffpayNetwork();
+  const [selectedTimeframe, setSelectedTimeframe] = useState<TokenPriceHistoryTimeframeId>('24H');
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: true,
     eagerWithoutCapabilities: true,
@@ -293,25 +711,32 @@ export function TokenDetailsScreen(): React.JSX.Element {
     [holdings, requestedMint],
   );
   const valuation = holding == null ? null : (valuationQuery.data?.[holding.mint] ?? null);
-  const tokenActivity = useMemo(() => {
+  const mintForDisplay =
+    holding == null ? requestedMint : isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
+  const priceHistoryQuery = useOffpayTokenPriceHistory({
+    mint: holding?.priceMint ?? null,
+    symbol: holding?.symbol ?? null,
+    priceSymbol: holding?.priceSymbol ?? null,
+    currency,
+    timeframe: selectedTimeframe,
+    enabled: holding != null,
+  });
+  const tokenActivityItems = useMemo<TokenActivityItem[]>(() => {
     if (holding == null) return [];
 
     return transactionsQuery.transactions
       .filter((transaction) => transactionMatchesHolding(transaction, holding))
-      .slice(0, MAX_TOKEN_ACTIVITY_ROWS)
       .map((transaction) => ({
         transaction,
         view: mapWalletTransactionForHistory(transaction),
       }));
   }, [holding, transactionsQuery.transactions]);
+  const tokenActivity = useMemo(
+    () => tokenActivityItems.slice(0, MAX_TOKEN_ACTIVITY_ROWS),
+    [tokenActivityItems],
+  );
 
-  const mintForDisplay =
-    holding == null ? requestedMint : isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
-  const networkLabel =
-    network === 'mainnet' ? 'Mainnet' : network === 'devnet' ? 'Devnet' : 'Unknown';
   const screenHorizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
-  const heroPadding = dense ? spacing.lg : compact ? spacing.xl : spacing['2xl'];
-  const tokenIconSize = dense ? 54 : compact ? 60 : 68;
   const actionCompact = dense || width < 360 || fontScale > 1.1;
 
   const handleCopyMint = (): void => {
@@ -353,6 +778,12 @@ export function TokenDetailsScreen(): React.JSX.Element {
     },
     [holding, router],
   );
+  const handleTokenActivityPress = useCallback(
+    (transactionId: string): void => {
+      router.push(`/transaction-details?id=${encodeURIComponent(transactionId)}` as never);
+    },
+    [router],
+  );
 
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + spacing['4xl'];
 
@@ -376,11 +807,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
         <View style={styles.contentFrame}>
           <View style={styles.header}>
             <HeaderIconButton onPress={() => router.back()} accessibilityLabel="Go back">
-              <Ionicons
-                name="chevron-back"
-                size={layout.iconSizeNav}
-                color={colors.text.primary}
-              />
+              <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
             </HeaderIconButton>
             <Text
               variant="h2"
@@ -419,56 +846,17 @@ export function TokenDetailsScreen(): React.JSX.Element {
           </StaggerRevealItem>
         ) : (
           <StaggerRevealGroup itemStyle={styles.contentFrame}>
-            <View style={[styles.heroCard, { padding: heroPadding }]}>
-              <View style={styles.heroTopRow}>
-                <TokenIcon
-                  symbol={holding.symbol}
-                  name={holding.name}
-                  logoUri={holding.logo}
-                  size={tokenIconSize}
-                />
-                <View style={styles.heroTokenCopy}>
-                  <View style={styles.nameRow}>
-                    <Text
-                      variant="h2"
-                      color={colors.text.primary}
-                      style={[styles.tokenName, dense && styles.tokenNameDense]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.72}
-                      maxFontSizeMultiplier={1.05}
-                    >
-                      {holding.name}
-                    </Text>
-                    {holding.verified ? (
-                      <Ionicons name="checkmark-circle" size={18} color={colors.semantic.success} />
-                    ) : null}
-                  </View>
-                  <Text variant="body" color={colors.text.secondary} numberOfLines={1}>
-                    {holding.symbol}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.balanceBlock}>
-                <Text variant="caption" color={colors.text.secondary}>
-                  Balance
-                </Text>
-                <Text
-                  variant="h1"
-                  color={colors.text.primary}
-                  style={styles.balanceValue}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.68}
-                >
-                  {holding.balance} {holding.symbol}
-                </Text>
-                <Text variant="body" color={colors.text.secondary} numberOfLines={1}>
-                  {valuation?.fiatValueLabel ?? '--'}
-                </Text>
-              </View>
-            </View>
+            <TokenPriceHistoryCard
+              priceHistory={priceHistoryQuery}
+              selectedTimeframe={selectedTimeframe}
+              onTimeframeChange={setSelectedTimeframe}
+              holding={holding}
+              valuation={valuation}
+              mintForDisplay={mintForDisplay}
+              onCopyMint={handleCopyMint}
+              dense={dense}
+              compact={compact}
+            />
 
             <View style={styles.actionsRow}>
               {TOKEN_DETAIL_ACTIONS.map((action) => (
@@ -479,23 +867,6 @@ export function TokenDetailsScreen(): React.JSX.Element {
                   onPress={handleTokenAction}
                 />
               ))}
-            </View>
-
-            <View style={styles.section}>
-              <Text variant="bodyBold" color={colors.text.primary} style={styles.sectionTitle}>
-                Details
-              </Text>
-              <View style={styles.detailCard}>
-                <DetailRow label="Network" value={networkLabel} />
-                <DetailRow
-                  label="Mint"
-                  value={mintForDisplay == null ? '--' : shortenWalletAddress(mintForDisplay, 6)}
-                  copyable={mintForDisplay != null}
-                  onCopy={handleCopyMint}
-                />
-                <DetailRow label="Unit Price" value={valuation?.unitPriceLabel ?? '--'} />
-                <DetailRow label="Verified" value={holding.verified ? 'Yes' : 'No'} />
-              </View>
             </View>
 
             <View style={styles.section}>
@@ -514,6 +885,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
                       compact={compact}
                       tokenLogos={tokenLogoMap}
                       metaLabel={`Fee ${formatLamportsAsExactSolLabel(transaction.fee)}`}
+                      onPress={handleTokenActivityPress}
                     />
                   ))}
                 </View>
@@ -552,11 +924,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    alignItems: 'center',
+    alignItems: 'stretch',
   },
   contentFrame: {
     width: '100%',
-    maxWidth: TOKEN_DETAIL_CONTENT_MAX_WIDTH,
   },
   header: {
     minHeight: layout.minTouchTarget,
@@ -591,48 +962,51 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontFamily: fontFamily.display,
   },
-  heroCard: {
-    borderRadius: radii['2xl'],
-    borderCurve: 'continuous',
-    gap: spacing['2xl'],
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
-    boxShadow: TOKEN_DETAIL_PANEL_SHADOW,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-  },
-  heroTokenCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: spacing.xs,
-  },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
     minWidth: 0,
   },
+  tokenNameButton: {
+    flexGrow: 0,
+    flexShrink: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   tokenName: {
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 1,
     minWidth: 0,
   },
   tokenNameDense: {
-    fontSize: 26,
-    lineHeight: 32,
+    fontSize: 22,
+    lineHeight: 28,
   },
-  balanceBlock: {
-    gap: spacing.xs,
+  tokenCopyButton: {
+    flexShrink: 0,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  balanceValue: {
-    fontFamily: fontFamily.semiBold,
-    fontVariant: ['tabular-nums'],
+  verifiedBadge: {
+    flexShrink: 0,
+    width: 22,
+    height: 22,
+    borderRadius: radii.full,
+    backgroundColor: colors.brand.whiteStream,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.brand.whiteStream,
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+      'inset 0 -1px 1px rgba(0, 0, 0, 0.15)',
+    ].join(', '),
   },
   section: {
     gap: spacing.md,
@@ -640,43 +1014,115 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontFamily: fontFamily.semiBold,
   },
-  detailCard: {
+  priceCard: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.backgroundAlt,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    overflow: 'hidden',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
     boxShadow: TOKEN_DETAIL_PANEL_SHADOW,
   },
-  detailRow: {
-    minHeight: 50,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+  priceCardCompact: {
+    padding: spacing.md,
+  },
+  overviewResetZone: {
+    gap: spacing.md,
+  },
+  overviewIdentityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.holdingsCard.divider,
+    gap: spacing.sm,
   },
-  detailRowPressed: {
-    backgroundColor: colors.holdingsCard.pressed,
-  },
-  detailValueRow: {
+  overviewTokenCopy: {
     flex: 1,
     minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
     gap: spacing.xs,
   },
-  detailValue: {
-    minWidth: 0,
-    textAlign: 'right',
+  overviewHero: {
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  overviewBalanceValue: {
+    width: '100%',
+    textAlign: 'center',
+    fontSize: 42,
+    lineHeight: 48,
+    fontFamily: fontFamily.display,
+    fontVariant: ['tabular-nums'],
+  },
+  overviewBalanceValueCompact: {
+    fontSize: 36,
+    lineHeight: 42,
+  },
+  overviewSubRow: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.lg,
+  },
+  overviewSubText: {
+    fontVariant: ['tabular-nums'],
+  },
+  chartFrame: {
+    minHeight: PRICE_CHART_VIEWBOX_HEIGHT,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    justifyContent: 'center',
+    marginHorizontal: -spacing.md,
+  },
+  chartInteractiveFrame: {
+    width: '100%',
+    height: PRICE_CHART_VIEWBOX_HEIGHT,
+    justifyContent: 'center',
+  },
+  chartEmptyLine: {
+    height: PRICE_CHART_VIEWBOX_HEIGHT,
+    borderRadius: radii.lg,
+    backgroundColor: colors.glass.smokeWash,
+  },
+  chartLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.lg,
+    backgroundColor: colors.glass.clearFill,
+  },
+  timeframeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  timeframeRowCompact: {
+    gap: spacing.xs,
+  },
+  timeframeButton: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: radii.md,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+    backgroundColor: 'transparent',
+  },
+  timeframeButtonActive: {
+    backgroundColor: colors.glass.strongFill,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+      'inset 0 -1px 1px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   activityList: {
     gap: spacing.md,

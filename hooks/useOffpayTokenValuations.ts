@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
@@ -11,7 +10,6 @@ import {
 } from '@/lib/currency-rates';
 import { pooledAllSettled } from '@/lib/perf/concurrency';
 import { getTokenUsdPriceForValuation } from '@/lib/market-prices';
-import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import {
   readCachedTokenUsdPrices,
   readCachedUsdToCurrencyRate,
@@ -57,13 +55,15 @@ function buildValuationsFromPrices(params: {
   currency: string;
   rate: number;
   unitUsdPrices: Record<string, number>;
+  allowInputUsdPriceFallback: boolean;
 }): Record<string, TokenValuationView> {
   const valuations: Record<string, TokenValuationView> = {};
 
   for (const item of params.priceInputs) {
     const usdPrice = STABLE_SYMBOLS.has(item.priceSymbol)
       ? 1
-      : params.unitUsdPrices[item.mint] ?? item.usdPrice;
+      : (params.unitUsdPrices[item.mint] ??
+        (params.allowInputUsdPriceFallback ? item.usdPrice : null));
     if (typeof usdPrice !== 'number' || !Number.isFinite(usdPrice) || usdPrice <= 0) {
       continue;
     }
@@ -88,7 +88,6 @@ export function useOffpayTokenValuations({
 }) {
   const { network } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
-  const { capabilities } = useOffpayCapabilities();
   const normalizedCurrency = normalizeCurrency(currency);
   const lastPricingRef = useRef<LastPricingSnapshot | null>(null);
   const [cachedValues, setCachedValues] = useState<
@@ -119,15 +118,7 @@ export function useOffpayTokenValuations({
       });
   }, [holdings]);
 
-  const priceCapabilityKnownUnavailable =
-    canUseNetwork && capabilities != null && !isOffpayFeatureAvailable(capabilities, 'swap.price');
-  const priceCapabilityAvailable =
-    !canUseNetwork || isOffpayFeatureAvailable(capabilities, 'swap.price');
-  const enabled =
-    network != null &&
-    priceInputs.length > 0 &&
-    priceCapabilityAvailable &&
-    !priceCapabilityKnownUnavailable;
+  const enabled = network != null && priceInputs.length > 0;
 
   useEffect(() => {
     if (network == null || isNetworkAccessSuspended || priceInputs.length === 0) {
@@ -153,6 +144,7 @@ export function useOffpayTokenValuations({
         currency: normalizedCurrency,
         rate: cachedRate,
         unitUsdPrices: cachedPrices,
+        allowInputUsdPriceFallback: true,
       });
       setCachedValues(Object.keys(values).length > 0 ? values : undefined);
     })();
@@ -196,30 +188,35 @@ export function useOffpayTokenValuations({
       // Cap fan-out at 6 concurrent requests so a wallet with 30+ tokens
       // doesn't fire 30 RPCs in parallel every refetch.
       const PRICE_CONCURRENCY_LIMIT = 6;
-      const priceResults = await pooledAllSettled(priceInputs, PRICE_CONCURRENCY_LIMIT, async (item) => {
-        if (STABLE_SYMBOLS.has(item.priceSymbol)) {
-          return { ...item, usdPrice: 1 };
-        }
-        if (item.usdPrice != null) {
-          fetchedPrices[item.mint] = item.usdPrice;
-          return { ...item, usdPrice: item.usdPrice };
-        }
-
-        if (!canUseNetwork) {
-          const cachedPrice = cachedPrices[item.mint];
-          if (cachedPrice == null) {
-            throw new Error(`Cached ${item.symbol} price is unavailable.`);
+      const priceResults = await pooledAllSettled(
+        priceInputs,
+        PRICE_CONCURRENCY_LIMIT,
+        async (item) => {
+          if (STABLE_SYMBOLS.has(item.priceSymbol)) {
+            return { ...item, usdPrice: 1 };
           }
-          return { ...item, usdPrice: cachedPrice };
-        }
 
-        const usdPrice = await getTokenUsdPriceForValuation({ mint: item.mint, network });
-        if (usdPrice == null) {
-          throw new Error(`No price available for ${item.symbol}.`);
-        }
-        fetchedPrices[item.mint] = usdPrice;
-        return { ...item, usdPrice };
-      });
+          if (!canUseNetwork) {
+            const cachedPrice = cachedPrices[item.mint] ?? item.usdPrice;
+            if (cachedPrice == null) {
+              throw new Error(`Cached ${item.symbol} price is unavailable.`);
+            }
+            return { ...item, usdPrice: cachedPrice };
+          }
+
+          const usdPrice = await getTokenUsdPriceForValuation({
+            mint: item.mint,
+            network,
+            symbol: item.symbol,
+            priceSymbol: item.priceSymbol,
+          });
+          if (usdPrice == null) {
+            throw new Error(`No price available for ${item.symbol}.`);
+          }
+          fetchedPrices[item.mint] = usdPrice;
+          return { ...item, usdPrice };
+        },
+      );
 
       const unitUsdPrices: Record<string, number> = { ...cachedPrices };
       priceResults.forEach((result) => {
@@ -231,6 +228,7 @@ export function useOffpayTokenValuations({
         currency: normalizedCurrency,
         rate: fxRate,
         unitUsdPrices,
+        allowInputUsdPriceFallback: !canUseNetwork,
       });
 
       if (canUseNetwork) {
@@ -272,6 +270,7 @@ export function useOffpayTokenValuations({
       currency: normalizedCurrency,
       rate: snapshot.rate,
       unitUsdPrices: snapshot.unitUsdPrices,
+      allowInputUsdPriceFallback: false,
     });
   }, [normalizedCurrency, priceInputs, pricingScopeKey]);
   const mergedValues = useMemo(() => {

@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
@@ -11,7 +10,6 @@ import {
 } from '@/lib/currency-rates';
 import { pooledAllSettled } from '@/lib/perf/concurrency';
 import { getTokenUsdPriceForValuation } from '@/lib/market-prices';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import {
   readCachedTokenUsdPrices,
   readCachedUsdToCurrencyRate,
@@ -73,6 +71,7 @@ function buildPortfolioValuationData(params: {
   rate: number;
   unitUsdPrices: Record<string, number>;
   fetchedAt: number;
+  allowProviderUsdPriceFallback: boolean;
 }): PortfolioValuationData {
   let totalUsd = 0;
   let pricedCount = 0;
@@ -80,7 +79,8 @@ function buildPortfolioValuationData(params: {
   for (const item of params.priceInputs) {
     const usdPrice = STABLE_SYMBOLS.has(item.priceSymbol)
       ? 1
-      : params.unitUsdPrices[item.mint] ?? item.usdPrice;
+      : (params.unitUsdPrices[item.mint] ??
+        (params.allowProviderUsdPriceFallback ? item.usdPrice : null));
     if (!isPositiveUsdPrice(usdPrice)) {
       continue;
     }
@@ -95,7 +95,8 @@ function buildPortfolioValuationData(params: {
     const priceSymbol = holding.priceSymbol.trim().toUpperCase();
     const usdPrice = STABLE_SYMBOLS.has(priceSymbol)
       ? 1
-      : params.unitUsdPrices[holding.priceMint] ?? holding.usdPrice;
+      : (params.unitUsdPrices[holding.priceMint] ??
+        (params.allowProviderUsdPriceFallback ? holding.usdPrice : null));
     if (!isPositiveUsdPrice(usdPrice)) {
       continue;
     }
@@ -124,17 +125,10 @@ export function useOffpayPortfolioValuation({
   holdings,
   currency,
   enabled: enabledOption,
-  deferCapabilitiesUntilAfterInteractions,
 }: PortfolioValuationInput) {
   const { network } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
   const enabledByCaller = enabledOption ?? true;
-  const capabilitiesQuery = useOffpayCapabilities({
-    enabled: enabledByCaller,
-    deferUntilAfterInteractions: deferCapabilitiesUntilAfterInteractions,
-  });
-  const { capabilities } = capabilitiesQuery;
-  const priceCapability = getOffpayFeatureCapability(capabilities, 'swap.price');
   const normalizedCurrency = normalizeCurrency(currency);
   const lastPricingRef = useRef<LastPricingSnapshot | null>(null);
   const [cachedData, setCachedData] = useState<PortfolioValuationData | null>(null);
@@ -157,16 +151,7 @@ export function useOffpayPortfolioValuation({
       });
   }, [holdings]);
 
-  const priceCapabilityKnownUnavailable =
-    canUseNetwork && capabilities != null && !isOffpayFeatureAvailable(capabilities, 'swap.price');
-  const priceCapabilityAvailable =
-    !canUseNetwork || isOffpayFeatureAvailable(capabilities, 'swap.price');
-  const enabled =
-    network != null &&
-    enabledByCaller &&
-    priceInputs.length > 0 &&
-    priceCapabilityAvailable &&
-    !priceCapabilityKnownUnavailable;
+  const enabled = network != null && enabledByCaller && priceInputs.length > 0;
 
   useEffect(() => {
     if (
@@ -202,6 +187,7 @@ export function useOffpayPortfolioValuation({
         rate: cachedRate,
         unitUsdPrices: cachedPrices,
         fetchedAt: Date.now(),
+        allowProviderUsdPriceFallback: true,
       });
       setCachedData(nextData.pricedCount > 0 ? nextData : null);
     })();
@@ -263,20 +249,21 @@ export function useOffpayPortfolioValuation({
           if (STABLE_SYMBOLS.has(item.priceSymbol)) {
             return { ...item, usdPrice: 1 };
           }
-          if (item.usdPrice != null) {
-            fetchedPrices[item.mint] = item.usdPrice;
-            return { ...item, usdPrice: item.usdPrice };
-          }
 
           if (!canUseNetwork) {
-            const cachedPrice = cachedPrices[item.mint];
+            const cachedPrice = cachedPrices[item.mint] ?? item.usdPrice;
             if (cachedPrice == null) {
               throw new Error(`Cached ${item.symbol} price is unavailable.`);
             }
             return { ...item, usdPrice: cachedPrice };
           }
 
-          const usdPrice = await getTokenUsdPriceForValuation({ mint: item.mint, network });
+          const usdPrice = await getTokenUsdPriceForValuation({
+            mint: item.mint,
+            network,
+            symbol: item.symbol,
+            priceSymbol: item.priceSymbol,
+          });
           if (usdPrice == null) {
             throw new Error(`No price available for ${item.symbol}.`);
           }
@@ -309,6 +296,7 @@ export function useOffpayPortfolioValuation({
         rate: fxRate,
         unitUsdPrices,
         fetchedAt: Date.now(),
+        allowProviderUsdPriceFallback: !canUseNetwork,
       });
     },
     enabled: enabled && !isNetworkAccessSuspended,
@@ -318,9 +306,6 @@ export function useOffpayPortfolioValuation({
     refetchOnMount: true,
     refetchOnReconnect: true,
     retry: 1,
-    meta: {
-      capabilityMessage: priceCapability.message,
-    },
   });
   const pricingScopeKey = `${network ?? 'none'}:${normalizedCurrency}`;
 
@@ -343,6 +328,7 @@ export function useOffpayPortfolioValuation({
       rate: snapshot.rate,
       unitUsdPrices: snapshot.unitUsdPrices,
       fetchedAt: Date.now(),
+      allowProviderUsdPriceFallback: false,
     });
   }, [holdings, normalizedCurrency, priceInputs, pricingScopeKey]);
 
