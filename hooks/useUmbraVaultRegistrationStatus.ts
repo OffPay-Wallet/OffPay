@@ -15,7 +15,7 @@ import { useWalletStore } from '@/store/walletStore';
 import type { UmbraVaultRegistrationStatus } from '@/lib/umbra/umbra-execution';
 
 const UMBRA_REGISTRATION_GC_TIME_MS = 1000 * 60 * 30;
-const UMBRA_REGISTRATION_STALE_TIME_MS = 0;
+const UMBRA_REGISTRATION_STALE_TIME_MS = 10 * 60_000;
 
 /**
  * Fetches the on-chain Umbra vault registration status for the active wallet.
@@ -60,11 +60,13 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
       });
     },
     enabled,
-    // Registration gates shield/withdraw/claim. Keep previous data for a
-    // smooth screen, but never treat it as fresh across mounts.
+    // Registration only changes after explicit setup/repair paths, which
+    // already invalidate this key. Keep it fresh across receive-screen
+    // remounts so cached "already active" state does not keep probing
+    // the on-chain registration account.
     staleTime: UMBRA_REGISTRATION_STALE_TIME_MS,
     gcTime: UMBRA_REGISTRATION_GC_TIME_MS,
-    refetchOnMount: true,
+    refetchOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     placeholderData: (previousData, previousQuery) => {

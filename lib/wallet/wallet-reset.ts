@@ -1,8 +1,12 @@
 import { clearOffpayBootstrapCredentials } from '@/lib/api/offpay-api-storage';
-import { clearOffpaySigningSession, setOffpayAuthRecoveryHandler } from '@/lib/api/offpay-api-client';
+import {
+  clearOffpaySigningSession,
+  setOffpayAuthRecoveryHandler,
+} from '@/lib/api/offpay-api-client';
 import { clearOfflineNonceState } from '@/lib/offline/offline-payments';
 import { clearOfflinePaymentSlotCache } from '@/lib/offline/offline-payment-slots';
 import { clearPendingBackupQueue } from '@/lib/payments/pending-backup-queue';
+import { deleteAllManagedProfileImages } from '@/lib/profile/profile-image';
 import { clearSecuritySettings } from '@/lib/wallet/security-settings';
 import { deleteStoredWallet } from '@/lib/wallet/secure-wallet-store';
 import { deleteWalletDisplayCache } from '@/lib/wallet/wallet-display-cache';
@@ -70,7 +74,12 @@ function resetWalletScopedStores(): void {
     recipientHistoryClearedAtByWallet: {},
   });
   usePrivatePaymentStore.setState({ receipts: [] });
-  useUmbraPrivacyStore.setState({ receipts: [], registeredVaultKeys: [] });
+  useUmbraPrivacyStore.setState({
+    receipts: [],
+    registeredVaultKeys: [],
+    registeredMixerKeys: [],
+    registeredMixerVerifiedAt: {},
+  });
   useNotificationStore.getState().clearNotifications();
   usePreferencesStore.getState().setWalletMode('online');
   usePreferencesStore.getState().setOfflinePaymentsEnabled(false);
@@ -78,7 +87,6 @@ function resetWalletScopedStores(): void {
 
 export async function resetForgottenWallet(params: ResetForgottenWalletParams): Promise<void> {
   const walletAddresses = uniqueWalletAddresses();
-
   setOffpayAuthRecoveryHandler(null);
   clearOffpaySigningSession();
   await params.queryClient.cancelQueries();
@@ -94,5 +102,7 @@ export async function resetForgottenWallet(params: ResetForgottenWalletParams): 
   params.queryClient.clear();
   resetWalletScopedStores();
   useAppStore.getState().setUsername(null);
+  deleteAllManagedProfileImages();
+  useAppStore.getState().setProfileImageUri(null);
   useAppStore.getState().setHasOnboarded(false);
 }

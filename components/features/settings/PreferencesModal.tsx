@@ -57,10 +57,10 @@ interface PreferencesModalProps {
 }
 
 const SHEET_HEIGHTS: Record<Step, number> = {
-  root: layout.buttonHeightLg * 4 + spacing['4xl'] + spacing.xl,
-  walletMode: layout.buttonHeightLg * 3 + spacing['4xl'],
+  root: layout.buttonHeightLg * 3.5 + spacing['3xl'],
+  walletMode: layout.buttonHeightLg * 2.5 + spacing['3xl'],
   offlinePayments: layout.buttonHeightLg * 10 + spacing['4xl'],
-  network: layout.buttonHeightLg * 3 + spacing['4xl'],
+  network: layout.buttonHeightLg * 2.5 + spacing['3xl'],
 };
 
 const HEADER_TITLES: Record<Step, string> = {
@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
   },
   headerRowCompact: { paddingTop: spacing.md, paddingBottom: spacing.xs },

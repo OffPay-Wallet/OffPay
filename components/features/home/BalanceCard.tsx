@@ -40,7 +40,6 @@ import { CURRENCIES } from '@/constants/currencies';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import Svg, { Defs, Filter, Rect, FeTurbulence, FeColorMatrix } from 'react-native-svg';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -358,24 +357,7 @@ export function BalanceCard({
             style={StyleSheet.absoluteFill}
             pointerEvents="none"
           />
-          {/* SVG noise texture */}
-          <View style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} pointerEvents="none">
-            <Svg width="100%" height="100%">
-              <Defs>
-                <Filter id="noise" x="0%" y="0%" width="100%" height="100%">
-                  <FeTurbulence
-                    type="fractalNoise"
-                    baseFrequency="0.85"
-                    numOctaves={4}
-                    stitchTiles="stitch"
-                    result="noise"
-                  />
-                  <FeColorMatrix type="saturate" values="0" in="noise" />
-                </Filter>
-              </Defs>
-              <Rect width="100%" height="100%" filter="url(#noise)" opacity={0.6} />
-            </Svg>
-          </View>
+          <View style={styles.nativeGlossWash} pointerEvents="none" />
           <View
             style={[
               styles.content,
@@ -896,6 +878,10 @@ const styles = StyleSheet.create({
       'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
       '0 6px 16px rgba(0, 0, 0, 0.2)',
     ].join(', '),
+  },
+  nativeGlossWash: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.025)',
   },
   content: {
     minWidth: 0,

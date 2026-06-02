@@ -23,7 +23,6 @@ import { UmbraReceiveCard } from '@/components/features/receive/UmbraReceiveCard
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { Text } from '@/components/ui/Text';
-import { PuffyInfoCircleIcon } from '@/components/ui/icons/PuffyInfoCircleIcon';
 import { PuffyQRIcon } from '@/components/ui/icons/PuffyQRIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -43,7 +42,7 @@ import {
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { offpayWalletBalanceQueryKey } from '@/lib/api/offpay-wallet-query-keys';
 import { mark, measure } from '@/lib/perf/perf-marks';
-import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
+import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import {
   isRnZkProverNativeModuleAvailable,
@@ -58,7 +57,7 @@ import type {
   PrivatePaymentRoute,
   PrivatePaymentRouteOption,
 } from '@/components/features/private-payment/send-flow/types';
-import type { UmbraExecutionResult } from '@/lib/umbra/umbra-execution';
+import type { UmbraExecutionResult, UmbraPendingClaimUtxo } from '@/lib/umbra/umbra-execution';
 
 // `ReceiveInfoModal` ships ~12 KB of glassy receive-flow copy + nested
 // gradients. Defer loading it until the user taps the info icon so it
@@ -74,6 +73,10 @@ const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_ROUTE_MINT = 'native-sol';
 const RECEIVE_CONTENT_MAX_WIDTH = 430;
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 384;
+const UMBRA_AUTO_SCAN_DELAY_MS = 1400;
+const UMBRA_AUTO_SCAN_TIMEOUT_MS = 5000;
+const UMBRA_MIXER_REGISTRATION_RECHECK_MS = 6 * 60 * 60 * 1000;
+const EMPTY_UMBRA_PENDING_CLAIMS: readonly UmbraPendingClaimUtxo[] = [];
 // Fade-out timing for the standard / private content swap. The
 // outgoing content fades quickly (the user has already committed to
 // the new mode); the incoming content is revealed by the per-component
@@ -172,15 +175,21 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const [claimingUmbra, setClaimingUmbra] = useState(false);
   const [claimResult, setClaimResult] = useState<UmbraExecutionResult | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
-  const [_setupResult, setSetupResult] = useState<UmbraExecutionResult | null>(null);
+  const [setupResult, setSetupResult] = useState<UmbraExecutionResult | null>(null);
   const [_setupError, setSetupError] = useState<string | null>(null);
   const [pendingClaimResult, setPendingClaimResult] = useState<UmbraExecutionResult | null>(null);
   const [scanningUmbraClaims, setScanningUmbraClaims] = useState(false);
   const [hasCheckedUmbraClaims, setHasCheckedUmbraClaims] = useState(false);
   const scanningUmbraClaimsRef = useRef(false);
+  const scanAbortControllerRef = useRef<AbortController | null>(null);
   const pendingClaimToastRef = useRef<string | null>(null);
   const pendingClaimAutoScanKeyRef = useRef<string | null>(null);
   const umbraCacheInvalidator = useUmbraCacheInvalidator();
+  const registeredMixerKeys = useUmbraPrivacyStore((state) => state.registeredMixerKeys);
+  const registeredMixerVerifiedAt = useUmbraPrivacyStore(
+    (state) => state.registeredMixerVerifiedAt,
+  );
+  const setMixerRegistered = useUmbraPrivacyStore((state) => state.setMixerRegistered);
   const requestedMint = getSearchParam(params.mint);
   const requestedToken = getSearchParam(params.token);
   const requestedName = getSearchParam(params.name);
@@ -205,8 +214,24 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     walletId != null &&
     network != null &&
     isUmbraNetworkSupported(network);
+  const activeMixerRegistrationKey =
+    walletAddress != null && network != null ? `${network}:${walletAddress}` : null;
+  const persistedMixerRegistered =
+    activeMixerRegistrationKey != null && registeredMixerKeys.includes(activeMixerRegistrationKey);
+  const persistedMixerVerifiedAt =
+    activeMixerRegistrationKey == null
+      ? null
+      : (registeredMixerVerifiedAt?.[activeMixerRegistrationKey] ?? null);
+  const shouldRecheckPersistedMixerRegistration =
+    persistedMixerRegistered &&
+    (persistedMixerVerifiedAt == null ||
+      Date.now() - persistedMixerVerifiedAt >= UMBRA_MIXER_REGISTRATION_RECHECK_MS);
+  const shouldQueryUmbraMixerRegistration =
+    canShowUmbraReceiveRoute &&
+    receiveMode === 'private' &&
+    (!persistedMixerRegistered || shouldRecheckPersistedMixerRegistration);
   const umbraVaultRegistrationQuery = useUmbraVaultRegistrationStatus({
-    enabled: canShowUmbraReceiveRoute && receiveMode === 'private',
+    enabled: shouldQueryUmbraMixerRegistration,
   });
   const canUseUmbraNativeProver = isRnZkProverNativeModuleAvailable();
   const capabilities = capabilitiesQuery.capabilities;
@@ -231,7 +256,34 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const canScanUmbraClaims = canShowUmbraReceiveRoute && canUseUmbraReceiveRoute;
   const canUseUmbraClaim = canScanUmbraClaims;
   const umbraVaultRegistrationStatus = umbraVaultRegistrationQuery.data ?? null;
-  const umbraAlreadyMixerRegistered = umbraVaultRegistrationStatus?.mixerRegistered === true;
+  const onChainMixerRegistered = umbraVaultRegistrationStatus?.mixerRegistered === true;
+  const umbraAlreadyMixerRegistered =
+    onChainMixerRegistered || setupResult?.mixerRegistered === true || persistedMixerRegistered;
+  const umbraMixerStatusChecking =
+    canUseUmbraReceiveRoute &&
+    !umbraAlreadyMixerRegistered &&
+    umbraVaultRegistrationStatus == null &&
+    (umbraVaultRegistrationQuery.isLoading ||
+      umbraVaultRegistrationQuery.isFetching ||
+      umbraVaultRegistrationQuery.isPending ||
+      umbraVaultRegistrationQuery.isCapabilitiesPending);
+
+  useEffect(() => {
+    if (activeMixerRegistrationKey == null) return;
+    if (onChainMixerRegistered) {
+      setMixerRegistered(activeMixerRegistrationKey, true);
+      return;
+    }
+    if (umbraVaultRegistrationStatus != null && !umbraVaultRegistrationQuery.isFetching) {
+      setMixerRegistered(activeMixerRegistrationKey, false);
+    }
+  }, [
+    activeMixerRegistrationKey,
+    onChainMixerRegistered,
+    setMixerRegistered,
+    umbraVaultRegistrationQuery.isFetching,
+    umbraVaultRegistrationStatus,
+  ]);
   const receiveRouteOptions = useMemo<PrivatePaymentRouteOption[]>(() => {
     const routes: PrivatePaymentRouteOption[] = [
       {
@@ -262,8 +314,26 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     ? receiveRoute
     : 'normal';
 
+  const abortUmbraPendingClaimScan = useCallback((reason: string): void => {
+    const controller = scanAbortControllerRef.current;
+    scanAbortControllerRef.current = null;
+    if (controller == null || controller.signal.aborted) return;
+    try {
+      controller.abort(new Error(reason));
+    } catch {
+      try {
+        controller.abort();
+      } catch {
+        /* no-op */
+      }
+    }
+  }, []);
+
   const handleChangeReceiveMode = useCallback(
     (mode: ReceiveMode) => {
+      if (mode === 'standard') {
+        abortUmbraPendingClaimScan('Receive mode switched away from Umbra private claims.');
+      }
       setReceiveMode(mode);
       // Keep the legacy `receiveRoute` (used to encode the QR payload)
       // in sync with the segmented mode. When the user is on the
@@ -276,7 +346,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         setReceiveRoute('normal');
       }
     },
-    [canUseUmbraReceiveRoute],
+    [abortUmbraPendingClaimScan, canUseUmbraReceiveRoute],
   );
 
   const qrResult = useMemo(() => {
@@ -445,6 +515,17 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     }
   }, [networkLabel, showToast, walletAddress]);
 
+  useEffect(() => {
+    if (receiveMode !== 'private') {
+      abortUmbraPendingClaimScan('Receive private tab hidden.');
+      pendingClaimAutoScanKeyRef.current = null;
+      if (scanningUmbraClaimsRef.current) {
+        scanningUmbraClaimsRef.current = false;
+        setScanningUmbraClaims(false);
+      }
+    }
+  }, [abortUmbraPendingClaimScan, receiveMode]);
+
   const scanUmbraPendingClaims = useCallback(() => {
     if (walletAddress == null || walletId == null || network == null || !canScanUmbraClaims) {
       setPendingClaimResult(null);
@@ -452,12 +533,34 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     }
     if (scanningUmbraClaimsRef.current) return;
 
-    const signal = getScreenSignal();
+    const screenSignal = getScreenSignal();
+    const controller = new AbortController();
+    const abortFromScreen = () => {
+      try {
+        controller.abort(new Error('Receive screen hidden while Umbra claims were scanning.'));
+      } catch {
+        try {
+          controller.abort();
+        } catch {
+          /* no-op */
+        }
+      }
+    };
+    if (screenSignal.aborted) {
+      abortFromScreen();
+      return;
+    }
+    screenSignal.addEventListener('abort', abortFromScreen, { once: true });
+    scanAbortControllerRef.current = controller;
+    const signal = controller.signal;
     scanningUmbraClaimsRef.current = true;
     setScanningUmbraClaims(true);
     void (async () => {
       const startedAt = mark();
+      await yieldToUi();
+      if (signal.aborted) return;
       const { scanUmbraPrivateP2PClaims } = await import('@/lib/umbra/umbra-execution');
+      await yieldToUi();
       if (signal.aborted) return;
       const latestClaimedUmbraIndexSet = getClaimedUmbraUtxoIndexSet(
         {
@@ -509,8 +612,12 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         setHasCheckedUmbraClaims(true);
       })
       .finally(() => {
+        screenSignal.removeEventListener('abort', abortFromScreen);
+        if (scanAbortControllerRef.current === controller) {
+          scanAbortControllerRef.current = null;
+        }
         scanningUmbraClaimsRef.current = false;
-        if (!signal.aborted) {
+        if (!screenSignal.aborted) {
           setScanningUmbraClaims(false);
         }
       });
@@ -556,10 +663,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     pendingClaimAutoScanKeyRef.current = key;
 
     const scheduled = scheduleUiWorkAfterFirstPaint(
-      () => {
+      async () => {
+        await yieldToUi();
         scanLatestRef.current();
       },
-      { fallbackDelayMs: 700, timeoutMs: 3000 },
+      { fallbackDelayMs: UMBRA_AUTO_SCAN_DELAY_MS, timeoutMs: UMBRA_AUTO_SCAN_TIMEOUT_MS },
     );
 
     return () => scheduled.cancel();
@@ -767,6 +875,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
       .mutateAsync({ walletAddress, walletId, network })
       .then((result) => {
         setSetupResult(result);
+        if (activeMixerRegistrationKey != null && result.mixerRegistered === true) {
+          setMixerRegistered(activeMixerRegistrationKey, true);
+        }
         void queryClient.invalidateQueries({
           queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
         });
@@ -790,10 +901,12 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         });
       });
   }, [
+    activeMixerRegistrationKey,
     canUseUmbraReceiveRoute,
     mixerRegisterMutation,
     network,
     queryClient,
+    setMixerRegistered,
     showToast,
     umbraAlreadyMixerRegistered,
     umbraReceiveDisabledReason,
@@ -1017,11 +1130,14 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                   canUseUmbraReceiveRoute
                     ? {
                         title: 'Umbra Claims',
-                        buttonLabel: 'Set up',
-                        loadingLabel: 'Setting up',
+                        buttonLabel: umbraMixerStatusChecking ? 'Checking' : 'Set up',
+                        loadingLabel: umbraMixerStatusChecking ? 'Checking' : 'Setting up',
                         onPress: handleSetupUmbraPrivateP2P,
-                        disabled: !canUseUmbraReceiveRoute || mixerRegisterMutation.isPending,
-                        loading: mixerRegisterMutation.isPending,
+                        disabled:
+                          !canUseUmbraReceiveRoute ||
+                          mixerRegisterMutation.isPending ||
+                          umbraMixerStatusChecking,
+                        loading: mixerRegisterMutation.isPending || umbraMixerStatusChecking,
                         accessibilityLabel: 'Set up Umbra private P2P',
                         completed: umbraAlreadyMixerRegistered,
                       }
@@ -1064,7 +1180,8 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                     pendingClaimCount > 0
                       ? 'Claim all pending Umbra private payments'
                       : 'Check for pending Umbra private payments',
-                  pendingClaims: pendingClaimResult?.pendingClaimUtxoDetails ?? [],
+                  pendingClaims:
+                    pendingClaimResult?.pendingClaimUtxoDetails ?? EMPTY_UMBRA_PENDING_CLAIMS,
                   previewLimit: 2,
                 }}
                 revealKey={renderedReceiveMode}
@@ -1216,10 +1333,9 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: [
-      '0 8px 24px rgba(0, 0, 0, 0.35)',
-      'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
-    ].join(', '),
+    boxShadow: ['0 8px 24px rgba(0, 0, 0, 0.35)', 'inset 0 1px 1px rgba(255, 255, 255, 0.12)'].join(
+      ', ',
+    ),
   },
   qrCardDense: {
     padding: spacing.md,

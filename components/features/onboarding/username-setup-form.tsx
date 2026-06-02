@@ -1,12 +1,22 @@
 import { useMemo, useState } from 'react';
-import { Keyboard, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Keyboard,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
+import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
-import { PuffyAvatarIcon } from '@/components/ui/icons/PuffyAvatarIcon';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useLocalProfileImageManager } from '@/hooks/useLocalProfileImageManager';
 import {
   formatOffpayUsername,
   getOffpayUsernameError,
@@ -31,10 +41,17 @@ export function UsernameSetupForm({
   const [username, setUsername] = useState(() =>
     sanitizeOffpayUsernameInput(initialUsername ?? ''),
   );
+  const {
+    profileImageUri,
+    pickingProfileImage,
+    pickProfileImage,
+    clearProfileImage,
+  } = useLocalProfileImageManager();
   const normalizedUsername = useMemo(() => sanitizeOffpayUsernameInput(username), [username]);
   const usernameError = username.length > 0 ? getOffpayUsernameError(username) : null;
   const canContinue = formatOffpayUsername(username) != null;
   const titleFontSize = width < 360 ? 28 : width < 390 ? 30 : 32;
+  const avatarSize = width < 360 ? 72 : 80;
 
   const handleSubmit = (): void => {
     const formatted = formatOffpayUsername(username);
@@ -46,11 +63,91 @@ export function UsernameSetupForm({
 
   return (
     <View style={styles.shell}>
-      <PuffyAvatarIcon
-        size={layout.avatarLg + spacing['3xl']}
-        color={colors.brand.glossAccent}
-        style={styles.avatarIcon}
-      />
+      <View style={styles.profileBlock}>
+        <Pressable
+          style={styles.avatarButton}
+          onPress={() => {
+            void pickProfileImage();
+          }}
+          disabled={pickingProfileImage || submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Change profile photo"
+        >
+          <WalletAvatar size={avatarSize} solidFill />
+          <View style={styles.avatarBadge}>
+            {pickingProfileImage ? (
+              <ActivityIndicator size="small" color={colors.text.onAccent} />
+            ) : (
+              <Ionicons name="camera-outline" size={14} color={colors.text.onAccent} />
+            )}
+          </View>
+        </Pressable>
+
+        <View style={styles.profileActions}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.profileAction,
+              pressed && !pickingProfileImage && !submitting ? styles.profileActionPressed : null,
+            ]}
+            onPress={() => {
+              void pickProfileImage();
+            }}
+            disabled={pickingProfileImage || submitting}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+          >
+            {pickingProfileImage ? (
+              <ActivityIndicator size="small" color={colors.text.primary} />
+            ) : (
+              <Ionicons
+                name="image-outline"
+                size={layout.iconSizeInline}
+                color={colors.text.primary}
+              />
+            )}
+            <Text
+              variant="buttonSmall"
+              color={colors.text.primary}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.05}
+              style={styles.profileActionLabel}
+            >
+              Change photo
+            </Text>
+          </Pressable>
+
+          {profileImageUri != null ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.profileAction,
+                styles.profileActionDanger,
+                pressed && !submitting ? styles.profileActionDangerPressed : null,
+              ]}
+              onPress={() => {
+                void clearProfileImage();
+              }}
+              disabled={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="Remove profile photo"
+            >
+              <Ionicons
+                name="trash-outline"
+                size={layout.iconSizeInline}
+                color={colors.semantic.error}
+              />
+              <Text
+                variant="buttonSmall"
+                color={colors.semantic.error}
+                numberOfLines={1}
+                maxFontSizeMultiplier={1.05}
+                style={styles.profileActionLabel}
+              >
+                Remove photo
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
 
       <View style={styles.copyBlock}>
         <Text
@@ -130,8 +227,61 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: spacing['2xl'],
   },
-  avatarIcon: {
+  profileBlock: {
     alignSelf: 'center',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  avatarButton: {
+    position: 'relative',
+  },
+  avatarBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 28,
+    height: 28,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand.glossAccent,
+    borderWidth: 2,
+    borderColor: colors.brand.glassTint,
+  },
+  profileActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  profileAction: {
+    minHeight: 38,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+  },
+  profileActionPressed: {
+    backgroundColor: colors.surface.pressed,
+  },
+  profileActionDanger: {
+    backgroundColor: 'rgba(255, 77, 90, 0.1)',
+    borderColor: 'rgba(255, 77, 90, 0.28)',
+  },
+  profileActionDangerPressed: {
+    backgroundColor: 'rgba(255, 77, 90, 0.18)',
+  },
+  profileActionLabel: {
+    flexShrink: 1,
+    fontFamily: fontFamily.uiSemiBold,
   },
   copyBlock: {},
   title: {
@@ -145,7 +295,7 @@ const styles = StyleSheet.create({
     minHeight: layout.buttonHeightMd,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.backgroundTint,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     paddingHorizontal: spacing.xl,

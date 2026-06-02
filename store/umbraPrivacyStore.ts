@@ -27,6 +27,8 @@ export interface UmbraPrivacyReceipt {
 interface UmbraPrivacyState {
   receipts: UmbraPrivacyReceipt[];
   registeredVaultKeys: string[];
+  registeredMixerKeys: string[];
+  registeredMixerVerifiedAt: Record<string, number>;
   // Insertion indices of Umbra UTXOs we have already claimed locally,
   // bucketed by `${network}:${walletAddress}`. The Umbra indexer does not
   // surface a "claimed" flag — it returns every leaf in the Merkle tree.
@@ -37,6 +39,7 @@ interface UmbraPrivacyState {
   addReceipt: (receipt: UmbraPrivacyReceipt) => void;
   clearReceiptsForNetwork: (network: OffpayNetwork) => void;
   setVaultRegistered: (key: string, registered: boolean) => void;
+  setMixerRegistered: (key: string, registered: boolean) => void;
   markUtxosClaimed: (params: {
     network: OffpayNetwork;
     walletAddress: string;
@@ -69,6 +72,8 @@ export const useUmbraPrivacyStore = create<UmbraPrivacyState>()(
     (set) => ({
       receipts: [],
       registeredVaultKeys: [],
+      registeredMixerKeys: [],
+      registeredMixerVerifiedAt: {},
       claimedUtxoInsertionIndices: {},
       addReceipt: (receipt) =>
         set((state) => ({
@@ -87,6 +92,23 @@ export const useUmbraPrivacyStore = create<UmbraPrivacyState>()(
             ? [key, ...state.registeredVaultKeys.filter((item) => item !== key)].slice(0, 20)
             : state.registeredVaultKeys.filter((item) => item !== key),
         })),
+      setMixerRegistered: (key, registered) =>
+        set((state) => {
+          const currentVerifiedAt = state.registeredMixerVerifiedAt ?? {};
+          const nextKeys = registered
+            ? [key, ...state.registeredMixerKeys.filter((item) => item !== key)].slice(0, 20)
+            : state.registeredMixerKeys.filter((item) => item !== key);
+          const nextVerifiedAt = nextKeys.reduce<Record<string, number>>((acc, item) => {
+            const previousVerifiedAt = currentVerifiedAt[item];
+            acc[item] =
+              item === key && registered ? Date.now() : (previousVerifiedAt ?? Date.now());
+            return acc;
+          }, {});
+          return {
+            registeredMixerKeys: nextKeys,
+            registeredMixerVerifiedAt: nextVerifiedAt,
+          };
+        }),
       markUtxosClaimed: ({ network, walletAddress, insertionIndices }) =>
         set((state) => {
           const indices = insertionIndices

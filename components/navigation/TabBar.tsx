@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -45,7 +46,14 @@ const QUICK_ACTION_ROW_GAP = spacing.md;
 // Material recipes
 // ---------------------------------------------------------------------------
 
-const BAR_TINT = 'rgba(20, 20, 20, 0.9)';
+const BAR_TINT = colors.brand.graphiteDepth;
+const BAR_GLOSS_COLORS = [
+  'rgba(255, 255, 255, 0.1)',
+  'rgba(255, 255, 255, 0.035)',
+  'rgba(0, 0, 0, 0.1)',
+  'rgba(0, 0, 0, 0.22)',
+] as const;
+const BAR_GLOSS_LOCATIONS = [0, 0.36, 0.72, 1] as const;
 // Active-tab pill - glossy highlight so the selected tab remains
 // readable on the dark floating bar.
 const PILL_TINT = colors.brand.glossAccent;
@@ -76,10 +84,10 @@ const SCRIM_OPACITY = 0.82;
 
 // Shadows — neutral lift only, no coloured glow.
 const BAR_SHADOW = [
-  '0 10px 24px rgba(0, 0, 0, 0.38)',
+  '0 12px 28px rgba(0, 0, 0, 0.52)',
   'inset 0 1px 1px rgba(255, 255, 255, 0.22)',
-  'inset 0 0 12px rgba(255, 255, 255, 0.04)',
-  'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
+  'inset 0 0 16px rgba(255, 255, 255, 0.05)',
+  'inset 0 -1px 3px rgba(0, 0, 0, 0.42)',
 ].join(', ');
 const PILL_SHADOW = [
   'inset 0 1px 1px rgba(255, 255, 255, 0.85)',
@@ -420,6 +428,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         ]}
       >
         <View pointerEvents="none" style={[styles.barTint, { backgroundColor: BAR_TINT }]} />
+        <LinearGradient
+          pointerEvents="none"
+          colors={BAR_GLOSS_COLORS}
+          locations={BAR_GLOSS_LOCATIONS}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
 
         <View style={styles.tabRow}>
           <Animated.View
@@ -658,7 +674,7 @@ const styles = StyleSheet.create({
     borderRadius: BAR_RADIUS,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: 'transparent',
+    backgroundColor: BAR_TINT,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: HAIRLINE,
@@ -737,7 +753,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1.5,
     borderBottomWidth: HAIRLINE,
     borderRightWidth: HAIRLINE,
-    borderColor: 'rgba(255, 255, 255, 0.22)',
+    borderColor: FAB_BORDER_COLOR,
     backgroundColor: colors.brand.actionFill,
     boxShadow: FAB_PUCK_SHADOW,
   },

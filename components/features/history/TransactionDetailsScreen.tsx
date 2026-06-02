@@ -360,15 +360,17 @@ function TransactionActionIcon({
   type: OffpayDisplayTransactionType;
   size: number;
 }): React.JSX.Element {
+  const actionColor = colors.brand.glossAccent;
+
   if (type === 'receive') {
-    return <PuffyReceiveArrowIcon size={size} />;
+    return <PuffyReceiveArrowIcon size={size} color={actionColor} />;
   }
 
   if (type === 'swap') {
-    return <PuffySwapIcon size={size} color={colors.brand.glossAccent} focused />;
+    return <PuffySwapIcon size={size} color={actionColor} focused />;
   }
 
-  return <PuffySendIcon size={size} />;
+  return <PuffySendIcon size={size} color={actionColor} />;
 }
 
 function HeaderIconButton({

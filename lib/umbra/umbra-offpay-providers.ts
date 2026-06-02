@@ -130,6 +130,7 @@ const UMBRA_PROGRAM_ID_BY_NETWORK: Partial<Record<OffpayNetwork, string>> = {
 const PROTOCOL_FEE_VAULT_OFFSET_ZERO = 0n as never;
 const UMBRA_FORWARDER_SEND_MAX_RETRIES = 1;
 const UMBRA_VAULT_READINESS_POSITIVE_CACHE_TTL_MS = 5 * 60_000;
+const UMBRA_RPC_READINESS_POSITIVE_CACHE_TTL_MS = 10_000;
 const depositProtocolFeeProvider = getHardcodedDepositProtocolFeeProvider();
 const createUtxoProtocolFeeProvider = getHardcodedCreateUtxoProtocolFeeProvider();
 const withdrawalProtocolFeeProvider = getHardcodedWithdrawalProtocolFeeProvider();
@@ -142,6 +143,14 @@ const positiveVaultReadinessCache = new Map<
   { expiresAt: number; readiness: UmbraVaultFeeAccountReadiness }
 >();
 const inFlightVaultReadinessCache = new Map<string, Promise<UmbraVaultFeeAccountReadiness>>();
+const positiveRpcReadinessCache = new Map<
+  OffpayNetwork,
+  { expiresAt: number; readiness: { blockhash: string; slot: bigint } }
+>();
+const inFlightRpcReadinessCache = new Map<
+  OffpayNetwork,
+  Promise<{ blockhash: string; slot: bigint }>
+>();
 
 const LEGACY_FEE_SCHEDULE_SEED = Uint8Array.from([
   219, 103, 184, 147, 198, 147, 112, 38, 55, 38, 235, 215, 80, 203, 76, 46, 100, 134, 54, 137, 90,
@@ -1280,17 +1289,49 @@ export async function verifyOffpayUmbraRpcReadiness(network: OffpayNetwork): Pro
   slot: bigint;
 }> {
   assertUmbraNetworkSupportedForProviders(network);
-  const startedAt = mark();
-  const [blockhash, slot] = await Promise.all([
-    getRpcLatestBlockhash(network),
-    getRpcSlot(network),
-  ]);
-  measure('umbra.rpc.readiness', startedAt, {
-    network,
-  });
+  const now = Date.now();
+  const cached = positiveRpcReadinessCache.get(network);
+  if (cached != null && cached.expiresAt > now) {
+    const startedAt = mark();
+    measure('umbra.rpc.readiness.cacheHit', startedAt, { network });
+    return cached.readiness;
+  }
+  if (cached != null) {
+    positiveRpcReadinessCache.delete(network);
+  }
 
-  return {
-    blockhash: blockhash.blockhash,
-    slot: toBigint(slot.slot),
-  };
+  const inFlight = inFlightRpcReadinessCache.get(network);
+  if (inFlight != null) {
+    const startedAt = mark();
+    try {
+      return await inFlight;
+    } finally {
+      measure('umbra.rpc.readiness.inFlightJoin', startedAt, { network });
+    }
+  }
+
+  const startedAt = mark();
+  const promise = Promise.all([getRpcLatestBlockhash(network), getRpcSlot(network)]).then(
+    ([blockhash, slot]) => {
+      const readiness = {
+        blockhash: blockhash.blockhash,
+        slot: toBigint(slot.slot),
+      };
+      positiveRpcReadinessCache.set(network, {
+        expiresAt: Date.now() + UMBRA_RPC_READINESS_POSITIVE_CACHE_TTL_MS,
+        readiness,
+      });
+      return readiness;
+    },
+  );
+  inFlightRpcReadinessCache.set(network, promise);
+
+  try {
+    return await promise;
+  } finally {
+    inFlightRpcReadinessCache.delete(network);
+    measure('umbra.rpc.readiness', startedAt, {
+      network,
+    });
+  }
 }

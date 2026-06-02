@@ -19,7 +19,6 @@ import { UmbraVaultActionPanel } from '@/components/features/umbra-vault/umbra-v
 import { UmbraVaultPortfolioCard } from '@/components/features/umbra-vault/umbra-vault-portfolio-card';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
-import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -78,6 +77,7 @@ interface UmbraTokenLogoMap {
 }
 
 const UMBRA_ACTION_MIN_SOL_LAMPORTS = 5_000;
+const VAULT_SETUP_ACTION_LABEL = 'Set Up';
 const EMPTY_VAULT_BALANCES: UmbraVaultBalance[] = [];
 
 function decimalInputToPositiveAtomic(value: string, decimals: number): bigint | null {
@@ -254,7 +254,7 @@ function buildVaultActionFeedback(params: {
   }
 
   if (!params.vaultRegistered) {
-    return dangerFeedback('Set up vault first', 'Set up vault first');
+    return dangerFeedback(VAULT_SETUP_ACTION_LABEL, 'Set up vault first');
   }
 
   if (params.amount.trim().length === 0 || params.amountAtomic == null) {
@@ -861,6 +861,11 @@ function UmbraVaultContentBody({
   const handleSubmitAction = () => {
     void (async () => {
       if (actionFeedback.disabled) {
+        if (actionFeedback.label === VAULT_SETUP_ACTION_LABEL) {
+          handleSetup();
+          return;
+        }
+
         showToast({
           title: actionFeedback.toastTitle,
           message: actionFeedback.toastMessage,
@@ -1191,55 +1196,42 @@ function UmbraVaultContentBody({
         disabled={!canUseVault}
         disabledMessage={disabledMessage}
         networkLabel={networkLabel}
-        setupLoading={
-          registerMutation.isPending ||
-          setupInFlight ||
-          vaultSetupChecking ||
-          setupConfirmationPending
-        }
-        setupDisabled={vaultSetupChecking || setupConfirmationPending}
-        setupLabel={
-          setupConfirmationPending ? 'Confirming' : vaultSetupChecking ? 'Checking' : undefined
-        }
         repairLoading={repairKeyMutation.isPending}
         repairAvailable={hasUmbraKeyMismatch}
         tokenLogos={tokenLogoMap}
-        onSetup={handleSetup}
         onRepair={handleRepairVaultKey}
         onRefresh={() => refreshBalances(false)}
       />
 
-      <StaggerRevealItem index={0}>
-        <UmbraVaultActionPanel
-          action={action}
-          token={token}
-          tokens={supportedTokens}
-          balances={balances}
-          balanceLoadState={encryptedBalanceLoadState}
-          subtitle={vaultActionSubtitle}
-          amount={amount}
-          loading={isActionSubmitting || fundsValidationPending}
-          loadingLabel={fundsValidationPending ? 'Checking funds' : 'Finalizing'}
-          disabled={actionSubmitDisabled}
-          feedbackLabel={actionFeedback.label}
-          feedbackTone={actionFeedback.tone}
-          disabledMessage={disabledMessage}
-          maxAmount={maxAmountValue}
-          onActionChange={(nextAction) => {
-            setAction(nextAction);
-          }}
-          onTokenChange={setToken}
-          onAmountChange={(nextAmount) => {
-            const decimals = selectedTokenConfig?.decimals ?? 9;
-            setAmount(sanitizeDecimalInput(nextAmount, decimals));
-          }}
-          onMaxPress={() => {
-            if (maxAmountValue == null) return;
-            setAmount(maxAmountValue);
-          }}
-          onSubmit={handleSubmitAction}
-        />
-      </StaggerRevealItem>
+      <UmbraVaultActionPanel
+        action={action}
+        token={token}
+        tokens={supportedTokens}
+        balances={balances}
+        balanceLoadState={encryptedBalanceLoadState}
+        subtitle={vaultActionSubtitle}
+        amount={amount}
+        loading={isActionSubmitting || fundsValidationPending}
+        loadingLabel={fundsValidationPending ? 'Checking funds' : 'Finalizing'}
+        disabled={actionSubmitDisabled}
+        feedbackLabel={actionFeedback.label}
+        feedbackTone={actionFeedback.tone}
+        disabledMessage={disabledMessage}
+        maxAmount={maxAmountValue}
+        onActionChange={(nextAction) => {
+          setAction(nextAction);
+        }}
+        onTokenChange={setToken}
+        onAmountChange={(nextAmount) => {
+          const decimals = selectedTokenConfig?.decimals ?? 9;
+          setAmount(sanitizeDecimalInput(nextAmount, decimals));
+        }}
+        onMaxPress={() => {
+          if (maxAmountValue == null) return;
+          setAmount(maxAmountValue);
+        }}
+        onSubmit={handleSubmitAction}
+      />
     </View>
   );
 }

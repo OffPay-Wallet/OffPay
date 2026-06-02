@@ -2,14 +2,7 @@
  * HomeHeader — wallet identity, connectivity toggle, and notifications.
  */
 import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import {
-  InteractionManager,
-  Pressable,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-  type ImageSourcePropType,
-} from 'react-native';
+import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   Easing,
@@ -27,6 +20,10 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import {
+  deleteManagedProfileImage,
+  resolveStoredProfileImageUri,
+} from '@/lib/profile/profile-image';
 import { useAppStore } from '@/store/app';
 import { useNotificationStore } from '@/store/notificationStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -52,22 +49,28 @@ const NotificationCenterModal = lazy(NOTIFICATION_MODAL_IMPORT);
 // ---------------------------------------------------------------------------
 
 const TOGGLE_TIMING = { duration: 150, easing: Easing.out(Easing.cubic) };
-const WALLET_PROFILE_ICON =
-  require('../../../assets/wallet_icons/wallet_profile.png') as ImageSourcePropType;
+const WALLET_PROFILE_ICON = require('../../../assets/AppIcons/playstore.png') as number;
 
 const HeaderWalletProfileIcon = memo(function HeaderWalletProfileIcon({
+  onProfileImageError,
+  profileImageUri,
   size,
 }: {
+  onProfileImageError: () => void;
+  profileImageUri: string | null;
   size: number;
 }): React.JSX.Element {
+  const source = profileImageUri != null ? { uri: profileImageUri } : WALLET_PROFILE_ICON;
+
   return (
     <Image
-      source={WALLET_PROFILE_ICON}
+      source={source}
       style={[styles.walletProfileIcon, { width: size, height: size, borderRadius: size / 2 }]}
-      contentFit="cover"
+      contentFit="contain"
       cachePolicy="memory-disk"
       priority="high"
       transition={0}
+      onError={profileImageUri != null ? onProfileImageError : undefined}
       accessible={false}
     />
   );
@@ -108,6 +111,8 @@ function HomeHeaderComponent({
   const accountName = useWalletStore((s) => s.accountName);
   const publicKey = useWalletStore((s) => s.publicKey);
   const username = useAppStore((s) => s.username);
+  const profileImageUri = useAppStore((s) => s.profileImageUri);
+  const setProfileImageUri = useAppStore((s) => s.setProfileImageUri);
   const unreadNotifications = useNotificationStore((s) => s.unreadCount);
   const markAllNotificationsRead = useNotificationStore((s) => s.markAllRead);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
@@ -198,6 +203,12 @@ function HomeHeaderComponent({
   const handlePrefetchNotifications = useCallback((): void => {
     prefetchNotificationModal();
   }, []);
+
+  const handleProfileImageError = useCallback((): void => {
+    if (profileImageUri == null) return;
+    deleteManagedProfileImage(profileImageUri);
+    setProfileImageUri(resolveStoredProfileImageUri(null));
+  }, [profileImageUri, setProfileImageUri]);
 
   const handleOpenNotifications = useCallback((): void => {
     if (notificationsVisible) return;
@@ -313,7 +324,11 @@ function HomeHeaderComponent({
           accessibilityLabel="Open accounts"
         >
           <View style={[styles.walletIdentity, { gap: walletGap }]}>
-            <HeaderWalletProfileIcon size={avatarSize} />
+            <HeaderWalletProfileIcon
+              onProfileImageError={handleProfileImageError}
+              profileImageUri={profileImageUri}
+              size={avatarSize}
+            />
             <View style={[styles.walletTextBlock, { width: walletTextWidth }]}>
               <Text
                 variant="bodyBold"
@@ -493,10 +508,14 @@ const styles = StyleSheet.create({
   },
   walletProfileIcon: {
     overflow: 'hidden',
-    backgroundColor: colors.brand.glossAccent,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.28)',
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.35)',
+    backgroundColor: colors.brand.glassTint,
+    borderWidth: 1,
+    borderColor: colors.glass.rimSubtle,
+    boxShadow: [
+      '0 5px 14px rgba(0, 0, 0, 0.38)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.16)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.28)',
+    ].join(', '),
   },
   walletTextBlock: {
     flexShrink: 1,

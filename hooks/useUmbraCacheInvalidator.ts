@@ -66,20 +66,20 @@ export function useUmbraCacheInvalidator() {
       });
       void queryClient.invalidateQueries({
         queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
-        // History is usually not mounted when a shield / claim runs.
-        // Refetch inactive activity queries too so the next History
-        // open is not pinned to the old page set.
-        refetchType: 'all',
+        // Mark inactive history pages stale, but only refetch them if the
+        // History surface is mounted. Umbra claim/send flows should not spend
+        // foreground bandwidth refreshing off-screen lists.
+        refetchType: 'active',
       });
       void queryClient.invalidateQueries({
         // Invalidate every encrypted-balance scope (token-set keyed).
         // Using the prefix matcher keeps this callback agnostic to
         // which token list the caller queried with.
         queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress] as const,
-        // Claims often happen from Receive while the Shielded tab is
-        // inactive. Refetch cached inactive vault queries too so the
-        // next tab open is not pinned to the old zero balance.
-        refetchType: 'all',
+        // Inactive shielded views are marked stale and will refetch on open;
+        // avoid eager background reads while the claim/send action is still
+        // settling.
+        refetchType: 'active',
       });
       // Vault registration status (mixer + vault setup bits). Bust
       // it after every Umbra action so a fresh setup or shield

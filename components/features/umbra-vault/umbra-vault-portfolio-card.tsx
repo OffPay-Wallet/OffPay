@@ -30,16 +30,12 @@ interface UmbraVaultPortfolioCardProps {
   balanceStatusMessage: string | null;
   vaultRegistered: boolean;
   loading: boolean;
-  setupLoading: boolean;
-  setupDisabled: boolean;
-  setupLabel?: string;
   repairLoading: boolean;
   repairAvailable: boolean;
   disabled: boolean;
   disabledMessage: string | null;
   networkLabel: string | null;
   tokenLogos?: TokenLogoLookup;
-  onSetup: () => void;
   onRepair: () => void;
   onRefresh: () => void;
 }
@@ -130,25 +126,19 @@ export function UmbraVaultPortfolioCard({
   balanceStatusMessage,
   vaultRegistered,
   loading,
-  setupLoading,
-  setupDisabled,
-  setupLabel,
   repairLoading,
   repairAvailable,
   disabled,
   disabledMessage,
   networkLabel,
   tokenLogos,
-  onSetup,
   onRepair,
   onRefresh,
 }: UmbraVaultPortfolioCardProps): React.JSX.Element {
   const { width, height, fontScale } = useWindowDimensions();
   const dense = width < 350 || fontScale > 1.18;
   const compact = width < 390 || height < 760 || fontScale > 1.05;
-  const actionLoading = setupLoading || loading || repairLoading;
-  const setupButtonDisabled = disabled || setupDisabled || setupLoading;
-  const setupButtonLabel = setupLabel ?? (setupLoading ? 'Setting up' : 'Set Up');
+  const actionLoading = loading || repairLoading;
 
   return (
     <View style={styles.section}>
@@ -175,36 +165,7 @@ export function UmbraVaultPortfolioCard({
               disabled={disabled || actionLoading}
               onPress={repairAvailable ? onRepair : onRefresh}
             />
-          ) : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Set up shielded vault"
-              accessibilityState={{ busy: setupLoading, disabled: setupButtonDisabled }}
-              disabled={setupButtonDisabled}
-              hitSlop={6}
-              onPress={onSetup}
-              style={({ pressed }) => [
-                styles.smallAction,
-                compact && styles.smallActionCompact,
-                styles.setupAction,
-                setupButtonDisabled && styles.disabled,
-                pressed && !setupButtonDisabled && styles.pressed,
-              ]}
-            >
-              {setupLoading ? (
-                <LazyLoadingSpinner size={compact ? 15 : 16} color={colors.text.primary} />
-              ) : null}
-              <Text
-                variant="captionBold"
-                color={colors.text.primary}
-                style={styles.actionText}
-                numberOfLines={1}
-                maxFontSizeMultiplier={1}
-              >
-                {setupButtonLabel}
-              </Text>
-            </Pressable>
-          )}
+          ) : null}
         </View>
 
         <View style={styles.valueBlock}>
@@ -369,9 +330,6 @@ const styles = StyleSheet.create({
   smallActionCompact: {
     minHeight: 32,
     paddingHorizontal: spacing.sm,
-  },
-  setupAction: {
-    backgroundColor: colors.glass.strongFill,
   },
   refreshIconSlot: {
     alignItems: 'center',

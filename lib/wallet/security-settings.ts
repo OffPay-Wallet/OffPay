@@ -170,6 +170,10 @@ async function getPasscodeMaterial(): Promise<{ saltHex: string; storedHash: str
   return { saltHex, storedHash };
 }
 
+export async function preloadPasscodeMaterial(): Promise<void> {
+  await getPasscodeMaterial();
+}
+
 export async function verifyPasscode(passcode: string): Promise<boolean> {
   if (!isValidPasscode(passcode)) return false;
   const material = await getPasscodeMaterial();

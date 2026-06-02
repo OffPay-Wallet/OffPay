@@ -34,6 +34,10 @@ import {
   transactionDetailsScreenOptions,
 } from '@/constants/navigation';
 import { formatOffpayUsername } from '@/lib/api/offpay-username';
+import {
+  pruneManagedProfileImages,
+  resolveStoredProfileImageUri,
+} from '@/lib/profile/profile-image';
 import { AppProviders } from '@/providers';
 import { useAppStore } from '@/store/app';
 import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
@@ -111,8 +115,10 @@ export const unstable_settings = {
 export default function RootLayout(): React.JSX.Element | null {
   const hasOnboarded = useAppStore((s) => s.hasOnboarded);
   const username = useAppStore((s) => s.username);
+  const profileImageUri = useAppStore((s) => s.profileImageUri);
   const setHasOnboarded = useAppStore((s) => s.setHasOnboarded);
   const setUsername = useAppStore((s) => s.setUsername);
+  const setProfileImageUri = useAppStore((s) => s.setProfileImageUri);
   const hydrateWallet = useWalletStore((s) => s.hydrate);
   const walletHydrated = useWalletStore((s) => s.isHydrated);
   const walletCount = useWalletStore((s) => s.wallets.length);
@@ -204,6 +210,20 @@ export default function RootLayout(): React.JSX.Element | null {
       setUsername(restoredUsername);
     }
   }, [accountName, hasStoredWallet, setUsername, username]);
+
+  // Keep the local profile image stable across restarts and app
+  // container path changes. If MMKV loses the URI, recover the newest
+  // managed image from disk. If the stored file disappeared, clear the
+  // stale URI instead of showing a broken avatar.
+  useEffect(() => {
+    const resolvedProfileImageUri = resolveStoredProfileImageUri(profileImageUri);
+    if (resolvedProfileImageUri !== profileImageUri) {
+      setProfileImageUri(resolvedProfileImageUri);
+    }
+    if (resolvedProfileImageUri != null) {
+      pruneManagedProfileImages(resolvedProfileImageUri);
+    }
+  }, [profileImageUri, setProfileImageUri]);
 
   // Resolve onboarding routing before the native splash fades away.
   useEffect(() => {

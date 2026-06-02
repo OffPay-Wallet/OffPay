@@ -25,12 +25,15 @@ import { layout, radii, spacing } from '@/constants/spacing';
 import { authenticateWithBiometrics } from '@/lib/wallet/biometric-auth';
 import {
   getSecuritySettings,
+  preloadPasscodeMaterial,
   setWalletLocked,
   verifyPasscode,
 } from '@/lib/wallet/security-settings';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { clearSigningSeedCache } from '@/lib/wallet/signing-seed-cache';
 import { getStoredWalletInfo } from '@/lib/wallet/secure-wallet-store';
 import { resetForgottenWallet } from '@/lib/wallet/wallet-reset';
+import { getAppLockSuppressionRemainingMs } from '@/lib/wallet/app-lock-suppression';
 import { useWalletStore } from '@/store/walletStore';
 
 interface AppLockGateProps {
@@ -246,7 +249,8 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       isAppActive() ||
       lockedRef.current ||
       unlockingRef.current ||
-      Date.now() < ignoreBackgroundLockUntilRef.current
+      Date.now() < ignoreBackgroundLockUntilRef.current ||
+      getAppLockSuppressionRemainingMs() > 0
     ) {
       return;
     }
@@ -271,6 +275,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       !settings.hasPasscode ||
       unlockingRef.current ||
       Date.now() < ignoreBackgroundLockUntilRef.current ||
+      getAppLockSuppressionRemainingMs() > 0 ||
       mutationId !== lockMutationIdRef.current
     ) {
       return;
@@ -284,13 +289,17 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   }, [hasPasscode, setLockedState, writeWalletLocked]);
 
   const scheduleBackgroundLock = useCallback((): void => {
-    const backgroundLockDelay = ignoreBackgroundLockUntilRef.current - Date.now();
+    const now = Date.now();
+    const backgroundLockDelay = Math.max(
+      ignoreBackgroundLockUntilRef.current - now,
+      getAppLockSuppressionRemainingMs(now),
+    );
     if (backgroundLockDelay > 0) {
       clearPendingBackgroundLock();
       backgroundLockTimerRef.current = setTimeout(() => {
         backgroundLockTimerRef.current = null;
         void lockWalletForBackground();
-      }, backgroundLockDelay);
+      }, backgroundLockDelay + 32);
       return;
     }
 
@@ -487,6 +496,11 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
     return () => clearTimeout(timeout);
   }, [toast]);
 
+  useEffect(() => {
+    if (!enabled || !locked || !hasPasscode) return;
+    void preloadPasscodeMaterial().catch(() => undefined);
+  }, [enabled, hasPasscode, locked]);
+
   const handlePasscodeUnlock = useCallback(
     async (candidate: string): Promise<void> => {
       if (unlocking) return;
@@ -499,7 +513,11 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
 
       setUnlockingState(true);
       try {
+        const verifyStartedAt = mark();
         const ok = await verifyPasscode(candidate);
+        measure('passcode.unlock.verify', verifyStartedAt, {
+          cachedMaterialExpected: true,
+        });
         if (!ok) {
           setToast('Incorrect wallet password.');
           triggerShake();
@@ -674,7 +692,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
           key={key}
           kind="digit"
           label={key}
-          disabled={inputDisabled || passcode.length >= 6}
+          disabled={inputDisabled}
           frameStyle={keyFrameStyle}
           onPress={digitHandlers[key]!}
         />

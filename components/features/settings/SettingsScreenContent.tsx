@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { PreferencesModal } from '@/components/features/settings/PreferencesModal';
+import { ProfileSettingsModal } from '@/components/features/settings/ProfileSettingsModal';
 import { SecuritySettingsModal } from '@/components/features/settings/SecuritySettingsModal';
 import { useAppToast } from '@/components/ui/AppToast';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
@@ -78,6 +79,7 @@ export function SettingsScreenContent({
   // slides the sheet up over the dimmed settings list instead of
   // pushing a new screen (which flashed the navigator backdrop).
   const [preferencesVisible, setPreferencesVisible] = useState(false);
+  const [profileVisible, setProfileVisible] = useState(false);
   const [securityVisible, setSecurityVisible] = useState(false);
   const showOverlay = useOverlayVisibilityStore((s) => s.showOverlay);
   const hideOverlay = useOverlayVisibilityStore((s) => s.hideOverlay);
@@ -86,7 +88,7 @@ export function SettingsScreenContent({
   // stable overlay id so overlapping opens/closes stay consistent, and
   // the cleanup always releases the flag if this screen unmounts while a
   // sheet is still open (no stuck-hidden tab bar).
-  const anySettingsSheetOpen = preferencesVisible || securityVisible;
+  const anySettingsSheetOpen = preferencesVisible || profileVisible || securityVisible;
   useEffect(() => {
     const overlayId = 'settings-sheet';
     if (anySettingsSheetOpen) {
@@ -183,9 +185,7 @@ export function SettingsScreenContent({
                     rightValue={usernameLabel}
                     compact={compact}
                     dense={dense}
-                    onPress={() =>
-                      router.push({ pathname: '/username-setup', params: { source: 'settings' } })
-                    }
+                    onPress={() => setProfileVisible(true)}
                   />
                   <SettingsRow
                     iconNode={
@@ -435,6 +435,8 @@ export function SettingsScreenContent({
       </Modal>
 
       <PreferencesModal visible={preferencesVisible} onClose={() => setPreferencesVisible(false)} />
+
+      <ProfileSettingsModal visible={profileVisible} onClose={() => setProfileVisible(false)} />
 
       <SecuritySettingsModal visible={securityVisible} onClose={() => setSecurityVisible(false)} />
     </>

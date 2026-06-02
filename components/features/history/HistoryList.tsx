@@ -334,8 +334,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     textAlign: 'left',
     paddingHorizontal: spacing.xs,
-    color: colors.text.tertiary,
-    opacity: 0.85,
+    color: colors.text.secondary,
   },
   sectionHeaderCompact: {
     fontSize: 13,

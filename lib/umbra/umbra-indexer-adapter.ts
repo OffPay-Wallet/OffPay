@@ -312,9 +312,13 @@ export function createOffpayUmbraUtxoDataFetcher(
     const cappedLimit = limit === undefined ? maxLimit : limit > maxLimit ? maxLimit : limit;
     const startedAt = mark();
     let itemCount = 0;
+    let hasMore: boolean | null = null;
+    let nextCursor: string | null = null;
     try {
       const result = await fetchOffpayUmbraUtxoData(client, startIndex, endIndex, cappedLimit);
       itemCount = result.items.size;
+      hasMore = result.hasMore;
+      nextCursor = result.nextCursor == null ? null : String(result.nextCursor);
       assertUmbraIndexerNotAborted(options.signal);
       if (options.yieldAfterPage === true) {
         await yieldToUi();
@@ -323,8 +327,12 @@ export function createOffpayUmbraUtxoDataFetcher(
     } finally {
       measure('umbra.indexer.utxoPage', startedAt, {
         network,
+        startIndex: startIndex.toString(),
+        endIndex: endIndex == null ? null : endIndex.toString(),
         limit: Number(cappedLimit),
         itemCount,
+        hasMore,
+        nextCursor,
       });
     }
   };
@@ -551,8 +559,7 @@ export function createOffpayUmbraBatchMerkleProofFetcher(network: OffpayNetwork)
     // can correlate a failed claim with the root it proved against.
     if (__DEV__) {
       const rootBytes = (result as { root?: Uint8Array }).root;
-      const rootHex =
-        rootBytes instanceof Uint8Array ? bytesToHex(rootBytes) : 'unknown';
+      const rootHex = rootBytes instanceof Uint8Array ? bytesToHex(rootBytes) : 'unknown';
       const proofs = (result as { proofs?: Map<unknown, unknown> }).proofs;
       measure('umbra.claims.merkleProof', startedAt, {
         network,
@@ -639,13 +646,7 @@ export function createOffpayUmbraClaimRelayer(network: OffpayNetwork) {
     }
     const requestId =
       response.claimId ??
-      readOptionalString(response.result, [
-        'requestId',
-        'request_id',
-        'claimId',
-        'claim_id',
-        'id',
-      ]);
+      readOptionalString(response.result, ['requestId', 'request_id', 'claimId', 'claim_id', 'id']);
     measure('umbra.relayer.submitClaim', startedAt, {
       network,
       ok: requestId != null,

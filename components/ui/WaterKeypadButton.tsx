@@ -9,37 +9,32 @@
  *     edges, making each key look puffy and rounded like a dorayaki.
  *
  * Pressed state ("water press"):
- *   - Spring-driven scale animation (press-in squishes to 0.88,
- *     release bounces back with overshoot past 1.0 before settling).
+ *   - Short timing-driven scale animation. Keypad taps are latency-sensitive,
+ *     so the feedback stays glossy without a spring overshoot pass.
  *   - The inner glow intensifies on press, as if the surface tension
  *     of the gloss deforms under the finger.
- *   - Uses `react-native-reanimated` withSpring on the UI thread for
- *     60fps tactile feedback.
+ *   - Uses `react-native-reanimated` timing on the UI thread for tactile
+ *     feedback without adding JS work to digit entry.
  */
 import { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
-  type WithSpringConfig,
+  withTiming,
 } from 'react-native-reanimated';
 
-/* ─── Spring tuning ─────────────────────────────────────────────── */
+/* ─── Press tuning ─────────────────────────────────────────────── */
 
-/** Water-tension spring: fast snap-in, bouncy overshoot on release. */
-const WATER_SPRING_IN: WithSpringConfig = {
-  damping: 14,
-  stiffness: 380,
-  mass: 0.5,
-};
-
-const WATER_SPRING_OUT: WithSpringConfig = {
-  damping: 8,
-  stiffness: 300,
-  mass: 0.45,
-  overshootClamping: false,
-};
+const WATER_PRESS_IN = {
+  duration: 72,
+  easing: Easing.out(Easing.quad),
+} as const;
+const WATER_PRESS_OUT = {
+  duration: 96,
+  easing: Easing.out(Easing.cubic),
+} as const;
 
 /* ─── Component ─────────────────────────────────────────────────── */
 
@@ -71,13 +66,13 @@ export const WaterKeypadButton = memo(function WaterKeypadButton({
   const glowIntensity = useSharedValue(0);
 
   const handlePressIn = useCallback((): void => {
-    scale.value = withSpring(0.88, WATER_SPRING_IN);
-    glowIntensity.value = withSpring(1, WATER_SPRING_IN);
+    scale.value = withTiming(0.94, WATER_PRESS_IN);
+    glowIntensity.value = withTiming(1, WATER_PRESS_IN);
   }, [glowIntensity, scale]);
 
   const handlePressOut = useCallback((): void => {
-    scale.value = withSpring(1, WATER_SPRING_OUT);
-    glowIntensity.value = withSpring(0, WATER_SPRING_OUT);
+    scale.value = withTiming(1, WATER_PRESS_OUT);
+    glowIntensity.value = withTiming(0, WATER_PRESS_OUT);
   }, [glowIntensity, scale]);
 
   const animatedContainerStyle = useAnimatedStyle(() => ({
@@ -131,13 +126,10 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     // Dorayaki base: subtle semi-transparent fill.
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    // Convex "buffed from center" — layered inset shadows:
-    //   1. Bright center-top highlight (the dorayaki dome gloss)
-    //   2. Soft diffuse inner glow from center
-    //   3. Darker rim at the edge for depth
+    // Convex gloss with minimal layers; this component renders 12 times on
+    // passcode screens, so avoid stacking expensive inset shadows per key.
     boxShadow: [
       'inset 0 1px 2px rgba(255, 255, 255, 0.22)',
-      'inset 0 0 12px rgba(255, 255, 255, 0.06)',
       'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
     ].join(', '),
     // Thin subtle border for glass definition.
@@ -152,12 +144,7 @@ const styles = StyleSheet.create({
     // "water refraction" flash at the center.
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(255, 255, 255, 0.14)',
-    // The glow is strongest at center, fading to edges — achieved
-    // with an inset shadow that brightens the center.
-    boxShadow: [
-      'inset 0 0 16px rgba(255, 255, 255, 0.35)',
-      'inset 0 1px 4px rgba(255, 255, 255, 0.5)',
-    ].join(', '),
+    boxShadow: 'inset 0 1px 4px rgba(255, 255, 255, 0.42)',
   },
   contentLayer: {
     zIndex: 1,

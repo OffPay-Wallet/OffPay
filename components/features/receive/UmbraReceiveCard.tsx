@@ -22,6 +22,7 @@ import type { UmbraPendingClaimUtxo } from '@/lib/umbra/umbra-execution';
  */
 
 const CLAIM_PREVIEW_DEFAULT_LIMIT = 2;
+const EMPTY_PENDING_CLAIMS: readonly UmbraPendingClaimUtxo[] = [];
 
 type StatusTone = 'neutral' | 'success' | 'warning' | 'error';
 
@@ -313,9 +314,10 @@ const ClaimSection = memo(function ClaimSection({
   const statusColor = statusToneColor(statusTone);
   const hasPending = pendingCount > 0;
   const claimDisabled = (!hasPending && !allowEmptyAction) || disabled;
+  const safePendingClaims = pendingClaims ?? EMPTY_PENDING_CLAIMS;
   const visibleClaims = useMemo(
-    () => (pendingClaims ?? []).slice(0, Math.max(0, previewLimit)),
-    [pendingClaims, previewLimit],
+    () => safePendingClaims.slice(0, Math.max(0, previewLimit)),
+    [safePendingClaims, previewLimit],
   );
   const hiddenClaimCount = Math.max(0, pendingCount - visibleClaims.length);
 

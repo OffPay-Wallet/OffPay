@@ -1,11 +1,11 @@
 import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
-  withSpring,
-  type WithSpringConfig,
+  withTiming,
 } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
@@ -50,13 +50,12 @@ const MODES: readonly ModeDescriptor[] = [
 ];
 const TRACK_PADDING = 4;
 const SEGMENT_GAP = 0;
-// Snappy spring — the thumb slides with a tight, smooth motion and a
-// barely-perceptible settle. Runs entirely on the UI thread.
-const THUMB_SPRING: WithSpringConfig = {
-  damping: 22,
-  stiffness: 320,
-  mass: 0.7,
-};
+// Timing-based motion keeps the segmented control deterministic and avoids
+// spring settle work while Umbra scans are running on the JS thread.
+const THUMB_TIMING = {
+  duration: 180,
+  easing: Easing.out(Easing.cubic),
+} as const;
 
 function modeIndex(mode: ReceiveMode): number {
   for (let i = 0; i < MODES.length; i += 1) {
@@ -85,7 +84,7 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
   // Taps already moved the thumb in the press handler, so when the prop
   // later catches up this resolves to the same target (a no-op).
   React.useEffect(() => {
-    selectedIndex.value = withSpring(modeIndex(selectedMode), THUMB_SPRING);
+    selectedIndex.value = withTiming(modeIndex(selectedMode), THUMB_TIMING);
   }, [selectedIndex, selectedMode]);
 
   // Slide the thumb immediately on tap, on the UI thread, without
@@ -93,7 +92,7 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
   // mode via `onChangeMode`; this just unblocks the visual.
   const handleSelect = useCallback(
     (mode: ReceiveMode) => {
-      selectedIndex.value = withSpring(modeIndex(mode), THUMB_SPRING);
+      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING);
       onChangeMode(mode);
     },
     [onChangeMode, selectedIndex],

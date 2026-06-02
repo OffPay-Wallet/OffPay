@@ -1,11 +1,12 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FlatList,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
+  type ListRenderItem,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,6 +33,7 @@ import { useWalletStore } from '@/store/walletStore';
 import type { UmbraExecutionResult, UmbraPendingClaimUtxo } from '@/lib/umbra/umbra-execution';
 
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 384;
+const CLAIM_ROW_ESTIMATED_HEIGHT = 252;
 
 const ROW_BORDER = {
   borderTopWidth: 1,
@@ -257,6 +259,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   const [utxos, setUtxos] = useState<UmbraPendingClaimUtxo[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const scanInFlightRef = useRef(false);
+  const pendingInsertionIndices = useMemo(() => utxos.map((utxo) => utxo.insertionIndex), [utxos]);
 
   // Cancel-on-blur signal so a focus-driven scan or pull-to-refresh
   // that resolves after the user navigates away does not write into
@@ -359,9 +362,9 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           // other pending insertion index. Combined with the
           // existing on-device "already claimed" filter this leaves
           // exactly one candidate that the SDK will actually burn.
-          const otherPendingIndices = utxos
-            .filter((entry) => entry.id !== utxo.id)
-            .map((entry) => entry.insertionIndex);
+          const otherPendingIndices = pendingInsertionIndices.filter(
+            (index) => index !== utxo.insertionIndex,
+          );
           const exclusionSet = new Set<number>([...claimedIndexSet, ...otherPendingIndices]);
 
           try {
@@ -425,7 +428,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
       runScan,
       showToast,
       umbraCacheInvalidator,
-      utxos,
+      pendingInsertionIndices,
       walletAddress,
       walletId,
     ],
@@ -453,11 +456,46 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
 
   const compact = width < 380 || fontScale > 1.08;
   const screenHorizontalPadding = compact ? spacing.lg : spacing['2xl'];
+  const handleCopyIdPress = useCallback(
+    (target: UmbraPendingClaimUtxo) => {
+      void handleCopyId(target);
+    },
+    [handleCopyId],
+  );
+  const renderClaimItem = useCallback<ListRenderItem<UmbraPendingClaimUtxo>>(
+    ({ item }) => (
+      <ClaimRow
+        utxo={item}
+        busy={busyId === item.id}
+        disabled={busyId != null && busyId !== item.id}
+        onClaim={handleClaim}
+        onCopyId={handleCopyIdPress}
+      />
+    ),
+    [busyId, handleClaim, handleCopyIdPress],
+  );
+  const keyExtractor = useCallback((item: UmbraPendingClaimUtxo) => item.id, []);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<UmbraPendingClaimUtxo> | null | undefined, index: number) => ({
+      length: CLAIM_ROW_ESTIMATED_HEIGHT,
+      offset: CLAIM_ROW_ESTIMATED_HEIGHT * index,
+      index,
+    }),
+    [],
+  );
 
   return (
     <View style={styles.container}>
       <GradientBackground />
-      <ScrollView
+      <FlatList
+        data={utxos}
+        renderItem={renderClaimItem}
+        keyExtractor={keyExtractor}
+        getItemLayout={getItemLayout}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[
           styles.scrollContent,
@@ -468,6 +506,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           },
           utxos.length === 0 ? styles.scrollContentCentered : null,
         ]}
+        ItemSeparatorComponent={ClaimRowSeparator}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -475,130 +514,127 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
             tintColor={colors.text.primary}
           />
         }
-      >
-        <View style={styles.header}>
-          <Pressable
-            style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
-            onPress={handleBack}
-            hitSlop={6}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <View
-              style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}
-            >
-              <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
-            </View>
-          </Pressable>
-          <Text
-            variant="h2"
-            color={colors.text.inverse}
-            align="center"
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.86}
-            maxFontSizeMultiplier={1}
-            style={styles.headerTitle}
-          >
-            Pending Claims
-          </Text>
-          <View style={styles.headerSpacer} />
-        </View>
-
-        {scanning && utxos.length === 0 ? (
-          <View style={styles.emptyState}>
-            <LazyLoadingSpinner size={28} color={colors.text.primary} />
-            <Text
-              variant="small"
-              color={colors.text.secondary}
-              align="center"
-              maxFontSizeMultiplier={1}
-              style={styles.statusText}
-            >
-              Loading pending Umbra claims…
-            </Text>
-          </View>
-        ) : error != null ? (
-          <View style={styles.emptyState}>
-            <Text
-              variant="bodyBold"
-              color={colors.semantic.error}
-              align="center"
-              numberOfLines={2}
-              maxFontSizeMultiplier={1}
-            >
-              Couldn’t load claims
-            </Text>
-            <Text
-              variant="small"
-              color={colors.text.secondary}
-              align="center"
-              numberOfLines={3}
-              maxFontSizeMultiplier={1}
-              style={styles.statusText}
-            >
-              {error}
-            </Text>
-          </View>
-        ) : utxos.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text
-              variant="bodyBold"
-              color={colors.text.primary}
-              align="center"
-              maxFontSizeMultiplier={1.1}
-            >
-              No pending claims
-            </Text>
-            <Text
-              variant="small"
-              color={colors.text.secondary}
-              align="center"
-              numberOfLines={2}
-              maxFontSizeMultiplier={1}
-              style={styles.statusText}
-            >
-              New private payments will show up here.
-            </Text>
+        ListHeaderComponent={
+          <View style={styles.header}>
             <Pressable
+              style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
+              onPress={handleBack}
+              hitSlop={6}
               accessibilityRole="button"
-              accessibilityLabel="Deep scan for older private payments"
-              disabled={deepScanning || scanning || refreshing}
-              onPress={() => void runScan('deep')}
-              style={({ pressed }) => [
-                styles.deepScanButton,
-                !deepScanning && (scanning || refreshing) && styles.deepScanButtonDisabled,
-                pressed && styles.pressed,
-              ]}
+              accessibilityLabel="Go back"
             >
-              {deepScanning ? (
-                <LazyLoadingSpinner size={18} color={colors.text.primary} />
-              ) : (
-                <Ionicons name="search" size={16} color={colors.text.primary} />
-              )}
-              <Text variant="captionBold" color={colors.text.primary} maxFontSizeMultiplier={1.1}>
-                {deepScanning ? 'Deep scanning…' : 'Scan for older payments'}
-              </Text>
+              <View
+                style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}
+              >
+                <Ionicons
+                  name="chevron-back"
+                  size={layout.iconSizeNav}
+                  color={colors.text.primary}
+                />
+              </View>
             </Pressable>
+            <Text
+              variant="h2"
+              color={colors.text.inverse}
+              align="center"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.86}
+              maxFontSizeMultiplier={1}
+              style={styles.headerTitle}
+            >
+              Pending Claims
+            </Text>
+            <View style={styles.headerSpacer} />
           </View>
-        ) : (
-          <View style={styles.list}>
-            {utxos.map((utxo) => (
-              <ClaimRow
-                key={utxo.id}
-                utxo={utxo}
-                busy={busyId === utxo.id}
-                disabled={busyId != null && busyId !== utxo.id}
-                onClaim={handleClaim}
-                onCopyId={(target) => void handleCopyId(target)}
-              />
-            ))}
-          </View>
-        )}
-      </ScrollView>
+        }
+        ListEmptyComponent={
+          scanning && utxos.length === 0 ? (
+            <View style={styles.emptyState}>
+              <LazyLoadingSpinner size={28} color={colors.text.primary} />
+              <Text
+                variant="small"
+                color={colors.text.secondary}
+                align="center"
+                maxFontSizeMultiplier={1}
+                style={styles.statusText}
+              >
+                Loading pending Umbra claims…
+              </Text>
+            </View>
+          ) : error != null ? (
+            <View style={styles.emptyState}>
+              <Text
+                variant="bodyBold"
+                color={colors.semantic.error}
+                align="center"
+                numberOfLines={2}
+                maxFontSizeMultiplier={1}
+              >
+                Couldn’t load claims
+              </Text>
+              <Text
+                variant="small"
+                color={colors.text.secondary}
+                align="center"
+                numberOfLines={3}
+                maxFontSizeMultiplier={1}
+                style={styles.statusText}
+              >
+                {error}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text
+                variant="bodyBold"
+                color={colors.text.primary}
+                align="center"
+                maxFontSizeMultiplier={1.1}
+              >
+                No pending claims
+              </Text>
+              <Text
+                variant="small"
+                color={colors.text.secondary}
+                align="center"
+                numberOfLines={2}
+                maxFontSizeMultiplier={1}
+                style={styles.statusText}
+              >
+                New private payments will show up here.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Deep scan for older private payments"
+                disabled={deepScanning || scanning || refreshing}
+                onPress={() => void runScan('deep')}
+                style={({ pressed }) => [
+                  styles.deepScanButton,
+                  !deepScanning && (scanning || refreshing) && styles.deepScanButtonDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                {deepScanning ? (
+                  <LazyLoadingSpinner size={18} color={colors.text.primary} />
+                ) : (
+                  <Ionicons name="search" size={16} color={colors.text.primary} />
+                )}
+                <Text variant="captionBold" color={colors.text.primary} maxFontSizeMultiplier={1.1}>
+                  {deepScanning ? 'Deep scanning…' : 'Scan for older payments'}
+                </Text>
+              </Pressable>
+            </View>
+          )
+        }
+      />
     </View>
   );
 }
+
+const ClaimRowSeparator = memo(function ClaimRowSeparator(): React.JSX.Element {
+  return <View style={styles.claimRowSeparator} />;
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -607,7 +643,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    gap: spacing.lg,
   },
   scrollContentCentered: {
     justifyContent: 'flex-start',
@@ -666,8 +701,8 @@ const styles = StyleSheet.create({
   statusText: {
     maxWidth: 320,
   },
-  list: {
-    gap: spacing.md,
+  claimRowSeparator: {
+    height: spacing.md,
   },
   rowCard: {
     borderRadius: radii.xl,

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
   useAnimatedStyle,
@@ -16,13 +16,16 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import {
   getSecuritySettings,
+  preloadPasscodeMaterial,
   setPasscode,
   setWalletLocked,
   verifyPasscode,
 } from '@/lib/wallet/security-settings';
+import { mark, measure } from '@/lib/perf/perf-marks';
 
 type SecuritySetupIntent = 'create-wallet' | 'restore-wallet' | 'privy-wallet';
 type PasscodeMode = 'create' | 'confirm' | 'unlockExisting';
+type SetupKeyKind = 'digit' | 'clear' | 'delete';
 
 const PASSCODE_SHAKE_SEGMENT_MS = 60;
 const PASSCODE_SHAKE_DURATION_MS = PASSCODE_SHAKE_SEGMENT_MS * 7;
@@ -31,6 +34,51 @@ const PASSCODE_SHAKE_OFFSET = 12;
 interface PasscodeSetupScreenProps {
   intent: SecuritySetupIntent;
 }
+
+interface SetupKeyButtonProps {
+  kind: SetupKeyKind;
+  label: string;
+  disabled: boolean;
+  muted?: boolean;
+  frameStyle: ViewStyle;
+  onPress: () => void;
+}
+
+const SetupKeyButton = memo(function SetupKeyButton({
+  kind,
+  label,
+  disabled,
+  muted,
+  frameStyle,
+  onPress,
+}: SetupKeyButtonProps): React.JSX.Element {
+  return (
+    <WaterKeypadButton
+      frameStyle={frameStyle}
+      onPress={onPress}
+      disabled={disabled}
+      muted={muted}
+      accessibilityRole={kind === 'digit' ? 'keyboardkey' : 'button'}
+      accessibilityLabel={
+        kind === 'clear'
+          ? 'Clear passcode'
+          : kind === 'delete'
+            ? 'Delete last digit'
+            : `Digit ${label}`
+      }
+    >
+      <Text
+        variant="h2"
+        color={colors.text.primary}
+        align="center"
+        style={styles.keyLabel}
+        allowFontScaling={false}
+      >
+        {label}
+      </Text>
+    </WaterKeypadButton>
+  );
+});
 
 function nextRoute(intent: SecuritySetupIntent): void {
   router.push({
@@ -44,18 +92,27 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
   const compact = height < 760;
   const veryCompact = height < 690;
   const horizontalPadding = width < 360 ? spacing.xl : spacing['3xl'];
-  const keypadMaxWidth = Math.min(336, Math.max(220, width - horizontalPadding * 2));
-  const keypadGap = veryCompact ? spacing.sm : compact ? spacing.md : spacing.lg;
-  const maxKeySize = veryCompact ? 52 : compact ? 60 : 66;
-  const keypadHeightBudget = Math.max(220, height - (veryCompact ? 330 : compact ? 370 : 430));
-  const keySize = Math.max(
-    layout.minTouchTarget,
-    Math.min(
-      maxKeySize,
-      Math.floor((keypadMaxWidth - keypadGap * 2) / 3),
-      Math.floor((keypadHeightBudget - keypadGap * 3) / 4),
-    ),
-  );
+  const keypadLayout = useMemo(() => {
+    const keypadMaxWidth = Math.min(336, Math.max(220, width - horizontalPadding * 2));
+    const keypadGap = veryCompact ? spacing.sm : compact ? spacing.md : spacing.lg;
+    const maxKeySize = veryCompact ? 52 : compact ? 60 : 66;
+    const keypadHeightBudget = Math.max(220, height - (veryCompact ? 330 : compact ? 370 : 430));
+    const keySize = Math.max(
+      layout.minTouchTarget,
+      Math.min(
+        maxKeySize,
+        Math.floor((keypadMaxWidth - keypadGap * 2) / 3),
+        Math.floor((keypadHeightBudget - keypadGap * 3) / 4),
+      ),
+    );
+    const keyFrameStyle = {
+      width: keySize,
+      height: keySize,
+      borderRadius: keySize / 2,
+    } as const;
+    return { keypadMaxWidth, keypadGap, keyFrameStyle };
+  }, [compact, height, horizontalPadding, veryCompact, width]);
+  const { keypadMaxWidth, keypadGap, keyFrameStyle } = keypadLayout;
   const bodyOffsetY = veryCompact ? 0 : compact ? spacing.sm : spacing['2xl'];
   const titleFontSize = width < 360 || veryCompact ? 26 : width < 390 || compact ? 28 : 32;
 
@@ -132,6 +189,11 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
   }, [setEntryValue, setFirstPasscodeValue, setModeValue]);
 
   useEffect(() => {
+    if (!settingsReady || mode !== 'unlockExisting') return;
+    void preloadPasscodeMaterial().catch(() => undefined);
+  }, [mode, settingsReady]);
+
+  useEffect(() => {
     if (toast == null) return;
     const timeout = setTimeout(() => setToast(null), 2400);
     return () => clearTimeout(timeout);
@@ -188,7 +250,11 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         if (activeMode === 'unlockExisting') {
           setSaving(true);
           try {
+            const verifyStartedAt = mark();
             const ok = await verifyPasscode(nextEntry);
+            measure('passcode.setup.verifyExisting', verifyStartedAt, {
+              cachedMaterialExpected: true,
+            });
             if (!ok) {
               setToast('Incorrect wallet password.');
               triggerShake();
@@ -304,79 +370,58 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
 
   const inputDisabled = !settingsReady || saving || processingEntry;
 
-  function renderKey(key: string): React.JSX.Element {
-    const keyFrameStyle = { width: keySize, height: keySize, borderRadius: keySize / 2 };
-
-    if (key === 'clear') {
-      return (
-        <WaterKeypadButton
-          key={key}
-          frameStyle={keyFrameStyle}
-          onPress={handleClear}
-          disabled={entry.length === 0 || inputDisabled}
-          muted={entry.length === 0}
-          accessibilityRole="button"
-          accessibilityLabel="Clear passcode"
-        >
-          <Text
-            variant="h2"
-            color={colors.text.primary}
-            align="center"
-            style={styles.keyLabel}
-            allowFontScaling={false}
-          >
-            x
-          </Text>
-        </WaterKeypadButton>
-      );
+  const digitHandlers = useMemo<Record<string, () => void>>(() => {
+    const out: Record<string, () => void> = {};
+    for (const digit of ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']) {
+      out[digit] = () => handleDigit(digit);
     }
+    return out;
+  }, [handleDigit]);
 
-    if (key === 'delete') {
+  const renderKey = useCallback(
+    (key: string): React.JSX.Element => {
+      if (key === 'clear') {
+        return (
+          <SetupKeyButton
+            key={key}
+            kind="clear"
+            label="x"
+            frameStyle={keyFrameStyle}
+            onPress={handleClear}
+            disabled={entry.length === 0 || inputDisabled}
+            muted={entry.length === 0}
+          />
+        );
+      }
+
+      if (key === 'delete') {
+        return (
+          <SetupKeyButton
+            key={key}
+            kind="delete"
+            label="<"
+            frameStyle={keyFrameStyle}
+            onPress={handleDelete}
+            disabled={entry.length === 0 || inputDisabled}
+            muted={entry.length === 0}
+          />
+        );
+      }
+
       return (
-        <WaterKeypadButton
+        <SetupKeyButton
           key={key}
+          kind="digit"
+          label={key}
           frameStyle={keyFrameStyle}
-          onPress={handleDelete}
-          disabled={entry.length === 0 || inputDisabled}
-          muted={entry.length === 0}
-          accessibilityRole="button"
-          accessibilityLabel="Delete last digit"
-        >
-          <Text
-            variant="h2"
-            color={colors.text.primary}
-            align="center"
-            style={styles.keyLabel}
-            allowFontScaling={false}
-          >
-            {'<'}
-          </Text>
-        </WaterKeypadButton>
+          onPress={digitHandlers[key]!}
+          disabled={inputDisabled}
+          muted={inputDisabled}
+        />
       );
-    }
-
-    return (
-      <WaterKeypadButton
-        key={key}
-        frameStyle={keyFrameStyle}
-        onPress={() => handleDigit(key)}
-        disabled={inputDisabled || entry.length >= 6}
-        muted={inputDisabled}
-        accessibilityRole="keyboardkey"
-        accessibilityLabel={`Digit ${key}`}
-      >
-        <Text
-          variant="h2"
-          color={colors.text.primary}
-          align="center"
-          style={styles.keyLabel}
-          allowFontScaling={false}
-        >
-          {key}
-        </Text>
-      </WaterKeypadButton>
-    );
-  }
+    },
+    [digitHandlers, entry.length, handleClear, handleDelete, inputDisabled, keyFrameStyle],
+  );
 
   return (
     <CreateWalletScreenLayout

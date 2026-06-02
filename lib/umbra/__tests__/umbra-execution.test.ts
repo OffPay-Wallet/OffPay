@@ -404,6 +404,8 @@ function resetUmbraPrivacyStore(): void {
   useUmbraPrivacyStore.setState({
     receipts: [],
     registeredVaultKeys: [],
+    registeredMixerKeys: [],
+    registeredMixerVerifiedAt: {},
     claimedUtxoInsertionIndices: {},
   });
 }

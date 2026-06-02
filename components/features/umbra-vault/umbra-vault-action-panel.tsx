@@ -120,6 +120,7 @@ export function UmbraVaultActionPanel({
   const withdrawReadable = action !== 'withdraw' || canReadVaultBalance(selectedBalance);
   const submitBlocked = disabled || !withdrawReadable;
   const submitDisabled = submitBlocked || loading;
+  const submitAccessibilityDisabled = loading;
   const showDangerFeedback = feedbackTone === 'danger' && submitBlocked && !loading;
   const submitLabel = loading
     ? (loadingLabel ?? getButtonLabel(action, token, true))
@@ -317,7 +318,7 @@ export function UmbraVaultActionPanel({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={submitLabel}
-          accessibilityState={{ disabled: submitDisabled, busy: loading }}
+          accessibilityState={{ disabled: submitAccessibilityDisabled, busy: loading }}
           disabled={loading}
           onPress={onSubmit}
           style={({ pressed }) => [

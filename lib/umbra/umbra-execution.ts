@@ -101,7 +101,7 @@ import {
 } from '@/lib/umbra/umbra-supported-tokens';
 import { decimalInputToAtomicAmount, formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { mark, measure } from '@/lib/perf/perf-marks';
-import { yieldToUiIfNeeded } from '@/lib/perf/ui-work-scheduler';
+import { yieldToUi, yieldToUiIfNeeded } from '@/lib/perf/ui-work-scheduler';
 import {
   byteArraysEqual,
   encodeU128LeBytes,
@@ -226,10 +226,121 @@ type UmbraClaimScanWindow = {
   fakeProgressStore: UmbraUtxoDataStore | undefined;
 };
 
+interface UmbraPrivateP2PUtxoScanResult {
+  receiverClaimableUtxos: readonly unknown[];
+  selfClaimableUtxos: readonly unknown[];
+  nextScanStartIndex: string;
+  scanMode: UmbraClaimScanMode;
+  scanStartInsertionIndex: number;
+  scanEndInsertionIndex: number;
+}
+
+interface UmbraClaimScanCacheEntry {
+  scopeKey: string;
+  start: bigint;
+  end: bigint;
+  expiresAt: number;
+  result: UmbraPrivateP2PUtxoScanResult;
+}
+
+const UMBRA_CLAIM_SCAN_CACHE_TTL_MS = 30_000;
+const UMBRA_CLAIM_SCAN_CACHE_MAX_ENTRIES = 6;
+let umbraClaimScanCache: UmbraClaimScanCacheEntry[] = [];
+
 function normalizePositiveBigint(value: number | bigint | undefined, fallback: bigint): bigint {
   if (value == null) return fallback;
   const normalized = typeof value === 'bigint' ? value : BigInt(Math.max(1, Math.trunc(value)));
   return normalized > 0n ? normalized : fallback;
+}
+
+function getUmbraClaimScanCacheScope(params: {
+  runtime: UmbraRuntime;
+  network: OffpayNetwork;
+  walletAddress: string | null | undefined;
+  walletId: string | null | undefined;
+  treeIndex: bigint;
+}): string {
+  return [
+    params.network,
+    params.walletAddress ?? 'unknown-wallet',
+    params.walletId ?? 'unknown-wallet-id',
+    String(params.treeIndex),
+    params.runtime.activeMasterSeedSchemeId ?? 'all-schemes',
+  ].join('|');
+}
+
+function pruneUmbraClaimScanCache(now = Date.now()): void {
+  umbraClaimScanCache = umbraClaimScanCache.filter((entry) => entry.expiresAt > now);
+  if (umbraClaimScanCache.length > UMBRA_CLAIM_SCAN_CACHE_MAX_ENTRIES) {
+    umbraClaimScanCache = umbraClaimScanCache.slice(
+      umbraClaimScanCache.length - UMBRA_CLAIM_SCAN_CACHE_MAX_ENTRIES,
+    );
+  }
+}
+
+function filterUmbraUtxosToScanWindow(
+  utxos: readonly unknown[],
+  window: UmbraClaimScanWindow,
+): unknown[] {
+  return utxos.filter((utxo) => {
+    const insertionIndex = getUtxoInsertionIndexAsNumber(utxo);
+    if (insertionIndex == null) return false;
+    const value = BigInt(insertionIndex);
+    return value >= window.start && value <= window.end;
+  });
+}
+
+function narrowUmbraClaimScanResultToWindow(
+  cached: UmbraPrivateP2PUtxoScanResult,
+  window: UmbraClaimScanWindow,
+): UmbraPrivateP2PUtxoScanResult {
+  return {
+    receiverClaimableUtxos: filterUmbraUtxosToScanWindow(cached.receiverClaimableUtxos, window),
+    selfClaimableUtxos: filterUmbraUtxosToScanWindow(cached.selfClaimableUtxos, window),
+    nextScanStartIndex: String(window.end),
+    scanMode: window.mode,
+    scanStartInsertionIndex: Number(window.start),
+    scanEndInsertionIndex: Number(window.end),
+  };
+}
+
+function readUmbraClaimScanCache(
+  scopeKey: string,
+  window: UmbraClaimScanWindow,
+): UmbraPrivateP2PUtxoScanResult | null {
+  const now = Date.now();
+  pruneUmbraClaimScanCache(now);
+  const cached = umbraClaimScanCache.find(
+    (entry) =>
+      entry.scopeKey === scopeKey &&
+      entry.start <= window.start &&
+      entry.end >= window.end &&
+      entry.expiresAt > now,
+  );
+  if (cached == null) return null;
+  return narrowUmbraClaimScanResultToWindow(cached.result, window);
+}
+
+function writeUmbraClaimScanCache(
+  scopeKey: string,
+  window: UmbraClaimScanWindow,
+  result: UmbraPrivateP2PUtxoScanResult,
+): void {
+  if (window.mode === 'deep') return;
+  const now = Date.now();
+  pruneUmbraClaimScanCache(now);
+  umbraClaimScanCache = umbraClaimScanCache.filter(
+    (entry) =>
+      !(entry.scopeKey === scopeKey && entry.start === window.start && entry.end === window.end),
+  );
+  umbraClaimScanCache.push({
+    scopeKey,
+    start: window.start,
+    end: window.end,
+    expiresAt: now + UMBRA_CLAIM_SCAN_CACHE_TTL_MS,
+    result,
+  });
+  pruneUmbraClaimScanCache(now);
 }
 
 function createPreScannedUmbraUtxoDataStore(start: bigint): UmbraUtxoDataStore | undefined {
@@ -492,11 +603,19 @@ function narrowUmbraClientToScheme(client: IUmbraClient, schemeId: string | null
  * cost once the accumulated synchronous work crosses `budgetMs`, so throughput
  * stays high while the JS thread still gets regular frames.
  */
-function createYieldingUmbraAesDecryptor(budgetMs = 8) {
+function createYieldingUmbraAesDecryptor(budgetMs = 8, signal?: AbortSignal | null) {
   const baseDecryptor = getAesDecryptor();
   let sliceStartedAt = Date.now();
+  const assertNotAborted = () => {
+    if (signal?.aborted !== true) return;
+    const error = new Error('Umbra scan cancelled.');
+    error.name = 'AbortError';
+    throw error;
+  };
   return async (key: Uint8Array, ciphertext: Uint8Array): Promise<Uint8Array> => {
+    assertNotAborted();
     sliceStartedAt = await yieldToUiIfNeeded(sliceStartedAt, budgetMs);
+    assertNotAborted();
     return baseDecryptor(key as never, ciphertext as never) as Promise<Uint8Array>;
   };
 }
@@ -2090,7 +2209,7 @@ async function scanUmbraPrivateP2PUtxos(
   runtime: UmbraRuntime,
   network: OffpayNetwork,
   params: UmbraClaimScanParams,
-) {
+): Promise<UmbraPrivateP2PUtxoScanResult> {
   const pageLimit =
     params.pageLimit == null
       ? UMBRA_CLAIM_SCAN_PAGE_LIMIT
@@ -2098,6 +2217,30 @@ async function scanUmbraPrivateP2PUtxos(
         ? params.pageLimit
         : BigInt(Math.max(1, Math.trunc(params.pageLimit)));
   const window = await resolveUmbraClaimScanWindow(network, params);
+  const walletParams = params as Partial<UmbraWalletExecutionParams>;
+  const cacheScope = getUmbraClaimScanCacheScope({
+    runtime,
+    network,
+    walletAddress: walletParams.walletAddress,
+    walletId: walletParams.walletId,
+    treeIndex: window.treeIndex,
+  });
+  const cachedScanResult = readUmbraClaimScanCache(cacheScope, window);
+  if (cachedScanResult != null) {
+    measure('umbra.claims.sdkScan.cacheHit', mark(), {
+      network,
+      scanMode: window.mode,
+      schemeCount:
+        runtime.activeMasterSeedSchemeId == null
+          ? (runtime.client.masterSeedSchemes?.length ?? 0)
+          : 1,
+      treeIndex: Number(window.treeIndex),
+      startInsertionIndex: window.start.toString(),
+      endInsertionIndex: window.end.toString(),
+      leafCount: Number(window.leafCount),
+    });
+    return cachedScanResult;
+  }
   const fetchUtxoData = createOffpayUmbraUtxoDataFetcher(network, {
     maxLimit: pageLimit,
     signal: params.signal,
@@ -2122,9 +2265,10 @@ async function scanUmbraPrivateP2PUtxos(
   } as IUmbraClient;
   const scanner = getClaimableUtxoScannerFunction({ client: clientWithIndexer }, {
     fetchUtxoData,
-    aesDecryptor: createYieldingUmbraAesDecryptor(),
+    aesDecryptor: createYieldingUmbraAesDecryptor(window.mode === 'deep' ? 8 : 4, params.signal),
   } as never);
   const startedAt = mark();
+  await yieldToUi();
   const scanResult = (await scanner()) as {
     etaToStealthPoolReceiverBurnable?: readonly unknown[];
     ataToStealthPoolReceiverBurnable?: readonly unknown[];
@@ -2178,7 +2322,7 @@ async function scanUmbraPrivateP2PUtxos(
       (scanResult.ataIntoSelfBurnable?.length ?? scanResult.publicSelfBurnable?.length ?? 0),
   });
 
-  return {
+  const result: UmbraPrivateP2PUtxoScanResult = {
     receiverClaimableUtxos: [
       ...(scanResult.etaToStealthPoolReceiverBurnable ?? []),
       ...(scanResult.ataToStealthPoolReceiverBurnable ?? []),
@@ -2198,6 +2342,8 @@ async function scanUmbraPrivateP2PUtxos(
     scanStartInsertionIndex: Number(window.start),
     scanEndInsertionIndex: Number(window.end),
   };
+  writeUmbraClaimScanCache(cacheScope, window, result);
+  return result;
 }
 
 function getU128LeBytes(value: unknown): Uint8Array | null {
@@ -2319,108 +2465,126 @@ async function getOnChainClaimedUmbraInsertionIndexSet(
   treeIndex: number | undefined,
   utxos: readonly unknown[],
 ): Promise<ReadonlySet<number>> {
-  const candidates = (
-    await Promise.all(
-      utxos.map(async (utxo) => {
-        const insertionIndex = getUtxoInsertionIndexAsNumber(utxo);
-        const modifiedGenerationIndexBytes = getUtxoModifiedGenerationIndexBytes(utxo);
-        const nullifier = await getUtxoNullifierValue(utxo);
-        if (insertionIndex == null || modifiedGenerationIndexBytes == null || nullifier == null) {
-          return null;
-        }
+  const startedAt = mark();
+  let candidateCount = 0;
+  let nullifierSetAccountCount = 0;
+  let claimedCount = 0;
+  try {
+    const candidates = (
+      await Promise.all(
+        utxos.map(async (utxo) => {
+          const insertionIndex = getUtxoInsertionIndexAsNumber(utxo);
+          const modifiedGenerationIndexBytes = getUtxoModifiedGenerationIndexBytes(utxo);
+          const nullifier = await getUtxoNullifierValue(utxo);
+          if (insertionIndex == null || modifiedGenerationIndexBytes == null || nullifier == null) {
+            return null;
+          }
 
+          return {
+            insertionIndex,
+            modifiedGenerationIndexBytes,
+            nullifier,
+            unlockerType: getUtxoUnlockerType(utxo),
+          };
+        }),
+      )
+    ).filter(
+      (
+        candidate,
+      ): candidate is {
+        insertionIndex: number;
+        modifiedGenerationIndexBytes: Uint8Array;
+        nullifier: bigint;
+        unlockerType: string | null;
+      } => candidate != null,
+    );
+    candidateCount = candidates.length;
+    if (candidates.length === 0) return new Set();
+
+    const poseidonHasher = getPoseidonHasher();
+    const receiverPoseidonPrivateKey = candidates.some(
+      (candidate) =>
+        candidate.unlockerType !== 'self-burnable' &&
+        candidate.unlockerType !== 'public-self-burnable',
+    )
+      ? await getPoseidonPrivateKeyDeriver({ client: runtime.client })()
+      : null;
+    const ephemeralPoseidonPrivateKeyDeriver = candidates.some(
+      (candidate) =>
+        candidate.unlockerType === 'self-burnable' ||
+        candidate.unlockerType === 'public-self-burnable',
+    )
+      ? getEphemeralUtxoPoseidonPrivateKeyDeriver({ client: runtime.client })
+      : null;
+    const candidateNullifierHashes = await Promise.all(
+      candidates.map(async (candidate) => {
+        const poseidonPrivateKey =
+          candidate.unlockerType === 'self-burnable' ||
+          candidate.unlockerType === 'public-self-burnable'
+            ? await ephemeralPoseidonPrivateKeyDeriver!(
+                decodeU256LeBytes(
+                  await expandModifiedGenerationIndex(
+                    candidate.modifiedGenerationIndexBytes as never,
+                  ),
+                ) as never,
+              )
+            : receiverPoseidonPrivateKey;
+        if (poseidonPrivateKey == null) return null;
+        const nullifierHash = BigInt(
+          await poseidonHasher([poseidonPrivateKey, candidate.nullifier] as never),
+        );
         return {
-          insertionIndex,
-          modifiedGenerationIndexBytes,
-          nullifier,
-          unlockerType: getUtxoUnlockerType(utxo),
+          insertionIndex: candidate.insertionIndex,
+          sequences: getU256SearchSequences(nullifierHash),
         };
       }),
-    )
-  ).filter(
-    (
-      candidate,
-    ): candidate is {
-      insertionIndex: number;
-      modifiedGenerationIndexBytes: Uint8Array;
-      nullifier: bigint;
-      unlockerType: string | null;
-    } => candidate != null,
-  );
-  if (candidates.length === 0) return new Set();
+    );
 
-  const poseidonHasher = getPoseidonHasher();
-  const receiverPoseidonPrivateKey = candidates.some(
-    (candidate) =>
-      candidate.unlockerType !== 'self-burnable' &&
-      candidate.unlockerType !== 'public-self-burnable',
-  )
-    ? await getPoseidonPrivateKeyDeriver({ client: runtime.client })()
-    : null;
-  const ephemeralPoseidonPrivateKeyDeriver = candidates.some(
-    (candidate) =>
-      candidate.unlockerType === 'self-burnable' ||
-      candidate.unlockerType === 'public-self-burnable',
-  )
-    ? getEphemeralUtxoPoseidonPrivateKeyDeriver({ client: runtime.client })
-    : null;
-  const candidateNullifierHashes = await Promise.all(
-    candidates.map(async (candidate) => {
-      const poseidonPrivateKey =
-        candidate.unlockerType === 'self-burnable' ||
-        candidate.unlockerType === 'public-self-burnable'
-          ? await ephemeralPoseidonPrivateKeyDeriver!(
-              decodeU256LeBytes(
-                await expandModifiedGenerationIndex(
-                  candidate.modifiedGenerationIndexBytes as never,
-                ),
-              ) as never,
-            )
-          : receiverPoseidonPrivateKey;
-      if (poseidonPrivateKey == null) return null;
-      const nullifierHash = BigInt(
-        await poseidonHasher([poseidonPrivateKey, candidate.nullifier] as never),
-      );
-      return {
-        insertionIndex: candidate.insertionIndex,
-        sequences: getU256SearchSequences(nullifierHash),
-      };
-    }),
-  );
-
-  const nullifierSetPdas = await findNullifierSetPdas(
-    BigInt(treeIndex ?? 0) as never,
-    runtime.client.networkConfig.programId as never,
-  );
-  const nullifierSetAddresses = [
-    nullifierSetPdas.treap0,
-    nullifierSetPdas.treap1,
-    nullifierSetPdas.treap2,
-    nullifierSetPdas.treap3,
-    nullifierSetPdas.treap4,
-  ];
-  const accountMap = await runtime.rpc.accountInfoProvider(nullifierSetAddresses as never);
-  const nullifierSetData = nullifierSetAddresses
-    .map((address) =>
-      getMaybeEncodedAccountData(getMapValueByStringKey(accountMap, String(address))),
-    )
-    .filter((data): data is Uint8Array => data != null);
-
-  if (nullifierSetData.length === 0) return new Set();
-
-  const claimedInsertionIndices = new Set<number>();
-  for (const candidate of candidateNullifierHashes) {
-    if (candidate == null) continue;
-    if (
-      nullifierSetData.some((data) =>
-        candidate.sequences.some((sequence) => bytesContainSequence(data, sequence)),
+    const nullifierSetPdas = await findNullifierSetPdas(
+      BigInt(treeIndex ?? 0) as never,
+      runtime.client.networkConfig.programId as never,
+    );
+    const nullifierSetAddresses = [
+      nullifierSetPdas.treap0,
+      nullifierSetPdas.treap1,
+      nullifierSetPdas.treap2,
+      nullifierSetPdas.treap3,
+      nullifierSetPdas.treap4,
+    ];
+    const accountMap = await runtime.rpc.accountInfoProvider(nullifierSetAddresses as never);
+    const nullifierSetData = nullifierSetAddresses
+      .map((address) =>
+        getMaybeEncodedAccountData(getMapValueByStringKey(accountMap, String(address))),
       )
-    ) {
-      const { insertionIndex } = candidate;
-      claimedInsertionIndices.add(insertionIndex);
+      .filter((data): data is Uint8Array => data != null);
+    nullifierSetAccountCount = nullifierSetData.length;
+
+    if (nullifierSetData.length === 0) return new Set();
+
+    const claimedInsertionIndices = new Set<number>();
+    for (const candidate of candidateNullifierHashes) {
+      if (candidate == null) continue;
+      if (
+        nullifierSetData.some((data) =>
+          candidate.sequences.some((sequence) => bytesContainSequence(data, sequence)),
+        )
+      ) {
+        const { insertionIndex } = candidate;
+        claimedInsertionIndices.add(insertionIndex);
+      }
     }
+    claimedCount = claimedInsertionIndices.size;
+    return claimedInsertionIndices;
+  } finally {
+    measure('umbra.claims.nullifierCheck', startedAt, {
+      network: runtime.network,
+      treeIndex: treeIndex ?? 0,
+      inputCount: utxos.length,
+      candidateCount,
+      nullifierSetAccountCount,
+      claimedCount,
+    });
   }
-  return claimedInsertionIndices;
 }
 
 function filterClaimableUtxos<T>(

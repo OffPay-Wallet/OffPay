@@ -46,7 +46,7 @@ export function SelectableCard({
           <View style={styles.titleRow}>
             <Text
               variant="body"
-              color={selected ? colors.brand.glossAccent : colors.text.primary}
+              color={colors.text.primary}
               style={styles.title}
               numberOfLines={1}
               ellipsizeMode="tail"
@@ -77,15 +77,28 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: radii.lg,
     borderCurve: 'continuous',
-    borderWidth: 1,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.glass.textBacking,
-    padding: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     minWidth: 0,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.08)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   cardActive: {
-    borderColor: colors.brand.glossAccent,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
     backgroundColor: colors.glass.smokeWash,
+    boxShadow: [
+      'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
+      '0 4px 12px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
   },
   disabled: {
     opacity: 0.45,
@@ -114,8 +127,8 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: 10 },
   radio: {
-    width: layout.iconSizeInline + spacing.xs,
-    height: layout.iconSizeInline + spacing.xs,
+    width: 22,
+    height: 22,
     borderRadius: radii.full,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -123,11 +136,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
-  radioActive: { borderColor: colors.brand.glossAccent },
+  radioActive: { borderColor: colors.text.primary },
   radioDot: {
-    width: spacing.md,
-    height: spacing.md,
+    width: 10,
+    height: 10,
     borderRadius: radii.full,
-    backgroundColor: colors.brand.glossAccent,
+    backgroundColor: colors.text.primary,
   },
 });

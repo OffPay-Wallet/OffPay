@@ -21,10 +21,14 @@ interface AppState {
   /** App-level display name used for nearby BLE wallet discovery; not scoped to the active wallet. */
   username: string | null;
 
+  /** Device-local profile image URI copied into app storage. */
+  profileImageUri: string | null;
+
   /** Actions */
   setHasOnboarded: (value: boolean) => void;
   setColorScheme: (scheme: 'light' | 'dark' | null) => void;
   setUsername: (username: string | null) => void;
+  setProfileImageUri: (uri: string | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -33,10 +37,12 @@ export const useAppStore = create<AppState>()(
       hasOnboarded: false,
       colorScheme: null,
       username: null,
+      profileImageUri: null,
 
       setHasOnboarded: (value) => set({ hasOnboarded: value }),
       setColorScheme: (scheme) => set({ colorScheme: scheme }),
       setUsername: (username) => set({ username: formatOffpayUsername(username) }),
+      setProfileImageUri: (uri) => set({ profileImageUri: uri }),
     }),
     {
       name: 'app-store',

@@ -45,8 +45,6 @@ const HOME_CONTAINER_SHADOW =
   '0 12px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14)';
 const ACTION_BADGE_SHADOW =
   '0 6px 14px rgba(0, 0, 0, 0.36), inset 0 1px 1px rgba(255, 255, 255, 0.22)';
-const ICON_CLUSTER_SHADOW =
-  '0 8px 18px rgba(0, 0, 0, 0.38), inset 0 1px 1px rgba(255, 255, 255, 0.18)';
 
 const TOKEN_SYMBOL_PATTERN = /(?:^|[\s+-])(?:\d[\d,.]*\s+)?([A-Za-z][A-Za-z0-9]{1,15})$/;
 
@@ -63,7 +61,7 @@ function TransactionActionIcon({
   type: OffpayDisplayTransactionType;
   size: number;
 }): React.JSX.Element {
-  const actionColor = colors.brand.actionFill;
+  const actionColor = colors.brand.glossAccent;
 
   if (type === 'receive') {
     return <PuffyReceiveArrowIcon size={size} color={actionColor} />;
@@ -463,13 +461,7 @@ const styles = StyleSheet.create({
   assetIconFrame: {
     flexShrink: 0,
     overflow: 'visible',
-    backgroundColor: colors.brand.whiteStream,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-    boxShadow: ICON_CLUSTER_SHADOW,
+    backgroundColor: 'transparent',
   },
   singleAssetIcon: {
     position: 'absolute',
@@ -494,8 +486,8 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    backgroundColor: colors.brand.whiteStream,
+    borderColor: colors.glass.rim,
+    backgroundColor: colors.surface.backgroundTint,
     boxShadow: ACTION_BADGE_SHADOW,
   },
   amountCol: {
