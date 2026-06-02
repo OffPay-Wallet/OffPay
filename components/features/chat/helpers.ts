@@ -41,7 +41,7 @@ export function isFinalPrivateSendStatus(status: AgenticPrivateSendAction['statu
 /**
  * Build a Solscan transaction URL with the correct cluster query for devnet
  * vs. mainnet. Mirrors the helpers used elsewhere in the app
- * (TransactionDetailsScreen, PrivatePaymentSendFlow, SwapExecutionStatusCard).
+ * (TransactionDetailsSheet, PrivatePaymentSendFlow, SwapExecutionStatusCard).
  */
 export function buildSolscanTxUrl(
   signature: string,

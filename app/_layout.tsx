@@ -16,6 +16,7 @@ import { installQueryCachePersistence } from '@/lib/cache/query-persistence';
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { isRunningInExpoGo } from 'expo';
 import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
+import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -31,9 +32,9 @@ import {
   globalScreenOptions,
   holdingsScreenOptions,
   privatePaymentScreenOptions,
-  transactionDetailsScreenOptions,
 } from '@/constants/navigation';
 import { formatOffpayUsername } from '@/lib/api/offpay-username';
+import { cirkaFontMap } from '@/assets/fonts/cirka';
 import {
   pruneManagedProfileImages,
   resolveStoredProfileImageUri,
@@ -147,10 +148,11 @@ export default function RootLayout(): React.JSX.Element | null {
     void hydrateWallet();
   }, [hydrateWallet]);
 
-  // Custom fonts ship as native assets via the `expo-font` config plugin
-  // (see `app.config.ts`), so they are available to the platform before
-  // any JS runs. We no longer pay a `useFonts` hop on cold start.
-  const appReady = true;
+  // Geist/Quicksand ship via the expo-font config plugin on native builds.
+  // Cirka is also listed there, but we load it at runtime so portfolio
+  // money type renders correctly in Expo Go and before the next rebuild.
+  const [cirkaFontsLoaded, cirkaFontError] = useFonts(cirkaFontMap);
+  const appReady = cirkaFontsLoaded || cirkaFontError != null;
   const firstSegment = segments[0];
   const inOnboarding = firstSegment === 'onboarding';
   const inUsernameSetup = firstSegment === 'username-setup';
@@ -279,9 +281,7 @@ export default function RootLayout(): React.JSX.Element | null {
     walletHydrated,
   ]);
 
-  // Fonts are now embedded at build time via the `expo-font` config
-  // plugin, so there is nothing to await here. Render immediately and
-  // let the splash gate take over until route + wallet are ready.
+  if (!appReady) return null;
 
   return (
     <AppProviders>
@@ -304,7 +304,6 @@ export default function RootLayout(): React.JSX.Element | null {
             <Stack.Screen name="umbra-privacy" />
             <Stack.Screen name="holdings" options={holdingsScreenOptions} />
             <Stack.Screen name="token-details" />
-            <Stack.Screen name="transaction-details" options={transactionDetailsScreenOptions} />
             <Stack.Screen name="accounts" />
             <Stack.Screen name="create-wallet" options={createWalletScreenOptions} />
             <Stack.Screen name="privy-wallet" options={createWalletScreenOptions} />

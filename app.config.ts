@@ -100,6 +100,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
             './assets/fonts/Quicksand/static/Quicksand-Regular.ttf',
             './assets/fonts/Quicksand/static/Quicksand-SemiBold.ttf',
             './assets/fonts/Quicksand/static/Quicksand-Bold.ttf',
+            './assets/fonts/cirka/Cirka-Light.otf',
+            './assets/fonts/cirka/Cirka-Bold.otf',
           ],
         },
       ],

@@ -34,6 +34,7 @@ import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { ThreeDPressable, SNAPPY_PRESS_SPRING } from '@/components/ui/ThreeDPressable';
+import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
 import { SlotText } from '@/components/ui/SlotText';
 import { Text } from '@/components/ui/Text';
 import { CURRENCIES } from '@/constants/currencies';
@@ -496,14 +497,21 @@ export function BalanceCard({
                 ) : (
                   <SlotText
                     value={displayedPortfolioValue}
-                    variant="display"
-                    color={colors.text.primary}
-                    style={[styles.balanceAmount, compact && styles.balanceAmountCompact]}
                     numberOfLines={1}
                     adjustsFontSizeToFit
                     minimumFontScale={0.42}
                     maxFontSizeMultiplier={1}
-                  />
+                  >
+                    <FiatMoneyText
+                      value={displayedPortfolioValue}
+                      compact={compact}
+                      style={styles.balanceAmount}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.42}
+                      maxFontSizeMultiplier={1}
+                    />
+                  </SlotText>
                 )}
               </View>
             </View>
@@ -1054,17 +1062,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   balanceAmount: {
-    fontFamily: fontFamily.display,
-    fontVariant: ['tabular-nums'],
-    fontSize: 36,
-    lineHeight: 44,
-    minWidth: 0,
-    maxWidth: '100%',
-    textAlign: 'center',
-  },
-  balanceAmountCompact: {
-    fontSize: 30,
-    lineHeight: 37,
+    width: '100%',
   },
   balanceSkeleton: {
     alignSelf: 'center',

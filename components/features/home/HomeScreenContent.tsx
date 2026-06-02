@@ -31,6 +31,7 @@ import { HomeHeader } from '@/components/features/home/HomeHeader';
 import { OfflineSlotsPromptModal } from '@/components/features/home/OfflineSlotsPromptModal';
 import { RecentActivityCard } from '@/components/features/home/RecentActivityCard';
 import { TokenHoldingsCard } from '@/components/features/home/TokenHoldingsCard';
+import { TransactionDetailsSheet } from '@/components/features/history/TransactionDetailsSheet';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
@@ -70,6 +71,7 @@ import { usePreferencesStore } from '@/store/preferencesStore';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
+import type { OffpayRecentActivityView } from '@/lib/api/offpay-wallet-data';
 import type { ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import type { WalletMode } from '@/store/preferencesStore';
 
@@ -170,6 +172,9 @@ export function HomeScreenContent(): React.JSX.Element {
   const [shieldedPaneMounted, setShieldedPaneMounted] = useState(false);
   const [slotPromptVisible, setSlotPromptVisible] = useState(false);
   const [homeRefreshPending, setHomeRefreshPending] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<OffpayRecentActivityView | null>(
+    null,
+  );
   const slotPromptAutoShownRef = useRef<string | null>(null);
   const slotPrepareShouldEnterOfflineRef = useRef(false);
   const previousSlotStatusRef = useRef<{
@@ -250,6 +255,7 @@ export function HomeScreenContent(): React.JSX.Element {
     return buildWalletRecentActivityItems({
       transactions: transactionsQuery.transactions,
       localReceipts: localReceiptsForNetwork,
+      network,
     }).slice(0, MAX_HOME_ACTIVITY_ITEMS);
   }, [network, offlineReceipts, transactionsQuery.transactions]);
   const portfolioValueLabel =
@@ -964,12 +970,13 @@ export function HomeScreenContent(): React.JSX.Element {
     [navigateToStack],
   );
 
-  const handleActivityPress = useCallback(
-    (transactionId: string): void => {
-      router.push(`/transaction-details?id=${encodeURIComponent(transactionId)}` as never);
-    },
-    [router],
-  );
+  const handleActivityPress = useCallback((transaction: OffpayRecentActivityView): void => {
+    setSelectedTransaction(transaction);
+  }, []);
+
+  const handleDismissTransactionDetails = useCallback((): void => {
+    setSelectedTransaction(null);
+  }, []);
 
   const handleViewAllHoldings = useCallback((): void => {
     router.push('/holdings' as never);
@@ -1123,6 +1130,11 @@ export function HomeScreenContent(): React.JSX.Element {
           onCancel={() => setSlotPromptVisible(false)}
         />
       ) : null}
+      <TransactionDetailsSheet
+        transaction={selectedTransaction}
+        tokenLogos={tokenLogoMap}
+        onDismiss={handleDismissTransactionDetails}
+      />
     </View>
   );
 }

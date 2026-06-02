@@ -1,7 +1,7 @@
 /**
  * History screen — chronological list of wallet transactions.
  */
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +15,7 @@ import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { HistoryList } from '@/components/features/history/HistoryList';
+import { TransactionDetailsSheet } from '@/components/features/history/TransactionDetailsSheet';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -28,7 +29,10 @@ import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
 
-import type { OffpayLocalReceiptViewInput } from '@/lib/api/offpay-wallet-data';
+import type {
+  OffpayHistoryTransactionView,
+  OffpayLocalReceiptViewInput,
+} from '@/lib/api/offpay-wallet-data';
 import type { PrivatePaymentReceipt } from '@/store/privatePaymentStore';
 import type { UmbraPrivacyReceipt } from '@/store/umbraPrivacyStore';
 
@@ -59,6 +63,7 @@ function mapUmbraReceiptToHistoryInput(receipt: UmbraPrivacyReceipt): OffpayLoca
     subtitle: receipt.subtitle,
     createdAt: receipt.createdAt,
     signature: receipt.signature ?? null,
+    network: receipt.network,
     privacyLabel: 'Private',
   };
 }
@@ -90,6 +95,7 @@ function mapAgenticPrivateReceiptToHistoryInput(
     createdAt: receipt.createdAt,
     signature: receipt.signature,
     recipient: receipt.recipient,
+    network: receipt.network,
     routeLabel: 'Yuga Transfer',
     privacyLabel: receipt.route === 'normal' ? 'Public route' : 'Private route',
     programLabel:
@@ -134,15 +140,21 @@ export function HistoryScreenContent(): React.JSX.Element {
   const transactionsQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
     deferUntilAfterInteractions: true,
-    // Hydrated display-cache rows can be missing transaction metadata
-    // after an earlier RPC enrichment miss. Always refetch on entry so
-    // those placeholders are replaced after the tab transition settles.
-    refetchOnMount: 'always',
+    // Let React Query's stale window decide whether the entry needs a
+    // network refresh. The activity stream invalidates this query when
+    // new transactions arrive, so forcing every tab entry to refetch
+    // competes with navigation and price queries.
+    refetchOnMount: true,
   });
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
   const refreshIconSize = dense ? 15 : compact ? 16 : 18;
+  const canRefreshHistory = transactionsQuery.isCapabilityEnabled;
+  const isHistoryStale = transactionsQuery.isStale;
+  const refetchHistoryQuery = transactionsQuery.refetch;
+  const [selectedTransaction, setSelectedTransaction] =
+    useState<OffpayHistoryTransactionView | null>(null);
 
   const handleBack = () => {
     const target =
@@ -160,18 +172,18 @@ export function HistoryScreenContent(): React.JSX.Element {
   // after the screen has already lost focus.
   const getScreenSignal = useScreenAbortSignal();
 
-  const refreshHistory = useCallback(() => {
-    if (!transactionsQuery.isCapabilityEnabled) return;
-    const signal = getScreenSignal();
-    runAfterTapFrame(() => {
-      if (signal.aborted) return;
-      void transactionsQuery.refetch();
-    });
-    // The wrapper `transactionsQuery` is a fresh object every render;
-    // we deliberately depend on the stable inner accessors so the
-    // callback identity stays pinned and FlashList does not rebuild.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactionsQuery.isCapabilityEnabled, transactionsQuery.refetch, getScreenSignal]);
+  const refreshHistory = useCallback(
+    (options?: { force?: boolean }) => {
+      if (!canRefreshHistory) return;
+      if (options?.force !== true && !isHistoryStale) return;
+      const signal = getScreenSignal();
+      runAfterTapFrame(() => {
+        if (signal.aborted) return;
+        void refetchHistoryQuery();
+      });
+    },
+    [canRefreshHistory, getScreenSignal, isHistoryStale, refetchHistoryQuery],
+  );
 
   // First focus is already covered by the initial query mount — only
   // refetch on subsequent focuses (i.e., when the user re-enters the
@@ -189,11 +201,15 @@ export function HistoryScreenContent(): React.JSX.Element {
     }, [refreshHistory]),
   );
 
-  const handleRefresh = refreshHistory;
+  const handleRefresh = useCallback(() => refreshHistory({ force: true }), [refreshHistory]);
 
-  const handleTransactionPress = (transactionId: string) => {
-    router.push(`/transaction-details?id=${encodeURIComponent(transactionId)}` as never);
-  };
+  const handleTransactionPress = useCallback((transaction: OffpayHistoryTransactionView) => {
+    setSelectedTransaction(transaction);
+  }, []);
+
+  const handleDismissTransactionDetails = useCallback(() => {
+    setSelectedTransaction(null);
+  }, []);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -284,6 +300,10 @@ export function HistoryScreenContent(): React.JSX.Element {
           onTransactionPress={handleTransactionPress}
         />
       </StaggerRevealItem>
+      <TransactionDetailsSheet
+        transaction={selectedTransaction}
+        onDismiss={handleDismissTransactionDetails}
+      />
     </View>
   );
 }

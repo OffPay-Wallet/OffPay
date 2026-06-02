@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { StyleSheet } from 'react-native';
 
@@ -10,9 +10,10 @@ type TextProps = ComponentProps<typeof Text>;
 
 interface SlotTextProps extends TextProps {
   value: string;
+  children?: ReactNode;
 }
 
-export function SlotText({ value, ...props }: SlotTextProps): React.JSX.Element {
+export function SlotText({ value, children, ...props }: SlotTextProps): React.JSX.Element {
   const hasMountedRef = useRef(false);
   const shouldAnimate = hasMountedRef.current;
 
@@ -27,7 +28,7 @@ export function SlotText({ value, ...props }: SlotTextProps): React.JSX.Element 
       exiting={shouldAnimate ? FadeOut.duration(140) : undefined}
       style={styles.container}
     >
-      <Text {...props}>{value}</Text>
+      {children ?? <Text {...props}>{value}</Text>}
     </Animated.View>
   );
 }

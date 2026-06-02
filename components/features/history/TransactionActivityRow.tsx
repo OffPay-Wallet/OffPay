@@ -497,7 +497,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   amount: {
-    fontFamily: fontFamily.monoSemiBold,
+    fontFamily: fontFamily.moneyBold,
     fontVariant: ['tabular-nums'],
     textAlign: 'right',
     fontSize: 14,
@@ -508,7 +508,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   secondaryAmount: {
-    fontFamily: fontFamily.mono,
+    fontFamily: fontFamily.moneyLight,
     fontVariant: ['tabular-nums'],
     textAlign: 'right',
     fontSize: 11,

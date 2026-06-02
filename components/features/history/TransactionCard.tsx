@@ -11,7 +11,7 @@ export function TransactionCard({
   tx: OffpayHistoryTransactionView;
   tokenLogos?: TokenLogoLookup;
   compact?: boolean;
-  onPress?: (id: string) => void;
+  onPress?: (transaction: OffpayHistoryTransactionView) => void;
 }): React.JSX.Element {
   return (
     <TransactionActivityRow
@@ -19,7 +19,7 @@ export function TransactionCard({
       compact={compact}
       tokenLogos={tokenLogos}
       variant="home"
-      onPress={onPress}
+      onPress={onPress == null ? undefined : () => onPress(tx)}
     />
   );
 }

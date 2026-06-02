@@ -2,14 +2,14 @@
  * Typography tokens for OffPay.
  *
  * Font files: assets/fonts/
- * Loaded via expo-font in app/_layout.tsx
+ * Embedded via the expo-font config plugin in app.config.ts.
  */
 import { Platform } from 'react-native';
 
 import type { TextStyle } from 'react-native';
 
 /**
- * Font family names — match the keys used in useFonts().
+ * Font family names — match the embedded native asset family names.
  * Keep the legacy weight keys for existing call sites, and use the role
  * keys for new UI work.
  */
@@ -17,12 +17,16 @@ export const fontFamily = {
   /** Quicksand — warm display/headline moments */
   display: 'Quicksand-Bold',
   displaySemiBold: 'Quicksand-SemiBold',
+  /** Cirka — numeric financial display */
+  moneyLight: 'Cirka-Light',
+  money: 'Cirka-Bold',
+  moneyBold: 'Cirka-Bold',
   /** Geist — primary product UI */
   ui: 'Geist-Regular',
   uiMedium: 'Geist-Medium',
   uiSemiBold: 'Geist-SemiBold',
   uiBold: 'Geist-Bold',
-  /** Geist Mono — balances, addresses, hashes, technical values */
+  /** Geist Mono — addresses, hashes, technical values */
   mono: 'GeistMono-Regular',
   monoMedium: 'GeistMono-Medium',
   monoSemiBold: 'GeistMono-SemiBold',
@@ -46,7 +50,7 @@ export const fontFamily = {
 export const textStyles = {
   /** Large balance amounts — 40px bold */
   display: {
-    fontFamily: fontFamily.display,
+    fontFamily: fontFamily.moneyBold,
     fontSize: 40,
     lineHeight: 48,
   } satisfies TextStyle,
@@ -126,6 +130,13 @@ export const textStyles = {
     fontFamily: fontFamily.mono,
     fontSize: 14,
     lineHeight: 20,
+  } satisfies TextStyle,
+
+  /** Money — balances, token quantities, fiat values */
+  money: {
+    fontFamily: fontFamily.moneyBold,
+    fontSize: 16,
+    lineHeight: 22,
   } satisfies TextStyle,
 } as const;
 

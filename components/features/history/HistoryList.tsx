@@ -35,7 +35,7 @@ interface HistoryListProps {
   transactionsQuery: UseOffpayWalletTransactionsResult;
   localReceipts?: readonly (OffpayLocalReceiptViewInput | OfflinePaymentReceipt)[];
   includeUnmatchedLocalReceipts?: boolean;
-  onTransactionPress?: (id: string) => void;
+  onTransactionPress?: (transaction: OffpayHistoryTransactionView) => void;
 }
 
 function flattenHistorySections(sections: OffpayHistoryTransactionGroup[]): HistoryRow[] {
@@ -62,7 +62,7 @@ interface HistoryItemRowProps {
   tokenLogos: TokenLogoLookup;
   compact: boolean;
   contentFrameWidth: number;
-  onTransactionPress?: (id: string) => void;
+  onTransactionPress?: (transaction: OffpayHistoryTransactionView) => void;
 }
 
 const HistoryItemRow = React.memo(function HistoryItemRow({
@@ -134,8 +134,14 @@ export function HistoryList({
       transactions: transactionsQuery.transactions,
       localReceipts,
       includeUnmatchedLocalReceipts,
+      network: transactionsQuery.network,
     });
-  }, [includeUnmatchedLocalReceipts, localReceipts, transactionsQuery.transactions]);
+  }, [
+    includeUnmatchedLocalReceipts,
+    localReceipts,
+    transactionsQuery.network,
+    transactionsQuery.transactions,
+  ]);
   const rows = useMemo(() => flattenHistorySections(sections), [sections]);
 
   // Extra padding at the bottom so we can scroll past the custom Tab Bar

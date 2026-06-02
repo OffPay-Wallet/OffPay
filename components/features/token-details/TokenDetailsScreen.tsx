@@ -24,6 +24,7 @@ import Svg, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TransactionActivityRow } from '@/components/features/history/TransactionActivityRow';
+import { TransactionDetailsSheet } from '@/components/features/history/TransactionDetailsSheet';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { PuffyReceiveIcon } from '@/components/ui/icons/PuffyReceiveIcon';
 import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
@@ -54,6 +55,7 @@ import { formatLamportsAsExactSolLabel } from '@/lib/crypto/solana-amounts';
 import { usePreferencesStore } from '@/store/preferencesStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
+import type { OffpayHistoryTransactionView } from '@/lib/api/offpay-wallet-data';
 import type {
   ConvertedTokenPriceHistorySample,
   TokenPriceHistoryTimeframeId,
@@ -410,17 +412,13 @@ function PriceLineChart({
       if (chartPath == null || chartWidth <= 0) return;
 
       const viewBoxX = (event.nativeEvent.locationX / chartWidth) * PRICE_CHART_VIEWBOX_WIDTH;
-      let nearestIndex = 0;
-      let nearestDistance = Number.POSITIVE_INFINITY;
-
-      chartPath.points.forEach((point, index) => {
-        const distance = Math.abs(point.x - viewBoxX);
-        if (distance < nearestDistance) {
-          nearestIndex = index;
-          nearestDistance = distance;
-        }
-      });
-
+      const nearestIndex = Math.max(
+        0,
+        Math.min(
+          chartPath.points.length - 1,
+          Math.round((viewBoxX / PRICE_CHART_VIEWBOX_WIDTH) * (chartPath.points.length - 1)),
+        ),
+      );
       setInspectedIndex(nearestIndex);
     },
     [chartPath, chartWidth],
@@ -495,7 +493,7 @@ function PriceLineChart({
               y={21}
               fill={colors.text.primary}
               fontSize={13}
-              fontFamily={fontFamily.uiSemiBold}
+              fontFamily={fontFamily.moneyBold}
               textAnchor="middle"
             >
               {formatFiatValue(activePoint.sample.price, currency)}
@@ -684,6 +682,8 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const requestedMint = getSearchParam(params.mint);
   const currency = usePreferencesStore((state) => state.currency);
   const [selectedTimeframe, setSelectedTimeframe] = useState<TokenPriceHistoryTimeframeId>('24H');
+  const [selectedTransaction, setSelectedTransaction] =
+    useState<OffpayHistoryTransactionView | null>(null);
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: true,
     eagerWithoutCapabilities: true,
@@ -705,11 +705,12 @@ export function TokenDetailsScreen(): React.JSX.Element {
         : buildVisibleTokenHoldings(balanceQuery.data, tokenLogoMap, tokenMetadata),
     [balanceQuery.data, tokenLogoMap, tokenMetadata],
   );
-  const valuationQuery = useOffpayTokenValuations({ holdings, currency });
   const holding = useMemo(
     () => holdings.find((item) => item.mint === requestedMint) ?? null,
     [holdings, requestedMint],
   );
+  const valuationHoldings = useMemo(() => (holding == null ? [] : [holding]), [holding]);
+  const valuationQuery = useOffpayTokenValuations({ holdings: valuationHoldings, currency });
   const valuation = holding == null ? null : (valuationQuery.data?.[holding.mint] ?? null);
   const mintForDisplay =
     holding == null ? requestedMint : isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
@@ -721,20 +722,21 @@ export function TokenDetailsScreen(): React.JSX.Element {
     timeframe: selectedTimeframe,
     enabled: holding != null,
   });
-  const tokenActivityItems = useMemo<TokenActivityItem[]>(() => {
+  const tokenActivity = useMemo<TokenActivityItem[]>(() => {
     if (holding == null) return [];
 
-    return transactionsQuery.transactions
-      .filter((transaction) => transactionMatchesHolding(transaction, holding))
-      .map((transaction) => ({
+    const items: TokenActivityItem[] = [];
+    for (const transaction of transactionsQuery.transactions) {
+      if (!transactionMatchesHolding(transaction, holding)) continue;
+      items.push({
         transaction,
-        view: mapWalletTransactionForHistory(transaction),
-      }));
-  }, [holding, transactionsQuery.transactions]);
-  const tokenActivity = useMemo(
-    () => tokenActivityItems.slice(0, MAX_TOKEN_ACTIVITY_ROWS),
-    [tokenActivityItems],
-  );
+        view: mapWalletTransactionForHistory(transaction, null, transactionsQuery.network),
+      });
+      if (items.length >= MAX_TOKEN_ACTIVITY_ROWS) break;
+    }
+
+    return items;
+  }, [holding, transactionsQuery.network, transactionsQuery.transactions]);
 
   const screenHorizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
   const actionCompact = dense || width < 360 || fontScale > 1.1;
@@ -779,11 +781,15 @@ export function TokenDetailsScreen(): React.JSX.Element {
     [holding, router],
   );
   const handleTokenActivityPress = useCallback(
-    (transactionId: string): void => {
-      router.push(`/transaction-details?id=${encodeURIComponent(transactionId)}` as never);
+    (transaction: OffpayHistoryTransactionView): void => {
+      setSelectedTransaction(transaction);
     },
-    [router],
+    [],
   );
+
+  const handleDismissTransactionDetails = useCallback((): void => {
+    setSelectedTransaction(null);
+  }, []);
 
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + spacing['4xl'];
 
@@ -885,7 +891,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
                       compact={compact}
                       tokenLogos={tokenLogoMap}
                       metaLabel={`Fee ${formatLamportsAsExactSolLabel(transaction.fee)}`}
-                      onPress={handleTokenActivityPress}
+                      onPress={() => handleTokenActivityPress(view)}
                     />
                   ))}
                 </View>
@@ -911,6 +917,11 @@ export function TokenDetailsScreen(): React.JSX.Element {
           </StaggerRevealGroup>
         )}
       </ScrollView>
+      <TransactionDetailsSheet
+        transaction={selectedTransaction}
+        tokenLogos={tokenLogoMap}
+        onDismiss={handleDismissTransactionDetails}
+      />
     </View>
   );
 }
@@ -1054,7 +1065,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 42,
     lineHeight: 48,
-    fontFamily: fontFamily.display,
+    fontFamily: fontFamily.moneyBold,
     fontVariant: ['tabular-nums'],
   },
   overviewBalanceValueCompact: {
@@ -1069,6 +1080,7 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   overviewSubText: {
+    fontFamily: fontFamily.moneyLight,
     fontVariant: ['tabular-nums'],
   },
   chartFrame: {

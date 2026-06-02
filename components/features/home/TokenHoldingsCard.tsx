@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   amountText: {
-    fontFamily: fontFamily.ui,
+    fontFamily: fontFamily.moneyLight,
     minWidth: 0,
     fontSize: 13,
     lineHeight: 17,
@@ -586,7 +586,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   fiatValue: {
-    fontFamily: fontFamily.monoSemiBold,
+    fontFamily: fontFamily.moneyBold,
     fontVariant: ['tabular-nums'],
     textAlign: 'right',
     fontSize: 13,
@@ -601,7 +601,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   unitPrice: {
-    fontFamily: fontFamily.mono,
+    fontFamily: fontFamily.moneyLight,
     fontVariant: ['tabular-nums'],
     textAlign: 'right',
     fontSize: 9,

@@ -26,6 +26,4 @@ export const privatePaymentScreenOptions: NativeStackNavigationOptions = {
   gestureEnabled: false,
 };
 
-export const transactionDetailsScreenOptions: NativeStackNavigationOptions = globalScreenOptions;
-
 export const createWalletScreenOptions: NativeStackNavigationOptions = globalScreenOptions;

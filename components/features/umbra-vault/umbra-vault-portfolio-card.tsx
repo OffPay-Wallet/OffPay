@@ -213,6 +213,7 @@ export function UmbraVaultPortfolioCard({
                 <Text
                   variant="caption"
                   color={colors.text.secondary}
+                  style={styles.tokenBalance}
                   numberOfLines={1}
                   ellipsizeMode="tail"
                   adjustsFontSizeToFit
@@ -345,14 +346,15 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   value: {
-    fontFamily: fontFamily.bold,
-    fontSize: 38,
-    lineHeight: 42,
+    fontFamily: fontFamily.moneyBold,
+    fontSize: 42,
+    lineHeight: 48,
+    includeFontPadding: false,
     letterSpacing: 0,
   },
   valueCompact: {
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 34,
+    lineHeight: 40,
   },
   tokenGrid: {
     flexDirection: 'row',
@@ -392,6 +394,10 @@ const styles = StyleSheet.create({
   },
   tokenSymbol: {
     fontFamily: fontFamily.uiSemiBold,
+  },
+  tokenBalance: {
+    fontFamily: fontFamily.moneyLight,
+    fontVariant: ['tabular-nums'],
   },
   disabledText: {
     lineHeight: 18,

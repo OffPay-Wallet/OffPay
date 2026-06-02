@@ -12,7 +12,7 @@ import type { Query } from '@tanstack/query-core';
  * cause TanStack to discard any persisted cache from older builds.
  * Bump it whenever a query's response shape changes.
  */
-const APP_QUERY_CACHE_VERSION = 'v2';
+const APP_QUERY_CACHE_VERSION = 'v3';
 
 /** 24 hours of cached query data is plenty for a wallet UI. */
 const QUERY_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
@@ -26,6 +26,7 @@ const VOLATILE_WALLET_QUERY_SCOPES = new Set([
   'umbraVaultRegistrationStatus',
   'privatePaymentBalance',
   'portfolioValuation',
+  'tokenPriceHistory',
   'tokenValuations',
 ]);
 

@@ -32,7 +32,7 @@ interface RecentActivityCardProps {
   /** List of recent transactions backed by the current OffPay wallet surfaces. */
   transactions: Transaction[];
   /** Called when a transaction row is tapped */
-  onTransactionPress?: (id: string) => void;
+  onTransactionPress?: (transaction: Transaction) => void;
   /** Called when "View All" is tapped */
   onViewAll?: () => void;
   statusLabel?: string | null;
@@ -72,7 +72,7 @@ const TransactionRow = memo(function TransactionRow({
 }: {
   transaction: Transaction;
   compact: boolean;
-  onPress?: (id: string) => void;
+  onPress?: (transaction: Transaction) => void;
   privacyHidden: boolean;
   tokenLogos: TokenLogoLookup;
 }): React.JSX.Element {
@@ -80,7 +80,7 @@ const TransactionRow = memo(function TransactionRow({
     <TransactionActivityRow
       tx={transaction}
       compact={compact}
-      onPress={onPress}
+      onPress={onPress == null ? undefined : () => onPress(transaction)}
       privacyHidden={privacyHidden}
       variant="home"
       tokenLogos={tokenLogos}
