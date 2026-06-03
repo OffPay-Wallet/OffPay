@@ -27,7 +27,10 @@ import { gatherPayrollRunReadiness } from '@/lib/payroll/payroll-run-readiness';
 import { pickPayrollFile } from '@/lib/payroll/payroll-file-intake';
 import { probeRecipientRegistration } from '@/lib/payroll/payroll-recipient-registration';
 import { umbraBlockedOnlyBySenderSetup } from '@/lib/payroll/payroll-route-readiness';
-import { resolvePayrollTokenContext, walletCanSignPayroll } from '@/lib/payroll/payroll-wallet-eligibility';
+import {
+  resolvePayrollTokenContext,
+  walletCanSignPayroll,
+} from '@/lib/payroll/payroll-wallet-eligibility';
 import { stagePayroll } from '@/lib/payroll/payroll-staging';
 import { isAbortError } from '@/lib/perf/abort';
 import { usePayrollStore } from '@/store/payrollStore';
@@ -38,7 +41,11 @@ import type { PayrollRecipientFacts } from '@/lib/payroll/payroll-route-readines
 import type { PayrollRoutePolicy, PayrollRow, PayrollRun } from '@/lib/payroll/payroll-types';
 import type { PayrollTokenContext } from '@/lib/payroll/payroll-validation';
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
-import type { CapabilitiesResponse, OffpayNetwork, WalletBalanceResponse } from '@/types/offpay-api';
+import type {
+  CapabilitiesResponse,
+  OffpayNetwork,
+  WalletBalanceResponse,
+} from '@/types/offpay-api';
 
 export interface UsePayrollChatIntakeParams {
   walletAddress: string | null;
@@ -62,6 +69,11 @@ export interface PayrollMappingRequest {
   suggestedMapping: PayrollColumnMapping;
 }
 
+export type PayrollStageOutcome =
+  | { status: 'staged' }
+  | { status: 'mapping_required' }
+  | { status: 'error'; message: string };
+
 export interface UsePayrollChatIntakeResult {
   activeRunId: string | null;
   summary: PayrollConfirmationSummary | null;
@@ -70,9 +82,9 @@ export interface UsePayrollChatIntakeResult {
   /** Set when the file parsed but columns need manual mapping. */
   mappingRequest: PayrollMappingRequest | null;
   pickFile: () => Promise<void>;
-  stageFromText: (fileName: string, text: string) => Promise<void>;
+  stageFromText: (fileName: string, text: string) => Promise<PayrollStageOutcome>;
   /** Re-stage the pending mapping-request file with a user-chosen mapping. */
-  stageWithMapping: (mapping: PayrollColumnMapping) => Promise<void>;
+  stageWithMapping: (mapping: PayrollColumnMapping) => Promise<PayrollStageOutcome>;
   cancelMapping: () => void;
   refreshRoutes: () => Promise<void>;
   reset: () => void;
@@ -258,13 +270,7 @@ export function usePayrollChatIntake(
 
       return { rows: routedRows, summary };
     },
-    [
-      params.balance,
-      params.capabilities,
-      params.canUseNetwork,
-      params.importMethod,
-      walletId,
-    ],
+    [params.balance, params.capabilities, params.canUseNetwork, params.importMethod, walletId],
   );
 
   const stage = useCallback(
@@ -273,17 +279,19 @@ export function usePayrollChatIntake(
       mimeType: string | null,
       text: string,
       mappingOverride?: PayrollColumnMapping,
-    ) => {
+    ): Promise<PayrollStageOutcome> => {
       setError(null);
       if (params.walletAddress == null || params.network == null) {
-        setError('Connect a wallet before staging payroll.');
-        return;
+        const message = 'Connect a wallet before staging payroll.';
+        setError(message);
+        return { status: 'error', message };
       }
 
       const token = resolvePayrollTokenContext(params.balance, tokenSymbol);
       if (token == null) {
-        setError(`No ${tokenSymbol} balance found in the active wallet.`);
-        return;
+        const message = `No ${tokenSymbol} balance found in the active wallet.`;
+        setError(message);
+        return { status: 'error', message };
       }
 
       setBusy(true);
@@ -312,10 +320,10 @@ export function usePayrollChatIntake(
               sampleRows: staged.sampleRows,
               suggestedMapping: staged.suggestedMapping,
             });
-            return;
+            return { status: 'mapping_required' };
           }
           setError(staged.message);
-          return;
+          return { status: 'error', message: staged.message };
         }
 
         setMappingRequest(null);
@@ -325,9 +333,16 @@ export function usePayrollChatIntake(
         replaceRows(staged.run.id, routed.rows);
         setActiveRunId(staged.run.id);
         setSummary(routed.summary);
+        return { status: 'staged' };
       } catch (caught) {
-        if (isAbortError(caught)) return;
-        setError(caught instanceof Error ? caught.message : 'Failed to stage payroll.');
+        if (isAbortError(caught)) {
+          const message = 'Payroll staging was cancelled.';
+          setError(message);
+          return { status: 'error', message };
+        }
+        const message = caught instanceof Error ? caught.message : 'Failed to stage payroll.';
+        setError(message);
+        return { status: 'error', message };
       } finally {
         setBusy(false);
       }
@@ -358,16 +373,18 @@ export function usePayrollChatIntake(
 
   const stageFromText = useCallback(
     async (fileName: string, text: string) => {
-      await stage(fileName, null, text);
+      return stage(fileName, null, text);
     },
     [stage],
   );
 
   const stageWithMapping = useCallback(
-    async (mapping: PayrollColumnMapping) => {
+    async (mapping: PayrollColumnMapping): Promise<PayrollStageOutcome> => {
       const request = mappingRequest;
-      if (request == null) return;
-      await stage(request.fileName, request.mimeType, request.text, mapping);
+      if (request == null) {
+        return { status: 'error', message: 'No payroll file is waiting for column mapping.' };
+      }
+      return stage(request.fileName, request.mimeType, request.text, mapping);
     },
     [mappingRequest, stage],
   );

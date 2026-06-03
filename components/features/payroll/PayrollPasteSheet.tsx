@@ -6,7 +6,16 @@
  */
 
 import React, { useState } from 'react';
-import { Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -18,7 +27,7 @@ interface PayrollPasteSheetProps {
   visible: boolean;
   busy: boolean;
   onClose: () => void;
-  onSubmit: (fileName: string, text: string) => void;
+  onSubmit: (fileName: string, text: string) => boolean | Promise<boolean>;
 }
 
 export function PayrollPasteSheet({
@@ -32,53 +41,65 @@ export function PayrollPasteSheet({
   const trimmed = text.trim();
   const canSubmit = trimmed.length > 0 && !busy;
 
-  const handleSubmit = (): void => {
+  const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     // Name it so format detection falls back to delimiter sniffing / JSON.
     const looksJson = trimmed.startsWith('{') || trimmed.startsWith('[');
-    onSubmit(looksJson ? 'pasted-payroll.json' : 'pasted-payroll.txt', trimmed);
-    setText('');
+    const accepted = await onSubmit(
+      looksJson ? 'pasted-payroll.json' : 'pasted-payroll.txt',
+      trimmed,
+    );
+    if (accepted) setText('');
   };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={pasteStyles.backdrop} onPress={onClose}>
-        <Pressable style={pasteStyles.sheet} onPress={(event) => event.stopPropagation()}>
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>Paste payroll</Text>
-            <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
-              <Text style={styles.secondaryButtonText}>Close</Text>
+      <View style={pasteStyles.backdrop}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={pasteStyles.keyboardAvoider}
+        >
+          <View style={pasteStyles.sheet}>
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Paste payroll</Text>
+              <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+                <Text style={styles.secondaryButtonText}>Close</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.claimNote}>
+              Paste CSV, TSV, JSON, or manual rows. Headerless rows can use wallet amount.
+            </Text>
+
+            <ScrollView keyboardShouldPersistTaps="always" style={pasteStyles.inputScroller}>
+              <TextInput
+                value={text}
+                onChangeText={setText}
+                placeholder={'wallet,amount\nAbc...123,100\nDef...456,50'}
+                placeholderTextColor={colors.text.placeholder}
+                style={pasteStyles.input}
+                multiline
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Payroll rows"
+              />
+            </ScrollView>
+
+            <Pressable
+              style={[styles.primaryButton, !canSubmit && styles.primaryButtonDisabled]}
+              onPress={() => {
+                void handleSubmit();
+              }}
+              disabled={!canSubmit}
+              accessibilityRole="button"
+              accessibilityLabel="Stage pasted payroll"
+              accessibilityState={{ disabled: !canSubmit }}
+            >
+              <Text style={styles.primaryButtonText}>Stage payroll</Text>
             </Pressable>
           </View>
-
-          <Text style={styles.claimNote}>
-            Paste rows as CSV, TSV, or JSON. Include a header row with recipient and amount columns.
-          </Text>
-
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder={'wallet,amount\nAbc...123,100\nDef...456,50'}
-            placeholderTextColor={colors.text.placeholder}
-            style={pasteStyles.input}
-            multiline
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel="Payroll rows"
-          />
-
-          <Pressable
-            style={[styles.primaryButton, !canSubmit && styles.primaryButtonDisabled]}
-            onPress={handleSubmit}
-            disabled={!canSubmit}
-            accessibilityRole="button"
-            accessibilityLabel="Stage pasted payroll"
-            accessibilityState={{ disabled: !canSubmit }}
-          >
-            <Text style={styles.primaryButtonText}>Stage payroll</Text>
-          </Pressable>
-        </Pressable>
-      </Pressable>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -89,6 +110,10 @@ const pasteStyles = StyleSheet.create({
     backgroundColor: 'rgba(16, 16, 16, 0.32)',
     justifyContent: 'flex-end',
   },
+  keyboardAvoider: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
   sheet: {
     backgroundColor: colors.surface.cardElevated,
     borderTopLeftRadius: spacing.xl,
@@ -96,6 +121,9 @@ const pasteStyles = StyleSheet.create({
     borderCurve: 'continuous',
     padding: spacing.xl,
     gap: spacing.md,
+  },
+  inputScroller: {
+    maxHeight: 320,
   },
   input: {
     minHeight: 160,

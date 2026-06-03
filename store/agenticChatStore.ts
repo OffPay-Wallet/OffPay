@@ -19,7 +19,7 @@ export interface AgenticConversation extends AgenticChatScope {
   updatedAt: number;
 }
 
-export type AgenticPrivateSendStatus =
+export type AgenticActionStatus =
   | 'needs_confirmation'
   | 'submitting'
   | 'submitted'
@@ -30,7 +30,7 @@ export type AgenticPrivateSendStatus =
 export interface AgenticPrivateSendAction {
   id: string;
   kind: 'private_send' | 'normal_send';
-  status: AgenticPrivateSendStatus;
+  status: AgenticActionStatus;
   walletAddress: string;
   network: OffpayNetwork;
   recipient: string;
@@ -41,7 +41,7 @@ export interface AgenticPrivateSendAction {
   tokenName: string;
   tokenLogo: string | null;
   tokenDecimals: number;
-  route: 'magicblock' | 'normal';
+  route: 'magicblock' | 'normal' | 'umbra';
   /**
    * True when the original prompt explicitly asked to send to the active wallet
    * (for example "send to my own wallet"). Persisted so confirm-time
@@ -57,6 +57,43 @@ export interface AgenticPrivateSendAction {
   errorMessage?: string | null;
 }
 
+export interface AgenticSwapAction {
+  id: string;
+  kind: 'swap';
+  status: AgenticActionStatus;
+  walletAddress: string;
+  network: OffpayNetwork;
+  route: 'normal';
+  inputMint: string;
+  inputSymbol: string;
+  inputName: string;
+  inputDecimals: number;
+  inputAmount: string;
+  inputRawAmount: string;
+  outputMint: string;
+  outputSymbol: string;
+  outputName: string;
+  outputDecimals: number;
+  outputAmount: string;
+  outputRawAmount: string;
+  slippageBps: number | null;
+  slippageMode: 'auto' | 'manual' | null;
+  priceImpactPct: number;
+  fee: string;
+  routeSummary: string;
+  quoteId: string;
+  unsignedTransaction: string;
+  expiresAt: number;
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  errorMessage?: string | null;
+}
+
+export type AgenticChatAction = AgenticPrivateSendAction | AgenticSwapAction;
+
 export interface AgenticChatMessage {
   id: string;
   role: AgenticChatRole;
@@ -71,7 +108,7 @@ export interface AgenticChatMessage {
 
 interface AgenticChatState {
   messages: AgenticChatMessage[];
-  actions: AgenticPrivateSendAction[];
+  actions: AgenticChatAction[];
   conversations: AgenticConversation[];
   activeConversationIdByScope: Record<string, string | null>;
   createConversation: (scope: AgenticChatScope, title?: string) => string;
@@ -79,8 +116,11 @@ interface AgenticChatState {
   deleteConversation: (id: string) => void;
   addMessage: (message: AgenticChatMessage) => void;
   updateMessage: (id: string, patch: Partial<Omit<AgenticChatMessage, 'id'>>) => void;
-  upsertAction: (action: AgenticPrivateSendAction) => void;
-  updateAction: (id: string, patch: Partial<Omit<AgenticPrivateSendAction, 'id'>>) => void;
+  upsertAction: (action: AgenticChatAction) => void;
+  updateAction: (
+    id: string,
+    patch: Partial<Omit<AgenticPrivateSendAction, 'id'>> | Partial<Omit<AgenticSwapAction, 'id'>>,
+  ) => void;
   clearMessages: (scope?: { walletAddress: string | null; network: OffpayNetwork | null }) => void;
 }
 
@@ -229,8 +269,11 @@ export const useAgenticChatStore = create<AgenticChatState>()(
         })),
       updateAction: (id, patch) =>
         set((state) => ({
-          actions: state.actions.map((action) =>
-            action.id === id ? { ...action, ...patch, updatedAt: Date.now() } : action,
+          actions: state.actions.map(
+            (action): AgenticChatAction =>
+              action.id === id
+                ? ({ ...action, ...patch, updatedAt: Date.now() } as AgenticChatAction)
+                : action,
           ),
         })),
       clearMessages: (scope) =>
@@ -258,7 +301,9 @@ export const useAgenticChatStore = create<AgenticChatState>()(
               // scope, or actions whose own scope is not the cleared one
               // (so we don't take down drafts on other wallets).
               if (visibleActionIds.has(action.id)) return true;
-              return action.walletAddress !== scope.walletAddress || action.network !== scope.network;
+              return (
+                action.walletAddress !== scope.walletAddress || action.network !== scope.network
+              );
             }),
             conversations: state.conversations.filter(
               (conversation) => !sameScope(conversation, scope),

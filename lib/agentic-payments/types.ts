@@ -32,6 +32,9 @@ export type AgentSafeContext = {
     walletBalance: boolean;
     normalSend: boolean;
     privateSend: boolean;
+    swap?: boolean;
+    umbra?: boolean;
+    privateBalance?: boolean;
   };
   supportedActions?: string[];
   tokenSymbols?: string[];
@@ -91,6 +94,9 @@ export type AiIntentContext = {
     networkAvailable: boolean;
     normalSend: boolean;
     privateSend: boolean;
+    swap?: boolean;
+    umbra?: boolean;
+    privateBalance?: boolean;
   };
   tokenSymbols?: string[];
   supportedActions?: string[];

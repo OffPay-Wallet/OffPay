@@ -11,6 +11,11 @@ const COMPOSER_SHADOW =
 
 export const promptStyles = StyleSheet.create({
   promptDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
     paddingTop: spacing.sm,
   },
   prompt: {

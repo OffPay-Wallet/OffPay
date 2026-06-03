@@ -4,6 +4,8 @@ import {
   stripBom,
   type PayrollFileFormat,
 } from '@/lib/payroll/parsing/payroll-formats';
+import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
+import { decimalInputToAtomicAmount, sanitizeDecimalInput } from '@/lib/policy/token-amounts';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { createAbortError, isAbortError } from '@/lib/perf/abort';
 
@@ -139,8 +141,10 @@ async function parseJson(text: string, signal?: AbortSignal): Promise<PayrollTab
 
   const rows = Array.isArray(parsed)
     ? parsed
-    : parsed != null && typeof parsed === 'object' && Array.isArray((parsed as { rows?: unknown }).rows)
-      ? ((parsed as { rows: unknown[] }).rows)
+    : parsed != null &&
+        typeof parsed === 'object' &&
+        Array.isArray((parsed as { rows?: unknown }).rows)
+      ? (parsed as { rows: unknown[] }).rows
       : null;
 
   if (rows == null) {
@@ -149,6 +153,81 @@ async function parseJson(text: string, signal?: AbortSignal): Promise<PayrollTab
 
   await yieldToUi();
   return tableFromJsonArray(rows);
+}
+
+function splitManualLine(line: string): string[] {
+  const delimiterMatch = /[,;\t|]/.exec(line);
+  if (delimiterMatch != null) {
+    return line
+      .split(delimiterMatch[0])
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+  }
+  return line
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function looksLikeAmount(value: string): boolean {
+  const normalized = sanitizeDecimalInput(value, 18);
+  const atomic = decimalInputToAtomicAmount(normalized, 18);
+  return atomic != null && /^\d+$/.test(atomic) && BigInt(atomic) > 0n;
+}
+
+function parseManualPayrollLine(line: string): Record<string, string> | null {
+  const parts = splitManualLine(line);
+  if (parts.length < 2) return null;
+
+  const recipientIndex = parts.findIndex(isValidSolanaAddress);
+  if (recipientIndex < 0) return null;
+
+  const amountIndexAfterRecipient = parts.findIndex(
+    (part, index) => index > recipientIndex && looksLikeAmount(part),
+  );
+  const amountIndex =
+    amountIndexAfterRecipient >= 0
+      ? amountIndexAfterRecipient
+      : parts.findIndex((part, index) => index !== recipientIndex && looksLikeAmount(part));
+  if (amountIndex < 0) return null;
+
+  const tokenIndex = parts.findIndex(
+    (part, index) => index > amountIndex && /^[A-Za-z][A-Za-z0-9_-]{1,15}$/.test(part),
+  );
+  const token = tokenIndex >= 0 ? (parts[tokenIndex] ?? '') : '';
+  const label = parts
+    .filter(
+      (_part, index) => index !== recipientIndex && index !== amountIndex && index !== tokenIndex,
+    )
+    .join(' ');
+
+  return {
+    label,
+    recipient: parts[recipientIndex] ?? '',
+    amount: parts[amountIndex] ?? '',
+    token,
+  };
+}
+
+function parseHeaderlessManualText(text: string): PayrollTable | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return null;
+
+  const records: Record<string, string>[] = [];
+  for (const line of lines) {
+    const record = parseManualPayrollLine(line);
+    if (record == null) return null;
+    records.push(record);
+  }
+
+  return {
+    headers: ['label', 'recipient', 'amount', 'token'],
+    records,
+  };
 }
 
 /**
@@ -183,12 +262,17 @@ export async function parsePayrollTable(
         table = await parseDelimited(text, '\t', params.signal);
         break;
       case 'txt':
-        table = await parseDelimited(text, detectDelimiter(text), params.signal);
+        table =
+          parseHeaderlessManualText(text) ??
+          (await parseDelimited(text, detectDelimiter(text), params.signal));
         break;
     }
 
     if (table.headers.length === 0 || table.records.length === 0) {
-      return { ok: false, message: 'No data rows were found. Check the file has a header and rows.' };
+      return {
+        ok: false,
+        message: 'No data rows were found. Check the file has a header and rows.',
+      };
     }
     return { ok: true, table };
   } catch (error) {

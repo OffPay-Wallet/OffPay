@@ -66,33 +66,36 @@ const baseContext: AgenticToolRunnerContext = {
 };
 
 describe('runAgenticTools', () => {
-  it('returns a privacy-safe token list without addresses or mints', () => {
-    const run = runAgenticTools(
+  it('returns a privacy-safe token list without addresses or mints', async () => {
+    const run = await runAgenticTools(
       [{ id: 'call-1', name: 'list_wallet_tokens', args: {} }],
       baseContext,
     );
 
     expect(run.drafts).toHaveLength(0);
     expect(run.results).toHaveLength(1);
-    const result = run.results[0].result as { status: string; tokens: Array<Record<string, unknown>> };
+    const result = run.results[0].result as {
+      status: string;
+      tokens: Array<Record<string, unknown>>;
+    };
     expect(result.status).toBe('ok');
     expect(JSON.stringify(result)).not.toContain(usdcMint);
     expect(JSON.stringify(result)).not.toContain(walletAddress);
     expect(result.tokens.some((token) => token.symbol === 'USDC')).toBe(true);
   });
 
-  it('returns a status code only when balances are still loading', () => {
-    const run = runAgenticTools(
-      [{ id: 'call-1', name: 'list_wallet_tokens', args: {} }],
-      { ...baseContext, balance: null },
-    );
+  it('returns a status code only when balances are still loading', async () => {
+    const run = await runAgenticTools([{ id: 'call-1', name: 'list_wallet_tokens', args: {} }], {
+      ...baseContext,
+      balance: null,
+    });
 
     // Tool result must NOT contain English copy — only structured codes.
     expect(run.results[0].result).toEqual({ status: 'loading' });
   });
 
-  it('returns SOL balance as a human-readable amount only', () => {
-    const run = runAgenticTools(
+  it('returns SOL balance as a human-readable amount only', async () => {
+    const run = await runAgenticTools(
       [{ id: 'call-2', name: 'get_sol_balance', args: {} }],
       baseContext,
     );
@@ -101,19 +104,19 @@ describe('runAgenticTools', () => {
     expect(JSON.stringify(run.results[0].result)).not.toContain(walletAddress);
   });
 
-  it('emits insight ids only — the model writes the prose', () => {
-    const run = runAgenticTools(
+  it('emits insight ids only — the model writes the prose', async () => {
+    const run = await runAgenticTools(
       [{ id: 'call-3', name: 'analyze_wallet', args: {} }],
       baseContext,
     );
 
     const result = run.results[0].result as {
       status: string;
-      insights: Array<{ id: string; severity: string }>;
+      details: Array<{ id: string; severity: string }>;
     };
     expect(result.status).toBe('ok');
-    expect(result.insights.length).toBeGreaterThan(0);
-    for (const insight of result.insights) {
+    expect(result.details.length).toBeGreaterThan(0);
+    for (const insight of result.details) {
       expect(typeof insight.id).toBe('string');
       expect(typeof insight.severity).toBe('string');
       // No prose fields like `title` or `detail` should appear in the
@@ -124,8 +127,8 @@ describe('runAgenticTools', () => {
     }
   });
 
-  it('builds a private-send draft when the model calls draft_private_send with a redacted recipient', () => {
-    const run = runAgenticTools(
+  it('builds a private-send draft when the model calls draft_private_send with a redacted recipient', async () => {
+    const run = await runAgenticTools(
       [
         {
           id: 'call-4',
@@ -159,8 +162,8 @@ describe('runAgenticTools', () => {
     });
   });
 
-  it('returns a structured rejection code when the validator refuses an unknown token', () => {
-    const run = runAgenticTools(
+  it('returns a structured rejection code when the validator refuses an unknown token', async () => {
+    const run = await runAgenticTools(
       [
         {
           id: 'call-5',
@@ -179,8 +182,8 @@ describe('runAgenticTools', () => {
     expect(run.results[0].error?.code).toBe('token_unknown');
   });
 
-  it('reports unknown_tool when the model calls a tool not in the catalog', () => {
-    const run = runAgenticTools(
+  it('reports unknown_tool when the model calls a tool not in the catalog', async () => {
+    const run = await runAgenticTools(
       [{ id: 'call-6', name: 'rm_rf_wallet', args: {} }],
       baseContext,
     );
@@ -189,19 +192,22 @@ describe('runAgenticTools', () => {
     expect(run.results[0].error?.code).toBe('unknown_tool');
   });
 
-  it('emits a payroll intake intent without exposing payroll data', () => {
-    const run = runAgenticTools(
+  it('emits a payroll intake intent without exposing payroll data', async () => {
+    const run = await runAgenticTools(
       [{ id: 'call-7', name: 'stage_payroll', args: { source: 'upload' } }],
       baseContext,
     );
 
     expect(run.payrollIntents).toEqual([{ toolCallId: 'call-7', source: 'upload' }]);
-    expect(run.results[0].result).toMatchObject({ status: 'opening_payroll_intake', source: 'upload' });
+    expect(run.results[0].result).toMatchObject({
+      status: 'opening_payroll_intake',
+      source: 'upload',
+    });
     expect(run.drafts).toHaveLength(0);
   });
 
-  it('defaults the payroll intake source to paste', () => {
-    const run = runAgenticTools(
+  it('defaults the payroll intake source to paste', async () => {
+    const run = await runAgenticTools(
       [{ id: 'call-8', name: 'stage_payroll', args: {} }],
       baseContext,
     );

@@ -1,5 +1,8 @@
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
-import { buildStablecoinMetadataLookup, buildVisibleTokenHoldings } from '@/lib/api/offpay-wallet-data';
+import {
+  buildStablecoinMetadataLookup,
+  buildVisibleTokenHoldings,
+} from '@/lib/api/offpay-wallet-data';
 
 import type { AgentSafeContext } from '@/lib/agentic-payments/types';
 import type { WalletAccount } from '@/store/walletStore';
@@ -50,8 +53,28 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
         isOffpayFeatureAvailable(capabilities, 'payment.privateInitMint') &&
         isOffpayFeatureAvailable(capabilities, 'payment.privateSend') &&
         isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast'),
+      swap: isOffpayFeatureAvailable(capabilities, 'swap.normalSwap'),
+      umbra:
+        isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
+        isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p'),
+      privateBalance: isOffpayFeatureAvailable(capabilities, 'payment.privateBalance'),
     },
-    supportedActions: ['draft_normal_send', 'draft_private_send', 'stage_payroll'],
+    supportedActions: [
+      'get_client_capabilities',
+      'get_wallet_balance',
+      'get_wallet_history',
+      'resolve_recipient',
+      'get_normal_transfer_fee',
+      'get_swap_tokens',
+      'get_swap_price',
+      'prepare_swap_quote',
+      'get_private_payment_balance',
+      'scan_umbra_claims',
+      'get_umbra_balances',
+      'draft_normal_send',
+      'draft_private_send',
+      'stage_payroll',
+    ],
     tokenSymbols,
   };
 }

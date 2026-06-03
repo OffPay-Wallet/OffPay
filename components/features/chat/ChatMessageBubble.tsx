@@ -9,18 +9,19 @@ import { View } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { useAgentThinkingPhrase } from '@/hooks/agentic-chat/useAgentThinkingPhrase';
 
-import type { AgenticChatMessage, AgenticPrivateSendAction } from '@/store/agenticChatStore';
+import type { AgenticChatAction, AgenticChatMessage } from '@/store/agenticChatStore';
 
 import { AiLoaderLottie } from './AiLoaderLottie';
 import { ChatBubble } from './ChatBubble';
 import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
+import { SwapConfirmationCard } from './SwapConfirmationCard';
 import { messageStyles as styles } from './styles/message';
 
 interface ChatMessageBubbleProps {
   message: AgenticChatMessage;
-  action?: AgenticPrivateSendAction;
-  onConfirmPrivateSend: (action: AgenticPrivateSendAction) => void;
-  onCancelPrivateSend: (action: AgenticPrivateSendAction) => void;
+  action?: AgenticChatAction;
+  onConfirmPrivateSend: (action: AgenticChatAction) => void;
+  onCancelPrivateSend: (action: AgenticChatAction) => void;
 }
 
 function AgentThinkingContent({ statusPhrase }: { statusPhrase: string }): React.JSX.Element {
@@ -106,11 +107,19 @@ export function ChatMessageBubble({
         ) : null}
         {action != null ? (
           <View style={styles.actionCardWrap}>
-            <PrivateSendConfirmationCard
-              action={action}
-              onConfirm={onConfirmPrivateSend}
-              onCancel={onCancelPrivateSend}
-            />
+            {action.kind === 'swap' ? (
+              <SwapConfirmationCard
+                action={action}
+                onConfirm={onConfirmPrivateSend}
+                onCancel={onCancelPrivateSend}
+              />
+            ) : (
+              <PrivateSendConfirmationCard
+                action={action}
+                onConfirm={onConfirmPrivateSend}
+                onCancel={onCancelPrivateSend}
+              />
+            )}
           </View>
         ) : null}
       </View>

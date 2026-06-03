@@ -169,7 +169,7 @@ function buildToolDeclarations(
   schemas: AgentChatRequest['toolSchemas'],
 ): Array<Record<string, unknown>> {
   if (schemas == null || schemas.length === 0) return [];
-  return schemas.slice(0, 12).map((schema: AgentToolSchema) => {
+  return schemas.slice(0, 24).map((schema: AgentToolSchema) => {
     const parameters = normalizeToolParameters(schema.parameters);
     const declaration: Record<string, unknown> = {
       name: schema.name.slice(0, 64),

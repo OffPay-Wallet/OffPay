@@ -1,5 +1,5 @@
 /**
- * Hook that turns a drafted `AgenticPrivateSendAction` (status =
+ * Hook that turns a drafted chat action (status =
  * `needs_confirmation`) into an actually-broadcast transfer. Owns:
  *
  * - Re-validating the draft against the current scope to defend against
@@ -26,10 +26,13 @@ import {
   pendingBackupQueueStatsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import {
   useAgenticChatStore,
+  type AgenticChatAction,
   type AgenticChatScope,
   type AgenticPrivateSendAction,
+  type AgenticSwapAction,
 } from '@/store/agenticChatStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -54,8 +57,8 @@ interface SubmitResult {
 }
 
 export interface UseAgenticConfirmSendResult {
-  confirm: (action: AgenticPrivateSendAction) => Promise<void>;
-  cancel: (action: AgenticPrivateSendAction) => void;
+  confirm: (action: AgenticChatAction) => Promise<void>;
+  cancel: (action: AgenticChatAction) => void;
 }
 
 export function useAgenticConfirmSend({
@@ -74,7 +77,7 @@ export function useAgenticConfirmSend({
   const addPrivateReceipt = usePrivatePaymentStore((s) => s.addReceipt);
 
   const cancel = useCallback(
-    (action: AgenticPrivateSendAction) => {
+    (action: AgenticChatAction) => {
       if (action.status !== 'needs_confirmation') return;
       updateAction(action.id, { status: 'cancelled', errorMessage: null });
     },
@@ -82,7 +85,7 @@ export function useAgenticConfirmSend({
   );
 
   const confirm = useCallback(
-    async (action: AgenticPrivateSendAction): Promise<void> => {
+    async (action: AgenticChatAction): Promise<void> => {
       if (action.status !== 'needs_confirmation') return;
 
       if (scope.walletAddress !== action.walletAddress || scope.network !== action.network) {
@@ -90,6 +93,17 @@ export function useAgenticConfirmSend({
           'Switch back to the wallet and network used for this draft before confirming.';
         updateAction(action.id, { status: 'failed', errorMessage: message });
         showToast({ title: 'Confirmation blocked', message, variant: 'error' });
+        return;
+      }
+
+      if (action.kind === 'swap') {
+        await confirmSwapAction({
+          action,
+          walletId,
+          queryClient,
+          updateAction,
+          showToast,
+        });
         return;
       }
 
@@ -110,7 +124,7 @@ export function useAgenticConfirmSend({
         allowSelfRecipient: action.selfRecipientRequested === true,
       };
       const validation =
-        action.route === 'normal'
+        action.route === 'normal' || action.route === 'umbra'
           ? validateAgenticNormalSendDraft(validationInput)
           : validateAgenticPrivateSendDraft(validationInput);
       if (!validation.ok) {
@@ -119,7 +133,7 @@ export function useAgenticConfirmSend({
         return;
       }
 
-      if (action.route === 'normal' && walletId == null) {
+      if ((action.route === 'normal' || action.route === 'umbra') && walletId == null) {
         const message = 'Unlock wallet and try again.';
         updateAction(action.id, { status: 'failed', errorMessage: message });
         showToast({ title: 'Confirmation blocked', message, variant: 'error' });
@@ -140,9 +154,11 @@ export function useAgenticConfirmSend({
         const message =
           action.route === 'normal'
             ? 'Yuga normal payment submitted'
-            : result.status === 'submitted'
-              ? 'Yuga private payment submitted'
-              : 'Yuga private payment queued';
+            : action.route === 'umbra'
+              ? 'Yuga Umbra private payment submitted'
+              : result.status === 'submitted'
+                ? 'Yuga private payment submitted'
+                : 'Yuga private payment queued';
 
         addPrivateReceipt({
           id: id ?? action.id,
@@ -170,6 +186,7 @@ export function useAgenticConfirmSend({
           walletAddress: validation.draft.walletAddress,
           network: validation.draft.network,
           isNormalRoute: action.route === 'normal',
+          includeUmbraInvalidation: action.route === 'umbra',
         });
 
         updateAction(action.id, {
@@ -179,8 +196,7 @@ export function useAgenticConfirmSend({
           errorMessage: null,
         });
         showToast({
-          title:
-            result.status === 'submitted' ? 'Yuga transfer submitted' : 'Yuga transfer queued',
+          title: result.status === 'submitted' ? 'Yuga transfer submitted' : 'Yuga transfer queued',
           message: `${validation.draft.amount} ${validation.draft.tokenSymbol}`,
           variant: 'success',
         });
@@ -191,7 +207,9 @@ export function useAgenticConfirmSend({
             ? error.message
             : action.route === 'normal'
               ? 'Unable to submit normal send.'
-              : 'Unable to submit private send.';
+              : action.route === 'umbra'
+                ? 'Unable to submit Umbra private send.'
+                : 'Unable to submit private send.';
         updateAction(action.id, { status: 'failed', errorMessage: message });
         showToast({ title: 'Yuga transfer failed', message, variant: 'error' });
         onSpeakOutcome?.(agenticSendOutcomeSpeech('failed', action.route));
@@ -255,6 +273,28 @@ async function runSubmitter({
     };
   }
 
+  if (action.route === 'umbra') {
+    if (walletId == null) {
+      throw new Error('Unlock wallet and try again.');
+    }
+    const { sendUmbraPrivateP2PFromPublicBalance } = await import('@/lib/umbra/umbra-execution');
+    const umbraResult = await sendUmbraPrivateP2PFromPublicBalance({
+      walletAddress: draft.walletAddress,
+      walletId,
+      recipient: draft.recipient,
+      token: draft.tokenMint,
+      amount: draft.amount,
+      network: draft.network,
+      autoSetupSender: true,
+    });
+    return {
+      status: 'submitted',
+      signature: umbraResult.primarySignature ?? umbraResult.signatures[0] ?? null,
+      txId: null,
+      initSignature: null,
+    };
+  }
+
   const { submitPrivatePayment } = await import('@/lib/magicblock/private-payment');
   const privateResult = await submitPrivatePayment({
     walletAddress: draft.walletAddress,
@@ -277,6 +317,7 @@ interface InvalidateAfterTransferParams {
   walletAddress: string;
   network: AgenticChatScope['network'];
   isNormalRoute: boolean;
+  includeUmbraInvalidation?: boolean;
 }
 
 function invalidateAfterTransfer({
@@ -284,6 +325,7 @@ function invalidateAfterTransfer({
   walletAddress,
   network,
   isNormalRoute,
+  includeUmbraInvalidation = false,
 }: InvalidateAfterTransferParams): Promise<unknown> {
   if (network == null) return Promise.resolve();
   return Promise.all([
@@ -302,5 +344,114 @@ function invalidateAfterTransfer({
             queryKey: pendingBackupQueueStatsQueryKey(walletAddress, network),
           }),
         ]),
+    ...(includeUmbraInvalidation
+      ? [
+          queryClient.invalidateQueries({
+            queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
+          }),
+        ]
+      : []),
   ]);
+}
+
+const SWAP_QUOTE_REFRESH_BUFFER_MS = 15_000;
+
+async function confirmSwapAction(params: {
+  action: AgenticSwapAction;
+  walletId: string | null;
+  queryClient: ReturnType<typeof useQueryClient>;
+  updateAction: ReturnType<typeof useAgenticChatStore.getState>['updateAction'];
+  showToast: ReturnType<typeof useAppToast>['showToast'];
+}): Promise<void> {
+  const { action, walletId, queryClient, updateAction, showToast } = params;
+  if (walletId == null) {
+    const message = 'Unlock wallet and try again.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'Confirmation blocked', message, variant: 'error' });
+    return;
+  }
+
+  updateAction(action.id, { status: 'submitting', errorMessage: null });
+  await yieldToUi();
+
+  try {
+    const { createSwapQuote, executeSwapQuote } = await import('@/lib/api/offpay-api-client');
+    const { signSerializedTransactionForWallet } =
+      await import('@/lib/crypto/solana-transaction-signing');
+    const quote =
+      action.expiresAt - Date.now() <= SWAP_QUOTE_REFRESH_BUFFER_MS
+        ? await createSwapQuote({
+            inputMint: action.inputMint,
+            outputMint: action.outputMint,
+            amount: action.inputRawAmount,
+            network: action.network,
+            receiverAddress: action.walletAddress,
+            ...(action.slippageBps == null
+              ? {}
+              : {
+                  slippageBps: action.slippageBps,
+                  useManualSlippage: action.slippageMode === 'manual',
+                }),
+          })
+        : {
+            quoteId: action.quoteId,
+            inputMint: action.inputMint,
+            outputMint: action.outputMint,
+            inAmount: action.inputRawAmount,
+            outAmount: action.outputRawAmount,
+            slippageBps: action.slippageBps,
+            slippageMode: action.slippageMode ?? undefined,
+            priceImpactPct: action.priceImpactPct,
+            fee: action.fee,
+            routeSummary: action.routeSummary,
+            expiresAt: action.expiresAt,
+            unsignedTransaction: action.unsignedTransaction,
+          };
+    if (quote.unsignedTransaction.trim().length === 0) {
+      throw new Error('Swap quote expired. Ask Yuga to prepare a fresh quote.');
+    }
+
+    const signedTransaction = await signSerializedTransactionForWallet({
+      unsignedTransaction: quote.unsignedTransaction,
+      walletAddress: action.walletAddress,
+      walletId,
+    });
+    const result = await executeSwapQuote({
+      quoteId: quote.quoteId,
+      signedTransaction,
+      network: action.network,
+    });
+
+    await invalidateAfterTransfer({
+      queryClient,
+      walletAddress: action.walletAddress,
+      network: action.network,
+      isNormalRoute: true,
+    });
+
+    updateAction(action.id, {
+      status: 'submitted',
+      signature: result.signature,
+      errorMessage: null,
+      quoteId: quote.quoteId,
+      unsignedTransaction: quote.unsignedTransaction,
+      outputRawAmount: quote.outAmount,
+      outputAmount: formatAtomicAmount(quote.outAmount, action.outputDecimals),
+      expiresAt: quote.expiresAt,
+      priceImpactPct: quote.priceImpactPct,
+      fee: quote.fee,
+      routeSummary: quote.routeSummary,
+      slippageBps: quote.slippageBps ?? null,
+      slippageMode: quote.slippageMode ?? null,
+    });
+    showToast({
+      title: 'Yuga swap submitted',
+      message: `${action.inputAmount} ${action.inputSymbol} → ${action.outputSymbol}`,
+      variant: 'success',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to submit swap.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'Yuga swap failed', message, variant: 'error' });
+  }
 }

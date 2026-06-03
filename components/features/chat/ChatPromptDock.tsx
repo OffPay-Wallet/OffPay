@@ -15,7 +15,7 @@
 
 import React, { type RefObject } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import Animated, { FadeOut, LinearTransition, ZoomIn } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors } from '@/constants/colors';
@@ -24,7 +24,26 @@ import { Text } from '@/components/ui/Text';
 
 import { AiLoaderLottie } from './AiLoaderLottie';
 import { VoiceWaveform } from './VoiceWaveform';
+import { PROMPT_ICON_SIZE } from './constants';
 import { promptStyles as styles } from './styles/prompt';
+
+const VOICE_CARD_EASE = Easing.inOut(Easing.ease);
+const VOICE_CARD_TRANSITION_MS = 260;
+const VOICE_CARD_LAYOUT_TRANSITION =
+  LinearTransition.duration(VOICE_CARD_TRANSITION_MS).easing(VOICE_CARD_EASE);
+const VOICE_CARD_ENTERING = FadeIn.duration(240)
+  .easing(VOICE_CARD_EASE)
+  .withInitialValues({
+    opacity: 0,
+    transform: [
+      { translateX: PROMPT_ICON_SIZE * 0.35 },
+      { translateY: PROMPT_ICON_SIZE * 0.35 },
+      { scale: 0.98 },
+    ],
+  });
+const VOICE_CARD_EXITING = FadeOut.duration(180).easing(VOICE_CARD_EASE);
+const COMPOSER_CARD_ENTERING = FadeIn.duration(180).easing(VOICE_CARD_EASE);
+const COMPOSER_CARD_EXITING = FadeOut.duration(160).easing(VOICE_CARD_EASE);
 
 export type ChatVoiceState = 'idle' | 'recording' | 'transcribing' | 'review';
 
@@ -55,6 +74,7 @@ interface ChatPromptDockProps {
   busy: boolean;
   canSubmit: boolean;
   bottomInset: number;
+  keyboardOffset?: number;
   horizontalPadding: number;
   onChangeText: (next: string) => void;
   onSubmit: () => void;
@@ -62,6 +82,7 @@ interface ChatPromptDockProps {
   onUpload?: () => void;
   /** Optional long-press on upload (e.g. open paste sheet). */
   onUploadLongPress?: () => void;
+  onPastePayroll?: () => void;
   uploadBusy?: boolean;
   /** Optional voice control. Omit to hide the mic. */
   voice?: ChatVoiceControl;
@@ -81,11 +102,13 @@ export function ChatPromptDock({
   busy,
   canSubmit,
   bottomInset,
+  keyboardOffset = 0,
   horizontalPadding,
   onChangeText,
   onSubmit,
   onUpload,
   onUploadLongPress,
+  onPastePayroll,
   uploadBusy = false,
   voice,
   speech,
@@ -100,29 +123,33 @@ export function ChatPromptDock({
       style={[
         styles.promptDock,
         {
+          bottom: keyboardOffset,
           paddingHorizontal: horizontalPadding,
           paddingBottom: Math.max(bottomInset, spacing.lg),
         },
       ]}
     >
-      <Animated.View layout={LinearTransition.springify().damping(20).stiffness(180)}>
+      <Animated.View layout={VOICE_CARD_LAYOUT_TRANSITION}>
         {voiceCardActive && voice != null ? (
           <VoiceCard voice={voice} />
         ) : (
-          <ComposerCard
-            inputRef={inputRef}
-            prompt={prompt}
-            busy={busy}
-            canSubmit={canSubmit}
-            placeholder={placeholder}
-            onChangeText={onChangeText}
-            onSubmit={onSubmit}
-            onUpload={onUpload}
-            onUploadLongPress={onUploadLongPress}
-            uploadBusy={uploadBusy}
-            voice={voice}
-            speech={speech}
-          />
+          <Animated.View entering={COMPOSER_CARD_ENTERING} exiting={COMPOSER_CARD_EXITING}>
+            <ComposerCard
+              inputRef={inputRef}
+              prompt={prompt}
+              busy={busy}
+              canSubmit={canSubmit}
+              placeholder={placeholder}
+              onChangeText={onChangeText}
+              onSubmit={onSubmit}
+              onUpload={onUpload}
+              onUploadLongPress={onUploadLongPress}
+              onPastePayroll={onPastePayroll}
+              uploadBusy={uploadBusy}
+              voice={voice}
+              speech={speech}
+            />
+          </Animated.View>
         )}
       </Animated.View>
     </View>
@@ -139,6 +166,7 @@ interface ComposerCardProps {
   onSubmit: () => void;
   onUpload?: () => void;
   onUploadLongPress?: () => void;
+  onPastePayroll?: () => void;
   uploadBusy: boolean;
   voice?: ChatVoiceControl;
   speech?: ChatSpeechControl;
@@ -154,6 +182,7 @@ function ComposerCard({
   onSubmit,
   onUpload,
   onUploadLongPress,
+  onPastePayroll,
   uploadBusy,
   voice,
   speech,
@@ -198,6 +227,18 @@ function ComposerCard({
               ) : (
                 <Ionicons name="add" size={24} color={colors.text.primary} />
               )}
+            </Pressable>
+          ) : null}
+          {onPastePayroll != null ? (
+            <Pressable
+              onPress={onPastePayroll}
+              disabled={uploadBusy}
+              style={styles.promptAccessory}
+              accessibilityRole="button"
+              accessibilityLabel="Paste payroll rows"
+              hitSlop={8}
+            >
+              <Ionicons name="document-text-outline" size={21} color={colors.text.primary} />
             </Pressable>
           ) : null}
         </View>
@@ -332,8 +373,8 @@ function VoiceCard({ voice }: { voice: ChatVoiceControl }): React.JSX.Element {
 
   return (
     <Animated.View
-      entering={ZoomIn.springify().damping(18).stiffness(170)}
-      exiting={FadeOut.duration(140)}
+      entering={VOICE_CARD_ENTERING}
+      exiting={VOICE_CARD_EXITING}
       style={styles.voiceCard}
     >
       {isReview ? (

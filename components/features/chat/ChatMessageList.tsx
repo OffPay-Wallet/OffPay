@@ -7,16 +7,16 @@
 import React from 'react';
 import { View } from 'react-native';
 
-import type { AgenticChatMessage, AgenticPrivateSendAction } from '@/store/agenticChatStore';
+import type { AgenticChatAction, AgenticChatMessage } from '@/store/agenticChatStore';
 
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { messageStyles as styles } from './styles/message';
 
 interface ChatMessageListProps {
   messages: readonly AgenticChatMessage[];
-  actionsById: ReadonlyMap<string, AgenticPrivateSendAction>;
-  onConfirmPrivateSend: (action: AgenticPrivateSendAction) => void;
-  onCancelPrivateSend: (action: AgenticPrivateSendAction) => void;
+  actionsById: ReadonlyMap<string, AgenticChatAction>;
+  onConfirmPrivateSend: (action: AgenticChatAction) => void;
+  onCancelPrivateSend: (action: AgenticChatAction) => void;
 }
 
 export function ChatMessageList({

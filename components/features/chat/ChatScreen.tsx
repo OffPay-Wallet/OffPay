@@ -10,7 +10,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Keyboard,
-  KeyboardAvoidingView,
+  type KeyboardEvent,
   Platform,
   ScrollView,
   TextInput,
@@ -35,10 +35,7 @@ import { useAgenticConfirmSend } from '@/hooks/agentic-chat/useAgenticConfirmSen
 import { useAgenticPendingSweep } from '@/hooks/agentic-chat/useAgenticPendingSweep';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { buildAgentWalletBalanceResponse } from '@/lib/agentic-payments/safe-context';
-import {
-  type AgenticConversation,
-  useAgenticChatStore,
-} from '@/store/agenticChatStore';
+import { type AgenticConversation, useAgenticChatStore } from '@/store/agenticChatStore';
 import { useAppStore } from '@/store/app';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -93,16 +90,13 @@ export function ChatScreen(): React.JSX.Element {
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
-  // The composer card (input row + action row) is taller than the legacy
-  // pill, so reserve extra space below the scroll content for it.
-  const bottomPadding = Math.max(insets.bottom, spacing.lg) + PROMPT_HEIGHT + spacing['4xl'];
   const avatarSize = dense ? 36 : compact ? 40 : 44;
   const displayName = username != null ? `@${username}` : (accountName ?? 'there');
 
   const [prompt, setPrompt] = useState('');
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const [payrollPasteOpen, setPayrollPasteOpen] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardFrame, setKeyboardFrame] = useState<{ screenY: number } | null>(null);
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(
     null,
   );
@@ -111,6 +105,15 @@ export function ChatScreen(): React.JSX.Element {
   const payrollIntakeRef = useRef<ReturnType<typeof usePayrollChatIntake> | null>(null);
   const inputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const keyboardOffset = useMemo(() => {
+    if (keyboardFrame == null) return 0;
+    return Math.max(0, windowHeight - keyboardFrame.screenY);
+  }, [keyboardFrame, windowHeight]);
+  const promptBottomInset = keyboardFrame == null ? insets.bottom : spacing.xs;
+  // The composer is an overlay so the empty-state layout stays stable. Reserve
+  // enough scroll padding for both the dock and its keyboard lift.
+  const bottomPadding =
+    Math.max(insets.bottom, spacing.lg) + keyboardOffset + PROMPT_HEIGHT + spacing['4xl'];
 
   const activeConversationId = activeConversationIdByScope[scopeKey] ?? null;
   const scopedConversations = useMemo(
@@ -126,8 +129,7 @@ export function ChatScreen(): React.JSX.Element {
   );
   const activeConversation = useMemo(
     () =>
-      scopedConversations.find((conversation) => conversation.id === activeConversationId) ??
-      null,
+      scopedConversations.find((conversation) => conversation.id === activeConversationId) ?? null,
     [activeConversationId, scopedConversations],
   );
   const scopedMessages = useMemo(
@@ -168,6 +170,7 @@ export function ChatScreen(): React.JSX.Element {
   // Outcome read-aloud. Speaks short, sanitized status lines after a send or
   // payroll run resolves. Silent-fail and privacy-gated inside the hook.
   const speech = useAgenticSpeech();
+  const activeWalletId = useWalletStore((s) => s.activeWalletId);
 
   const { submit, busy: agentBusy } = useAgenticAgentSubmit({
     scope,
@@ -179,6 +182,7 @@ export function ChatScreen(): React.JSX.Element {
     balance: agentBalance,
     capabilities: capabilitiesQuery.capabilities,
     knownWallets,
+    walletId: activeWalletId,
     onPayrollIntent: (source) => {
       if (source === 'upload') {
         void payrollIntakeRef.current?.pickFile();
@@ -200,7 +204,6 @@ export function ChatScreen(): React.JSX.Element {
     },
   });
 
-  const activeWalletId = useWalletStore((s) => s.activeWalletId);
   const activeImportMethod = useMemo(() => {
     const active = wallets.find((wallet) => wallet.publicKey === scope.walletAddress);
     return active?.importMethod ?? null;
@@ -257,20 +260,34 @@ export function ChatScreen(): React.JSX.Element {
     showToast,
   ]);
 
-  // Track keyboard visibility so the dock can drop its safe-area bottom
-  // padding while the keyboard is up — the keyboard inset replaces the
-  // home-indicator inset, preventing a double gap (and the input being
-  // pushed under the keyboard on some devices).
+  // Track only the keyboard overlap and move the bottom dock. Resizing the
+  // whole screen makes the empty-state center jump when the composer focuses.
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    const handleShow = (event: KeyboardEvent) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setKeyboardFrame({ screenY: event.endCoordinates.screenY });
+    };
+    const handleHide = (event: KeyboardEvent) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setKeyboardFrame(null);
+    };
+    const showSub = Keyboard.addListener(showEvent, handleShow);
+    const hideSub = Keyboard.addListener(hideEvent, handleHide);
     return () => {
       showSub.remove();
       hideSub.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (keyboardFrame == null) return;
+    const frame = requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [keyboardFrame, keyboardOffset]);
 
   // Migrate legacy messages with a missing `conversationId` once.
   useEffect(() => {
@@ -359,11 +376,7 @@ export function ChatScreen(): React.JSX.Element {
   const canSubmit = prompt.trim().length > 0 && !agentBusy;
 
   return (
-    <KeyboardAvoidingView
-      style={headerStyles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={0}
-    >
+    <View style={headerStyles.container}>
       <ChatHeader
         topInset={insets.top}
         horizontalPadding={horizontalPadding}
@@ -384,68 +397,73 @@ export function ChatScreen(): React.JSX.Element {
           keyboardDismissMode="interactive"
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
         >
-        <View style={headerStyles.welcomeRow}>
-          <View style={[headerStyles.welcomeAvatar, { width: avatarSize + 12, height: avatarSize + 12 }]}>
-            <WalletAvatar size={avatarSize} solidFill />
-          </View>
-          <View style={headerStyles.welcomeText}>
-            <Text
-              color={colors.text.secondary}
-              style={headerStyles.welcomeEyebrow}
-              numberOfLines={1}
+          <View style={headerStyles.welcomeRow}>
+            <View
+              style={[
+                headerStyles.welcomeAvatar,
+                { width: avatarSize + 12, height: avatarSize + 12 },
+              ]}
             >
-              Hey there
-            </Text>
-            <Text
-              color={colors.text.primary}
-              style={headerStyles.welcomeName}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              adjustsFontSizeToFit
-              minimumFontScale={0.86}
-              maxFontSizeMultiplier={1.05}
-            >
-              {displayName}
-            </Text>
+              <WalletAvatar size={avatarSize} solidFill />
+            </View>
+            <View style={headerStyles.welcomeText}>
+              <Text
+                color={colors.text.secondary}
+                style={headerStyles.welcomeEyebrow}
+                numberOfLines={1}
+              >
+                Hey there
+              </Text>
+              <Text
+                color={colors.text.primary}
+                style={headerStyles.welcomeName}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                adjustsFontSizeToFit
+                minimumFontScale={0.86}
+                maxFontSizeMultiplier={1.05}
+              >
+                {displayName}
+              </Text>
+            </View>
           </View>
-        </View>
 
-        {activePayrollRunId != null ? (
-          <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.lg }}>
-            <PayrollChatController
-              runId={activePayrollRunId}
-              walletId={activeWalletId}
-              summary={payrollIntake.activeRunId != null ? payrollIntake.summary : null}
-              onSetupUmbra={handleSetupUmbraForPayroll}
-              onRefreshRoutes={
-                payrollIntake.activeRunId != null ? payrollIntake.refreshRoutes : undefined
-              }
-              onSpeakOutcome={(phrase) => {
-                void speech.speak(phrase, { payrollMode: true });
+          {activePayrollRunId != null ? (
+            <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.lg }}>
+              <PayrollChatController
+                runId={activePayrollRunId}
+                walletId={activeWalletId}
+                summary={payrollIntake.activeRunId != null ? payrollIntake.summary : null}
+                onSetupUmbra={handleSetupUmbraForPayroll}
+                onRefreshRoutes={
+                  payrollIntake.activeRunId != null ? payrollIntake.refreshRoutes : undefined
+                }
+                onSpeakOutcome={(phrase) => {
+                  void speech.speak(phrase, { payrollMode: true });
+                }}
+                setupBusy={mixerRegisterMutation.isPending}
+              />
+            </View>
+          ) : null}
+
+          {payrollIntake.error != null ? (
+            <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.sm }}>
+              <Text variant="caption" color={colors.semantic.error}>
+                {payrollIntake.error}
+              </Text>
+            </View>
+          ) : null}
+
+          {scopedMessages.length > 0 ? (
+            <ChatMessageList
+              messages={scopedMessages}
+              actionsById={actionsById}
+              onConfirmPrivateSend={(action) => {
+                void confirmPrivateSend(action);
               }}
-              setupBusy={mixerRegisterMutation.isPending}
+              onCancelPrivateSend={cancelPrivateSend}
             />
-          </View>
-        ) : null}
-
-        {payrollIntake.error != null ? (
-          <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.sm }}>
-            <Text variant="caption" color={colors.semantic.error}>
-              {payrollIntake.error}
-            </Text>
-          </View>
-        ) : null}
-
-        {scopedMessages.length > 0 ? (
-          <ChatMessageList
-            messages={scopedMessages}
-            actionsById={actionsById}
-            onConfirmPrivateSend={(action) => {
-              void confirmPrivateSend(action);
-            }}
-            onCancelPrivateSend={cancelPrivateSend}
-          />
-        ) : null}
+          ) : null}
         </ScrollView>
 
         {scopedMessages.length === 0 ? (
@@ -458,7 +476,8 @@ export function ChatScreen(): React.JSX.Element {
         prompt={prompt}
         busy={agentBusy}
         canSubmit={canSubmit}
-        bottomInset={keyboardVisible ? spacing.xs : insets.bottom}
+        bottomInset={promptBottomInset}
+        keyboardOffset={keyboardOffset}
         horizontalPadding={horizontalPadding}
         onChangeText={setPrompt}
         onSubmit={handleSubmit}
@@ -466,6 +485,7 @@ export function ChatScreen(): React.JSX.Element {
           void payrollIntake.pickFile();
         }}
         onUploadLongPress={() => setPayrollPasteOpen(true)}
+        onPastePayroll={() => setPayrollPasteOpen(true)}
         uploadBusy={payrollIntake.busy}
         voice={{
           state: voice.state,
@@ -490,9 +510,13 @@ export function ChatScreen(): React.JSX.Element {
         visible={payrollPasteOpen}
         busy={payrollIntake.busy}
         onClose={() => setPayrollPasteOpen(false)}
-        onSubmit={(fileName, text) => {
-          setPayrollPasteOpen(false);
-          void payrollIntake.stageFromText(fileName, text);
+        onSubmit={async (fileName, text) => {
+          const result = await payrollIntake.stageFromText(fileName, text);
+          if (result.status === 'staged' || result.status === 'mapping_required') {
+            setPayrollPasteOpen(false);
+            return true;
+          }
+          return false;
         }}
       />
 
@@ -533,6 +557,6 @@ export function ChatScreen(): React.JSX.Element {
         onCancel={handleCancelDeleteConversation}
         onConfirm={handleConfirmDeleteConversation}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }

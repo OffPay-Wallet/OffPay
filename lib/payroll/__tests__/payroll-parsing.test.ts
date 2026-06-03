@@ -48,7 +48,11 @@ describe('parsePayrollTable', () => {
     expect(result.ok).toBe(true);
     expect(result.table?.headers).toEqual(['name', 'wallet', 'amount']);
     expect(result.table?.records).toHaveLength(2);
-    expect(result.table?.records[0]).toMatchObject({ name: 'Alice', wallet: 'addr1', amount: '100' });
+    expect(result.table?.records[0]).toMatchObject({
+      name: 'Alice',
+      wallet: 'addr1',
+      amount: '100',
+    });
   });
 
   it('parses TSV and pipe-delimited TXT', async () => {
@@ -63,6 +67,29 @@ describe('parsePayrollTable', () => {
       format: 'txt',
     });
     expect(txt.table?.records[0]).toMatchObject({ amount: '100' });
+  });
+
+  it('parses headerless manual payroll rows', async () => {
+    const result = await parsePayrollTable({
+      text:
+        '11111111111111111111111111111111 100\n' +
+        'Bob So11111111111111111111111111111111111111112 50 USDC',
+      format: 'txt',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.table?.headers).toEqual(['label', 'recipient', 'amount', 'token']);
+    expect(result.table?.records).toHaveLength(2);
+    expect(result.table?.records[0]).toMatchObject({
+      recipient: '11111111111111111111111111111111',
+      amount: '100',
+    });
+    expect(result.table?.records[1]).toMatchObject({
+      label: 'Bob',
+      recipient: 'So11111111111111111111111111111111111111112',
+      amount: '50',
+      token: 'USDC',
+    });
   });
 
   it('disambiguates duplicate headers deterministically', async () => {

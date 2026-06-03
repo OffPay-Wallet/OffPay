@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { toOffpayNetwork } from '@/constants/networks';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
@@ -31,17 +32,13 @@ import {
   runAgenticPrivacyFirewall,
   sanitizeAgentMessagesForAi,
 } from '@/lib/agentic-payments/privacy-firewall';
-import type {
-  AgentMessage,
-  AgentToolCall,
-  AgentToolResult,
-} from '@/lib/agentic-payments/types';
+import type { AgentMessage, AgentToolCall, AgentToolResult } from '@/lib/agentic-payments/types';
 import {
   getAgenticConversationScopeKey,
   useAgenticChatStore,
   type AgenticChatMessage,
   type AgenticChatScope,
-  type AgenticPrivateSendAction,
+  type AgenticChatAction,
 } from '@/store/agenticChatStore';
 import type { WalletAccount } from '@/store/walletStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -52,10 +49,7 @@ import {
   AGENT_HISTORY_LIMIT,
   AGENT_INTENT_PRIOR_TURNS,
 } from '@/components/features/chat/constants';
-import {
-  createAgenticId,
-  getProxyErrorMessage,
-} from '@/components/features/chat/helpers';
+import { createAgenticId, getProxyErrorMessage } from '@/components/features/chat/helpers';
 
 import { revealAssistantMessageText } from './revealAssistantMessageText';
 
@@ -71,6 +65,7 @@ interface UseAgenticAgentSubmitParams {
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
+  walletId?: string | null;
   /** Fired when the model asks to open payroll intake (upload/paste). */
   onPayrollIntent?: (source: 'upload' | 'paste') => void;
 }
@@ -90,10 +85,12 @@ export function useAgenticAgentSubmit({
   balance,
   capabilities,
   knownWallets,
+  walletId,
   onPayrollIntent,
 }: UseAgenticAgentSubmitParams): UseAgenticAgentSubmitResult {
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const queryClient = useQueryClient();
 
   useEffect(
     () => () => {
@@ -111,8 +108,7 @@ export function useAgenticAgentSubmit({
       const promptPrivacy = runAgenticPrivacyFirewall(prompt);
       const storedPrompt = promptPrivacy.blocked ? '[Sensitive content blocked]' : prompt;
       const store = useAgenticChatStore.getState();
-      const conversationId =
-        activeConversationId ?? store.createConversation(scope, storedPrompt);
+      const conversationId = activeConversationId ?? store.createConversation(scope, storedPrompt);
 
       const userMessage: AgenticChatMessage = {
         id: createAgenticId('agentic-user'),
@@ -184,9 +180,7 @@ export function useAgenticAgentSubmit({
       const recentUserTurns = scopedMessages
         .filter(
           (message) =>
-            message.role === 'user' &&
-            message.pending !== true &&
-            message.text.trim().length > 0,
+            message.role === 'user' && message.pending !== true && message.text.trim().length > 0,
         )
         .slice(-AGENT_INTENT_PRIOR_TURNS)
         .map((message) => message.text);
@@ -206,6 +200,8 @@ export function useAgenticAgentSubmit({
         balance,
         capabilities,
         knownWallets,
+        queryClient,
+        walletId,
         onPayrollIntent,
       })
         .catch((error: unknown) => {
@@ -233,9 +229,11 @@ export function useAgenticAgentSubmit({
       capabilities,
       knownWallets,
       onPayrollIntent,
+      queryClient,
       scope,
       scopeKey,
       scopedMessages,
+      walletId,
       walletMode,
     ],
   );
@@ -257,6 +255,8 @@ interface RunAgentLoopParams {
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
+  queryClient: ReturnType<typeof useQueryClient>;
+  walletId?: string | null;
   onPayrollIntent?: (source: 'upload' | 'paste') => void;
 }
 
@@ -280,18 +280,20 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
           walletMode: params.walletMode,
           capabilities: {
             networkAvailable: params.canUseNetwork,
-            walletBalance: isOffpayFeatureAvailable(
-              params.capabilities ?? null,
-              'wallet.balance',
-            ),
-            normalSend: isOffpayFeatureAvailable(
-              params.capabilities ?? null,
-              'wallet.balance',
-            ),
+            walletBalance: isOffpayFeatureAvailable(params.capabilities ?? null, 'wallet.balance'),
+            normalSend: isOffpayFeatureAvailable(params.capabilities ?? null, 'wallet.balance'),
             privateSend:
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.privateInitMint') &&
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.privateSend') &&
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.rpcBroadcast'),
+            swap: isOffpayFeatureAvailable(params.capabilities ?? null, 'swap.normalSwap'),
+            umbra:
+              isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution') &&
+              isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p'),
+            privateBalance: isOffpayFeatureAvailable(
+              params.capabilities ?? null,
+              'payment.privateBalance',
+            ),
           },
           tokenSymbols: buildSafeTokenSymbols(params.balance),
         },
@@ -329,8 +331,11 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       knownWallets: params.knownWallets,
       redactions: params.redactions,
       userText: params.userTextForTools,
+      queryClient: params.queryClient,
+      signal: params.controller.signal,
+      walletId: params.walletId,
     };
-    const run = runAgenticTools(turn.toolCalls, toolContext);
+    const run = await runAgenticTools(turn.toolCalls, toolContext);
 
     if (run.drafts.length > 0) {
       attachedActionId = persistDraftAction({
@@ -343,7 +348,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       params.onPayrollIntent(run.payrollIntents[0].source);
     }
 
-    pendingToolCalls = [...turn.toolCalls];
+    pendingToolCalls = [...run.toolCalls];
     pendingToolResults = run.results;
   }
 
@@ -367,19 +372,32 @@ function persistDraftAction({
 }): string {
   const store = useAgenticChatStore.getState();
   const now = Date.now();
-  const action: AgenticPrivateSendAction = {
-    ...draft.draft,
-    id: createAgenticId(
-      draft.kind === 'normal_send' ? 'agentic-normal-send' : 'agentic-private-send',
-    ),
-    kind: draft.kind,
-    status: 'needs_confirmation',
-    route: draft.route,
-    conversationId,
-    toolCallId: createAgenticId('intent'),
-    createdAt: now,
-    updatedAt: now,
-  };
+  const action: AgenticChatAction =
+    draft.kind === 'swap'
+      ? {
+          ...draft.draft,
+          id: createAgenticId('agentic-swap'),
+          kind: 'swap',
+          status: 'needs_confirmation',
+          route: draft.route,
+          conversationId,
+          toolCallId: createAgenticId('intent'),
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...draft.draft,
+          id: createAgenticId(
+            draft.kind === 'normal_send' ? 'agentic-normal-send' : 'agentic-private-send',
+          ),
+          kind: draft.kind,
+          status: 'needs_confirmation',
+          route: draft.route,
+          conversationId,
+          toolCallId: createAgenticId('intent'),
+          createdAt: now,
+          updatedAt: now,
+        };
   store.upsertAction(action);
   return action.id;
 }
@@ -399,8 +417,10 @@ function isCurrentScope(submittedScope: AgenticChatScope, submittedScopeKey: str
   if (currentScopeKey === submittedScopeKey) return true;
   // submittedScope referenced for type narrowing only — the real check is
   // the scope-key comparison above.
-  return submittedScope.walletAddress === currentWalletAddress &&
-    submittedScope.network === currentNetwork;
+  return (
+    submittedScope.walletAddress === currentWalletAddress &&
+    submittedScope.network === currentNetwork
+  );
 }
 
 function buildSafeTokenSymbols(balance: WalletBalanceResponse | null | undefined): string[] {

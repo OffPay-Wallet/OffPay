@@ -8,7 +8,7 @@ export type AgenticSendSpeechOutcome = 'submitted' | 'queued' | 'failed';
 
 export function agenticSendOutcomeSpeech(
   outcome: AgenticSendSpeechOutcome,
-  route: 'normal' | 'magicblock',
+  route: 'normal' | 'magicblock' | 'umbra',
 ): string {
   switch (outcome) {
     case 'submitted':

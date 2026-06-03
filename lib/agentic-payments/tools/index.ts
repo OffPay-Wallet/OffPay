@@ -1,9 +1,5 @@
-export {
-  AGENTIC_TOOL_DEFINITIONS,
-  AGENTIC_TOOL_SCHEMAS,
-  runAgenticTools,
-} from '@/lib/agentic-payments/tools';
-
+export { AGENTIC_TOOL_DEFINITIONS, AGENTIC_TOOL_SCHEMAS } from './registry';
+export { runAgenticTools } from './runner';
 export type {
   AgenticToolDraft,
   AgenticToolName,
@@ -12,4 +8,4 @@ export type {
   AgenticTransferRoute,
   AgenticSwapRoute,
   PayrollStageIntent,
-} from '@/lib/agentic-payments/tools';
+} from './types';
