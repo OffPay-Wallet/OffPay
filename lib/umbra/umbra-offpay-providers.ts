@@ -52,9 +52,9 @@ import {
   getRpcSignatureStatuses,
   getRpcSignaturesForAddress,
   getRpcSlot,
+  OFFPAY_API_ORIGIN,
 } from '@/lib/api/offpay-api-client';
 import { mark, measure } from '@/lib/perf/perf-marks';
-import { getPrimaryRpcEndpoint } from '@/services/rpc';
 
 import type { OffpayNetwork, RpcAccountRecord } from '@/types/offpay-api';
 import type { Address } from '@solana/kit';
@@ -109,13 +109,7 @@ function toBase64Transaction(value: RpcSignatureInput): string {
 }
 
 function getUmbraRpcUrl(network: OffpayNetwork): string {
-  const endpoint = getPrimaryRpcEndpoint(network);
-  if (endpoint != null) return endpoint;
-
-  throw new Error(
-    `Umbra ${network} execution needs a configured Solana RPC endpoint. ` +
-      `Set a ${network} EXPO_PUBLIC RPC URL and restart Expo.`,
-  );
+  return `${OFFPAY_API_ORIGIN}/api/rpc?network=${encodeURIComponent(network)}`;
 }
 
 const UMBRA_VAULT_UNAVAILABLE_MESSAGE =

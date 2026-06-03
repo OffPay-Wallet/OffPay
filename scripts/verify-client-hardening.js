@@ -9,8 +9,9 @@ const allowedFetchFiles = new Set([
   path.join('backend', 'private-payments.ts'),
   path.join('backend', 'provider-router.ts'),
   path.join('backend', 'umbra.ts'),
-  path.join('lib', 'offpay-api-client.ts'),
-  path.join('lib', 'umbra-rn-zk-prover.ts'),
+  path.join('lib', 'api', 'offpay-api-client.ts'),
+  path.join('lib', 'agentic-payments', 'ai-proxy-client.ts'),
+  path.join('lib', 'umbra', 'umbra-rn-zk-prover.ts'),
 ]);
 
 const disallowedProviderPatterns = [
@@ -87,7 +88,10 @@ function reportFailure(message, failures) {
   failures.push(message);
 }
 
-const files = sourceRoots.flatMap((sourceRoot) => walk(path.join(root, sourceRoot)));
+const files = sourceRoots.flatMap((sourceRoot) => {
+  const fullPath = path.join(root, sourceRoot);
+  return fs.existsSync(fullPath) ? walk(fullPath) : [];
+});
 const failures = [];
 
 for (const file of files) {
@@ -141,12 +145,15 @@ assertFileDoesNotMatch(
   'bootstrapOffpayRequestSecret must not default to prototype attestation bypass.',
 );
 assertFileDoesNotMatch(
-  path.join('lib', 'offpay-api-client.ts'),
+  path.join('lib', 'api', 'offpay-api-client.ts'),
   /OFFPAY_APP_VERSION\s*=\s*['"]/,
   'OFFPAY_APP_VERSION must come from Expo/native metadata, not a hardcoded string.',
 );
 
-const offlineSlotsSource = fs.readFileSync(path.join(root, 'lib', 'offline-payment-slots.ts'), 'utf8');
+const offlineSlotsSource = fs.readFileSync(
+  path.join(root, 'lib', 'offline', 'offline-payment-slots.ts'),
+  'utf8',
+);
 if (
   !/spendAuthorization:\s*OfflineSlotSpendAuthorization/.test(offlineSlotsSource) ||
   !/params\.spendAuthorization\s*!==\s*'user-confirmed'/.test(offlineSlotsSource)
@@ -164,7 +171,10 @@ if (
   );
 }
 
-const offlineSlotsHookSource = fs.readFileSync(path.join(root, 'hooks', 'useOfflinePaymentSlots.ts'), 'utf8');
+const offlineSlotsHookSource = fs.readFileSync(
+  path.join(root, 'hooks', 'useOfflinePaymentSlots.ts'),
+  'utf8',
+);
 const autoSyncMatch = offlineSlotsHookSource.match(
   /export function useOfflinePaymentSlotsAutoSync\(\): void \{[\s\S]*?\n\}/,
 );

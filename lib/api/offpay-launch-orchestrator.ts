@@ -2,6 +2,11 @@ import { QueryClient } from '@tanstack/react-query';
 
 import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
 import { getCapabilities } from '@/lib/api/offpay-api-client';
+import {
+  buildUnavailableCapabilities,
+  CAPABILITIES_FAST_TIMEOUT_MS,
+  CAPABILITIES_STALE_TIME_MS,
+} from '@/lib/api/offpay-capability-fallback';
 import { prefetchWalletDisplayData } from '@/lib/wallet/wallet-display-cache';
 
 import type { OffpayLaunchStep } from '@/store/offpayLaunchStore';
@@ -84,13 +89,35 @@ export async function runOffpayLaunchSequence(
     'Protected OffPay API bootstrap is deferred until a protected route needs it.',
   );
 
-  onStep('capabilities', 'running', 'Loading local capability matrix.');
-  const capabilities = await params.queryClient.fetchQuery({
-    queryKey: offpayCapabilitiesQueryKey(network),
-    queryFn: () => getCapabilities(network),
-    staleTime: 1000 * 60,
-  });
-  onStep('capabilities', 'complete', 'Capabilities loaded.');
+  onStep('capabilities', 'running', 'Loading OffPay capability matrix.');
+  const capabilitiesKey = offpayCapabilitiesQueryKey(network);
+  const cachedCapabilities = params.queryClient.getQueryData<CapabilitiesResponse>(capabilitiesKey);
+  const capabilities =
+    cachedCapabilities?.network === network
+      ? cachedCapabilities
+      : await params.queryClient
+          .fetchQuery({
+            queryKey: capabilitiesKey,
+            queryFn: ({ signal }) =>
+              getCapabilities(network, {
+                signal,
+                timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
+              }),
+            staleTime: CAPABILITIES_STALE_TIME_MS,
+          })
+          .catch(() =>
+            buildUnavailableCapabilities(
+              network,
+              'OffPay API capabilities were unavailable during launch.',
+            ),
+          );
+  onStep(
+    'capabilities',
+    'complete',
+    cachedCapabilities?.network === network
+      ? 'Capabilities loaded from memory cache.'
+      : 'Capabilities loaded.',
+  );
 
   onStep(
     'pendingBackups',

@@ -39,7 +39,7 @@ flowchart LR
 flowchart TD
   Preferences["preferencesStore offline settings"]
   SlotsHook["useOfflinePaymentSlots"]
-  ClientOffline["services/offline/ helpers"]
+  ApiOffline["/api/offline/* via Worker"]
   LocalSlots["local nonce-slot state"]
   PaymentFlow["PrivatePaymentSendFlow"]
   OfflinePayments["lib/offline-payments.ts"]
@@ -48,7 +48,7 @@ flowchart TD
   Settlement["settlement engine"]
 
   Preferences --> SlotsHook
-  SlotsHook --> ClientOffline
+  SlotsHook --> ApiOffline
   SlotsHook --> LocalSlots
   LocalSlots --> PaymentFlow
   PaymentFlow --> OfflinePayments
@@ -59,7 +59,7 @@ flowchart TD
 
 ## Offline Network Policy
 
-Manual offline mode blocks non-loopback HTTP(S) fetches and pauses query online state. Token logos, provider-router requests, and protected OffPay API requests should not bypass `lib/offpay-api-client.ts` unless a file is explicitly exempted by the hardening script.
+Manual offline mode blocks non-loopback HTTP(S) fetches and pauses query online state. Token logos and OffPay API requests should not bypass `lib/api/offpay-api-client.ts` unless a file is explicitly exempted by the hardening script.
 
 ## BLE And QR Surfaces
 

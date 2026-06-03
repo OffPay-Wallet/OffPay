@@ -17,9 +17,55 @@ import {
 } from '@/lib/agentic-payments/session-token';
 import { sanitizeTextForCloudTts } from '@/lib/agentic-payments/voice-privacy';
 
-const AI_PROXY_ORIGIN = process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_URL?.trim() ?? '';
 const DEFAULT_CHAT_TIMEOUT_MS = 25_000;
 const DEFAULT_VOICE_TIMEOUT_MS = 35_000;
+
+function splitCsv(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function isLocalDevelopmentOrigin(url: URL): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    url.protocol === 'http:' &&
+    (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+  );
+}
+
+function normalizeProxyOrigin(rawValue: string, envKey: string): string {
+  const parsed = new URL(rawValue);
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+    throw new Error(`${envKey} must be an origin only.`);
+  }
+
+  if (parsed.protocol !== 'https:' && !isLocalDevelopmentOrigin(parsed)) {
+    throw new Error(`${envKey} must use HTTPS outside local development.`);
+  }
+
+  return parsed.origin;
+}
+
+function resolveAiProxyOrigin(): string {
+  const rawOrigin = process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_URL?.trim();
+  if (!rawOrigin) return '';
+
+  const origin = normalizeProxyOrigin(rawOrigin, 'EXPO_PUBLIC_OFFPAY_AI_PROXY_URL');
+  const allowedOrigins = splitCsv(process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS).map(
+    (entry) => normalizeProxyOrigin(entry, 'EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS'),
+  );
+  const effectiveAllowedOrigins = allowedOrigins.length > 0 ? allowedOrigins : [origin];
+
+  if (!effectiveAllowedOrigins.includes(origin)) {
+    throw new Error('EXPO_PUBLIC_OFFPAY_AI_PROXY_URL is not in EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS.');
+  }
+
+  return origin;
+}
+
+const AI_PROXY_ORIGIN = resolveAiProxyOrigin();
 
 export class AgenticPaymentsProxyError extends Error {
   readonly code: string;

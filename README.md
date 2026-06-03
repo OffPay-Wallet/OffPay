@@ -1,6 +1,6 @@
 # OffPay
 
-OffPay is an Expo Router React Native wallet client for iOS, Android, and static web output. Chain, wallet, Umbra, private payment, stream, and offline helper paths run client-side through the local provider boundary in `services/`; protected Jupiter, pending backup, and temporary bootstrap calls still go to `https://api.offpay.app`.
+OffPay is an Expo Router React Native wallet client for iOS, Android, and static web output. Chain, wallet, Umbra, private payment, stream, offline helper, swap, pending backup, and bootstrap paths route through the configured OffPay API Worker custom domain.
 
 ## Current Stack
 
@@ -31,15 +31,13 @@ flowchart TB
     Hooks["wallet, network, API hooks"]
     Screens["Expo Router screens"]
     SecureStore["Secure wallet and preference storage"]
-    ApiClient["lib/offpay-api-client.ts"]
-    ClientBackend["services/ client provider adapters"]
+    ApiClient["lib/api/offpay-api-client.ts"]
     OfflineGuard["lib/network-access-policy.ts"]
     BleOffline["offline BLE and nonce-slot modules"]
   end
 
   Backend["https://api.offpay.app"]
-  ProvidersRpc["RPC: Helius / Alchemy; WSS: Helius"]
-  PublicServices["Umbra / MagicBlock public APIs"]
+  ProvidersRpc["Worker providers: Helius / Alchemy / Jupiter / MagicBlock / Umbra"]
 
   Layout --> Providers
   Providers --> Screens
@@ -47,12 +45,10 @@ flowchart TB
   Hooks --> Stores
   Stores --> SecureStore
   Hooks --> ApiClient
-  ApiClient --> ClientBackend
   OfflineGuard --> ApiClient
   BleOffline --> Stores
-  ClientBackend --> ProvidersRpc
-  ClientBackend --> PublicServices
   ApiClient --> Backend
+  Backend --> ProvidersRpc
 ```
 
 ## App Entry And Providers
@@ -71,7 +67,7 @@ flowchart TB
 
 - `lib/wallet.ts` creates and restores Solana wallets using BIP39 and Ed25519 derivation path `m/44'/501'/0'/0'`.
 - `lib/secure-wallet-store.ts` owns wallet secret persistence; `store/walletStore.ts` keeps active-wallet UI state and public keys.
-- `lib/offpay-api-client.ts` bootstraps request auth through `/api/bootstrap/provision`, stores a per-device request secret, signs protected swap/pending/bootstrap calls, and delegates direct chain/service flows to `services/`.
+- `lib/api/offpay-api-client.ts` bootstraps request auth through `/api/bootstrap/provision`, stores a per-device request secret, signs protected Worker calls, and keeps provider credentials out of the app bundle.
 - Protected API calls include `X-Wallet-Address`, `X-Timestamp`, `X-Signature`, `X-App-HMAC`, `X-App-Version`, `X-Device-Id`, `X-Network`, and `X-Bootstrap-Version`.
 
 ## Network And Offline Behavior
@@ -80,27 +76,25 @@ flowchart TB
 - The default UI network is `mainnet-beta`.
 - Manual offline mode blocks non-loopback HTTP(S) fetches and marks TanStack Query offline.
 - `useWalletModeState()` falls back to offline mode when NetInfo reports the network is not reachable.
-- Provider endpoint URLs are Expo `EXPO_PUBLIC_*` client config. Treat them as public and protect them with provider-side secure URLs, allowlists, method restrictions, and usage limits.
+- Provider endpoint URLs and API keys are Worker secrets or Worker vars. The client keeps only public app config such as `EXPO_PUBLIC_OFFPAY_API_ORIGIN` and `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`.
 
 ## Environment
 
 - Local environment values live in `.env`, which is ignored by git.
-- `.env.example` is committed as the client-side template for provider endpoints, Umbra endpoints, MagicBlock validator allowlists, attestation mode, and the retained OffPay API origin.
-- EAS builds need the same `EXPO_PUBLIC_*` names configured in EAS environment variables because these values are bundled as public client config.
+- EAS builds need `EXPO_PUBLIC_OFFPAY_API_ORIGIN=https://api.offpay.app` and `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS=https://api.offpay.app` configured as public client config.
 
 ## Backend And Provider Surfaces Used
 
 `lib/offpay-api-client.ts` contains the current client contract:
 
-- capabilities: local static config from `services/capabilities/index.ts`
-- wallet data and activity: direct Helius RPC/WSS with Alchemy RPC fallback
+- capabilities: `/api/capabilities`
+- wallet data and activity: `/api/wallet/*` and `/api/stream/*`
 - pending backups: `/api/pending/backup`
 - swaps: `/api/swap/*`
-- private payments and settlement: direct MagicBlock/public-provider preparation plus client provider broadcast
-- Umbra indexer/relayer reads: direct client calls
-- Solana RPC: Helius primary with Alchemy fallback
-- Solana WSS: Helius only
-- offline nonce/token helpers: direct client provider router
+- private payments and settlement: `/api/payment/*`
+- Umbra indexer/relayer reads: `/api/umbra/*` and `/api/privacy/*`
+- Solana RPC: `/api/rpc/*`
+- offline nonce/token helpers: `/api/offline/*`
 
 ## Native Configuration
 

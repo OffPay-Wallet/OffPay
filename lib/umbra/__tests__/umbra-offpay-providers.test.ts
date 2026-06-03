@@ -5,9 +5,6 @@ const mockGetRpcLatestBlockhash = jest.fn();
 const mockGetRpcSignatureStatuses = jest.fn();
 const mockGetRpcSignaturesForAddress = jest.fn();
 const mockGetRpcSlot = jest.fn();
-const mockGetPrimaryRpcEndpoint = jest.fn<string | null, [string]>(
-  (network: string) => `https://${network}.rpc.test`,
-);
 const mockDefaultCreateRpc = jest.fn();
 const mockDefaultCreateRpcSubscriptions = jest.fn();
 const mockGetDefaultArciumDeps = jest.fn(() => ({
@@ -82,6 +79,7 @@ jest.mock('@umbra-privacy/sdk/client', () => ({
 
 jest.mock('@/lib/api/offpay-api-client', () => ({
   __esModule: true,
+  OFFPAY_API_ORIGIN: 'https://api.offpay.test',
   broadcastRawTransaction: mockBroadcastRawTransaction,
   getRpcAccounts: mockGetRpcAccounts,
   getRpcEpochInfo: mockGetRpcEpochInfo,
@@ -89,11 +87,6 @@ jest.mock('@/lib/api/offpay-api-client', () => ({
   getRpcSignatureStatuses: mockGetRpcSignatureStatuses,
   getRpcSignaturesForAddress: mockGetRpcSignaturesForAddress,
   getRpcSlot: mockGetRpcSlot,
-}));
-
-jest.mock('@/services/rpc', () => ({
-  __esModule: true,
-  getPrimaryRpcEndpoint: mockGetPrimaryRpcEndpoint,
 }));
 
 const {
@@ -150,9 +143,6 @@ describe('umbra-offpay-providers', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     __clearOffpayUmbraProtocolVersionCacheForTesting();
-    mockGetPrimaryRpcEndpoint.mockImplementation(
-      (network: string) => `https://${network}.rpc.test`,
-    );
   });
 
   it('allows Umbra provider setup on supported backend networks', () => {
@@ -243,7 +233,7 @@ describe('umbra-offpay-providers', () => {
       transactionCount: 222n,
     });
     expect(mockGetPollingComputationMonitor).toHaveBeenCalledWith(
-      { rpcUrl: 'https://mainnet.rpc.test' },
+      { rpcUrl: 'https://api.offpay.test/api/rpc?network=mainnet' },
       expect.objectContaining({
         rpcBuilders: expect.objectContaining({
           createRpc: expect.any(Function),
@@ -264,14 +254,6 @@ describe('umbra-offpay-providers', () => {
     await deps.transactionForwarder.forwardInParallel(['tx-2'] as never);
     expect(baseForwarder.forwardSequentially).toHaveBeenCalledWith(['tx-1'], { maxRetries: 1 });
     expect(baseForwarder.forwardInParallel).toHaveBeenCalledWith(['tx-2'], { maxRetries: 1 });
-  });
-
-  it('fails Umbra SDK setup clearly when no client RPC endpoint is configured', () => {
-    mockGetPrimaryRpcEndpoint.mockReturnValueOnce(null);
-
-    expect(() => createOffpayUmbraSdkDeps('devnet')).toThrow(
-      'Umbra devnet execution needs a configured Solana RPC endpoint.',
-    );
   });
 
   it('routes devnet SDK RPC dependency calls through devnet OffPay client helpers', async () => {

@@ -103,8 +103,8 @@ function getMinimumAppVersion(env: AppEnv['Bindings']): string {
   return minimumVersion;
 }
 
-function ensureAllowedOrigin(origin: string | null | undefined): void {
-  if (!isAllowedOrigin(origin)) {
+function ensureAllowedOrigin(origin: string | null | undefined, env: AppEnv['Bindings']): void {
+  if (!isAllowedOrigin(origin, env)) {
     throw new AppError({
       status: 403,
       code: 'FORBIDDEN_ORIGIN',
@@ -114,7 +114,7 @@ function ensureAllowedOrigin(origin: string | null | undefined): void {
 }
 
 function parseBootstrapPublicHeaders(context: Context<AppEnv>): BootstrapPublicHeaders {
-  ensureAllowedOrigin(context.req.header('Origin'));
+  ensureAllowedOrigin(context.req.header('Origin'), context.env);
 
   const appVersion = context.req.header('X-App-Version')?.trim() ?? '';
   if (!appVersion) {

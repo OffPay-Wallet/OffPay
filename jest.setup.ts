@@ -2,6 +2,10 @@ const mockSecureStoreValues = new Map<string, string>();
 const mockFileSystemValues = new Map<string, string>();
 const mockMmkvInstances = new Map<string, Map<string, string>>();
 const mockDirectories = new Set<string>(['file:///cache', 'file:///document']);
+
+process.env.EXPO_PUBLIC_OFFPAY_API_ORIGIN ??= 'https://api.offpay.test';
+process.env.EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS ??= 'https://api.offpay.test';
+
 const mockDownloadFileAsync = jest.fn(async (_url: string, destination: { uri: string }) => {
   mockDirectories.add(mockGetParentDirectory(destination.uri));
   // Umbra zkeys are ~30MB+. Tests expect completeness checks at >=10MB, so the

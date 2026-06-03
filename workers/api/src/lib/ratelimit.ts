@@ -44,6 +44,13 @@ const DEFAULT_AUTHENTICATED_POLICY: RateLimitPolicy = {
 const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['GET /api/bootstrap/provision', { limit: 60, windowSec: 60, scope: 'device' }],
   ['POST /api/bootstrap/provision', { limit: 30, windowSec: 60, scope: 'device' }],
+  ['GET /api/capabilities', { limit: 60, windowSec: 5 * 60, scope: 'ip' }],
+  ['GET /api/market/fx-rate', { limit: 120, windowSec: 60, scope: 'ip' }],
+  ['POST /api/market/token-price', { limit: 60, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/market/token-price-history', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/wallet/balance', { limit: 60, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/wallet/transactions', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/risk/score', { limit: 30, windowSec: 60, scope: 'wallet' }],
   ['GET /api/swap/tokens', { limit: 10, windowSec: 5 * 60, scope: 'wallet' }],
   ['GET /api/swap/price', { limit: 30, windowSec: 60, scope: 'wallet' }],
   ['POST /api/swap/quote', { limit: 20, windowSec: 60, scope: 'wallet' }],
@@ -53,9 +60,40 @@ const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['POST /api/swap/privacy-envelope/refresh-quote', { limit: 6, windowSec: 60, scope: 'wallet' }],
   ['POST /api/swap/privacy-envelope/finalize', { limit: 6, windowSec: 60, scope: 'wallet' }],
   ['POST /api/swap/recurring', { limit: 5, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/payment/private-init-mint', { limit: 5, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/payment/private-balance', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/payment/private-send', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/payment/settle', { limit: 5, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/offline/rent-estimate', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/offline/nonce-pool/prepare', { limit: 3, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/offline/nonce-pool/advance', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/offline/nonce-pool/status', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/offline/token-context', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/privacy/shielded-balance', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/privacy/scan-announcements', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/privacy/register-viewing-key', { limit: 3, windowSec: 24 * 60 * 60, scope: 'wallet' }],
+  ['GET /api/stream/capabilities', { limit: 10, windowSec: 5 * 60, scope: 'wallet' }],
+  ['GET /api/stream/wallet-activity', { limit: 20, windowSec: 60, scope: 'wallet' }],
   ['POST /api/pending/backup', { limit: 50, windowSec: 60, scope: 'wallet' }],
   ['GET /api/pending/backup', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['DELETE /api/pending/backup', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/rpc/latest-blockhash', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/rpc/fee-for-message', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/rpc/accounts', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/rpc/token-largest-accounts', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/rpc/epoch-info', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/rpc/slot', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/rpc/signature-statuses', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/rpc/signatures-for-address', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/rpc/broadcast', { limit: 5, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/umbra/utxos', { limit: 120, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/umbra/indexer-health', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/umbra/trees', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/umbra/trees/:treeIndex/proof/:insertionIndex', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/umbra/trees/:treeIndex/proofs', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/umbra/relayer-info', { limit: 10, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/umbra/claim', { limit: 5, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/umbra/claim-status/:id', { limit: 20, windowSec: 60, scope: 'wallet' }],
 ]);
 
 let kvClientFactory: KvClientFactory = createUpstashKvClient;
@@ -65,6 +103,19 @@ function normalizeRouteKey(method: string, path: string): string {
 }
 
 function normalizePolicyPath(method: string, path: string): string {
+  const normalizedMethod = method.toUpperCase();
+  if (normalizedMethod === 'GET' && /^\/api\/umbra\/trees\/[^/]+\/proof\/[^/]+$/.test(path)) {
+    return '/api/umbra/trees/:treeIndex/proof/:insertionIndex';
+  }
+
+  if (normalizedMethod === 'POST' && /^\/api\/umbra\/trees\/[^/]+\/proofs$/.test(path)) {
+    return '/api/umbra/trees/:treeIndex/proofs';
+  }
+
+  if (normalizedMethod === 'GET' && /^\/api\/umbra\/claim-status\/[^/]+$/.test(path)) {
+    return '/api/umbra/claim-status/:id';
+  }
+
   return path;
 }
 

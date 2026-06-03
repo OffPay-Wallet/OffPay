@@ -9,7 +9,7 @@ import {
 import { isRecord, isValidSolanaAddress } from './validation.js';
 import type { Bindings, Network } from './types.js';
 
-const JUPITER_TRIGGER_API_BASE_URL = 'https://api.jup.ag/trigger/v2';
+const DEFAULT_JUPITER_TRIGGER_API_BASE_URL = 'https://api.jup.ag/trigger/v2';
 const TRIGGER_AUTH_KEY_PREFIX = 'trigger-auth:v1';
 const TRIGGER_JWT_TTL_MS = 24 * 60 * 60 * 1000;
 const TRIGGER_JWT_REFRESH_WINDOW_MS = 5 * 60 * 1000;
@@ -181,6 +181,27 @@ function buildTriggerHeaders(
   return headers;
 }
 
+function readJupiterTriggerApiBaseUrl(bindings: Bindings): string {
+  const configuredUrl =
+    bindings.JUPITER_TRIGGER_API_BASE_URL?.trim() || DEFAULT_JUPITER_TRIGGER_API_BASE_URL;
+
+  try {
+    const parsed = new URL(configuredUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('Unsupported Jupiter Trigger API protocol.');
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch (error) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Jupiter Trigger API configuration is unavailable.',
+      retryable: true,
+      cause: error,
+    });
+  }
+}
+
 async function fetchTriggerJson(
   bindings: Bindings,
   path: string,
@@ -190,7 +211,7 @@ async function fetchTriggerJson(
 ): Promise<JupiterTriggerHttpResult> {
   let response: Response;
   try {
-    response = await fetch(`${JUPITER_TRIGGER_API_BASE_URL}${path}`, {
+    response = await fetch(`${readJupiterTriggerApiBaseUrl(bindings)}${path}`, {
       ...init,
       headers: buildTriggerHeaders(bindings, jwtToken, init.headers),
     });

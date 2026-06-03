@@ -1,7 +1,6 @@
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { isKnownStablecoinMint } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint, isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
-import { hasMagicBlockValidatorConfig } from '@/services/private-payments';
 
 import type { PayrollRouteFacts } from '@/lib/payroll/payroll-route-readiness';
 import type { CapabilitiesResponse, OffpayNetwork } from '@/types/offpay-api';
@@ -69,7 +68,7 @@ export function buildPayrollRouteFacts(inputs: PayrollReadinessInputs): PayrollR
     umbraSenderMixerRegistered: inputs.umbraSenderMixerRegistered,
 
     magicblockCapabilityAvailable,
-    magicblockValidatorConfigured: hasMagicBlockValidatorConfig(inputs.network),
+    magicblockValidatorConfigured: magicblockCapabilityAvailable,
     magicblockTokenSupported: tokenSupported,
   };
 }

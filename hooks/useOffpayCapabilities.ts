@@ -2,6 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getCapabilities } from '@/lib/api/offpay-api-client';
+import {
+  buildUnavailableCapabilities,
+  CAPABILITIES_FAST_TIMEOUT_MS,
+  CAPABILITIES_GC_TIME_MS,
+  CAPABILITIES_STALE_TIME_MS,
+} from '@/lib/api/offpay-capability-fallback';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { selectCapability } from '@/lib/api/offpay-capabilities';
@@ -64,21 +70,36 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
 
   const query = useQuery<CapabilitiesResponse>({
     queryKey: offpayCapabilitiesQueryKey(network),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (network == null) {
         throw new Error(unsupportedReason ?? 'This network is not supported by OffPay API.');
       }
-      return getCapabilities(network);
+      return getCapabilities(network, {
+        signal,
+        timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
+      });
     },
     enabled: capabilityIdentity != null && readyCapabilityIdentity === capabilityIdentity,
-    staleTime: 1000 * 60 * 5,
+    staleTime: CAPABILITIES_STALE_TIME_MS,
+    gcTime: CAPABILITIES_GC_TIME_MS,
     placeholderData: (previousData) =>
       previousData?.network === network ? previousData : undefined,
     refetchOnMount: false,
     refetchOnReconnect: true,
+    retry: false,
   });
 
-  const capabilities = query.data?.capabilities ?? null;
+  const hasCapabilityError = query.isError && !query.isFetching;
+  const fallbackCapabilities = useMemo(() => {
+    if (!hasCapabilityError || network == null || !enabledByCaller) return null;
+    const message =
+      query.error instanceof Error
+        ? `OffPay API capabilities are temporarily unavailable: ${query.error.message}`
+        : 'OffPay API capabilities are temporarily unavailable.';
+    return buildUnavailableCapabilities(network, message);
+  }, [enabledByCaller, hasCapabilityError, network, query.error]);
+  const capabilityResponse = query.data ?? fallbackCapabilities;
+  const capabilities = capabilityResponse?.capabilities ?? null;
 
   useEffect(() => {
     if (query.data?.capabilities.offline?.supportedStablecoins == null) return;
@@ -87,7 +108,6 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
       query.data.capabilities.offline.supportedStablecoins,
     );
   }, [query.data]);
-  const hasCapabilityError = query.isError && !query.isFetching;
   const errorMessage =
     query.error instanceof Error ? query.error.message : 'OffPay capabilities failed to load.';
 

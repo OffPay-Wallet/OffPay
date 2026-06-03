@@ -2,6 +2,9 @@ name = "offpay-ai-proxy"
 main = "src/index.ts"
 compatibility_date = "2026-05-25"
 workers_dev = true
+# offpay.app DNS is currently managed outside Cloudflare. Use workers.dev here
+# and point ai.offpay.app to this Worker from the DNS/frontend host.
+# routes = [{ pattern = "ai.offpay.app", custom_domain = true }]
 
 [observability]
 enabled = false
@@ -32,7 +35,7 @@ AI_PROXY_MAX_AUDIO_BYTES = "8388608"
 AI_PROXY_MAX_TTS_CHARS = "900"
 AI_PROXY_PROVIDER_TIMEOUT_MS = "20000"
 AI_PROXY_TTS_ENABLED = "true"
-AI_PROXY_ALLOWED_ORIGINS = ""
+AI_PROXY_ALLOWED_ORIGINS = "https://offpay.app"
 AI_PROXY_RATE_LIMIT_WINDOW_MS = "60000"
 AI_PROXY_RATE_LIMIT_MAX = "40"
 # Soft-rollout. Flip to "true" once every shipped app build includes

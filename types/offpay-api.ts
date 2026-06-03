@@ -236,6 +236,14 @@ export interface SwapPriceResponse {
   fetchedAt: number;
 }
 
+export interface FxRateResponse {
+  base: 'USD';
+  currency: string;
+  rate: number;
+  fetchedAt: number;
+  source: 'frankfurter' | 'currency-api';
+}
+
 export interface SwapQuoteRequest {
   inputMint: string;
   outputMint: string;
@@ -583,15 +591,20 @@ export interface RpcSignaturesForAddressResponse {
 
 export interface UmbraUtxosRequest {
   network: OffpayNetwork;
-  start?: number;
-  end?: number;
-  limit?: number;
+  start?: string;
+  end?: string;
+  limit?: string;
 }
 
 export interface UmbraUtxosResponse {
   network: OffpayNetwork;
   utxos: Array<Record<string, JsonValue>>;
   cursor: string | null;
+  hasMore: boolean;
+  totalCount: string;
+  startIndex: string;
+  endIndex: string | null;
+  highestIndexedInsertionIndex: string | null;
   fetchedAt: string;
 }
 
@@ -605,6 +618,16 @@ export interface UmbraTreeProofsResponse {
   network: OffpayNetwork;
   treeIndex: number;
   proofs: JsonValue[];
+  root: string | null;
+  fetchedAt: string;
+}
+
+export interface UmbraTreeSummariesResponse {
+  network: OffpayNetwork;
+  trees: Array<{
+    treeIndex: string;
+    numLeaves: string;
+  }>;
   fetchedAt: string;
 }
 

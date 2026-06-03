@@ -7,7 +7,7 @@
  *            the puffy icons in `assets/onboarding_icons/`. Sits
  *            directly on the gradient background.
  *   Bottom — a distinct rounded "sheet" card that hosts the wallet
- *            setup CTAs, the mock social auth row, and the legal
+ *            setup CTAs, the preview social auth row, and the legal
  *            footer. The card has rounded top corners and rests
  *            flush against the bottom edge so it visually separates
  *            action from content.

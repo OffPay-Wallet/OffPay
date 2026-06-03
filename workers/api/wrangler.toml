@@ -3,8 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2026-06-02"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
-# After api.offpay.app is routed to this Worker, set workers_dev = false
-# to avoid exposing an extra workers.dev production endpoint.
+# offpay.app DNS is currently managed outside Cloudflare. Use workers.dev here
+# and point api.offpay.app to this Worker from the DNS/frontend host.
 # routes = [{ pattern = "api.offpay.app", custom_domain = true }]
 
 [[r2_buckets]]
@@ -16,27 +16,51 @@ enabled = true
 
 # Set credentials with `npx wrangler secret put <NAME>`.
 # Generate OFFPAY_* secrets with `openssl rand -hex 32`.
+# npx wrangler secret put HELIUS_DEVNET_API_KEY
+# npx wrangler secret put HELIUS_MAINNET_API_KEY
 # npx wrangler secret put HELIUS_DEVNET_RPC_URL
 # npx wrangler secret put HELIUS_MAINNET_RPC_URL
-# npx wrangler secret put QUICKNODE_DEVNET_RPC_URL
-# npx wrangler secret put QUICKNODE_MAINNET_RPC_URL
+# npx wrangler secret put HELIUS_DEVNET_WS_URL
+# npx wrangler secret put HELIUS_MAINNET_WS_URL
+# npx wrangler secret put ALCHEMY_DEVNET_RPC_URL
+# npx wrangler secret put ALCHEMY_MAINNET_RPC_URL
+# Optional second Alchemy RPC endpoints, tried after the primary Alchemy RPC URL:
+# npx wrangler secret put ALCHEMY_DEVNET_FALLBACK_RPC_URL
+# npx wrangler secret put ALCHEMY_MAINNET_FALLBACK_RPC_URL
+# npx wrangler secret put ALCHEMY_PRICE_API_KEY
 # npx wrangler secret put JUPITER_API_KEY
-# npx wrangler secret put MAGICBLOCK_DEVNET_API_KEY
-# npx wrangler secret put MAGICBLOCK_MAINNET_API_KEY
 # npx wrangler secret put KV_REST_API_URL
 # npx wrangler secret put KV_REST_API_TOKEN
 # npx wrangler secret put OFFPAY_BOOTSTRAP_SECRET
 # npx wrangler secret put OFFPAY_BACKUP_HMAC_SECRET
+# Required only when OFFPAY_ANDROID_ATTESTATION_MODE = "play_integrity":
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY
+# Optional only when using a gated/private Umbra endpoint:
+# npx wrangler secret put UMBRA_API_KEY
 
 [vars]
 NODE_ENV = "production"
+OFFPAY_PROTOTYPE_MODE = "true"
+OFFPAY_ALLOWED_ORIGINS = "capacitor://localhost,https://offpay.app"
 MIN_APP_VERSION = "1.0.0"
 BOOTSTRAP_SECRET_VERSION = "1"
 OFFPAY_ANDROID_PACKAGE_NAME = "com.offpay.app"
-OFFPAY_ANDROID_ATTESTATION_MODE = "play_integrity"
+OFFPAY_ANDROID_ATTESTATION_MODE = "prototype_bypass"
 OFFPAY_IOS_BUNDLE_ID = "com.offpay.app"
 OFFPAY_IOS_TEAM_ID = ""
-MAGICBLOCK_DEVNET_VALIDATORS = ""
-MAGICBLOCK_MAINNET_VALIDATORS = ""
+JUPITER_API_BASE_URL = "https://api.jup.ag"
+JUPITER_TRIGGER_API_BASE_URL = "https://api.jup.ag/trigger/v2"
+UMBRA_INDEXER_URL_MAINNET = "https://utxo-indexer.api.umbraprivacy.com"
+UMBRA_INDEXER_URL_DEVNET = "https://utxo-indexer.api-devnet.umbraprivacy.com"
+UMBRA_RELAYER_URL_MAINNET = "https://relayer.api.umbraprivacy.com"
+UMBRA_RELAYER_URL_DEVNET = "https://relayer.api-devnet.umbraprivacy.com"
+UMBRA_CIRCUIT_VERSION = "v3"
+UMBRA_MIN_SDK_VERSION = "3.0.0"
+UMBRA_LOCAL_TEST_MODE = "0"
+MAGICBLOCK_DEVNET_VALIDATORS = "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57,MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e,MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd,MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo"
+MAGICBLOCK_MAINNET_VALIDATORS = "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57,MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e,MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd,MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo"
+OFFPAY_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+OFFPAY_DEVNET_USDT_MINT = ""
+OFFPAY_MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+OFFPAY_MAINNET_USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"

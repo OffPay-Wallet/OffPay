@@ -27,11 +27,11 @@ Private payment route options are only offered while online. The MagicBlock rout
 
 ## Client API Calls
 
-`lib/private-payment.ts` uses these client-side helpers from `lib/offpay-api-client.ts`, backed by `services/private-payments/index.ts` and `services/rpc/index.ts`:
+Private payment helpers call the API Worker through `lib/api/offpay-api-client.ts`:
 
-- `initializePrivatePaymentMint()` -> direct MagicBlock public API
-- `preparePrivateSend()` -> direct MagicBlock public API
-- `broadcastRawTransaction()` -> direct provider-router RPC broadcast
+- `initializePrivatePaymentMint()` -> `/api/payment/private-init-mint`
+- `preparePrivateSend()` -> `/api/payment/private-send`
+- `broadcastRawTransaction()` -> `/api/rpc/broadcast`
 
 The send flow invalidates private balance, wallet balance, wallet transactions, and pending backup query keys after a private payment result.
 
@@ -41,23 +41,22 @@ The send flow invalidates private balance, wallet balance, wallet transactions, 
 sequenceDiagram
   participant UI as PrivatePaymentSendFlow
   participant Private as lib/private-payment.ts
-  participant MagicBlock as MagicBlock public API
-  participant Providers as provider router
+  participant Worker as OffPay API Worker
   participant Wallet as wallet signing
   participant Queue as pending backup queue
 
   UI->>Private: submitPrivatePayment(params)
   Private->>Private: validate wallet, recipient, mint, amount, stablecoin support
-  Private->>MagicBlock: initializePrivatePaymentMint
-  MagicBlock-->>Private: optional init transaction
+  Private->>Worker: initializePrivatePaymentMint
+  Worker-->>Private: optional init transaction
   Private->>Wallet: sign init transaction if required
-  Private->>Providers: broadcast init transaction
-  Private->>MagicBlock: preparePrivateSend
-  MagicBlock-->>Private: unsigned private send transaction
+  Private->>Worker: broadcast init transaction
+  Private->>Worker: preparePrivateSend
+  Worker-->>Private: unsigned private send transaction
   Private->>Private: verify transaction signer, amount, mint, recipient/private route metadata
   Private->>Wallet: sign private send transaction
-  Private->>Providers: broadcast raw transaction
-  Providers-->>Private: signature
+  Private->>Worker: broadcast raw transaction
+  Worker-->>Private: signature
   Private-->>UI: submitted result
   Private->>Queue: queue signed payment if retryable submission fails
 ```

@@ -25,8 +25,8 @@ flowchart TD
   Signer["Noble Ed25519 IUmbraSigner"]
   Deps["createOffpayUmbraSdkDeps(network)"]
   Client["getUmbraClient"]
-  ClientRpc["services/rpc/index.ts"]
-  Providers["RPC: Helius / Alchemy; WSS: Helius"]
+  ClientRpc["Worker RPC helpers"]
+  Providers["/api/rpc/* via Worker"]
   UmbraAction["register, shield, withdraw, balance"]
 
   Action --> SigningMaterial --> Signer
@@ -41,7 +41,7 @@ flowchart TD
 
 ## OffPay RPC Adapters
 
-`lib/umbra-offpay-providers.ts` keeps Umbra SDK chain access behind the local client provider boundary. It maps SDK RPC needs to client API helpers:
+`lib/umbra-offpay-providers.ts` keeps Umbra SDK chain access behind the API Worker boundary. It maps SDK RPC needs to client API helpers:
 
 - account info and multiple accounts -> `getRpcAccounts`
 - latest blockhash -> `getRpcLatestBlockhash`
@@ -51,7 +51,7 @@ flowchart TD
 - signature statuses -> `getRpcSignatureStatuses`
 - signatures for address -> `getRpcSignaturesForAddress`
 
-The Umbra client is created with the primary configured client RPC endpoint when available. Actual request handling is provided by the injected SDK dependencies, which route through `services/rpc/index.ts` rather than the legacy RPC proxy.
+The Umbra client is created with the configured OffPay API Worker RPC facade URL. Actual request handling is provided by injected SDK dependencies, which route through `lib/api/offpay-api-client.ts`.
 
 ## Supported Networks And Tokens
 

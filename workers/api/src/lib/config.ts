@@ -14,10 +14,16 @@ interface WorkerConfigStatus {
   features: {
     androidAttestation: FeatureConfigStatus;
     iosAttestation: FeatureConfigStatus;
+    marketPrices: FeatureConfigStatus;
+    offline: FeatureConfigStatus;
     pendingBackup: FeatureConfigStatus;
+    privatePayment: FeatureConfigStatus;
     privateSwap: FeatureConfigStatus;
     protectedAuth: FeatureConfigStatus;
+    rpc: FeatureConfigStatus;
     swap: FeatureConfigStatus;
+    umbra: FeatureConfigStatus;
+    wallet: FeatureConfigStatus;
   };
 }
 
@@ -26,6 +32,8 @@ interface PublicWorkerConfigStatus {
   degraded: boolean;
   features: Record<keyof WorkerConfigStatus['features'], boolean>;
 }
+
+const NETWORKS = ['devnet', 'mainnet'] as const;
 
 const PROTECTED_AUTH_BINDINGS: BindingKey[] = [
   'BOOTSTRAP_SECRET_VERSION',
@@ -45,10 +53,16 @@ const IOS_APP_ATTEST_BINDINGS: BindingKey[] = ['OFFPAY_IOS_BUNDLE_ID', 'OFFPAY_I
 
 const PENDING_BACKUP_BINDINGS: BindingKey[] = ['OFFPAY_BACKUP_HMAC_SECRET'];
 const SWAP_BINDINGS: BindingKey[] = ['JUPITER_API_KEY'];
-
+const MARKET_PRICE_BINDINGS: BindingKey[] = ['ALCHEMY_PRICE_API_KEY'];
+const HELIUS_API_KEY_BINDINGS: BindingKey[] = ['HELIUS_DEVNET_API_KEY', 'HELIUS_MAINNET_API_KEY'];
 function hasStringBinding(bindings: Bindings, key: BindingKey): boolean {
   const value = bindings[key];
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasTruthyStringBinding(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
 function missingStringBindings(bindings: Bindings, keys: readonly BindingKey[]): string[] {
@@ -70,34 +84,42 @@ function hasR2Bucket(bindings: Bindings): boolean {
   return bindings.PENDING_BACKUP_BUCKET != null;
 }
 
-function readConfiguredUrl(value: string | undefined): string | null {
+function readConfiguredUrl(value: string | undefined, protocols: readonly string[]): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
 
   try {
     const parsed = new URL(trimmed);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? trimmed : null;
+    return protocols.includes(parsed.protocol) ? trimmed : null;
   } catch {
     return null;
   }
 }
 
 function hasRpcUrlForNetwork(bindings: Bindings, network: Network): boolean {
-  const quickNodeUrl = readConfiguredUrl(
-    network === 'mainnet' ? bindings.QUICKNODE_MAINNET_RPC_URL : bindings.QUICKNODE_DEVNET_RPC_URL,
-  );
   const heliusUrl = readConfiguredUrl(
     network === 'mainnet' ? bindings.HELIUS_MAINNET_RPC_URL : bindings.HELIUS_DEVNET_RPC_URL,
+    ['http:', 'https:'],
+  );
+  const alchemyUrl = readConfiguredUrl(
+    network === 'mainnet' ? bindings.ALCHEMY_MAINNET_RPC_URL : bindings.ALCHEMY_DEVNET_RPC_URL,
+    ['http:', 'https:'],
+  );
+  const alchemyFallbackUrl = readConfiguredUrl(
+    network === 'mainnet'
+      ? bindings.ALCHEMY_MAINNET_FALLBACK_RPC_URL
+      : bindings.ALCHEMY_DEVNET_FALLBACK_RPC_URL,
+    ['http:', 'https:'],
   );
 
-  return quickNodeUrl != null || heliusUrl != null;
+  return heliusUrl != null || alchemyUrl != null || alchemyFallbackUrl != null;
 }
 
 function missingRpcNetworkBindings(bindings: Bindings): string[] {
-  return (['devnet', 'mainnet'] as const).flatMap((network) =>
+  return NETWORKS.flatMap((network) =>
     hasRpcUrlForNetwork(bindings, network)
       ? []
-      : [`${network.toUpperCase()}_RPC_URL_HELIUS_OR_QUICKNODE`],
+      : [`${network.toUpperCase()}_RPC_URL_HELIUS_OR_ALCHEMY`],
   );
 }
 
@@ -114,7 +136,7 @@ function readMagicBlockValidators(bindings: Bindings, network: Network): string[
 }
 
 function missingMagicBlockValidatorBindings(bindings: Bindings): string[] {
-  return (['devnet', 'mainnet'] as const).flatMap((network) => {
+  return NETWORKS.flatMap((network) => {
     const validators = readMagicBlockValidators(bindings, network);
     const key =
       network === 'mainnet' ? 'MAGICBLOCK_MAINNET_VALIDATORS' : 'MAGICBLOCK_DEVNET_VALIDATORS';
@@ -127,13 +149,26 @@ function missingMagicBlockValidatorBindings(bindings: Bindings): string[] {
   });
 }
 
+function isProductionEnvironment(bindings: Bindings): boolean {
+  return bindings.NODE_ENV?.trim().toLowerCase() === 'production';
+}
+
+function isPrototypeMode(bindings: Bindings): boolean {
+  return hasTruthyStringBinding(bindings.OFFPAY_PROTOTYPE_MODE);
+}
+
+function isAndroidPrototypeBypassEnabled(bindings: Bindings): boolean {
+  return (
+    bindings.OFFPAY_ANDROID_ATTESTATION_MODE?.trim().toLowerCase() === 'prototype_bypass' &&
+    (!isProductionEnvironment(bindings) || isPrototypeMode(bindings))
+  );
+}
+
 function getAndroidAttestationStatus(bindings: Bindings): FeatureConfigStatus {
   const mode = bindings.OFFPAY_ANDROID_ATTESTATION_MODE?.trim().toLowerCase();
   if (mode === 'prototype_bypass') {
     return withConfiguredState(
-      bindings.NODE_ENV?.trim().toLowerCase() === 'production'
-        ? ['OFFPAY_ANDROID_ATTESTATION_MODE_PRODUCTION_BYPASS']
-        : [],
+      isAndroidPrototypeBypassEnabled(bindings) ? [] : ['OFFPAY_PROTOTYPE_MODE'],
     );
   }
 
@@ -148,6 +183,13 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
   const iosAttestation = withConfiguredState(
     missingStringBindings(bindings, IOS_APP_ATTEST_BINDINGS),
   );
+  const platformAttestationReady =
+    androidAttestation.configured &&
+    (iosAttestation.configured || isAndroidPrototypeBypassEnabled(bindings));
+  const rpc = withConfiguredState(missingRpcNetworkBindings(bindings));
+  const wallet = withConfiguredState(
+    mergeMissing(rpc.missing, missingStringBindings(bindings, HELIUS_API_KEY_BINDINGS)),
+  );
   const pendingBackup = withConfiguredState(
     mergeMissing(
       protectedAuth.missing,
@@ -158,32 +200,50 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
   const swap = withConfiguredState(
     mergeMissing(protectedAuth.missing, missingStringBindings(bindings, SWAP_BINDINGS)),
   );
-  const privateSwap = withConfiguredState(
+  const marketPrices = withConfiguredState(missingStringBindings(bindings, MARKET_PRICE_BINDINGS));
+  const privatePayment = withConfiguredState(
     mergeMissing(
-      swap.missing,
-      missingRpcNetworkBindings(bindings),
-      missingStringBindings(bindings, ['MAGICBLOCK_DEVNET_API_KEY', 'MAGICBLOCK_MAINNET_API_KEY']),
+      rpc.missing,
       missingMagicBlockValidatorBindings(bindings),
     ),
   );
+  const privateSwap = withConfiguredState(
+    mergeMissing(swap.missing, privatePayment.missing),
+  );
+  const offline = withConfiguredState(mergeMissing(protectedAuth.missing, rpc.missing));
+  const umbra = withConfiguredState(rpc.missing);
 
   const ready =
     protectedAuth.configured &&
-    androidAttestation.configured &&
-    iosAttestation.configured &&
+    platformAttestationReady &&
     pendingBackup.configured &&
-    swap.configured;
+    swap.configured &&
+    wallet.configured &&
+    rpc.configured;
 
   return {
     ready,
-    degraded: ready && !privateSwap.configured,
+    degraded:
+      ready &&
+      ((!iosAttestation.configured && isAndroidPrototypeBypassEnabled(bindings)) ||
+        !marketPrices.configured ||
+        !privatePayment.configured ||
+        !privateSwap.configured ||
+        !offline.configured ||
+        !umbra.configured),
     features: {
       androidAttestation,
       iosAttestation,
+      marketPrices,
+      offline,
       pendingBackup,
+      privatePayment,
       privateSwap,
       protectedAuth,
+      rpc,
       swap,
+      umbra,
+      wallet,
     },
   };
 }
@@ -192,14 +252,9 @@ function toPublicWorkerConfigStatus(status: WorkerConfigStatus): PublicWorkerCon
   return {
     ready: status.ready,
     degraded: status.degraded,
-    features: {
-      androidAttestation: status.features.androidAttestation.configured,
-      iosAttestation: status.features.iosAttestation.configured,
-      pendingBackup: status.features.pendingBackup.configured,
-      privateSwap: status.features.privateSwap.configured,
-      protectedAuth: status.features.protectedAuth.configured,
-      swap: status.features.swap.configured,
-    },
+    features: Object.fromEntries(
+      Object.entries(status.features).map(([key, value]) => [key, value.configured]),
+    ) as PublicWorkerConfigStatus['features'],
   };
 }
 

@@ -1,8 +1,8 @@
 import type { Handler, MiddlewareHandler } from 'hono';
-import type { AppEnv } from './types.js';
+import type { AppEnv, Bindings } from './types.js';
 import { errorResponse } from './errors.js';
 
-const ALLOWED_ORIGINS = [
+const DEFAULT_ALLOWED_ORIGINS = [
   'capacitor://localhost',
   'http://localhost',
   'https://offpay.app',
@@ -27,15 +27,26 @@ const EXPOSED_HEADERS = [
   'X-RateLimit-Reset',
 ];
 
-function isAllowedOrigin(origin: string | null | undefined): boolean {
+function readAllowedOrigins(bindings?: Bindings): string[] {
+  const configured = bindings?.OFFPAY_ALLOWED_ORIGINS?.trim();
+  if (!configured) return DEFAULT_ALLOWED_ORIGINS;
+
+  return configured
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function isAllowedOrigin(origin: string | null | undefined, bindings?: Bindings): boolean {
   if (!origin) {
     return true;
   }
 
-  return ALLOWED_ORIGINS.includes(origin);
+  return readAllowedOrigins(bindings).includes(origin);
 }
 
-function buildCorsHeaders(origin: string | null | undefined): Headers {
+function buildCorsHeaders(origin: string | null | undefined, bindings?: Bindings): Headers {
+  const allowedOrigins = readAllowedOrigins(bindings);
   const headers = new Headers({
     'Access-Control-Allow-Headers': ALLOWED_HEADERS.join(', '),
     'Access-Control-Allow-Credentials': 'true',
@@ -45,39 +56,43 @@ function buildCorsHeaders(origin: string | null | undefined): Headers {
     Vary: 'Origin',
   });
 
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  if (origin && allowedOrigins.includes(origin)) {
     headers.set('Access-Control-Allow-Origin', origin);
   }
 
   return headers;
 }
 
-function applyCorsHeaders(headers: Headers, origin: string | null | undefined): void {
-  buildCorsHeaders(origin).forEach((value, key) => {
+function applyCorsHeaders(
+  headers: Headers,
+  origin: string | null | undefined,
+  bindings?: Bindings,
+): void {
+  buildCorsHeaders(origin, bindings).forEach((value, key) => {
     headers.set(key, value);
   });
 }
 
 const corsMiddleware: MiddlewareHandler<AppEnv> = async (context, next) => {
   await next();
-  applyCorsHeaders(context.res.headers, context.req.header('Origin'));
+  applyCorsHeaders(context.res.headers, context.req.header('Origin'), context.env);
 };
 
 const handlePreflight: Handler<AppEnv> = (context) => {
   const origin = context.req.header('Origin');
-  if (!origin || !isAllowedOrigin(origin)) {
+  if (!origin || !isAllowedOrigin(origin, context.env)) {
     return errorResponse(403, 'FORBIDDEN_ORIGIN', 'Origin not permitted.');
   }
 
   const response = new Response(null, { status: 204 });
-  applyCorsHeaders(response.headers, origin);
+  applyCorsHeaders(response.headers, origin, context.env);
   return response;
 };
 
 export {
   ALLOWED_HEADERS,
   ALLOWED_METHODS,
-  ALLOWED_ORIGINS,
+  DEFAULT_ALLOWED_ORIGINS,
   EXPOSED_HEADERS,
   applyCorsHeaders,
   buildCorsHeaders,

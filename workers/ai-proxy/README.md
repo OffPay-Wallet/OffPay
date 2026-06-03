@@ -2,7 +2,7 @@
 
 Cloudflare Worker for the OffPay agentic payments AI and voice proxy.
 
-The worker protects default provider keys and does not execute OffPay wallet, payment, swap, Umbra, offline, or RPC tools. Tool execution remains in the app through `services/` adapters and app-side helpers.
+The worker protects default provider keys and does not execute OffPay wallet, payment, swap, Umbra, offline, or RPC tools. Tool execution remains in the app through local tool handlers and the API Worker-backed helpers.
 
 In strict privacy mode, chat providers receive sanitized prompt text only and return structured intent JSON. Wallet facts, balances, token mints, transaction hashes, validation, confirmation, signing, and submission stay in the app.
 
@@ -86,10 +86,11 @@ cp workers/ai-proxy/.dev.vars.example workers/ai-proxy/.dev.vars
 
 `workers/ai-proxy/.dev.vars` is ignored by git and is the only local file that should contain `GEMINI_API_KEY`, `SARVAM_API_KEY`, `ELEVENLABS_API_KEY`, or `ELEVENLABS_VOICE_ID`.
 
-The Expo app only needs the public Worker URL:
+The Expo app only needs the public Worker custom-domain URL and matching client allowlist:
 
 ```sh
-EXPO_PUBLIC_OFFPAY_AI_PROXY_URL=https://offpay-ai-proxy.<account>.workers.dev
+EXPO_PUBLIC_OFFPAY_AI_PROXY_URL=https://ai.offpay.app
+EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS=https://ai.offpay.app
 ```
 
 When `AI_PROXY_REQUIRE_SESSION_TOKEN=true` is set on the Worker, the app must also ship the matching shared secret in `EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET`. Until the backend mints session tokens server-side, the client signs them locally with this shared HMAC secret. Both values rotate together.
@@ -108,5 +109,6 @@ npx wrangler deploy
 After deploy, set the public Worker URL in the app:
 
 ```sh
-EXPO_PUBLIC_OFFPAY_AI_PROXY_URL=https://offpay-ai-proxy.<account>.workers.dev
+EXPO_PUBLIC_OFFPAY_AI_PROXY_URL=https://ai.offpay.app
+EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS=https://ai.offpay.app
 ```

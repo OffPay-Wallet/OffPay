@@ -11,7 +11,7 @@ import { broadcastRawTransaction } from './helius.js';
 import { isRecord, isValidSolanaAddress } from './validation.js';
 import type { Bindings, Network } from './types.js';
 
-const JUPITER_API_BASE_URL = 'https://api.jup.ag';
+const DEFAULT_JUPITER_API_BASE_URL = 'https://api.jup.ag';
 const SWAP_TOKENS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SWAP_PRICE_CACHE_TTL_MS = 10 * 1000;
 const DEFAULT_QUOTE_TTL_MS = 45 * 1000;
@@ -234,6 +234,26 @@ async function fetchJupiterJson(
   }
 
   return { response, payload };
+}
+
+function readJupiterApiBaseUrl(bindings: Bindings): string {
+  const configuredUrl = bindings.JUPITER_API_BASE_URL?.trim() || DEFAULT_JUPITER_API_BASE_URL;
+
+  try {
+    const parsed = new URL(configuredUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('Unsupported Jupiter API protocol.');
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch (error) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Jupiter API configuration is unavailable.',
+      retryable: true,
+      cause: error,
+    });
+  }
 }
 
 function buildQuoteStateKey(quoteId: string): string {
@@ -509,7 +529,7 @@ async function getSwapTokens(
   return memoryCache.getOrSet(cacheKey, SWAP_TOKENS_CACHE_TTL_MS, async () => {
     const { response, payload } = await fetchJupiterJson(
       bindings,
-      `${JUPITER_API_BASE_URL}/tokens/v2/tag?query=verified`,
+      `${readJupiterApiBaseUrl(bindings)}/tokens/v2/tag?query=verified`,
       { method: 'GET' },
       'Token metadata is currently unavailable.',
     );
@@ -573,7 +593,7 @@ async function getSwapPrice(
   return memoryCache.getOrSet(cacheKey, SWAP_PRICE_CACHE_TTL_MS, async () => {
     const { response, payload } = await fetchJupiterJson(
       bindings,
-      `${JUPITER_API_BASE_URL}/price/v3?ids=${encodeURIComponent(request.mint)}`,
+      `${readJupiterApiBaseUrl(bindings)}/price/v3?ids=${encodeURIComponent(request.mint)}`,
       { method: 'GET' },
       'Token price is currently unavailable.',
     );
@@ -630,7 +650,7 @@ async function createMetisSwapQuote(
 
   const { response: quoteResponse, payload: quotePayload } = await fetchJupiterJson(
     bindings,
-    `${JUPITER_API_BASE_URL}/swap/v1/quote?${quoteParams.toString()}`,
+    `${readJupiterApiBaseUrl(bindings)}/swap/v1/quote?${quoteParams.toString()}`,
     { method: 'GET' },
     'Swap quotes are currently unavailable.',
   );
@@ -646,7 +666,7 @@ async function createMetisSwapQuote(
 
   const { response: swapResponse, payload: swapPayload } = await fetchJupiterJson(
     bindings,
-    `${JUPITER_API_BASE_URL}/swap/v1/swap`,
+    `${readJupiterApiBaseUrl(bindings)}/swap/v1/swap`,
     {
       method: 'POST',
       headers: {
@@ -764,7 +784,7 @@ async function createSwapQuote(
 
   const { response, payload } = await fetchJupiterJson(
     bindings,
-    `${JUPITER_API_BASE_URL}/swap/v2/order?${params.toString()}`,
+    `${readJupiterApiBaseUrl(bindings)}/swap/v2/order?${params.toString()}`,
     { method: 'GET' },
     'Swap quotes are currently unavailable.',
   );
@@ -932,7 +952,7 @@ async function executeSwapQuoteDetailed(
 
     const { payload } = await fetchJupiterJson(
       bindings,
-      `${JUPITER_API_BASE_URL}/swap/v2/execute`,
+      `${readJupiterApiBaseUrl(bindings)}/swap/v2/execute`,
       {
         method: 'POST',
         headers: {
@@ -1051,7 +1071,7 @@ async function createRecurringOrder(
 
   const { response, payload } = await fetchJupiterJson(
     bindings,
-    `${JUPITER_API_BASE_URL}/recurring/v1/createOrder`,
+    `${readJupiterApiBaseUrl(bindings)}/recurring/v1/createOrder`,
     {
       method: 'POST',
       headers: {
@@ -1112,7 +1132,7 @@ async function executeRecurringOrder(
 
   const { payload } = await fetchJupiterJson(
     bindings,
-    `${JUPITER_API_BASE_URL}/recurring/v1/execute`,
+    `${readJupiterApiBaseUrl(bindings)}/recurring/v1/execute`,
     {
       method: 'POST',
       headers: {

@@ -1,6 +1,8 @@
 const mockClearOffpayBootstrapCredentials = jest.fn(async () => undefined);
-const mockGetOffpayBootstrapVersion = jest.fn(async () => 7);
-const mockGetOffpayRequestSecret = jest.fn(async () => 'request-secret');
+const mockGetOffpayBootstrapVersion = jest.fn<Promise<number | null>, []>(async () => 7);
+const mockGetOffpayRequestSecret = jest.fn<Promise<string | null>, []>(
+  async () => 'request-secret',
+);
 const mockGetOrCreateOffpayDeviceId = jest.fn(async () => 'device-1');
 
 const mockGetStoredWalletInfo = jest.fn(async () => ({
@@ -14,13 +16,6 @@ const mockGetStoredWalletSigningMaterialWithAuth = jest.fn(async () => ({
 
 const mockDecodeSigningSeedFromPrivateKey = jest.fn(() => new Uint8Array(32).fill(7));
 const mockDeriveSigningSeedFromMnemonic = jest.fn(async () => new Uint8Array(32).fill(9));
-const mockProviderGetWalletBalance = jest.fn(async () => ({
-  address: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
-  network: 'devnet',
-  solBalance: 0,
-  tokens: [],
-  fetchedAt: 123,
-}));
 
 jest.mock('@/lib/api/offpay-api-storage', () => ({
   __esModule: true,
@@ -62,24 +57,6 @@ jest.mock('@/lib/wallet/signing-seed-cache', () => ({
   SigningSeedCacheInvalidatedError: class extends Error {},
 }));
 
-jest.mock('@/services/rpc', () => ({
-  __esModule: true,
-  broadcastRawTransaction: jest.fn(),
-  getMinimumBalanceForRentExemption: jest.fn(),
-  getRpcAccounts: jest.fn(),
-  getRpcEpochInfo: jest.fn(),
-  getRpcLatestBlockhash: jest.fn(),
-  getRpcSignatureStatuses: jest.fn(),
-  getRpcSignaturesForAddress: jest.fn(),
-  getRpcSlot: jest.fn(),
-  getRpcTokenLargestAccounts: jest.fn(),
-  getWalletBalance: mockProviderGetWalletBalance,
-  getWalletLamports: jest.fn(),
-  getWalletTransactions: jest.fn(),
-  hasConfiguredHttpProvider: jest.fn(() => true),
-  hasConfiguredWsProvider: jest.fn(() => true),
-}));
-
 const {
   OFFPAY_APP_VERSION,
   OffpayApiError,
@@ -100,6 +77,7 @@ function buildResponse(body: unknown, status = 200): Response {
 
 describe('offpay-api-client', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     clearOffpaySigningSession();
     setOffpayAuthRecoveryHandler(null);
     setOffpayNetworkAccessAllowed(true);
@@ -156,8 +134,17 @@ describe('offpay-api-client', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('routes wallet balance requests through the client provider router', async () => {
+  it('routes wallet balance requests through the API Worker', async () => {
     const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(
+      buildResponse({
+        address: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+        network: 'devnet',
+        solBalance: 0,
+        tokens: [],
+        fetchedAt: 123,
+      }),
+    );
 
     await expect(
       getWalletBalance('Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw', 'devnet', {
@@ -168,12 +155,44 @@ describe('offpay-api-client', () => {
       network: 'devnet',
     });
 
-    expect(mockProviderGetWalletBalance).toHaveBeenCalledWith(
-      'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
-      'devnet',
-      { signal: undefined },
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/wallet/balance?'),
+      expect.objectContaining({
+        method: 'GET',
+      }),
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(
+      expect.stringContaining('address=Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw'),
+    );
+  });
+
+  it('reprovisions once when bootstrap credentials are missing locally', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    const reprovisionAuth = jest.fn(async () => undefined);
+    mockGetOffpayRequestSecret.mockResolvedValueOnce(null).mockResolvedValueOnce('request-secret');
+    mockGetOffpayBootstrapVersion.mockResolvedValueOnce(null).mockResolvedValueOnce(7);
+    fetchMock.mockResolvedValueOnce(
+      buildResponse({
+        ok: true,
+        network: 'mainnet',
+      }),
+    );
+
+    await expect(
+      offpayApiRequest<{ ok: boolean; network: string }>({
+        path: '/api/swap/tokens',
+        network: 'mainnet',
+        reprovisionAuth,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      network: 'mainnet',
+    });
+
+    expect(mockClearOffpayBootstrapCredentials).toHaveBeenCalledTimes(1);
+    expect(reprovisionAuth).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('clears credentials and retries once when auth recovery is available', async () => {

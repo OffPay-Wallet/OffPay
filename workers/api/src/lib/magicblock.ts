@@ -24,6 +24,8 @@ interface MagicBlockUnsignedTransaction {
   rentPda: string | null;
 }
 
+type MagicBlockBalanceLocation = 'base' | 'ephemeral';
+
 interface MagicBlockMintInitializationStatusRequest {
   mint: string;
   network: Network;
@@ -53,6 +55,37 @@ interface MagicBlockTransferRequest {
   validator: string;
   privacy: 'private' | 'public';
   memo?: string;
+}
+
+interface MagicBlockQueueInitializationRequest {
+  payerWallet: string;
+  mint: string;
+  network: Network;
+  validator: string;
+}
+
+interface MagicBlockPrivatePaymentRequest {
+  senderWallet: string;
+  recipientWallet: string;
+  mint: string;
+  amount: string;
+  network: Network;
+  validator: string;
+  memo?: string;
+}
+
+interface MagicBlockBalanceRequest {
+  address: string;
+  mint: string;
+  network: Network;
+}
+
+interface MagicBlockBalanceResponse {
+  address: string;
+  mint: string;
+  ata: string | null;
+  location: MagicBlockBalanceLocation;
+  balance: string;
 }
 
 interface MagicBlockHttpResult {
@@ -146,18 +179,13 @@ function resolveMagicBlockValidator(bindings: Bindings, network: Network, seed: 
   return validators[hash % validators.length] ?? validators[0]!;
 }
 
-function buildMagicBlockHeaders(bindings: Bindings, network: Network, extraHeaders?: HeadersInit): Headers {
+function resolveMagicBlockPrimaryValidator(bindings: Bindings, network: Network): string {
+  return parseMagicBlockValidators(bindings, network)[0]!;
+}
+
+function buildMagicBlockHeaders(extraHeaders?: HeadersInit): Headers {
   const headers = new Headers(extraHeaders);
   headers.set('Content-Type', 'application/json');
-
-  const apiKey =
-    network === 'mainnet'
-      ? bindings.MAGICBLOCK_MAINNET_API_KEY?.trim()
-      : bindings.MAGICBLOCK_DEVNET_API_KEY?.trim();
-
-  if (apiKey) {
-    headers.set('x-api-key', apiKey);
-  }
 
   return headers;
 }
@@ -173,7 +201,7 @@ async function fetchMagicBlockJson(
   try {
     response = await fetch(`${MAGICBLOCK_API_BASE_URL}${path}`, {
       ...init,
-      headers: buildMagicBlockHeaders(bindings, network, init.headers),
+      headers: buildMagicBlockHeaders(init.headers),
     });
   } catch (error) {
     throw new AppError({
@@ -264,6 +292,54 @@ function parseUnsignedTransactionPayload(
     validator: providerValidator,
     transferQueue,
     rentPda,
+  };
+}
+
+function parseBalancePayload(
+  payload: unknown,
+  expectedLocation: MagicBlockBalanceLocation,
+  fallbackAddress: string,
+  fallbackMint: string,
+): MagicBlockBalanceResponse {
+  if (!isRecord(payload)) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'MagicBlock balance lookup is currently unavailable.',
+      retryable: true,
+    });
+  }
+
+  const address =
+    readTrimmedString(payload.address) ?? readTrimmedString(payload.owner) ?? fallbackAddress;
+  const mint = readTrimmedString(payload.mint) ?? fallbackMint;
+  const ata = readTrimmedString(payload.ata);
+  const location =
+    readTrimmedString(payload.location) === 'ephemeral'
+      ? 'ephemeral'
+      : readTrimmedString(payload.location) === 'base'
+        ? 'base'
+        : expectedLocation;
+  const balance =
+    readTrimmedString(payload.balance) ??
+    readTrimmedString(payload.amount) ??
+    (readFiniteNumber(payload.balance) !== null ? String(readFiniteNumber(payload.balance)) : null);
+
+  if (!address || !mint || !balance || !/^\d+$/.test(balance)) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'MagicBlock balance lookup is currently unavailable.',
+      retryable: true,
+    });
+  }
+
+  return {
+    address,
+    mint,
+    ata,
+    location,
+    balance,
   };
 }
 
@@ -412,14 +488,193 @@ async function createMagicBlockTransferTransaction(
   return parseUnsignedTransactionPayload(payload, 'transfer', request.validator);
 }
 
+async function createMagicBlockQueueInitializationTransaction(
+  bindings: Bindings,
+  request: MagicBlockQueueInitializationRequest,
+): Promise<MagicBlockUnsignedTransaction> {
+  assertSupportedWallet(request.payerWallet, 'Owner wallet address is invalid.');
+  assertSupportedWallet(request.mint, 'Mint address is invalid.');
+  assertSupportedWallet(request.validator, 'MagicBlock validator address is invalid.');
+
+  const { response, payload } = await fetchMagicBlockJson(
+    bindings,
+    request.network,
+    '/v1/spl/initialize-mint',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        payer: request.payerWallet,
+        mint: request.mint,
+        cluster: request.network,
+        validator: request.validator,
+      }),
+    },
+    'MagicBlock mint initialization is currently unavailable.',
+  );
+
+  if (!response.ok) {
+    throw new AppError({
+      status: response.status === 400 || response.status === 422 ? 400 : 503,
+      code:
+        response.status === 400 || response.status === 422
+          ? 'INVALID_REQUEST'
+          : 'UPSTREAM_UNAVAILABLE',
+      message:
+        extractProviderMessage(payload) ?? 'MagicBlock mint initialization is currently unavailable.',
+      retryable: response.status !== 400 && response.status !== 422,
+    });
+  }
+
+  return parseUnsignedTransactionPayload(payload, 'initializeMint', request.validator);
+}
+
+async function createMagicBlockPrivatePaymentTransaction(
+  bindings: Bindings,
+  request: MagicBlockPrivatePaymentRequest,
+): Promise<MagicBlockUnsignedTransaction> {
+  assertSupportedWallet(request.senderWallet, 'Owner wallet address is invalid.');
+  assertSupportedWallet(request.recipientWallet, 'Recipient wallet address is invalid.');
+  assertSupportedWallet(request.mint, 'Mint address is invalid.');
+  assertSupportedWallet(request.validator, 'MagicBlock validator address is invalid.');
+
+  const amount = toProviderSafeInteger(request.amount, 'MagicBlock transfer amount');
+  const memo = sanitizeText(request.memo, 120);
+
+  const { response, payload } = await fetchMagicBlockJson(
+    bindings,
+    request.network,
+    '/v1/spl/transfer',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        from: request.senderWallet,
+        to: request.recipientWallet,
+        amount,
+        cluster: request.network,
+        mint: request.mint,
+        visibility: 'private',
+        fromBalance: 'base',
+        toBalance: 'base',
+        validator: request.validator,
+        ...(memo ? { memo } : {}),
+      }),
+    },
+    'MagicBlock transfer preparation is currently unavailable.',
+  );
+
+  if (!response.ok) {
+    throw new AppError({
+      status: response.status === 400 || response.status === 422 ? 400 : 503,
+      code:
+        response.status === 400 || response.status === 422
+          ? 'INVALID_REQUEST'
+          : 'UPSTREAM_UNAVAILABLE',
+      message:
+        extractProviderMessage(payload) ?? 'MagicBlock transfer preparation is currently unavailable.',
+      retryable: response.status !== 400 && response.status !== 422,
+    });
+  }
+
+  return parseUnsignedTransactionPayload(payload, 'transfer', request.validator);
+}
+
+async function getMagicBlockBalance(
+  bindings: Bindings,
+  request: MagicBlockBalanceRequest,
+): Promise<MagicBlockBalanceResponse> {
+  assertSupportedWallet(request.address, 'Wallet address is invalid.');
+  assertSupportedWallet(request.mint, 'Mint address is invalid.');
+
+  const params = new URLSearchParams({
+    owner: request.address,
+    cluster: request.network,
+    mint: request.mint,
+  });
+
+  const { response, payload } = await fetchMagicBlockJson(
+    bindings,
+    request.network,
+    `/v1/spl/balance?${params.toString()}`,
+    {
+      method: 'GET',
+    },
+    'MagicBlock balance lookup is currently unavailable.',
+  );
+
+  if (!response.ok) {
+    throw new AppError({
+      status: response.status === 400 || response.status === 422 ? 400 : 503,
+      code:
+        response.status === 400 || response.status === 422
+          ? 'INVALID_REQUEST'
+          : 'UPSTREAM_UNAVAILABLE',
+      message:
+        extractProviderMessage(payload) ?? 'MagicBlock balance lookup is currently unavailable.',
+      retryable: response.status !== 400 && response.status !== 422,
+    });
+  }
+
+  return parseBalancePayload(payload, 'base', request.address, request.mint);
+}
+
+async function getMagicBlockPrivateBalance(
+  bindings: Bindings,
+  request: MagicBlockBalanceRequest,
+): Promise<MagicBlockBalanceResponse> {
+  assertSupportedWallet(request.address, 'Wallet address is invalid.');
+  assertSupportedWallet(request.mint, 'Mint address is invalid.');
+
+  const params = new URLSearchParams({
+    owner: request.address,
+    cluster: request.network,
+    mint: request.mint,
+  });
+
+  const { response, payload } = await fetchMagicBlockJson(
+    bindings,
+    request.network,
+    `/v1/spl/private-balance?${params.toString()}`,
+    {
+      method: 'GET',
+    },
+    'MagicBlock balance lookup is currently unavailable.',
+  );
+
+  if (!response.ok) {
+    throw new AppError({
+      status: response.status === 400 || response.status === 422 ? 400 : 503,
+      code:
+        response.status === 400 || response.status === 422
+          ? 'INVALID_REQUEST'
+          : 'UPSTREAM_UNAVAILABLE',
+      message:
+        extractProviderMessage(payload) ?? 'MagicBlock balance lookup is currently unavailable.',
+      retryable: response.status !== 400 && response.status !== 422,
+    });
+  }
+
+  return parseBalancePayload(payload, 'ephemeral', request.address, request.mint);
+}
+
 export {
+  MAGICBLOCK_API_BASE_URL,
+  createMagicBlockPrivatePaymentTransaction,
   createMagicBlockInitializeMintTransaction,
+  createMagicBlockQueueInitializationTransaction,
   createMagicBlockTransferTransaction,
+  getMagicBlockBalance,
   getMagicBlockMintInitializationStatus,
+  getMagicBlockPrivateBalance,
+  resolveMagicBlockPrimaryValidator,
   resolveMagicBlockValidator,
+  type MagicBlockBalanceLocation,
+  type MagicBlockBalanceRequest,
+  type MagicBlockBalanceResponse,
   type MagicBlockInitializeMintRequest,
   type MagicBlockMintInitializationStatusRequest,
   type MagicBlockMintInitializationStatusResponse,
+  type MagicBlockPrivatePaymentRequest,
+  type MagicBlockQueueInitializationRequest,
   type MagicBlockTransferRequest,
   type MagicBlockUnsignedTransaction,
 };

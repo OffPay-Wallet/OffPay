@@ -5,6 +5,11 @@ import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { getCapabilities } from '@/lib/api/offpay-api-client';
+import {
+  buildUnavailableCapabilities,
+  CAPABILITIES_FAST_TIMEOUT_MS,
+  CAPABILITIES_STALE_TIME_MS,
+} from '@/lib/api/offpay-capability-fallback';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import {
@@ -15,8 +20,6 @@ import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
 import { useWalletStore, type WalletAccount } from '@/store/walletStore';
 
 import type { CapabilitiesResponse } from '@/types/offpay-api';
-
-const CAPABILITIES_STALE_TIME_MS = 1000 * 60 * 5;
 
 function getActiveWallet(
   wallets: WalletAccount[],
@@ -172,11 +175,27 @@ async function prefetchCapabilitiesInBackground(params: {
 }): Promise<CapabilitiesResponse | null> {
   if (params.walletAddress.length === 0 || params.walletId == null) return null;
 
-  return params.queryClient.fetchQuery({
-    queryKey: offpayCapabilitiesQueryKey(params.network),
-    queryFn: () => getCapabilities(params.network),
-    staleTime: CAPABILITIES_STALE_TIME_MS,
-  });
+  const cached = params.queryClient.getQueryData<CapabilitiesResponse>(
+    offpayCapabilitiesQueryKey(params.network),
+  );
+  if (cached?.network === params.network) return cached;
+
+  try {
+    return await params.queryClient.fetchQuery({
+      queryKey: offpayCapabilitiesQueryKey(params.network),
+      queryFn: ({ signal }) =>
+        getCapabilities(params.network, {
+          signal,
+          timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
+        }),
+      staleTime: CAPABILITIES_STALE_TIME_MS,
+    });
+  } catch {
+    return buildUnavailableCapabilities(
+      params.network,
+      'OffPay API capabilities were unavailable during wallet warm start.',
+    );
+  }
 }
 
 async function prefetchWalletDisplayInBackground(params: {

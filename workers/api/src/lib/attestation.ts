@@ -123,8 +123,31 @@ function getAndroidAttestationMode(bindings: Bindings): AndroidAttestationMode {
   });
 }
 
+function isPrototypeModeEnabled(bindings: Bindings): boolean {
+  const configuredValue = bindings.OFFPAY_PROTOTYPE_MODE?.trim().toLowerCase();
+  return (
+    configuredValue === '1' ||
+    configuredValue === 'true' ||
+    configuredValue === 'yes' ||
+    configuredValue === 'on'
+  );
+}
+
 function isProductionEnvironment(bindings: Bindings): boolean {
   return bindings.NODE_ENV?.trim().toLowerCase() === 'production';
+}
+
+function assertPrototypeBypassAllowed(bindings: Bindings): void {
+  if (!isProductionEnvironment(bindings) || isPrototypeModeEnabled(bindings)) {
+    return;
+  }
+
+  throw new AppError({
+    status: 503,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message: 'Required backend configuration is unavailable.',
+    retryable: true,
+  });
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -347,6 +370,7 @@ async function verifyAndroidIntegrity(
 ): Promise<AttestationVerificationResult> {
   const attestationMode = getAndroidAttestationMode(bindings);
   if (attestationMode === 'prototype_bypass') {
+    assertPrototypeBypassAllowed(bindings);
     return {
       platform: 'android',
       environment: 'development',

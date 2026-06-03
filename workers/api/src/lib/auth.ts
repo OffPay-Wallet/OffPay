@@ -19,9 +19,27 @@ const TIMESTAMP_MAX_AGE_MS = 60_000;
 const TIMESTAMP_FUTURE_SKEW_MS = 5_000;
 const HEX_PATTERN = /^[a-f0-9]+$/i;
 const PROTECTED_ROUTE_PREFIXES = [
+  '/api/market/',
+  '/api/wallet/',
+  '/api/risk/',
   '/api/swap/',
+  '/api/payment/',
+  '/api/offline/',
+  '/api/privacy/',
+  '/api/stream/',
   '/api/pending/',
+  '/api/rpc/',
+  '/api/umbra/',
 ] as const;
+const PUBLIC_AUTH_EXEMPT_ROUTES = new Set([
+  'GET /api/market/fx-rate',
+]);
+const PUBLIC_RATE_LIMITED_ROUTES = new Set([
+  'GET /api/bootstrap/provision',
+  'POST /api/bootstrap/provision',
+  'GET /api/capabilities',
+  'GET /api/market/fx-rate',
+]);
 
 interface AuthHeaders {
   walletAddress: string;
@@ -45,11 +63,51 @@ function normalizeRouteKey(method: string, path: string): string {
 }
 
 function requiresAuthentication(method: string, path: string): boolean {
-  if (method.toUpperCase() === 'OPTIONS') {
+  const normalizedMethod = method.toUpperCase();
+  if (normalizedMethod === 'OPTIONS') {
+    return false;
+  }
+
+  if (PUBLIC_AUTH_EXEMPT_ROUTES.has(normalizeRouteKey(normalizedMethod, path))) {
     return false;
   }
 
   return PROTECTED_ROUTE_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+function shouldRateLimitPublicRoute(method: string, path: string): boolean {
+  return PUBLIC_RATE_LIMITED_ROUTES.has(normalizeRouteKey(method, path));
+}
+
+function getPublicRateLimitIdentifier(context: Context<AppEnv>): string {
+  return (
+    context.req.header('X-Device-Id')?.trim() ||
+    context.req.header('CF-Connecting-IP')?.trim() ||
+    context.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
+    'anonymous'
+  );
+}
+
+async function checkRequestRateLimit(
+  context: Context<AppEnv>,
+  identifier: string,
+): Promise<Awaited<ReturnType<typeof checkRateLimit>> | Response> {
+  const rateLimit = await checkRateLimit(context.env, {
+    method: context.req.method,
+    path: context.req.path,
+    identifier,
+  });
+
+  if (!rateLimit.allowed) {
+    const response = errorResponse(429, 'RATE_LIMITED', 'Too many requests.', {
+      retryable: true,
+      retryAfterMs: rateLimit.retryAfterSec * 1000,
+    });
+    applyRateLimitHeaders(response.headers, rateLimit);
+    return response;
+  }
+
+  return rateLimit;
 }
 
 function getRequiredBinding(bindings: Bindings, key: keyof Bindings): string {
@@ -364,7 +422,7 @@ async function authenticateRequest(
   }
 
   const origin = context.req.header('Origin');
-  if (!isAllowedOrigin(origin)) {
+  if (!isAllowedOrigin(origin, context.env)) {
     return errorResponse(403, 'FORBIDDEN_ORIGIN', 'Origin not permitted.');
   }
 
@@ -407,6 +465,18 @@ async function authenticateRequest(
 
 const authenticationMiddleware: MiddlewareHandler<AppEnv> = async (context, next) => {
   if (!requiresAuthentication(context.req.method, context.req.path)) {
+    if (shouldRateLimitPublicRoute(context.req.method, context.req.path)) {
+      const rateLimit = await checkRequestRateLimit(
+        context,
+        getPublicRateLimitIdentifier(context),
+      );
+      if (rateLimit instanceof Response) return rateLimit;
+
+      await next();
+      applyRateLimitHeaders(context.res.headers, rateLimit);
+      return;
+    }
+
     await next();
     return;
   }
@@ -416,20 +486,8 @@ const authenticationMiddleware: MiddlewareHandler<AppEnv> = async (context, next
     return result;
   }
 
-  const rateLimit = await checkRateLimit(context.env, {
-    method: context.req.method,
-    path: context.req.path,
-    identifier: result.wallet,
-  });
-
-  if (!rateLimit.allowed) {
-    const response = errorResponse(429, 'RATE_LIMITED', 'Too many requests.', {
-      retryable: true,
-      retryAfterMs: rateLimit.retryAfterSec * 1000,
-    });
-    applyRateLimitHeaders(response.headers, rateLimit);
-    return response;
-  }
+  const rateLimit = await checkRequestRateLimit(context, result.wallet);
+  if (rateLimit instanceof Response) return rateLimit;
 
   await next();
   applyRateLimitHeaders(context.res.headers, rateLimit);

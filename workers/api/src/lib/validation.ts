@@ -38,7 +38,7 @@ function isValidEd25519Signature(value: string): boolean {
 }
 
 function parseWithSchema<T>(
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   value: unknown,
   message = 'Invalid request.',
 ): T {
@@ -90,7 +90,7 @@ function canonicalJsonStringify(value: unknown): string {
 
 async function readJsonBody<T>(
   request: Request,
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   missingBodyMessage = 'Request body is required.',
   invalidBodyMessage = 'Malformed JSON body.',
   maxBodyBytes = DEFAULT_MAX_JSON_BODY_BYTES,
@@ -136,7 +136,10 @@ async function readJsonBody<T>(
   return parseWithSchema(schema, parsed, invalidBodyMessage);
 }
 
-function readSearchParams<T>(requestUrl: string, schema: z.ZodType<T>): T {
+function readSearchParams<T>(
+  requestUrl: string,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+): T {
   const url = new URL(requestUrl);
   return parseWithSchema(
     schema,

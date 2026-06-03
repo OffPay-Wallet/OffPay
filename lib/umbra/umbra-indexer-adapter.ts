@@ -1,6 +1,9 @@
 import {
   getUmbraClaimStatus,
   getUmbraRelayerInfo,
+  getUmbraTreeProofs,
+  getUmbraTreeSummaries,
+  getUmbraUtxos,
   submitUmbraClaim,
 } from '@/lib/api/offpay-api-client';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
@@ -13,7 +16,9 @@ import {
   h1AddressPartsToBase58,
   isRecord,
   readBigint,
+  readCandidate,
   readOptionalString,
+  readRequiredString,
   safeBigintToNumber,
   splitAddressBase64,
 } from '@/lib/umbra/umbra-parsing';
@@ -25,16 +30,10 @@ import type { JsonValue, OffpayNetwork } from '@/types/offpay-api';
 import type {
   BatchMerkleProofResult,
   TreeSummaryFetcherFunction,
-  UtxoColumnarColumns,
   UtxoDataItem,
   UtxoFetchResult,
 } from '@umbra-privacy/sdk/indexer';
-import {
-  IndexerError,
-  ReadServiceClient,
-  getBatchMerkleProofFetcher,
-  getTreeSummaryFetcher,
-} from '@umbra-privacy/sdk/indexer';
+import { IndexerError } from '@umbra-privacy/sdk/indexer';
 
 /**
  * OffPay-side adapter for the Umbra indexer + relayer.
@@ -55,28 +54,6 @@ import {
  */
 
 const UMBRA_UTXO_FETCH_LIMIT_MAX = 1000n;
-const DEFAULT_INDEXER_URLS: Record<OffpayNetwork, string> = {
-  mainnet: 'https://utxo-indexer.api.umbraprivacy.com',
-  devnet: 'https://utxo-indexer.api-devnet.umbraprivacy.com',
-};
-const PUBLIC_UMBRA_INDEXER_ENV = {
-  EXPO_PUBLIC_UMBRA_INDEXER_URL_MAINNET: process.env.EXPO_PUBLIC_UMBRA_INDEXER_URL_MAINNET,
-  EXPO_PUBLIC_UMBRA_INDEXER_URL_DEVNET: process.env.EXPO_PUBLIC_UMBRA_INDEXER_URL_DEVNET,
-} satisfies Record<string, string | undefined>;
-
-function publicIndexerEnv(key: keyof typeof PUBLIC_UMBRA_INDEXER_ENV): string | null {
-  const value = PUBLIC_UMBRA_INDEXER_ENV[key]?.trim();
-  return value && value.length > 0 ? value : null;
-}
-
-function getUmbraIndexerEndpoint(network: OffpayNetwork): string {
-  const key =
-    network === 'mainnet'
-      ? 'EXPO_PUBLIC_UMBRA_INDEXER_URL_MAINNET'
-      : 'EXPO_PUBLIC_UMBRA_INDEXER_URL_DEVNET';
-  return (publicIndexerEnv(key) ?? DEFAULT_INDEXER_URLS[network]).replace(/\/$/, '');
-}
-
 const ARCIUM_ALREADY_CALLBACKED_ERROR_CODE = 6204;
 // Umbra program errors that mean "this UTXO has already been claimed".
 // Surfaces when a UTXO that has already been claimed is submitted again,
@@ -293,9 +270,6 @@ export function createOffpayUmbraUtxoDataFetcher(
   network: OffpayNetwork,
   options: UmbraUtxoDataFetcherOptions = {},
 ) {
-  const client = new ReadServiceClient({
-    endpoint: getUmbraIndexerEndpoint(network),
-  });
   const maxLimit = options.maxLimit ?? UMBRA_UTXO_FETCH_LIMIT_MAX;
 
   return async (
@@ -315,7 +289,7 @@ export function createOffpayUmbraUtxoDataFetcher(
     let hasMore: boolean | null = null;
     let nextCursor: string | null = null;
     try {
-      const result = await fetchOffpayUmbraUtxoData(client, startIndex, endIndex, cappedLimit);
+      const result = await fetchOffpayUmbraUtxoData(network, startIndex, endIndex, cappedLimit);
       itemCount = result.items.size;
       hasMore = result.hasMore;
       nextCursor = result.nextCursor == null ? null : String(result.nextCursor);
@@ -339,7 +313,7 @@ export function createOffpayUmbraUtxoDataFetcher(
 }
 
 async function fetchOffpayUmbraUtxoData(
-  client: ReadServiceClient,
+  network: OffpayNetwork,
   startIndex: bigint,
   endIndex?: bigint,
   limit?: bigint,
@@ -359,12 +333,13 @@ async function fetchOffpayUmbraUtxoData(
     );
   }
 
-  let columnarResponse: Awaited<ReturnType<ReadServiceClient['getUtxoDataColumnar']>>;
+  let response: Awaited<ReturnType<typeof getUmbraUtxos>>;
   try {
-    columnarResponse = await client.getUtxoDataColumnar({
-      start: startIndex,
-      end: endIndex,
-      limit,
+    response = await getUmbraUtxos({
+      network,
+      start: startIndex.toString(),
+      ...(endIndex !== undefined ? { end: endIndex.toString() } : {}),
+      ...(limit !== undefined ? { limit: limit.toString() } : {}),
     });
   } catch (error) {
     if (error instanceof IndexerError) throw error;
@@ -378,43 +353,32 @@ async function fetchOffpayUmbraUtxoData(
     );
   }
 
-  const cols = columnarResponse.columns;
   const items = new Map<bigint, UtxoDataItem>();
-  if (cols != null) {
-    for (let rowIndex = 0; rowIndex < cols.absolute_index.length; rowIndex += 1) {
-      try {
-        const item = normalizeColumnarUtxoDataItem(cols, rowIndex);
-        items.set(item.insertionIndex as bigint, item);
-      } catch (error) {
-        const absoluteIndex = readColumnValue(cols.absolute_index, rowIndex, 'absolute_index');
-        throw new IndexerError(
-          'parse',
-          `Failed to parse UTXO data for index ${String(absoluteIndex)}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          {
-            operation: 'fetchUtxoData',
-            cause: error instanceof Error ? error : undefined,
-          },
-        );
-      }
+  for (const utxo of response.utxos) {
+    try {
+      const item = normalizeOffpayUtxoDataItem(utxo);
+      items.set(item.insertionIndex as bigint, item);
+    } catch (error) {
+      const absoluteIndex = readCandidate(utxo, ['absolute_index', 'absoluteIndex']);
+      throw new IndexerError(
+        'parse',
+        `Failed to parse UTXO data for index ${String(absoluteIndex)}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        {
+          operation: 'fetchUtxoData',
+          cause: error instanceof Error ? error : undefined,
+        },
+      );
     }
   }
 
   return {
     items: items as never,
-    hasMore: columnarResponse.has_more,
-    nextCursor: columnarResponse.next_cursor ?? undefined,
-    totalCount: columnarResponse.total_count as never,
+    hasMore: response.hasMore,
+    nextCursor: response.cursor == null ? undefined : BigInt(response.cursor),
+    totalCount: BigInt(response.totalCount) as never,
   };
-}
-
-function readColumnValue<T>(values: readonly T[], rowIndex: number, label: string): T {
-  const value = values[rowIndex];
-  if (value === undefined) {
-    throw new Error(`Umbra indexer response is missing ${label}.`);
-  }
-  return value;
 }
 
 function readU128ColumnValue(value: unknown, label: string): bigint {
@@ -428,105 +392,109 @@ function readU128ColumnValue(value: unknown, label: string): bigint {
   throw new Error(`Umbra indexer response has invalid ${label}.`);
 }
 
-function normalizeColumnarUtxoDataItem(cols: UtxoColumnarColumns, rowIndex: number): UtxoDataItem {
+function normalizeOffpayUtxoDataItem(utxo: Record<string, JsonValue>): UtxoDataItem {
   const senderAddress = splitAddressBase64(
-    readColumnValue(cols.h1_sender_address, rowIndex, 'h1_sender_address'),
+    readRequiredString(utxo, ['h1_sender_address', 'h1SenderAddress'], 'h1_sender_address'),
     'h1_sender_address',
   );
   const mintAddress = splitAddressBase64(
-    readColumnValue(cols.h1_mint_address, rowIndex, 'h1_mint_address'),
+    readRequiredString(utxo, ['h1_mint_address', 'h1MintAddress'], 'h1_mint_address'),
     'h1_mint_address',
   );
-  const eventType = readColumnValue(cols.event_type, rowIndex, 'event_type');
+  const eventType = readRequiredString(utxo, ['event_type', 'eventType'], 'event_type');
   if (eventType !== 'deposit' && eventType !== 'callback') {
     throw new Error(`Umbra indexer response has invalid event_type: ${String(eventType)}.`);
   }
 
   return {
     absoluteIndex: readBigint(
-      readColumnValue(cols.absolute_index, rowIndex, 'absolute_index'),
+      readCandidate(utxo, ['absolute_index', 'absoluteIndex']),
       'absolute_index',
     ),
     treeIndex: readBigint(
-      readColumnValue(cols.tree_index, rowIndex, 'tree_index'),
+      readCandidate(utxo, ['tree_index', 'treeIndex']),
       'tree_index',
     ) as never,
     insertionIndex: readBigint(
-      readColumnValue(cols.insertion_index, rowIndex, 'insertion_index'),
+      readCandidate(utxo, ['insertion_index', 'insertionIndex']),
       'insertion_index',
     ) as never,
     finalCommitment: base64ToFixedBytes(
-      readColumnValue(cols.final_commitment, rowIndex, 'final_commitment'),
+      readRequiredString(utxo, ['final_commitment', 'finalCommitment'], 'final_commitment'),
       32,
       'final_commitment',
     ) as never,
     h1Components: {
       version: readU128ColumnValue(
-        readColumnValue(cols.h1_version, rowIndex, 'h1_version'),
+        readCandidate(utxo, ['h1_version', 'h1Version']),
         'h1_version',
       ) as never,
       commitmentIndex: readU128ColumnValue(
-        readColumnValue(cols.h1_commitment_index, rowIndex, 'h1_commitment_index'),
+        readCandidate(utxo, ['h1_commitment_index', 'h1CommitmentIndex']),
         'h1_commitment_index',
       ) as never,
       senderAddressLow: senderAddress.low as never,
       senderAddressHigh: senderAddress.high as never,
       relayerFixedSolFees: readBigint(
-        readColumnValue(cols.h1_relayer_fixed_sol_fees, rowIndex, 'h1_relayer_fixed_sol_fees'),
+        readCandidate(utxo, ['h1_relayer_fixed_sol_fees', 'h1RelayerFixedSolFees']),
         'h1_relayer_fixed_sol_fees',
       ) as never,
       mintAddressLow: mintAddress.low as never,
       mintAddressHigh: mintAddress.high as never,
       timestamp: {
-        year: readBigint(readColumnValue(cols.h1_year, rowIndex, 'h1_year'), 'h1_year') as never,
+        year: readBigint(readCandidate(utxo, ['h1_year', 'h1Year']), 'h1_year') as never,
         month: readBigint(
-          readColumnValue(cols.h1_month, rowIndex, 'h1_month'),
+          readCandidate(utxo, ['h1_month', 'h1Month']),
           'h1_month',
         ) as never,
-        day: readBigint(readColumnValue(cols.h1_day, rowIndex, 'h1_day'), 'h1_day') as never,
-        hour: readBigint(readColumnValue(cols.h1_hour, rowIndex, 'h1_hour'), 'h1_hour') as never,
+        day: readBigint(readCandidate(utxo, ['h1_day', 'h1Day']), 'h1_day') as never,
+        hour: readBigint(readCandidate(utxo, ['h1_hour', 'h1Hour']), 'h1_hour') as never,
         minute: readBigint(
-          readColumnValue(cols.h1_minute, rowIndex, 'h1_minute'),
+          readCandidate(utxo, ['h1_minute', 'h1Minute']),
           'h1_minute',
         ) as never,
         second: readBigint(
-          readColumnValue(cols.h1_second, rowIndex, 'h1_second'),
+          readCandidate(utxo, ['h1_second', 'h1Second']),
           'h1_second',
         ) as never,
       },
       poolVolumeSpl: readBigint(
-        readColumnValue(cols.h1_pool_volume_spl, rowIndex, 'h1_pool_volume_spl'),
+        readCandidate(utxo, ['h1_pool_volume_spl', 'h1PoolVolumeSpl']),
         'h1_pool_volume_spl',
       ) as never,
       poolVolumeSol: readBigint(
-        readColumnValue(cols.h1_pool_volume_sol, rowIndex, 'h1_pool_volume_sol'),
+        readCandidate(utxo, ['h1_pool_volume_sol', 'h1PoolVolumeSol']),
         'h1_pool_volume_sol',
       ) as never,
     },
     h1Hash: base64ToFixedBytes(
-      readColumnValue(cols.h1_hash, rowIndex, 'h1_hash'),
+      readRequiredString(utxo, ['h1_hash', 'h1Hash'], 'h1_hash'),
       32,
       'h1_hash',
     ) as never,
     h2Hash: base64ToFixedBytes(
-      readColumnValue(cols.h2_hash, rowIndex, 'h2_hash'),
+      readRequiredString(utxo, ['h2_hash', 'h2Hash'], 'h2_hash'),
       32,
       'h2_hash',
     ) as never,
     aesEncryptedData: base64ToBytes(
-      readColumnValue(cols.aes_encrypted_data, rowIndex, 'aes_encrypted_data'),
+      readRequiredString(utxo, ['aes_encrypted_data', 'aesEncryptedData'], 'aes_encrypted_data'),
       'aes_encrypted_data',
     ) as never,
     depositorX25519PublicKey: base64ToFixedBytes(
-      readColumnValue(cols.depositor_x25519_public_key, rowIndex, 'depositor_x25519_public_key'),
+      readRequiredString(
+        utxo,
+        ['depositor_x25519_public_key', 'depositorX25519PublicKey'],
+        'depositor_x25519_public_key',
+      ),
       32,
       'depositor_x25519_public_key',
     ) as never,
     timestamp: readBigint(
-      readColumnValue(cols.timestamp, rowIndex, 'timestamp'),
+      readCandidate(utxo, ['timestamp']),
       'timestamp',
     ) as never,
-    slot: readBigint(readColumnValue(cols.slot, rowIndex, 'slot'), 'slot') as never,
+    slot: readBigint(readCandidate(utxo, ['slot']), 'slot') as never,
     eventType,
   };
 }
@@ -534,22 +502,22 @@ function normalizeColumnarUtxoDataItem(cols: UtxoColumnarColumns, rowIndex: numb
 export function createOffpayUmbraTreeSummaryFetcher(
   network: OffpayNetwork,
 ): TreeSummaryFetcherFunction {
-  return getTreeSummaryFetcher({
-    apiEndpoint: getUmbraIndexerEndpoint(network),
-  });
+  return async () => {
+    const response = await getUmbraTreeSummaries(network);
+    return response.trees.map((tree) => ({
+      treeIndex: BigInt(tree.treeIndex) as never,
+      numLeaves: BigInt(tree.numLeaves) as never,
+    }));
+  };
 }
 
 export function createOffpayUmbraBatchMerkleProofFetcher(network: OffpayNetwork) {
-  const sdkFetcher = getBatchMerkleProofFetcher({
-    apiEndpoint: getUmbraIndexerEndpoint(network),
-  });
-
   return async (
     treeIndex: bigint,
     insertionIndices: readonly bigint[],
   ): Promise<BatchMerkleProofResult> => {
     const startedAt = mark();
-    const result = await sdkFetcher(treeIndex as never, insertionIndices as never);
+    const result = await fetchOffpayUmbraBatchMerkleProof(network, treeIndex, insertionIndices);
     // The Merkle root is a public input to the claim proof (aggregated-hash
     // slot [0]) and the on-chain program verifies it against its bounded
     // root-history window. If the indexer's root drifts from the on-chain
@@ -570,6 +538,72 @@ export function createOffpayUmbraBatchMerkleProofFetcher(network: OffpayNetwork)
       });
     }
     return result;
+  };
+}
+
+function readProofPathBytes(value: JsonValue | undefined): Uint8Array[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Umbra proof entry is missing a Merkle path.');
+  }
+
+  return value.map((entry, index) =>
+    jsonValueToFixedBytes(entry, 32, `proof[${index}]`),
+  );
+}
+
+function jsonValueToFixedBytes(value: JsonValue | undefined, length: number, label: string): Uint8Array {
+  if (typeof value === 'string') {
+    return base64ToFixedBytes(value, length, label);
+  }
+
+  if (Array.isArray(value) && value.every((entry) => typeof entry === 'number')) {
+    const bytes = Uint8Array.from(value as number[]);
+    if (bytes.length !== length) {
+      throw new Error(`Umbra indexer response ${label} must be ${length} bytes.`);
+    }
+    return bytes;
+  }
+
+  throw new Error(`Umbra indexer response has invalid ${label}.`);
+}
+
+async function fetchOffpayUmbraBatchMerkleProof(
+  network: OffpayNetwork,
+  treeIndex: bigint,
+  insertionIndices: readonly bigint[],
+): Promise<BatchMerkleProofResult> {
+  const response = await getUmbraTreeProofs({
+    network,
+    treeIndex: Number(treeIndex),
+    insertionIndexes: insertionIndices.map((insertionIndex) => Number(insertionIndex)),
+  });
+
+  if (response.root == null) {
+    throw new Error('Umbra proof batch response is missing the Merkle root.');
+  }
+
+  const proofs = new Map<bigint, { merklePath: Uint8Array[]; leaf: Uint8Array }>();
+  for (const entry of response.proofs) {
+    if (!isRecord(entry)) {
+      throw new Error('Umbra proof batch response has an invalid proof entry.');
+    }
+
+    const insertionIndex = readBigint(
+      readCandidate(entry, ['insertion_index', 'insertionIndex']),
+      'insertion_index',
+    );
+    const proofValue = readCandidate(entry, ['proof', 'merkleProof', 'merkle_path', 'merklePath']);
+    const leafValue = readCandidate(entry, ['leaf']);
+
+    proofs.set(insertionIndex, {
+      merklePath: readProofPathBytes(proofValue as JsonValue | undefined) as never,
+      leaf: jsonValueToFixedBytes(leafValue as JsonValue | undefined, 32, 'leaf') as never,
+    });
+  }
+
+  return {
+    root: jsonValueToFixedBytes(response.root, 32, 'root') as never,
+    proofs: proofs as never,
   };
 }
 

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef } from 'react';
  * Use this for imperative async work started in response to a user
  * gesture on the screen — pull-to-refresh, button-driven refetches,
  * mutation-triggered cache invalidations. Pass the signal to any
- * `lib/offpay-api-client` / `services/*` function that accepts one,
+ * `lib/api/offpay-api-client` function that accepts one,
  * and the request is cancelled at the network layer the moment the
  * user navigates away.
  *

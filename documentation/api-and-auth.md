@@ -1,6 +1,6 @@
 # API And Auth Contract
 
-The client sends only protected OffPay backend traffic to `https://api.offpay.app` from `lib/offpay-api-client.ts`. Chain, wallet, stream, Umbra, private payment, and offline helper paths route through the client-side provider adapters in `services/`.
+The client sends OffPay backend traffic through the configured API Worker custom domain from `lib/api/offpay-api-client.ts`. Chain, wallet, stream, Umbra, private payment, offline helper, swap, bootstrap, and pending-backup paths route through the Worker.
 
 ## Auth Flow
 
@@ -17,7 +17,7 @@ sequenceDiagram
   Client->>Backend: POST /api/bootstrap/provision with nonce signature and attestation fields
   Backend-->>Client: request secret, issuedAt, bootstrapVersion
   Client->>Storage: persist request secret, device id, bootstrap version
-  Client->>Backend: protected swap, pending backup, or bootstrap request with wallet signature and HMAC headers
+  Client->>Backend: protected Worker request with wallet signature and HMAC headers
 ```
 
 ## Protected Headers
@@ -37,7 +37,7 @@ The signed message is `offpay:<wallet>:<timestamp>:<method>:<pathAndQuery>:<body
 
 ## Recovery Behavior
 
-`offpayApiRequest()` retries a `SIGNATURE_INVALID` request once. It also runs bootstrap recovery for `SECRET_ROTATED` or `HMAC_INVALID` when an auth recovery handler is registered.
+`offpayApiRequest()` retries a `SIGNATURE_INVALID` request once. It also runs bootstrap recovery when local bootstrap credentials are missing, or for `SECRET_ROTATED` / `HMAC_INVALID` when an auth recovery handler is registered.
 
 ## Network Contract
 
@@ -51,34 +51,32 @@ The signed message is `offpay:<wallet>:<timestamp>:<method>:<pathAndQuery>:<body
 ```mermaid
 flowchart TB
   ApiClient["lib/offpay-api-client.ts"]
-  ClientAdapters["services/ client adapters"]
-  Providers["RPC: Helius / Alchemy; WSS: Helius"]
-  PublicServices["Umbra / MagicBlock public APIs"]
+  Worker["OffPay API Worker"]
+  Providers["Worker providers: Helius / Alchemy / Jupiter / MagicBlock / Umbra"]
   Bootstrap["/api/bootstrap/provision"]
-  Capabilities["local capabilities"]
-  Wallet["direct wallet RPC"]
-  Stream["direct WSS account subscriptions"]
+  Capabilities["/api/capabilities"]
+  Wallet["/api/wallet/*"]
+  Stream["/api/stream/*"]
   Pending["/api/pending/backup"]
   Swap["/api/swap/*"]
-  Payment["client private payment helpers"]
-  Rpc["direct Solana RPC"]
-  Offline["client offline helpers"]
+  Payment["/api/payment/*"]
+  Rpc["/api/rpc/*"]
+  Offline["/api/offline/*"]
 
-  ApiClient --> Bootstrap
-  ApiClient --> ClientAdapters
-  ClientAdapters --> Capabilities
-  ClientAdapters --> Wallet
-  ClientAdapters --> Stream
-  ApiClient --> Pending
-  ApiClient --> Swap
-  ClientAdapters --> Payment
-  ClientAdapters --> Rpc
-  ClientAdapters --> Offline
-  ClientAdapters --> Providers
-  ClientAdapters --> PublicServices
+  ApiClient --> Worker
+  Worker --> Bootstrap
+  Worker --> Capabilities
+  Worker --> Wallet
+  Worker --> Stream
+  Worker --> Pending
+  Worker --> Swap
+  Worker --> Payment
+  Worker --> Rpc
+  Worker --> Offline
+  Worker --> Providers
 ```
 
-`types/offpay-api.ts` defines the TypeScript request and response contracts used by the retained backend routes and the client-side adapter boundary.
+`types/offpay-api.ts` defines the TypeScript request and response contracts used by the Worker-backed API boundary.
 
 ## Network Access Guard
 

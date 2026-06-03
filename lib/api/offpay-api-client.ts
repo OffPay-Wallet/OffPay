@@ -7,41 +7,6 @@ import {
   zeroOutBytes,
 } from '@/lib/crypto/offpay-api-auth';
 import Constants from 'expo-constants';
-import { getClientCapabilities } from '@/services/capabilities';
-import {
-  broadcastRawTransaction as providerBroadcastRawTransaction,
-  getRpcAccounts as providerGetRpcAccounts,
-  getRpcEpochInfo as providerGetRpcEpochInfo,
-  getRpcFeeForMessage as providerGetRpcFeeForMessage,
-  getRpcLatestBlockhash as providerGetRpcLatestBlockhash,
-  getRpcSignatureStatuses as providerGetRpcSignatureStatuses,
-  getRpcSignaturesForAddress as providerGetRpcSignaturesForAddress,
-  getRpcSlot as providerGetRpcSlot,
-  getRpcTokenLargestAccounts as providerGetRpcTokenLargestAccounts,
-  getWalletBalance as providerGetWalletBalance,
-  getWalletTransactions as providerGetWalletTransactions,
-  hasConfiguredWsProvider,
-} from '@/services/rpc';
-import {
-  getPrivatePaymentBalance as clientGetPrivatePaymentBalance,
-  initializePrivatePaymentMint as clientInitializePrivatePaymentMint,
-  preparePrivateSend as clientPreparePrivateSend,
-  settlePrivatePayments as clientSettlePrivatePayments,
-} from '@/services/private-payments';
-import {
-  getOfflineNoncePoolStatus as clientGetOfflineNoncePoolStatus,
-  getOfflineRentEstimate as clientGetOfflineRentEstimate,
-  getOfflineTokenContext as clientGetOfflineTokenContext,
-  prepareOfflineNonceAdvance as clientPrepareOfflineNonceAdvance,
-  prepareOfflineNoncePool as clientPrepareOfflineNoncePool,
-} from '@/services/offline';
-import {
-  getUmbraClaimStatus as clientGetUmbraClaimStatus,
-  getUmbraRelayerInfo as clientGetUmbraRelayerInfo,
-  getUmbraTreeProofs as clientGetUmbraTreeProofs,
-  getUmbraUtxos as clientGetUmbraUtxos,
-  submitUmbraClaim as clientSubmitUmbraClaim,
-} from '@/services/umbra';
 import {
   clearOffpayBootstrapCredentials,
   getOffpayBootstrapVersion,
@@ -67,6 +32,7 @@ import type {
   BootstrapProvisionPrototypeBypassBody,
   BootstrapProvisionResponse,
   CapabilitiesResponse,
+  FxRateResponse,
   OffpayApiMethod,
   OffpayNetwork,
   PaymentSettleRequest,
@@ -128,6 +94,7 @@ import type {
   UmbraClaimResponse,
   UmbraClaimStatusResponse,
   UmbraRelayerInfoResponse,
+  UmbraTreeSummariesResponse,
   UmbraTreeProofsRequest,
   UmbraTreeProofsResponse,
   UmbraUtxosRequest,
@@ -136,13 +103,60 @@ import type {
   WalletTransactionsResponse,
 } from '@/types/offpay-api';
 
-const PUBLIC_OFFPAY_API_ORIGIN = process.env.EXPO_PUBLIC_OFFPAY_API_ORIGIN?.trim();
+function splitCsv(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
 
-export const OFFPAY_API_ORIGIN = (
-  PUBLIC_OFFPAY_API_ORIGIN != null && PUBLIC_OFFPAY_API_ORIGIN.length > 0
-    ? PUBLIC_OFFPAY_API_ORIGIN
-    : 'https://api.offpay.app'
-).replace(/\/$/, '');
+function isLocalDevelopmentOrigin(url: URL): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    url.protocol === 'http:' &&
+    (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+  );
+}
+
+function normalizeApiOrigin(rawValue: string, envKey: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawValue);
+  } catch {
+    throw new Error(`${envKey} must be a valid absolute URL.`);
+  }
+
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+    throw new Error(`${envKey} must be an origin only, for example https://api.offpay.app.`);
+  }
+
+  if (parsed.protocol !== 'https:' && !isLocalDevelopmentOrigin(parsed)) {
+    throw new Error(`${envKey} must use HTTPS outside local development.`);
+  }
+
+  return parsed.origin;
+}
+
+function resolveOffpayApiOrigin(): string {
+  const rawOrigin = process.env.EXPO_PUBLIC_OFFPAY_API_ORIGIN?.trim();
+  if (!rawOrigin) {
+    throw new Error('EXPO_PUBLIC_OFFPAY_API_ORIGIN must be configured.');
+  }
+
+  const origin = normalizeApiOrigin(rawOrigin, 'EXPO_PUBLIC_OFFPAY_API_ORIGIN');
+  const allowedOrigins = splitCsv(process.env.EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS).map(
+    (entry) => normalizeApiOrigin(entry, 'EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS'),
+  );
+  const effectiveAllowedOrigins = allowedOrigins.length > 0 ? allowedOrigins : [origin];
+
+  if (!effectiveAllowedOrigins.includes(origin)) {
+    throw new Error('EXPO_PUBLIC_OFFPAY_API_ORIGIN is not in EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS.');
+  }
+
+  return origin;
+}
+
+export const OFFPAY_API_ORIGIN = resolveOffpayApiOrigin();
 export const OFFPAY_APP_VERSION =
   Constants.expoConfig?.version ?? Constants.nativeAppVersion ?? '0.0.0';
 
@@ -249,6 +263,16 @@ function appendQuery(path: `/${string}`, query?: QueryParams): string {
 
 function buildUrl(pathAndQuery: string): string {
   return `${OFFPAY_API_ORIGIN}${pathAndQuery}`;
+}
+
+function buildIdempotencyKey(prefix: string, values: readonly string[]): string {
+  let hash = 2166136261;
+  const input = values.join('|');
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${prefix}:${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
 function isBackendErrorEnvelope(value: unknown): value is BackendErrorEnvelope {
@@ -394,62 +418,13 @@ async function offpayPublicRequest<T>(options: PublicRequestOptions): Promise<T>
   }
 }
 
-async function fetchFrankfurterUsdRate(currency: string): Promise<number> {
-  assertOffpayNetworkAccessAllowed();
-
-  const handle = withTimeout(undefined);
-  try {
-    const response = await fetch(`https://api.frankfurter.app/latest?from=USD&to=${currency}`, {
-      signal: handle.signal,
-    });
-    if (!response.ok) {
-      throw new Error(`Frankfurter does not have a USD/${currency} rate.`);
-    }
-
-    const body = (await parseJsonResponse(response)) as { rates?: Record<string, number> };
-    const rate = body.rates?.[currency];
-    if (typeof rate !== 'number' || !Number.isFinite(rate)) {
-      throw new Error(`Frankfurter missing USD/${currency} rate.`);
-    }
-
-    return rate;
-  } finally {
-    handle.cleanup();
-  }
-}
-
-async function fetchCurrencyApiUsdRate(currency: string): Promise<number> {
-  assertOffpayNetworkAccessAllowed();
-
-  const target = currency.toLowerCase();
-  const handle = withTimeout(undefined);
-  try {
-    const response = await fetch(
-      'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json',
-      { signal: handle.signal },
-    );
-    if (!response.ok) {
-      throw new Error(`Currency API does not have a USD/${currency} rate.`);
-    }
-
-    const body = (await parseJsonResponse(response)) as { usd?: Record<string, unknown> };
-    const rate = body.usd?.[target];
-    if (typeof rate !== 'number' || !Number.isFinite(rate)) {
-      throw new Error(`Currency API missing USD/${currency} rate.`);
-    }
-
-    return rate;
-  } finally {
-    handle.cleanup();
-  }
-}
-
 export async function fetchUsdToCurrencyRateFromNetwork(currency: string): Promise<number> {
-  try {
-    return await fetchFrankfurterUsdRate(currency);
-  } catch {
-    return fetchCurrencyApiUsdRate(currency);
-  }
+  const response = await offpayPublicRequest<FxRateResponse>({
+    path: '/api/market/fx-rate',
+    query: { currency },
+    timeoutMs: 4000,
+  });
+  return response.rate;
 }
 
 export function setOffpayAuthRecoveryHandler(handler: (() => Promise<void>) | null): void {
@@ -619,12 +594,35 @@ async function getStoredAuthContext(walletId?: string): Promise<StoredAuthContex
   };
 }
 
+function isMissingBootstrapCredentialsError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message === 'OffPay API bootstrap is required before this request.'
+  );
+}
+
 export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promise<T> {
   assertOffpayNetworkAccessAllowed();
 
   const method = options.method ?? 'GET';
   const pathAndQuery = appendQuery(options.path, options.query);
-  const authContext = await getStoredAuthContext(options.walletId);
+  let authContext: StoredAuthContext;
+
+  try {
+    authContext = await getStoredAuthContext(options.walletId);
+  } catch (error) {
+    if (isMissingBootstrapCredentialsError(error) && options.retryAuthRecovery !== false) {
+      const reprovisionAuth = options.reprovisionAuth ?? offpayAuthRecoveryHandler;
+      if (await recoverOffpayAuth(reprovisionAuth)) {
+        return offpayApiRequest<T>({
+          ...options,
+          retryAuthRecovery: false,
+        });
+      }
+    }
+
+    throw error;
+  }
 
   try {
     const headers: Record<string, string> = {
@@ -785,8 +783,16 @@ export async function provisionBootstrap(
   }
 }
 
-export function getCapabilities(network: OffpayNetwork): Promise<CapabilitiesResponse> {
-  return Promise.resolve(getClientCapabilities(network));
+export function getCapabilities(
+  network: OffpayNetwork,
+  options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<CapabilitiesResponse> {
+  return offpayPublicRequest<CapabilitiesResponse>({
+    path: '/api/capabilities',
+    query: { network },
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  });
 }
 
 export function getWalletBalance(
@@ -794,7 +800,12 @@ export function getWalletBalance(
   network: OffpayNetwork,
   options?: { useCache?: boolean; signal?: AbortSignal },
 ): Promise<WalletBalanceResponse> {
-  return providerGetWalletBalance(walletAddress, network, { signal: options?.signal });
+  return offpayApiRequest<WalletBalanceResponse>({
+    path: '/api/wallet/balance',
+    query: { address: walletAddress, network, useCache: options?.useCache },
+    network,
+    signal: options?.signal,
+  });
 }
 
 export function getWalletTransactions(
@@ -802,15 +813,24 @@ export function getWalletTransactions(
   network: OffpayNetwork,
   options?: { cursor?: string; limit?: number; signal?: AbortSignal },
 ): Promise<WalletTransactionsResponse> {
-  return providerGetWalletTransactions(walletAddress, network, options);
+  return offpayApiRequest<WalletTransactionsResponse>({
+    path: '/api/wallet/transactions',
+    query: {
+      address: walletAddress,
+      network,
+      cursor: options?.cursor,
+      limit: options?.limit,
+    },
+    network,
+    signal: options?.signal,
+  });
 }
 
 export function getStreamCapabilities(network: OffpayNetwork): Promise<StreamCapabilitiesResponse> {
-  return Promise.resolve({
+  return offpayApiRequest<StreamCapabilitiesResponse>({
+    path: '/api/stream/capabilities',
+    query: { network },
     network,
-    capabilities: {
-      walletActivity: hasConfiguredWsProvider(network),
-    },
   });
 }
 
@@ -1036,7 +1056,12 @@ export function finalizePrivacySwapEnvelope(
 export function initializePrivatePaymentMint(
   request: PrivateInitMintRequest,
 ): Promise<PrivateInitMintResponse> {
-  return clientInitializePrivatePaymentMint(request);
+  return offpayApiRequest<PrivateInitMintResponse>({
+    path: '/api/payment/private-init-mint',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function getPrivatePaymentBalance(
@@ -1044,27 +1069,50 @@ export function getPrivatePaymentBalance(
   network: OffpayNetwork,
   mint?: string,
 ): Promise<PrivateBalanceResponse> {
-  return clientGetPrivatePaymentBalance(walletAddress, network, mint);
+  return offpayApiRequest<PrivateBalanceResponse>({
+    path: '/api/payment/private-balance',
+    query: { wallet: walletAddress, network, mint },
+    network,
+  });
 }
 
 export function preparePrivateSend(request: PrivateSendRequest): Promise<PrivateSendResponse> {
-  return clientPreparePrivateSend(request);
+  return offpayApiRequest<PrivateSendResponse>({
+    path: '/api/payment/private-send',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function settlePrivatePayments(
   request: PaymentSettleRequest,
 ): Promise<PaymentSettleResponse> {
-  return clientSettlePrivatePayments(request);
+  return offpayApiRequest<PaymentSettleResponse>({
+    path: '/api/payment/settle',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function broadcastRawTransaction(
   request: RpcBroadcastRequest,
 ): Promise<RpcBroadcastResponse> {
-  return providerBroadcastRawTransaction(request);
+  return offpayApiRequest<RpcBroadcastResponse>({
+    path: '/api/rpc/broadcast',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function getRpcLatestBlockhash(network: OffpayNetwork): Promise<RpcLatestBlockhashResponse> {
-  return providerGetRpcLatestBlockhash(network);
+  return offpayApiRequest<RpcLatestBlockhashResponse>({
+    path: '/api/rpc/latest-blockhash',
+    query: { network },
+    network,
+  });
 }
 
 export function getRpcFeeForMessage(params: {
@@ -1072,62 +1120,137 @@ export function getRpcFeeForMessage(params: {
   messageBase64: string;
   signal?: AbortSignal;
 }): Promise<{ lamports: number | null }> {
-  return providerGetRpcFeeForMessage(params);
+  return offpayApiRequest<{ lamports: number | null }>({
+    path: '/api/rpc/fee-for-message',
+    method: 'POST',
+    body: {
+      messageBase64: params.messageBase64,
+      network: params.network,
+    },
+    network: params.network,
+    signal: params.signal,
+  });
 }
 
 export function getRpcAccounts(request: RpcAccountsRequest): Promise<RpcAccountsResponse> {
-  return providerGetRpcAccounts(request);
+  return offpayApiRequest<RpcAccountsResponse>({
+    path: '/api/rpc/accounts',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function getRpcTokenLargestAccounts(
   request: RpcTokenLargestAccountsRequest,
 ): Promise<RpcTokenLargestAccountsResponse> {
-  return providerGetRpcTokenLargestAccounts(request);
+  return offpayApiRequest<RpcTokenLargestAccountsResponse>({
+    path: '/api/rpc/token-largest-accounts',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function getRpcEpochInfo(network: OffpayNetwork): Promise<RpcEpochInfoResponse> {
-  return providerGetRpcEpochInfo(network);
+  return offpayApiRequest<RpcEpochInfoResponse>({
+    path: '/api/rpc/epoch-info',
+    query: { network },
+    network,
+  });
 }
 
 export function getRpcSlot(network: OffpayNetwork): Promise<RpcSlotResponse> {
-  return providerGetRpcSlot(network);
+  return offpayApiRequest<RpcSlotResponse>({
+    path: '/api/rpc/slot',
+    query: { network },
+    network,
+  });
 }
 
 export function getRpcSignatureStatuses(
   request: RpcSignatureStatusesRequest,
 ): Promise<RpcSignatureStatusesResponse> {
-  return providerGetRpcSignatureStatuses(request);
+  return offpayApiRequest<RpcSignatureStatusesResponse>({
+    path: '/api/rpc/signature-statuses',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function getRpcSignaturesForAddress(
   request: RpcSignaturesForAddressRequest,
 ): Promise<RpcSignaturesForAddressResponse> {
-  return providerGetRpcSignaturesForAddress(request);
+  return offpayApiRequest<RpcSignaturesForAddressResponse>({
+    path: '/api/rpc/signatures-for-address',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function getUmbraUtxos(request: UmbraUtxosRequest): Promise<UmbraUtxosResponse> {
-  return clientGetUmbraUtxos(request);
+  return offpayApiRequest<UmbraUtxosResponse>({
+    path: '/api/umbra/utxos',
+    query: {
+      network: request.network,
+      start: request.start,
+      end: request.end,
+      limit: request.limit,
+    },
+    network: request.network,
+  });
 }
 
 export function getUmbraTreeProofs(
   request: UmbraTreeProofsRequest,
 ): Promise<UmbraTreeProofsResponse> {
-  return clientGetUmbraTreeProofs(request);
+  return offpayApiRequest<UmbraTreeProofsResponse>({
+    path: `/api/umbra/trees/${request.treeIndex}/proofs`,
+    method: 'POST',
+    body: {
+      network: request.network,
+      insertionIndexes: request.insertionIndexes,
+    },
+    network: request.network,
+  });
+}
+
+export function getUmbraTreeSummaries(network: OffpayNetwork): Promise<UmbraTreeSummariesResponse> {
+  return offpayApiRequest<UmbraTreeSummariesResponse>({
+    path: '/api/umbra/trees',
+    query: { network },
+    network,
+  });
 }
 
 export function getUmbraRelayerInfo(network: OffpayNetwork): Promise<UmbraRelayerInfoResponse> {
-  return clientGetUmbraRelayerInfo(network);
+  return offpayApiRequest<UmbraRelayerInfoResponse>({
+    path: '/api/umbra/relayer-info',
+    query: { network },
+    network,
+  });
 }
 
 export function submitUmbraClaim(request: UmbraClaimRequest): Promise<UmbraClaimResponse> {
-  return clientSubmitUmbraClaim(request);
+  return offpayApiRequest<UmbraClaimResponse>({
+    path: '/api/umbra/claim',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
 }
 
 export function getUmbraClaimStatus(params: {
   network: OffpayNetwork;
   id: string;
 }): Promise<UmbraClaimStatusResponse> {
-  return clientGetUmbraClaimStatus(params);
+  return offpayApiRequest<UmbraClaimStatusResponse>({
+    path: `/api/umbra/claim-status/${encodeURIComponent(params.id)}`,
+    query: { network: params.network },
+    network: params.network,
+  });
 }
 
 export function getOfflineRentEstimate(params: {
@@ -1136,7 +1259,15 @@ export function getOfflineRentEstimate(params: {
   network: OffpayNetwork;
 }): Promise<OfflineRentEstimateResponse> {
   return assertAuthenticatedWallet(params.walletAddress, 'Offline rent estimate').then(() =>
-    clientGetOfflineRentEstimate(params),
+    offpayApiRequest<OfflineRentEstimateResponse>({
+      path: '/api/offline/rent-estimate',
+      query: {
+        wallet: params.walletAddress,
+        slotCount: params.slotCount,
+        network: params.network,
+      },
+      network: params.network,
+    }),
   );
 }
 
@@ -1144,7 +1275,20 @@ export function prepareOfflineNoncePool(
   request: OfflineNoncePoolPrepareRequest,
 ): Promise<OfflineNoncePoolPrepareResponse> {
   return assertAuthenticatedWallet(request.walletAddress, 'Offline slot preparation').then(() =>
-    clientPrepareOfflineNoncePool(request),
+    offpayApiRequest<OfflineNoncePoolPrepareResponse>({
+      path: '/api/offline/nonce-pool/prepare',
+      method: 'POST',
+      body: request,
+      headers: {
+        'Idempotency-Key': buildIdempotencyKey('nonce-prepare', [
+          request.walletAddress,
+          request.nonceAuthority,
+          request.network,
+          ...request.nonceAccounts.slice().sort(),
+        ]),
+      },
+      network: request.network,
+    }),
   );
 }
 
@@ -1152,7 +1296,19 @@ export function prepareOfflineNonceAdvance(
   request: OfflineNoncePoolAdvanceRequest,
 ): Promise<OfflineNoncePoolAdvanceResponse> {
   return assertAuthenticatedWallet(request.walletAddress, 'Offline slot refresh').then(() =>
-    clientPrepareOfflineNonceAdvance(request),
+    offpayApiRequest<OfflineNoncePoolAdvanceResponse>({
+      path: '/api/offline/nonce-pool/advance',
+      method: 'POST',
+      body: request,
+      headers: {
+        'Idempotency-Key': buildIdempotencyKey('nonce-advance', [
+          request.walletAddress,
+          request.nonceAccount,
+          request.network,
+        ]),
+      },
+      network: request.network,
+    }),
   );
 }
 
@@ -1163,7 +1319,15 @@ export function getOfflineNoncePoolStatus(params: {
   nonceAccounts?: string[];
 }): Promise<OfflineNoncePoolStatusResponse> {
   return assertAuthenticatedWallet(params.walletAddress, 'Offline slot status').then(() =>
-    clientGetOfflineNoncePoolStatus(params),
+    offpayApiRequest<OfflineNoncePoolStatusResponse>({
+      path: '/api/offline/nonce-pool/status',
+      query: {
+        wallet: params.walletAddress,
+        targetSlotCount: params.targetSlotCount,
+        network: params.network,
+      },
+      network: params.network,
+    }),
   );
 }
 
@@ -1174,6 +1338,15 @@ export function getOfflineTokenContext(params: {
   network: OffpayNetwork;
 }): Promise<OfflineTokenContextResponse> {
   return assertAuthenticatedWallet(params.sender, 'Offline token context').then(() =>
-    clientGetOfflineTokenContext(params),
+    offpayApiRequest<OfflineTokenContextResponse>({
+      path: '/api/offline/token-context',
+      query: {
+        mint: params.mint,
+        sender: params.sender,
+        recipient: params.recipient,
+        network: params.network,
+      },
+      network: params.network,
+    }),
   );
 }

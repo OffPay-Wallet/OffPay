@@ -47,11 +47,9 @@ flowchart LR
   Query["TanStack Query cache"]
   Stores["Zustand stores"]
   Api["offpay-api-client"]
-  ClientBackend["services/ client adapters"]
   Storage["SecureStore-backed storage"]
   Backend["api.offpay.app"]
-  Providers["RPC: Helius / Alchemy; WSS: Helius"]
-  PublicServices["Umbra / MagicBlock public APIs"]
+  Providers["Worker providers"]
 
   Screens --> Hooks
   Hooks --> Query
@@ -59,10 +57,8 @@ flowchart LR
   Hooks --> Api
   Stores --> Storage
   Api --> Storage
-  Api --> ClientBackend
-  ClientBackend --> Providers
-  ClientBackend --> PublicServices
   Api --> Backend
+  Backend --> Providers
 ```
 
 ## Main Stores
