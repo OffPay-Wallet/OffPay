@@ -93,7 +93,11 @@ export function assignPayrollRoutes(
     }
   }
 
-  return { rows, split, mintWouldChangeOnFallback: !shareMint };
+  return {
+    rows,
+    split,
+    mintWouldChangeOnFallback: !shareMint && params.facts.umbraTokenSupported,
+  };
 }
 
 /**

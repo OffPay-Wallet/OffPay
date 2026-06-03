@@ -26,6 +26,7 @@ import { payrollStyles as styles } from './styles';
 interface PayrollPasteSheetProps {
   visible: boolean;
   busy: boolean;
+  error?: string | null;
   onClose: () => void;
   onSubmit: (fileName: string, text: string) => boolean | Promise<boolean>;
 }
@@ -33,6 +34,7 @@ interface PayrollPasteSheetProps {
 export function PayrollPasteSheet({
   visible,
   busy,
+  error,
   onClose,
   onSubmit,
 }: PayrollPasteSheetProps): React.JSX.Element {
@@ -71,6 +73,12 @@ export function PayrollPasteSheet({
               Paste CSV, TSV, JSON, or manual rows. Headerless rows can use wallet amount.
             </Text>
 
+            {error != null ? (
+              <Text style={pasteStyles.errorText} selectable>
+                {error}
+              </Text>
+            ) : null}
+
             <ScrollView keyboardShouldPersistTaps="always" style={pasteStyles.inputScroller}>
               <TextInput
                 value={text}
@@ -78,6 +86,7 @@ export function PayrollPasteSheet({
                 placeholder={'wallet,amount\nAbc...123,100\nDef...456,50'}
                 placeholderTextColor={colors.text.placeholder}
                 style={pasteStyles.input}
+                selectionColor={colors.brand.whiteStream}
                 multiline
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -135,7 +144,12 @@ const pasteStyles = StyleSheet.create({
     fontFamily: 'GeistMono-Regular',
     fontSize: 13,
     color: colors.text.primary,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.glass.clearFill,
     textAlignVertical: 'top',
+  },
+  errorText: {
+    color: colors.semantic.error,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

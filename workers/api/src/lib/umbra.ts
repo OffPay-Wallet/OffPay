@@ -25,6 +25,7 @@ const DEFAULT_UMBRA_RELAYER_URLS: Readonly<Record<Network, string>> = {
 };
 const DEFAULT_UMBRA_CIRCUIT_VERSION = 'v3';
 const DEFAULT_UMBRA_MIN_SDK_VERSION = '3.0.0';
+const OFFPAY_UMBRA_USER_AGENT = 'OffPay-API-Worker/1.0';
 const UMBRA_BALANCE_CACHE_TTL_MS = 30_000;
 const UMBRA_INDEXER_HEALTH_CACHE_TTL_MS = 30_000;
 const UMBRA_INDEXER_SLOT_STALE_THRESHOLD: Readonly<Record<Network, number>> = {
@@ -94,28 +95,11 @@ const UMBRA_TREE_PROOFS_PATH_CANDIDATES = [
   '/api/umbra/trees/:treeIndex/proofs',
 ] as const;
 
-const UMBRA_TREE_SUMMARIES_PATH_CANDIDATES = [
-  '/v1/trees',
-  '/api/v1/trees',
-  '/trees',
-  '/api/trees',
-  '/v1/umbra/trees',
-  '/api/v1/umbra/trees',
-  '/umbra/trees',
-  '/api/umbra/trees',
-] as const;
+const UMBRA_RELAYER_INFO_PATH_CANDIDATES = ['/v1/relayer/info'] as const;
 
-const UMBRA_RELAYER_INFO_PATH_CANDIDATES = [
-  '/v1/relayer/info',
-] as const;
+const UMBRA_CLAIM_PATH_CANDIDATES = ['/v1/claims'] as const;
 
-const UMBRA_CLAIM_PATH_CANDIDATES = [
-  '/v1/claims',
-] as const;
-
-const UMBRA_CLAIM_STATUS_PATH_CANDIDATES = [
-  '/v1/claims/:id',
-] as const;
+const UMBRA_CLAIM_STATUS_PATH_CANDIDATES = ['/v1/claims/:id'] as const;
 
 interface UmbraShieldedBalance {
   mint: string;
@@ -338,26 +322,24 @@ function normalizeUmbraHttpUrl(baseUrl: string): string {
 }
 
 function getUmbraIndexerUrl(bindings: Bindings, network: Network): string {
-  const configuredUrl = network === 'mainnet'
-    ? bindings.UMBRA_INDEXER_URL_MAINNET?.trim()
-    : bindings.UMBRA_INDEXER_URL_DEVNET?.trim();
+  const configuredUrl =
+    network === 'mainnet'
+      ? bindings.UMBRA_INDEXER_URL_MAINNET?.trim()
+      : bindings.UMBRA_INDEXER_URL_DEVNET?.trim();
 
   return normalizeUmbraHttpUrl(
-    configuredUrl && configuredUrl.length > 0
-      ? configuredUrl
-      : DEFAULT_UMBRA_INDEXER_URLS[network],
+    configuredUrl && configuredUrl.length > 0 ? configuredUrl : DEFAULT_UMBRA_INDEXER_URLS[network],
   );
 }
 
 function getUmbraRelayerUrl(bindings: Bindings, network: Network): string {
-  const configuredUrl = network === 'mainnet'
-    ? bindings.UMBRA_RELAYER_URL_MAINNET?.trim()
-    : bindings.UMBRA_RELAYER_URL_DEVNET?.trim();
+  const configuredUrl =
+    network === 'mainnet'
+      ? bindings.UMBRA_RELAYER_URL_MAINNET?.trim()
+      : bindings.UMBRA_RELAYER_URL_DEVNET?.trim();
 
   return normalizeUmbraHttpUrl(
-    configuredUrl && configuredUrl.length > 0
-      ? configuredUrl
-      : DEFAULT_UMBRA_RELAYER_URLS[network],
+    configuredUrl && configuredUrl.length > 0 ? configuredUrl : DEFAULT_UMBRA_RELAYER_URLS[network],
   );
 }
 
@@ -371,6 +353,7 @@ function getUmbraCircuitMetadata(bindings: Bindings): UmbraCircuitMetadata {
 function buildUmbraHeaders(bindings: Bindings): Headers {
   const headers = new Headers();
   headers.set('Accept', 'application/json');
+  headers.set('User-Agent', OFFPAY_UMBRA_USER_AGENT);
   const apiKey = bindings.UMBRA_API_KEY?.trim();
   if (apiKey) {
     headers.set('x-api-key', apiKey);
@@ -465,6 +448,9 @@ async function fetchUmbraJson(
 function createUmbraIndexerFetch(bindings: Bindings): UmbraFetchImplementation {
   return async (input, init) => {
     const headers = new Headers(init?.headers);
+    if (!headers.has('User-Agent')) {
+      headers.set('User-Agent', OFFPAY_UMBRA_USER_AGENT);
+    }
     const apiKey = bindings.UMBRA_API_KEY?.trim();
     if (apiKey && !headers.has('x-api-key')) {
       headers.set('x-api-key', apiKey);
@@ -523,16 +509,131 @@ function readPrimitiveString(value: unknown): string | null {
   return null;
 }
 
+function readProtobufVarint(bytes: Uint8Array, offset: number): { value: bigint; offset: number } {
+  let value = 0n;
+  let shift = 0n;
+  let cursor = offset;
+
+  while (cursor < bytes.length) {
+    const byte = bytes[cursor];
+    cursor += 1;
+    value |= BigInt(byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) {
+      return { value, offset: cursor };
+    }
+    shift += 7n;
+    if (shift > 63n) {
+      break;
+    }
+  }
+
+  throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+}
+
+function skipProtobufField(bytes: Uint8Array, wireType: number, offset: number): number {
+  switch (wireType) {
+    case 0:
+      return readProtobufVarint(bytes, offset).offset;
+    case 1: {
+      const nextOffset = offset + 8;
+      if (nextOffset > bytes.length) {
+        throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+      }
+      return nextOffset;
+    }
+    case 2: {
+      const length = readProtobufVarint(bytes, offset);
+      const nextOffset = length.offset + Number(length.value);
+      if (nextOffset > bytes.length) {
+        throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+      }
+      return nextOffset;
+    }
+    case 5: {
+      const nextOffset = offset + 4;
+      if (nextOffset > bytes.length) {
+        throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+      }
+      return nextOffset;
+    }
+    default:
+      throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+  }
+}
+
+function readUmbraTreeSummaryItem(bytes: Uint8Array): UmbraTreeSummary {
+  let offset = 0;
+  let treeIndex = 0n;
+  let numLeaves: bigint | null = null;
+
+  while (offset < bytes.length) {
+    const key = readProtobufVarint(bytes, offset);
+    offset = key.offset;
+    const fieldNumber = Number(key.value >> 3n);
+    const wireType = Number(key.value & 0x07n);
+
+    if (wireType !== 0) {
+      offset = skipProtobufField(bytes, wireType, offset);
+      continue;
+    }
+
+    const field = readProtobufVarint(bytes, offset);
+    offset = field.offset;
+    if (fieldNumber === 1) {
+      treeIndex = field.value;
+    } else if (fieldNumber === 2) {
+      numLeaves = field.value;
+    }
+  }
+
+  if (numLeaves == null) {
+    throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+  }
+
+  return {
+    treeIndex: treeIndex.toString(),
+    numLeaves: numLeaves.toString(),
+  };
+}
+
+function readUmbraTreeSummariesProtobuf(bytes: Uint8Array): UmbraTreeSummary[] {
+  const trees: UmbraTreeSummary[] = [];
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const key = readProtobufVarint(bytes, offset);
+    offset = key.offset;
+    const fieldNumber = Number(key.value >> 3n);
+    const wireType = Number(key.value & 0x07n);
+
+    if (fieldNumber !== 1 || wireType !== 2) {
+      offset = skipProtobufField(bytes, wireType, offset);
+      continue;
+    }
+
+    const length = readProtobufVarint(bytes, offset);
+    offset = length.offset;
+    const endOffset = offset + Number(length.value);
+    if (endOffset > bytes.length) {
+      throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+    }
+    trees.push(readUmbraTreeSummaryItem(bytes.slice(offset, endOffset)));
+    offset = endOffset;
+  }
+
+  if (trees.length === 0) {
+    throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+  }
+
+  return trees;
+}
+
 function sanitizeUmbraJsonValue(value: unknown, depth = 0): UmbraJsonValue | undefined {
   if (depth > MAX_UMBRA_SANITIZE_DEPTH) {
     return null;
   }
 
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean'
-  ) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return value;
   }
 
@@ -577,7 +678,10 @@ function sanitizeUmbraJsonObject(value: unknown): UmbraJsonObject | null {
     : null;
 }
 
-function readRecordArrayCandidates(payload: unknown, candidateKeys: readonly string[]): unknown[] | null {
+function readRecordArrayCandidates(
+  payload: unknown,
+  candidateKeys: readonly string[],
+): unknown[] | null {
   if (Array.isArray(payload)) {
     return payload;
   }
@@ -607,7 +711,12 @@ function readRecordArrayCandidates(payload: unknown, candidateKeys: readonly str
 }
 
 function readShieldedBalanceEntries(payload: unknown): UmbraShieldedBalance[] {
-  const entries = readRecordArrayCandidates(payload, ['shieldedBalances', 'balances', 'items', 'results']);
+  const entries = readRecordArrayCandidates(payload, [
+    'shieldedBalances',
+    'balances',
+    'items',
+    'results',
+  ]);
   if (!entries) {
     throw toUmbraUnavailable('Umbra shielded balance data is temporarily unavailable.');
   }
@@ -680,29 +789,35 @@ function replaceUmbraPathParams(
   });
 }
 
-function readOptionalPayloadString(payload: unknown, candidateKeys: readonly string[]): string | null {
-  if (isRecord(payload)) {
-    for (const key of candidateKeys) {
-      const directValue = readPrimitiveString(payload[key]);
-      if (directValue) {
-        return directValue;
-      }
-    }
+function readOptionalPayloadString(
+  payload: unknown,
+  candidateKeys: readonly string[],
+): string | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
 
-    if (isRecord(payload.data)) {
-      for (const key of candidateKeys) {
-        const nestedValue = readPrimitiveString(payload.data[key]);
-        if (nestedValue) {
-          return nestedValue;
-        }
-      }
+  for (const key of candidateKeys) {
+    const directValue = readPrimitiveString(payload[key]);
+    if (directValue) {
+      return directValue;
+    }
+  }
+
+  for (const nestedKey of ['data', 'error', 'result'] as const) {
+    const nestedValue = readOptionalPayloadString(payload[nestedKey], candidateKeys);
+    if (nestedValue) {
+      return nestedValue;
     }
   }
 
   return null;
 }
 
-function readSanitizedObjectEntries(payload: unknown, candidateKeys: readonly string[]): UmbraJsonObject[] {
+function readSanitizedObjectEntries(
+  payload: unknown,
+  candidateKeys: readonly string[],
+): UmbraJsonObject[] {
   const entries = readRecordArrayCandidates(payload, candidateKeys);
   if (!entries) {
     return [];
@@ -805,10 +920,9 @@ function serializeUmbraIndexerUtxo(utxo: UmbraIndexerUtxoDataResponse): UmbraJso
   };
 }
 
-function serializeUmbraIndexerUtxoResponse(response: UmbraIndexerUtxoResponse): Omit<
-  UmbraUtxosResponse,
-  'network' | 'fetchedAt'
-> {
+function serializeUmbraIndexerUtxoResponse(
+  response: UmbraIndexerUtxoResponse,
+): Omit<UmbraUtxosResponse, 'network' | 'fetchedAt'> {
   const firstItem = response.items[0];
   return {
     utxos: response.items.map(serializeUmbraIndexerUtxo),
@@ -818,9 +932,12 @@ function serializeUmbraIndexerUtxoResponse(response: UmbraIndexerUtxoResponse): 
     startIndex: response.start_index.toString(),
     endIndex: bigintToString(response.end_index),
     highestIndexedInsertionIndex: firstItem
-      ? response.items.reduce((highest, utxo) => (
-        utxo.insertion_index > highest ? utxo.insertion_index : highest
-      ), firstItem.insertion_index).toString()
+      ? response.items
+          .reduce(
+            (highest, utxo) => (utxo.insertion_index > highest ? utxo.insertion_index : highest),
+            firstItem.insertion_index,
+          )
+          .toString()
       : null,
   };
 }
@@ -835,47 +952,14 @@ function serializeUmbraProofResponse(proof: UmbraIndexerProofResponse): UmbraJso
   };
 }
 
-function serializeUmbraBatchProofResponse(proofBatch: UmbraIndexerBatchProofResponse): UmbraJsonValue[] {
+function serializeUmbraBatchProofResponse(
+  proofBatch: UmbraIndexerBatchProofResponse,
+): UmbraJsonValue[] {
   return proofBatch.proofs.map((proof) => ({
     insertion_index: proof.insertion_index.toString(),
     proof: proof.proof,
     leaf: proof.leaf,
   }));
-}
-
-function readUmbraTreeSummaries(payload: unknown): UmbraTreeSummary[] {
-  const entries = readRecordArrayCandidates(payload, ['trees', 'items', 'results', 'data']);
-  if (!entries) {
-    throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
-  }
-
-  const trees: UmbraTreeSummary[] = [];
-  for (const entry of entries) {
-    if (!isRecord(entry)) {
-      continue;
-    }
-
-    const treeIndex =
-      readPrimitiveString(entry.treeIndex) ??
-      readPrimitiveString(entry.tree_index) ??
-      readPrimitiveString(entry.index);
-    const numLeaves =
-      readPrimitiveString(entry.numLeaves) ??
-      readPrimitiveString(entry.num_leaves) ??
-      readPrimitiveString(entry.leaves) ??
-      readPrimitiveString(entry.leafCount) ??
-      readPrimitiveString(entry.leaf_count);
-
-    if (treeIndex && numLeaves && /^\d+$/.test(treeIndex) && /^\d+$/.test(numLeaves)) {
-      trees.push({ treeIndex, numLeaves });
-    }
-  }
-
-  if (trees.length === 0) {
-    throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
-  }
-
-  return trees;
 }
 
 function readRelayerInfo(payload: unknown): UmbraJsonObject | null {
@@ -933,7 +1017,9 @@ async function getShieldedBalanceMetadata(
     };
   }
 
-  const cacheKey = createNetworkCacheKey(request.network, 'umbra:shielded-balance', [request.walletAddress]);
+  const cacheKey = createNetworkCacheKey(request.network, 'umbra:shielded-balance', [
+    request.walletAddress,
+  ]);
 
   return memoryCache.getOrSet(cacheKey, UMBRA_BALANCE_CACHE_TTL_MS, async () => {
     const { response, payload } = await fetchUmbraJson(
@@ -1151,7 +1237,10 @@ async function getUmbraTreeProofs(
       fetchedAt: createFetchedAt(),
     };
   } catch (error) {
-    throw toUmbraIndexerUnavailable('Umbra Merkle proof batch lookup is temporarily unavailable.', error);
+    throw toUmbraIndexerUnavailable(
+      'Umbra Merkle proof batch lookup is temporarily unavailable.',
+      error,
+    );
   }
 }
 
@@ -1167,28 +1256,30 @@ async function getUmbraTreeSummaries(
     };
   }
 
-  const { response, payload } = await fetchUmbraJson(
-    bindings,
-    UMBRA_TREE_SUMMARIES_PATH_CANDIDATES,
-    {
-      method: 'GET',
-    },
-    'Umbra tree summary is temporarily unavailable.',
-    undefined,
-    {
-      baseUrl: getUmbraIndexerUrl(bindings, request.network),
-    },
-  );
+  try {
+    const response = await createUmbraIndexerFetch(bindings)(
+      buildUmbraUrl('/v1/trees', undefined, getUmbraIndexerUrl(bindings, request.network)),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/protobuf',
+        },
+      },
+    );
 
-  if (!response.ok) {
-    throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+    if (!response.ok) {
+      throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return {
+      network: request.network,
+      trees: readUmbraTreeSummariesProtobuf(bytes),
+      fetchedAt: createFetchedAt(),
+    };
+  } catch (error) {
+    throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.', error);
   }
-
-  return {
-    network: request.network,
-    trees: readUmbraTreeSummaries(payload),
-    fetchedAt: createFetchedAt(),
-  };
 }
 
 async function getUmbraRelayerInfo(
@@ -1254,7 +1345,9 @@ function isUmbraIndexerStale(
     return true;
   }
 
-  return laggingBySeconds !== null && laggingBySeconds > UMBRA_INDEXER_SECONDS_STALE_THRESHOLD[network];
+  return (
+    laggingBySeconds !== null && laggingBySeconds > UMBRA_INDEXER_SECONDS_STALE_THRESHOLD[network]
+  );
 }
 
 async function getUmbraIndexerHealth(
@@ -1296,13 +1389,8 @@ async function getUmbraIndexerHealth(
         // Some deployments only expose readiness/stats; do not fail health on optional metadata.
       }
 
-      const [readiness, stats]: [
-        { ready: boolean; storage: boolean },
-        UmbraIndexerStatsResponse,
-      ] = await Promise.all([
-        client.readiness(),
-        client.getStats(),
-      ]);
+      const [readiness, stats]: [{ ready: boolean; storage: boolean }, UmbraIndexerStatsResponse] =
+        await Promise.all([client.readiness(), client.getStats()]);
 
       let latestUtxo: UmbraIndexerUtxoDataResponse | null = null;
       let latestTreeInfo: UmbraIndexerTreeInfoResponse | null = null;
@@ -1379,10 +1467,17 @@ async function submitUmbraClaim(
     };
   }
 
-  const body = {
-    ...request.payload,
-    network: request.network,
-  };
+  const relayerPayload = isRecord(request.payload.payload)
+    ? request.payload.payload
+    : request.payload;
+  if (!isRecord(relayerPayload)) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Umbra claim payload is invalid.',
+    });
+  }
+  const body = { ...(relayerPayload as UmbraJsonObject) };
 
   const { response, payload } = await fetchUmbraJson(
     bindings,
@@ -1402,11 +1497,13 @@ async function submitUmbraClaim(
   );
 
   if (!response.ok) {
-    const message = readOptionalPayloadString(payload, ["message", "error"]) ?? "Umbra claim submission is temporarily unavailable.";
+    const message =
+      readOptionalPayloadString(payload, ['message', 'error']) ??
+      'Umbra claim submission is temporarily unavailable.';
     const status = response.status >= 400 && response.status < 600 ? response.status : 503;
     throw new AppError({
       status: status >= 500 ? status : status === 400 ? 400 : status,
-      code: status >= 500 ? "UPSTREAM_UNAVAILABLE" : "INVALID_REQUEST",
+      code: status >= 500 ? 'UPSTREAM_UNAVAILABLE' : 'INVALID_REQUEST',
       message,
       retryable: status >= 500,
     });

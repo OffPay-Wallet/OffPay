@@ -49,6 +49,20 @@ describe('umbra-error-messages', () => {
     });
   });
 
+  it('does not map relayer request body format errors to vault unavailable', () => {
+    const error = getUmbraFriendlyError(
+      new Error(
+        'Failed to deserialize the JSON body into the target type: missing field `variant` at line 1 column 2625',
+      ),
+      'claim',
+    );
+
+    expect(error).toEqual({
+      title: 'Claim failed',
+      message: 'Claim request format mismatch. Update the API worker and retry.',
+    });
+  });
+
   it('does not misclassify non-fee Umbra hex errors as missing SOL', () => {
     const error = getUmbraFriendlyError(
       new Error(

@@ -21,6 +21,10 @@ export const headerStyles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
+  messageBottomAnchor: {
+    flexGrow: 1,
+    minHeight: spacing.md,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

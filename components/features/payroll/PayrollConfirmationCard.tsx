@@ -13,7 +13,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
-import { isTypedConfirmationValid, resolvePayrollStartGate } from '@/lib/payroll/payroll-confirmation';
+import {
+  isTypedConfirmationValid,
+  resolvePayrollStartGate,
+} from '@/lib/payroll/payroll-confirmation';
 import { payrollRoutePolicyCopy } from '@/lib/payroll/payroll-copy';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 
@@ -174,6 +177,7 @@ export function PayrollConfirmationCard({
             placeholder={String(summary.recipientCount)}
             placeholderTextColor={colors.text.placeholder}
             style={styles.typedConfirmInput}
+            selectionColor={colors.brand.whiteStream}
             accessibilityLabel="Type to confirm payroll"
           />
         </View>

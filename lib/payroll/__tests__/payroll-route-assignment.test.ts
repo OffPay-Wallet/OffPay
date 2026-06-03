@@ -118,6 +118,27 @@ describe('assignPayrollRoutes', () => {
     expect(assignment.mintWouldChangeOnFallback).toBe(true);
     expect(assignment.split.blocked).toBe(1);
   });
+
+  it('routes devnet MagicBlock USDC without probing an unsupported Umbra mint', () => {
+    const rows = [makeRow('a', 'rcpt-a')];
+    rows[0].tokenMint = DEVNET_MAGICBLOCK_USDC;
+    const assignment = assignPayrollRoutes({
+      rows,
+      policy: 'private_auto',
+      facts: readyFacts({
+        network: 'devnet',
+        umbraTokenSupported: false,
+        umbraVaultFeeReady: false,
+        magicblockTokenSupported: true,
+      }),
+      mint: DEVNET_MAGICBLOCK_USDC,
+      recipientFactsByAddress: { 'rcpt-a': UNREGISTERED },
+    });
+
+    expect(assignment.mintWouldChangeOnFallback).toBe(false);
+    expect(assignment.split.magicblock).toBe(1);
+    expect(assignment.split.blocked).toBe(0);
+  });
 });
 
 describe('applyRouteAssignment', () => {

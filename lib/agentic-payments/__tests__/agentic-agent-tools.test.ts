@@ -5,6 +5,10 @@ import { runAgenticTools, type AgenticToolRunnerContext } from '@/lib/agentic-pa
 
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
 
+jest.mock('@/lib/umbra/umbra-rn-zk-prover', () => ({
+  isRnZkProverNativeModuleAvailable: jest.fn(() => true),
+}));
+
 function addressFromSeedByte(byte: number): string {
   return bs58.encode(ed25519.getPublicKey(new Uint8Array(32).fill(byte)));
 }
@@ -12,6 +16,7 @@ function addressFromSeedByte(byte: number): string {
 const walletAddress = addressFromSeedByte(1);
 const recipient = addressFromSeedByte(2);
 const usdcMint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const umbraDusdcMint = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
 
 const available = { available: true, reason: 'available', message: 'Available' } as const;
 
@@ -30,9 +35,11 @@ const capabilities: CapabilitiesResponse['capabilities'] = {
     privateInitMint: available,
     privateBalance: available,
     privateSend: available,
+    umbraPrivateP2p: available,
     settle: available,
     rpcBroadcast: available,
   },
+  umbra: { execution: available },
 };
 
 const balance: WalletBalanceResponse = {
@@ -45,6 +52,16 @@ const balance: WalletBalanceResponse = {
       mint: usdcMint,
       name: 'USD Coin',
       symbol: 'USDC',
+      logo: null,
+      balance: '20',
+      decimals: 6,
+      verified: true,
+      spam: false,
+    },
+    {
+      mint: umbraDusdcMint,
+      name: 'Devnet USDC (Umbra test)',
+      symbol: 'dUSDC',
       logo: null,
       balance: '20',
       decimals: 6,
@@ -180,6 +197,144 @@ describe('runAgenticTools', () => {
 
     expect(run.drafts).toHaveLength(0);
     expect(run.results[0].error?.code).toBe('token_unknown');
+  });
+
+  it('infers Umbra route from recent user text when the model omits the route arg', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-umbra-1',
+          name: 'draft_private_send',
+          args: { amount: '2', token: 'dUSDC', recipient: '[ADDRESS_1]' },
+        },
+      ],
+      {
+        ...baseContext,
+        redactions: [{ type: 'address', placeholder: '[ADDRESS_1]', value: recipient }],
+        userText: `send 2 dUSDC to ${recipient} using umbra`,
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'private_send',
+      route: 'umbra',
+      draft: {
+        recipient,
+        rawAmount: '2000000',
+        tokenMint: umbraDusdcMint,
+        tokenSymbol: 'dUSDC',
+      },
+    });
+  });
+
+  it('maps USDC to the Umbra devnet token on Umbra follow-up drafts', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-umbra-2',
+          name: 'draft_private_send',
+          args: { amount: '2', token: 'USDC', recipient: '[ADDRESS_1]' },
+        },
+      ],
+      {
+        ...baseContext,
+        redactions: [{ type: 'address', placeholder: '[ADDRESS_1]', value: recipient }],
+        userText: [
+          `Send 2 dUSDC to ${recipient} using umbra`,
+          'What tokens are supported by the Umbra route?',
+          'Yes send USDC',
+        ].join('\n'),
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      route: 'umbra',
+      draft: {
+        tokenMint: umbraDusdcMint,
+        tokenSymbol: 'dUSDC',
+      },
+    });
+  });
+
+  it('recovers the previous amount and recipient for an Umbra token correction', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-umbra-3',
+          name: 'draft_private_send',
+          args: { token: 'USDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        userText: [
+          `Send 2 dUSDC to ${recipient} using umbra`,
+          'What tokens are supported by the Umbra route?',
+          'Yes send USDC',
+        ].join('\n'),
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      route: 'umbra',
+      draft: {
+        recipient,
+        rawAmount: '2000000',
+        tokenMint: umbraDusdcMint,
+        tokenSymbol: 'dUSDC',
+      },
+    });
+  });
+
+  it('does not recover stale draft fields for a supported-token question', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-umbra-info',
+          name: 'draft_private_send',
+          args: {},
+        },
+      ],
+      {
+        ...baseContext,
+        userText: [
+          `Send 2 dUSDC to ${recipient} using umbra`,
+          'What tokens are supported by the Umbra route?',
+        ].join('\n'),
+      },
+    );
+
+    expect(run.drafts).toHaveLength(0);
+    expect(run.results[0].error?.code).toBe('amount_missing');
+  });
+
+  it('accepts an Umbra token mint on Umbra drafts', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-umbra-4',
+          name: 'draft_private_send',
+          args: { amount: '1', token: umbraDusdcMint, recipient: '[ADDRESS_1]', route: 'umbra' },
+        },
+      ],
+      {
+        ...baseContext,
+        redactions: [{ type: 'address', placeholder: '[ADDRESS_1]', value: recipient }],
+        userText: `send 1 ${umbraDusdcMint} to ${recipient} using umbra`,
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      route: 'umbra',
+      draft: {
+        tokenMint: umbraDusdcMint,
+        tokenSymbol: 'dUSDC',
+      },
+    });
   });
 
   it('reports unknown_tool when the model calls a tool not in the catalog', async () => {

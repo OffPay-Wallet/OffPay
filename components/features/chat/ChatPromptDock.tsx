@@ -14,7 +14,14 @@
  */
 
 import React, { type RefObject } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  type LayoutChangeEvent,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import Animated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -76,6 +83,7 @@ interface ChatPromptDockProps {
   bottomInset: number;
   keyboardOffset?: number;
   horizontalPadding: number;
+  onLayout?: (event: LayoutChangeEvent) => void;
   onChangeText: (next: string) => void;
   onSubmit: () => void;
   /** Optional payroll/file upload affordance ("+" button). */
@@ -104,6 +112,7 @@ export function ChatPromptDock({
   bottomInset,
   keyboardOffset = 0,
   horizontalPadding,
+  onLayout,
   onChangeText,
   onSubmit,
   onUpload,
@@ -119,6 +128,7 @@ export function ChatPromptDock({
 
   return (
     <View
+      onLayout={onLayout}
       pointerEvents="box-none"
       style={[
         styles.promptDock,

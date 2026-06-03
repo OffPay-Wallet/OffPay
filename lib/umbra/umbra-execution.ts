@@ -48,6 +48,7 @@ import {
   decodeEncryptedUserAccount,
 } from '@umbra-privacy/umbra-codama';
 
+import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { getUmbraFriendlyErrorMessage } from '@/lib/umbra/umbra-error-messages';
 import {
@@ -246,6 +247,10 @@ interface UmbraClaimScanCacheEntry {
 const UMBRA_CLAIM_SCAN_CACHE_TTL_MS = 30_000;
 const UMBRA_CLAIM_SCAN_CACHE_MAX_ENTRIES = 6;
 let umbraClaimScanCache: UmbraClaimScanCacheEntry[] = [];
+
+export function __resetUmbraClaimScanCacheForTests(): void {
+  umbraClaimScanCache = [];
+}
 
 function normalizePositiveBigint(value: number | bigint | undefined, fallback: bigint): bigint {
   if (value == null) return fallback;
@@ -1108,10 +1113,13 @@ export async function resolveUmbraToken(params: {
   amountAtomic: string;
   amountDisplay: string;
 }> {
+  const normalizedToken = params.token.trim();
+  const tokenMint =
+    params.tokenMint?.trim() ?? (isValidSolanaAddress(normalizedToken) ? normalizedToken : null);
   const metadata = resolveUmbraSupportedToken({
     network: params.network,
-    token: params.token,
-    tokenMint: params.tokenMint,
+    token: normalizedToken,
+    tokenMint,
     requireMixer: params.requireMixer,
   });
 

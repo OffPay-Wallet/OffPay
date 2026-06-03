@@ -18,7 +18,10 @@ import {
   getStoredWalletSigningMaterialWithAuth,
   getStoredWalletInfo,
 } from '@/lib/wallet/secure-wallet-store';
-import { decodeSigningSeedFromPrivateKey, deriveSigningSeedFromMnemonic } from '@/lib/wallet/wallet';
+import {
+  decodeSigningSeedFromPrivateKey,
+  deriveSigningSeedFromMnemonic,
+} from '@/lib/wallet/wallet';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
 import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 
@@ -126,7 +129,13 @@ function normalizeApiOrigin(rawValue: string, envKey: string): string {
     throw new Error(`${envKey} must be a valid absolute URL.`);
   }
 
-  if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.pathname !== '/'
+  ) {
     throw new Error(`${envKey} must be an origin only, for example https://api.offpay.app.`);
   }
 
@@ -144,13 +153,15 @@ function resolveOffpayApiOrigin(): string {
   }
 
   const origin = normalizeApiOrigin(rawOrigin, 'EXPO_PUBLIC_OFFPAY_API_ORIGIN');
-  const allowedOrigins = splitCsv(process.env.EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS).map(
-    (entry) => normalizeApiOrigin(entry, 'EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS'),
+  const allowedOrigins = splitCsv(process.env.EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS).map((entry) =>
+    normalizeApiOrigin(entry, 'EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS'),
   );
   const effectiveAllowedOrigins = allowedOrigins.length > 0 ? allowedOrigins : [origin];
 
   if (!effectiveAllowedOrigins.includes(origin)) {
-    throw new Error('EXPO_PUBLIC_OFFPAY_API_ORIGIN is not in EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS.');
+    throw new Error(
+      'EXPO_PUBLIC_OFFPAY_API_ORIGIN is not in EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS.',
+    );
   }
 
   return origin;
@@ -1217,12 +1228,45 @@ export function getUmbraTreeProofs(
   });
 }
 
-export function getUmbraTreeSummaries(network: OffpayNetwork): Promise<UmbraTreeSummariesResponse> {
-  return offpayApiRequest<UmbraTreeSummariesResponse>({
-    path: '/api/umbra/trees',
-    query: { network },
-    network,
-  });
+export async function getUmbraTreeSummaries(
+  network: OffpayNetwork,
+): Promise<UmbraTreeSummariesResponse> {
+  try {
+    const response = await offpayApiRequest<UmbraTreeSummariesResponse>({
+      path: '/api/umbra/trees',
+      query: { network },
+      network,
+    });
+
+    if (__DEV__) {
+      console.log('[offpay-api] /api/umbra/trees response', {
+        network,
+        origin: OFFPAY_API_ORIGIN,
+        response,
+      });
+    }
+
+    return response;
+  } catch (error) {
+    if (__DEV__) {
+      console.log('[offpay-api] /api/umbra/trees error', {
+        network,
+        origin: OFFPAY_API_ORIGIN,
+        error:
+          error instanceof OffpayApiError
+            ? {
+                name: error.name,
+                code: error.code,
+                status: error.status,
+                message: error.message,
+                retryable: error.retryable,
+                retryAfterMs: error.retryAfterMs,
+              }
+            : error,
+      });
+    }
+    throw error;
+  }
 }
 
 export function getUmbraRelayerInfo(network: OffpayNetwork): Promise<UmbraRelayerInfoResponse> {
@@ -1233,13 +1277,46 @@ export function getUmbraRelayerInfo(network: OffpayNetwork): Promise<UmbraRelaye
   });
 }
 
-export function submitUmbraClaim(request: UmbraClaimRequest): Promise<UmbraClaimResponse> {
-  return offpayApiRequest<UmbraClaimResponse>({
-    path: '/api/umbra/claim',
-    method: 'POST',
-    body: request,
-    network: request.network,
-  });
+export async function submitUmbraClaim(request: UmbraClaimRequest): Promise<UmbraClaimResponse> {
+  try {
+    const response = await offpayApiRequest<UmbraClaimResponse>({
+      path: '/api/umbra/claim',
+      method: 'POST',
+      body: request,
+      network: request.network,
+    });
+
+    if (__DEV__) {
+      console.log('[offpay-api] /api/umbra/claim response', {
+        network: request.network,
+        origin: OFFPAY_API_ORIGIN,
+        claimId: response.claimId,
+        status: response.status,
+        resultKeys: response.result == null ? [] : Object.keys(response.result),
+      });
+    }
+
+    return response;
+  } catch (error) {
+    if (__DEV__) {
+      console.log('[offpay-api] /api/umbra/claim error', {
+        network: request.network,
+        origin: OFFPAY_API_ORIGIN,
+        error:
+          error instanceof OffpayApiError
+            ? {
+                name: error.name,
+                code: error.code,
+                status: error.status,
+                message: error.message,
+                retryable: error.retryable,
+                retryAfterMs: error.retryAfterMs,
+              }
+            : error,
+      });
+    }
+    throw error;
+  }
 }
 
 export function getUmbraClaimStatus(params: {

@@ -78,6 +78,15 @@ function formatTimestamp(ms: number | null): string {
   });
 }
 
+function removeClaimedUtxos(
+  utxos: readonly UmbraPendingClaimUtxo[],
+  insertionIndices: readonly number[],
+): UmbraPendingClaimUtxo[] {
+  if (insertionIndices.length === 0) return utxos.slice();
+  const claimed = new Set(insertionIndices);
+  return utxos.filter((utxo) => !claimed.has(utxo.insertionIndex));
+}
+
 interface ClaimRowProps {
   utxo: UmbraPendingClaimUtxo;
   busy: boolean;
@@ -258,8 +267,16 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [utxos, setUtxos] = useState<UmbraPendingClaimUtxo[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [recentClaimSettled, setRecentClaimSettled] = useState(false);
   const scanInFlightRef = useRef(false);
-  const pendingInsertionIndices = useMemo(() => utxos.map((utxo) => utxo.insertionIndex), [utxos]);
+  const visibleUtxos = useMemo(
+    () => utxos.filter((utxo) => !claimedIndexSet.has(utxo.insertionIndex)),
+    [claimedIndexSet, utxos],
+  );
+  const pendingInsertionIndices = useMemo(
+    () => visibleUtxos.map((utxo) => utxo.insertionIndex),
+    [visibleUtxos],
+  );
 
   // Cancel-on-blur signal so a focus-driven scan or pull-to-refresh
   // that resolves after the user navigates away does not write into
@@ -267,7 +284,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   const getScreenSignal = useScreenAbortSignal();
 
   const runScan = useCallback(
-    async (kind: 'initial' | 'refresh' | 'deep'): Promise<void> => {
+    async (kind: 'initial' | 'refresh' | 'deep' | 'background'): Promise<void> => {
       if (!canScan || walletAddress == null || walletId == null || network == null) return;
       if (scanInFlightRef.current) return;
       const signal = getScreenSignal();
@@ -304,6 +321,9 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
         });
         if (signal.aborted) return;
         setUtxos(result.pendingClaimUtxoDetails ?? []);
+        if ((result.pendingClaimUtxoDetails?.length ?? 0) > 0) {
+          setRecentClaimSettled(false);
+        }
         setError(null);
         measure(
           isDeep ? 'receive.umbraClaims.deepScan' : 'receive.umbraClaims.fullScreenScan',
@@ -316,13 +336,17 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
         );
       } catch (scanError) {
         if (signal.aborted) return;
-        setError(scanError instanceof Error ? scanError.message : 'Unable to load pending claims.');
+        if (kind !== 'background') {
+          setError(
+            scanError instanceof Error ? scanError.message : 'Unable to load pending claims.',
+          );
+        }
       } finally {
         scanInFlightRef.current = false;
         if (!signal.aborted) {
-          setScanning(false);
-          setRefreshing(false);
-          setDeepScanning(false);
+          if (kind === 'initial') setScanning(false);
+          else if (kind === 'deep') setDeepScanning(false);
+          else if (kind === 'refresh') setRefreshing(false);
         }
       }
     },
@@ -381,15 +405,35 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                   walletAddress,
                   insertionIndices,
                 });
+                setUtxos((current) => removeClaimedUtxos(current, insertionIndices));
+                setRecentClaimSettled(true);
               },
             });
             const claimed = result.claimedUtxoCount ?? 0;
+            const claimedIndices =
+              result.claimedUtxoInsertionIndices != null &&
+              result.claimedUtxoInsertionIndices.length > 0
+                ? result.claimedUtxoInsertionIndices
+                : claimed > 0
+                  ? [utxo.insertionIndex]
+                  : [];
+            if (claimedIndices.length > 0) {
+              markUmbraUtxosClaimed({
+                network,
+                walletAddress,
+                insertionIndices: claimedIndices,
+              });
+              setUtxos((current) => removeClaimedUtxos(current, claimedIndices));
+              setError(null);
+              setRecentClaimSettled(true);
+            }
             showToast({
               title: claimed > 0 ? 'Claim submitted' : 'Already settled',
               message: result.subtitle,
               variant: claimed > 0 ? 'success' : 'info',
             });
             umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
+            void runScan('background');
           } catch (claimError) {
             if (isBenignAlreadyClaimedFailure(claimError)) {
               markUmbraUtxosClaimed({
@@ -397,12 +441,16 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                 walletAddress,
                 insertionIndices: [utxo.insertionIndex],
               });
+              setUtxos((current) => removeClaimedUtxos(current, [utxo.insertionIndex]));
+              setError(null);
+              setRecentClaimSettled(true);
               showToast({
                 title: 'Already claimed',
                 message: 'Encrypted balance is up to date.',
                 variant: 'success',
               });
               umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
+              void runScan('background');
             } else {
               const { getUmbraFriendlyError } = await import('@/lib/umbra/umbra-error-messages');
               const friendly = getUmbraFriendlyError(claimError, 'claim');
@@ -413,7 +461,6 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               });
             }
           }
-          await runScan('refresh');
         } finally {
           setBusyId(null);
         }
@@ -488,7 +535,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
     <View style={styles.container}>
       <GradientBackground />
       <FlatList
-        data={utxos}
+        data={visibleUtxos}
         renderItem={renderClaimItem}
         keyExtractor={keyExtractor}
         getItemLayout={getItemLayout}
@@ -504,7 +551,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
             paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing['4xl'],
             paddingHorizontal: screenHorizontalPadding,
           },
-          utxos.length === 0 ? styles.scrollContentCentered : null,
+          visibleUtxos.length === 0 ? styles.scrollContentCentered : null,
         ]}
         ItemSeparatorComponent={ClaimRowSeparator}
         refreshControl={
@@ -549,7 +596,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           </View>
         }
         ListEmptyComponent={
-          scanning && utxos.length === 0 ? (
+          scanning && visibleUtxos.length === 0 ? (
             <View style={styles.emptyState}>
               <LazyLoadingSpinner size={28} color={colors.text.primary} />
               <Text
@@ -586,13 +633,18 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
             </View>
           ) : (
             <View style={styles.emptyState}>
+              {recentClaimSettled ? (
+                <View style={styles.emptySuccessIcon}>
+                  <Ionicons name="checkmark" size={22} color={colors.text.primary} />
+                </View>
+              ) : null}
               <Text
                 variant="bodyBold"
                 color={colors.text.primary}
                 align="center"
                 maxFontSizeMultiplier={1.1}
               >
-                No pending claims
+                {recentClaimSettled ? 'All caught up' : 'No pending claims'}
               </Text>
               <Text
                 variant="small"
@@ -602,7 +654,9 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                 maxFontSizeMultiplier={1}
                 style={styles.statusText}
               >
-                New private payments will show up here.
+                {recentClaimSettled
+                  ? 'Claim moved into encrypted balance. Balances may take a moment to refresh.'
+                  : 'New private payments will show up here.'}
               </Text>
               <Pressable
                 accessibilityRole="button"
@@ -682,6 +736,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing['4xl'],
     gap: spacing.sm,
+  },
+  emptySuccessIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.notificationIcon.successFill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.semantic.success,
   },
   deepScanButton: {
     flexDirection: 'row',

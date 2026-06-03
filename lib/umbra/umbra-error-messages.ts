@@ -115,9 +115,19 @@ export function getUmbraFriendlyError(
   }
 
   if (
+    hasPattern(message, /INVALID_REQUEST_BODY|missing field `?variant`?/i) ||
+    hasPattern(message, /deserialize the JSON body into the target type/i)
+  ) {
+    return {
+      title: titleForAction(action),
+      message: 'Claim request format mismatch. Update the API worker and retry.',
+    };
+  }
+
+  if (
     hasPattern(
       message,
-      /fee[_ ]schedule|fee schedule|fee[_ ]vault|protocol fee account|AccountNotInitialized|AccountDidNotDeserialize|failed to deserialize/i,
+      /fee[_ ]schedule|fee schedule|fee[_ ]vault|protocol fee account|AccountNotInitialized|AccountDidNotDeserialize/i,
     ) ||
     customCode === 3003 ||
     customCode === 3012

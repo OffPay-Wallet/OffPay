@@ -159,7 +159,7 @@ export function resolvePayrollRoute(params: {
 }): PayrollRouteDecision {
   const umbra = evaluateUmbraReadiness(params.facts, params.recipient);
   const magicblock = evaluateMagicBlockReadiness(params.facts);
-  const mintWouldChangeOnFallback = !params.routesShareMint;
+  const mintWouldChangeOnFallback = !params.routesShareMint && params.facts.umbraTokenSupported;
 
   if (params.policy === 'umbra_only') {
     return {

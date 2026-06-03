@@ -97,6 +97,36 @@ function getSearchParam(value: string | string[] | undefined): string | null {
   return value?.trim() || null;
 }
 
+function filterPendingClaimResult(
+  result: UmbraExecutionResult | null,
+  claimedIndices: ReadonlySet<number>,
+): UmbraExecutionResult | null {
+  if (result == null || claimedIndices.size === 0) return result;
+
+  const details = result.pendingClaimUtxoDetails;
+  const filteredDetails = details?.filter((utxo) => !claimedIndices.has(utxo.insertionIndex));
+  const sourceInsertionIndices =
+    result.pendingClaimUtxoInsertionIndices ?? details?.map((utxo) => utxo.insertionIndex) ?? [];
+  const filteredInsertionIndices = sourceInsertionIndices.filter(
+    (index) => !claimedIndices.has(index),
+  );
+  const nextCount =
+    filteredDetails != null ? filteredDetails.length : filteredInsertionIndices.length;
+
+  if (nextCount === 0) return null;
+
+  return {
+    ...result,
+    pendingClaimCount: nextCount,
+    pendingClaimUtxoInsertionIndices: filteredInsertionIndices,
+    ...(filteredDetails == null ? {} : { pendingClaimUtxoDetails: filteredDetails }),
+  };
+}
+
+function createClaimedIndexSet(insertionIndices: readonly number[]): ReadonlySet<number> {
+  return new Set(insertionIndices);
+}
+
 function HeaderIconButton({
   children,
   onPress,
@@ -430,7 +460,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         .sort((left, right) => right.createdAt - left.createdAt)[0] ?? null
     );
   }, [network, offlineReceipts]);
-  const pendingClaimCount = pendingClaimResult?.pendingClaimCount ?? 0;
+  const visiblePendingClaimResult = useMemo(
+    () => filterPendingClaimResult(pendingClaimResult, claimedUmbraIndexSet),
+    [claimedUmbraIndexSet, pendingClaimResult],
+  );
+  const pendingClaimCount = visiblePendingClaimResult?.pendingClaimCount ?? 0;
 
   const [renderedReceiveMode, setRenderedReceiveMode] = useState<ReceiveMode>('standard');
   const modeContentOpacity = useSharedValue(1);
@@ -526,110 +560,117 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     }
   }, [abortUmbraPendingClaimScan, receiveMode]);
 
-  const scanUmbraPendingClaims = useCallback(() => {
-    if (walletAddress == null || walletId == null || network == null || !canScanUmbraClaims) {
-      setPendingClaimResult(null);
-      return;
-    }
-    if (scanningUmbraClaimsRef.current) return;
-
-    const screenSignal = getScreenSignal();
-    const controller = new AbortController();
-    const abortFromScreen = () => {
-      try {
-        controller.abort(new Error('Receive screen hidden while Umbra claims were scanning.'));
-      } catch {
-        try {
-          controller.abort();
-        } catch {
-          /* no-op */
-        }
-      }
-    };
-    if (screenSignal.aborted) {
-      abortFromScreen();
-      return;
-    }
-    screenSignal.addEventListener('abort', abortFromScreen, { once: true });
-    scanAbortControllerRef.current = controller;
-    const signal = controller.signal;
-    scanningUmbraClaimsRef.current = true;
-    setScanningUmbraClaims(true);
-    void (async () => {
-      const startedAt = mark();
-      await yieldToUi();
-      if (signal.aborted) return;
-      const { scanUmbraPrivateP2PClaims } = await import('@/lib/umbra/umbra-execution');
-      await yieldToUi();
-      if (signal.aborted) return;
-      const latestClaimedUmbraIndexSet = getClaimedUmbraUtxoIndexSet(
-        {
-          claimedUtxoInsertionIndices: useUmbraPrivacyStore.getState().claimedUtxoInsertionIndices,
-        },
-        network,
-        walletAddress,
-      );
-      const result = await scanUmbraPrivateP2PClaims({
-        walletAddress,
-        walletId,
-        network,
-        scanMode: 'recent',
-        excludedInsertionIndices: latestClaimedUmbraIndexSet,
-        signal,
-        pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
-      });
-      if (signal.aborted) return;
-      const count = result.pendingClaimCount ?? 0;
-      setPendingClaimResult(count > 0 ? result : null);
-      setHasCheckedUmbraClaims(true);
-      measure('receive.umbraClaims.scan', startedAt, {
-        network,
-        pendingCount: count,
-        pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
-      });
-      if (count > 0) {
-        if (canUseUmbraClaim) {
-          setReceiveRoute('umbra');
-          // Auto-flip the segmented divider to the private surface
-          // when a pending claim appears so the Claim button is the
-          // first thing the user sees.
-          setReceiveMode('private');
-        }
-        const toastKey = `${walletAddress}:${network}:${count}:${result.nextScanStartIndex ?? ''}`;
-        if (pendingClaimToastRef.current !== toastKey) {
-          pendingClaimToastRef.current = toastKey;
-          showToast({
-            title: 'Private payment ready',
-            message: result.subtitle,
-            variant: 'success',
-          });
-        }
-      }
-    })()
-      .catch((error) => {
-        if (error instanceof Error && error.name === 'AbortError') return;
+  const scanUmbraPendingClaims = useCallback(
+    (options?: { silent?: boolean }) => {
+      const silent = options?.silent === true;
+      if (walletAddress == null || walletId == null || network == null || !canScanUmbraClaims) {
         setPendingClaimResult(null);
+        return;
+      }
+      if (scanningUmbraClaimsRef.current) return;
+
+      const screenSignal = getScreenSignal();
+      const controller = new AbortController();
+      const abortFromScreen = () => {
+        try {
+          controller.abort(new Error('Receive screen hidden while Umbra claims were scanning.'));
+        } catch {
+          try {
+            controller.abort();
+          } catch {
+            /* no-op */
+          }
+        }
+      };
+      if (screenSignal.aborted) {
+        abortFromScreen();
+        return;
+      }
+      screenSignal.addEventListener('abort', abortFromScreen, { once: true });
+      scanAbortControllerRef.current = controller;
+      const signal = controller.signal;
+      scanningUmbraClaimsRef.current = true;
+      if (!silent) {
+        setScanningUmbraClaims(true);
+      }
+      void (async () => {
+        const startedAt = mark();
+        await yieldToUi();
+        if (signal.aborted) return;
+        const { scanUmbraPrivateP2PClaims } = await import('@/lib/umbra/umbra-execution');
+        await yieldToUi();
+        if (signal.aborted) return;
+        const latestClaimedUmbraIndexSet = getClaimedUmbraUtxoIndexSet(
+          {
+            claimedUtxoInsertionIndices:
+              useUmbraPrivacyStore.getState().claimedUtxoInsertionIndices,
+          },
+          network,
+          walletAddress,
+        );
+        const result = await scanUmbraPrivateP2PClaims({
+          walletAddress,
+          walletId,
+          network,
+          scanMode: 'recent',
+          excludedInsertionIndices: latestClaimedUmbraIndexSet,
+          signal,
+          pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+        });
+        if (signal.aborted) return;
+        const count = result.pendingClaimCount ?? 0;
+        setPendingClaimResult(count > 0 ? result : null);
         setHasCheckedUmbraClaims(true);
-      })
-      .finally(() => {
-        screenSignal.removeEventListener('abort', abortFromScreen);
-        if (scanAbortControllerRef.current === controller) {
-          scanAbortControllerRef.current = null;
+        measure('receive.umbraClaims.scan', startedAt, {
+          network,
+          pendingCount: count,
+          pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+        });
+        if (count > 0) {
+          if (canUseUmbraClaim) {
+            setReceiveRoute('umbra');
+            // Auto-flip the segmented divider to the private surface
+            // when a pending claim appears so the Claim button is the
+            // first thing the user sees.
+            setReceiveMode('private');
+          }
+          const toastKey = `${walletAddress}:${network}:${count}:${result.nextScanStartIndex ?? ''}`;
+          if (pendingClaimToastRef.current !== toastKey) {
+            pendingClaimToastRef.current = toastKey;
+            showToast({
+              title: 'Private payment ready',
+              message: result.subtitle,
+              variant: 'success',
+            });
+          }
         }
-        scanningUmbraClaimsRef.current = false;
-        if (!screenSignal.aborted) {
-          setScanningUmbraClaims(false);
-        }
-      });
-  }, [
-    canScanUmbraClaims,
-    canUseUmbraClaim,
-    getScreenSignal,
-    network,
-    showToast,
-    walletAddress,
-    walletId,
-  ]);
+      })()
+        .catch((error) => {
+          if (error instanceof Error && error.name === 'AbortError') return;
+          setPendingClaimResult(null);
+          setHasCheckedUmbraClaims(true);
+        })
+        .finally(() => {
+          screenSignal.removeEventListener('abort', abortFromScreen);
+          if (scanAbortControllerRef.current === controller) {
+            scanAbortControllerRef.current = null;
+          }
+          scanningUmbraClaimsRef.current = false;
+          if (!screenSignal.aborted && !silent) {
+            setScanningUmbraClaims(false);
+          }
+        });
+    },
+    [
+      canScanUmbraClaims,
+      canUseUmbraClaim,
+      getScreenSignal,
+      network,
+      showToast,
+      walletAddress,
+      walletId,
+    ],
+  );
 
   // Latch the latest `scanUmbraPendingClaims` callback in a ref so the
   // deferred private-tab scan can stay cancellable without re-scheduling
@@ -715,7 +756,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
 
         try {
           const pendingScanRange = getUmbraClaimScanRangeForInsertionIndices(
-            pendingClaimResult?.pendingClaimUtxoInsertionIndices,
+            visiblePendingClaimResult?.pendingClaimUtxoInsertionIndices,
           );
           result = await claimUmbraPrivateP2PToEncryptedBalance({
             walletAddress,
@@ -737,6 +778,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 walletAddress,
                 insertionIndices,
               });
+              setPendingClaimResult((current) =>
+                filterPendingClaimResult(current, createClaimedIndexSet(insertionIndices)),
+              );
             },
           });
           break;
@@ -745,15 +789,18 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           // path. On-chain state is correct; persist exclusion indices
           // so the scan stops re-surfacing these UTXOs.
           if (isBenignAlreadyClaimedFailure(error)) {
-            const fallbackIndices = pendingClaimResult?.pendingClaimUtxoInsertionIndices ?? [];
+            const fallbackIndices =
+              visiblePendingClaimResult?.pendingClaimUtxoInsertionIndices ?? [];
             if (fallbackIndices.length > 0) {
               markUmbraUtxosClaimed({
                 network,
                 walletAddress,
                 insertionIndices: fallbackIndices,
               });
+              setPendingClaimResult((current) =>
+                filterPendingClaimResult(current, createClaimedIndexSet(fallbackIndices)),
+              );
             }
-            setPendingClaimResult(null);
             pendingClaimToastRef.current = null;
             void queryClient.invalidateQueries({
               queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
@@ -763,7 +810,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               message: 'Encrypted balance is up to date.',
               variant: 'success',
             });
-            scanUmbraPendingClaims();
+            scanUmbraPendingClaims({ silent: true });
             schedulePostClaimEncryptedBalanceRefetch();
             return;
           }
@@ -794,10 +841,25 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           walletAddress,
           insertionIndices: claimedIndices,
         });
+        setPendingClaimResult((current) =>
+          filterPendingClaimResult(current, createClaimedIndexSet(claimedIndices)),
+        );
       }
-      if ((result.claimedUtxoCount ?? 0) > 0) {
+      const remainingPendingIndices = result.pendingClaimUtxoInsertionIndices ?? [];
+      if ((result.claimedUtxoCount ?? 0) > 0 && remainingPendingIndices.length === 0) {
         setPendingClaimResult(null);
         pendingClaimToastRef.current = null;
+      } else if (remainingPendingIndices.length > 0) {
+        const remainingIndexSet = new Set(remainingPendingIndices);
+        const previousDetails = visiblePendingClaimResult?.pendingClaimUtxoDetails ?? [];
+        const remainingDetails = previousDetails.filter((utxo) =>
+          remainingIndexSet.has(utxo.insertionIndex),
+        );
+        setPendingClaimResult({
+          ...result,
+          pendingClaimCount: remainingPendingIndices.length,
+          pendingClaimUtxoDetails: remainingDetails,
+        });
       }
       void queryClient.invalidateQueries({
         queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
@@ -819,7 +881,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
       // claimed-index filter disappear from the card immediately. The
       // encrypted balance lags behind by an Arcium decryption cycle,
       // so retry a few times to surface the new amount when it lands.
-      scanUmbraPendingClaims();
+      scanUmbraPendingClaims({ silent: true });
       schedulePostClaimEncryptedBalanceRefetch();
     })()
       .catch(async (error) => {
@@ -840,11 +902,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     claimedUmbraIndexSet,
     markUmbraUtxosClaimed,
     network,
-    pendingClaimResult,
     queryClient,
     scanUmbraPendingClaims,
     schedulePostClaimEncryptedBalanceRefetch,
     showToast,
+    visiblePendingClaimResult,
     walletAddress,
     walletId,
   ]);
@@ -1181,7 +1243,8 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                       ? 'Claim all pending Umbra private payments'
                       : 'Check for pending Umbra private payments',
                   pendingClaims:
-                    pendingClaimResult?.pendingClaimUtxoDetails ?? EMPTY_UMBRA_PENDING_CLAIMS,
+                    visiblePendingClaimResult?.pendingClaimUtxoDetails ??
+                    EMPTY_UMBRA_PENDING_CLAIMS,
                   previewLimit: 2,
                 }}
                 revealKey={renderedReceiveMode}

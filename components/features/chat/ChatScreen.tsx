@@ -11,6 +11,7 @@ import {
   Alert,
   Keyboard,
   type KeyboardEvent,
+  type LayoutChangeEvent,
   Platform,
   ScrollView,
   TextInput,
@@ -97,6 +98,7 @@ export function ChatScreen(): React.JSX.Element {
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const [payrollPasteOpen, setPayrollPasteOpen] = useState(false);
   const [keyboardFrame, setKeyboardFrame] = useState<{ screenY: number } | null>(null);
+  const [promptDockHeight, setPromptDockHeight] = useState(PROMPT_HEIGHT);
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(
     null,
   );
@@ -110,10 +112,9 @@ export function ChatScreen(): React.JSX.Element {
     return Math.max(0, windowHeight - keyboardFrame.screenY);
   }, [keyboardFrame, windowHeight]);
   const promptBottomInset = keyboardFrame == null ? insets.bottom : spacing.xs;
-  // The composer is an overlay so the empty-state layout stays stable. Reserve
-  // enough scroll padding for both the dock and its keyboard lift.
-  const bottomPadding =
-    Math.max(insets.bottom, spacing.lg) + keyboardOffset + PROMPT_HEIGHT + spacing['4xl'];
+  // The composer is an overlay so the empty-state layout stays stable. Use the
+  // measured dock height so multiline input and voice states never cover replies.
+  const bottomPadding = keyboardOffset + promptDockHeight + spacing['2xl'];
 
   const activeConversationId = activeConversationIdByScope[scopeKey] ?? null;
   const scopedConversations = useMemo(
@@ -289,6 +290,14 @@ export function ChatScreen(): React.JSX.Element {
     return () => cancelAnimationFrame(frame);
   }, [keyboardFrame, keyboardOffset]);
 
+  useEffect(() => {
+    if (scopedMessages.length === 0) return;
+    const frame = requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [promptDockHeight, scopedMessages.length]);
+
   // Migrate legacy messages with a missing `conversationId` once.
   useEffect(() => {
     const legacy = messages.filter(
@@ -374,6 +383,12 @@ export function ChatScreen(): React.JSX.Element {
   }, [deleteConversation, pendingDeleteConversationId, showToast]);
 
   const canSubmit = prompt.trim().length > 0 && !agentBusy;
+  const handlePromptDockLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setPromptDockHeight((currentHeight) =>
+      Math.abs(currentHeight - nextHeight) > 1 ? nextHeight : currentHeight,
+    );
+  }, []);
 
   return (
     <View style={headerStyles.container}>
@@ -454,6 +469,8 @@ export function ChatScreen(): React.JSX.Element {
             </View>
           ) : null}
 
+          {scopedMessages.length > 0 ? <View style={headerStyles.messageBottomAnchor} /> : null}
+
           {scopedMessages.length > 0 ? (
             <ChatMessageList
               messages={scopedMessages}
@@ -479,6 +496,7 @@ export function ChatScreen(): React.JSX.Element {
         bottomInset={promptBottomInset}
         keyboardOffset={keyboardOffset}
         horizontalPadding={horizontalPadding}
+        onLayout={handlePromptDockLayout}
         onChangeText={setPrompt}
         onSubmit={handleSubmit}
         onUpload={() => {
@@ -509,6 +527,7 @@ export function ChatScreen(): React.JSX.Element {
       <PayrollPasteSheet
         visible={payrollPasteOpen}
         busy={payrollIntake.busy}
+        error={payrollIntake.error}
         onClose={() => setPayrollPasteOpen(false)}
         onSubmit={async (fileName, text) => {
           const result = await payrollIntake.stageFromText(fileName, text);

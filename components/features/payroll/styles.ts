@@ -92,7 +92,7 @@ export const payrollStyles = StyleSheet.create({
     fontFamily: fontFamily.uiSemiBold,
     fontSize: 15,
     color: colors.text.primary,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.glass.clearFill,
   },
   primaryButton: {
     height: 48,

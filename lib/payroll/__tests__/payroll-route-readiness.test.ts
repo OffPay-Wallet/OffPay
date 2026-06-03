@@ -139,6 +139,22 @@ describe('payroll route readiness', () => {
       expect(decision.mintWouldChangeOnFallback).toBe(true);
     });
 
+    it('allows MagicBlock fallback when the selected mint is not an Umbra mint', () => {
+      const decision = resolvePayrollRoute({
+        policy: 'private_auto',
+        facts: readyFacts({
+          network: 'devnet',
+          umbraTokenSupported: false,
+          umbraVaultFeeReady: false,
+          magicblockTokenSupported: true,
+        }),
+        recipient: registeredRecipient,
+        routesShareMint: false,
+      });
+      expect(decision.route).toBe('magicblock');
+      expect(decision.mintWouldChangeOnFallback).toBe(false);
+    });
+
     it('never selects MagicBlock under umbra_only', () => {
       const decision = resolvePayrollRoute({
         policy: 'umbra_only',

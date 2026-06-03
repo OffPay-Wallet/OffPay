@@ -16,6 +16,7 @@ import { Platform } from 'react-native';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { decimalInputToAtomicAmount } from '@/lib/policy/token-amounts';
+import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import {
   applyRouteAssignment,
   assignPayrollRoutes,
@@ -72,6 +73,7 @@ export interface PayrollMappingRequest {
 export type PayrollStageOutcome =
   | { status: 'staged' }
   | { status: 'mapping_required' }
+  | { status: 'blocked'; message: string }
   | { status: 'error'; message: string };
 
 export interface UsePayrollChatIntakeResult {
@@ -171,8 +173,12 @@ export function usePayrollChatIntake(
         isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution') &&
         isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p') &&
         isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.rpcBroadcast');
+      const umbraTokenSupported = getUmbraTokenByMint(run.network, token.mint) != null;
       const umbraEligible =
-        run.routePolicy !== 'magicblock_only' && umbraProverAvailable && umbraCapabilityAvailable;
+        run.routePolicy !== 'magicblock_only' &&
+        umbraProverAvailable &&
+        umbraCapabilityAvailable &&
+        umbraTokenSupported;
 
       // Gather REAL run-level readiness: sender mixer registration, vault
       // fee account readiness, and SOL fee buffer (replaces placeholders).
@@ -328,6 +334,14 @@ export function usePayrollChatIntake(
 
         setMappingRequest(null);
         const routed = await routeRows(staged.run, staged.rows, token);
+        if (routed.summary.recipientCount === 0) {
+          const message =
+            staged.summary.validCount > 0
+              ? 'No payable payroll rows are ready. Check the pasted rows, token, network, or route support and try again.'
+              : 'No valid payroll rows found. Check the recipient and amount columns and try again.';
+          setError(message);
+          return { status: 'blocked', message };
+        }
 
         createRun(staged.run, routed.rows);
         replaceRows(staged.run.id, routed.rows);

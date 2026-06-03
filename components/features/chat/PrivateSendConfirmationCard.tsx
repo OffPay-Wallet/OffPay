@@ -131,9 +131,9 @@ export function PrivateSendConfirmationCard({
             accessibilityLabel="Confirm Yuga transfer"
           >
             {submitting ? (
-              <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+              <ActivityIndicator size="small" color={colors.brand.deepShadow} />
             ) : (
-              <Text variant="buttonSmall" color={colors.brand.whiteStream}>
+              <Text variant="buttonSmall" color={colors.text.onAccent}>
                 Confirm
               </Text>
             )}
