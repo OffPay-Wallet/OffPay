@@ -18,6 +18,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -32,6 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
+import { PreferenceStepLayout } from '@/components/features/preferences/PreferenceStepLayout';
 import { AuthGateStep } from '@/components/features/security/AuthGateStep';
 import { PasscodeStep } from '@/components/features/security/PasscodeStep';
 import { SecurityRootStep } from '@/components/features/security/SecurityRootStep';
@@ -67,11 +69,14 @@ interface SecuritySettingsModalProps {
 
 const CLIPBOARD_CLEAR_MS = 60_000;
 
-const SHEET_HEIGHTS: Record<Step, number> = {
-  root: layout.buttonHeightLg * 4 + spacing['4xl'] + spacing.xl,
-  passcode: layout.buttonHeightLg * 8 + spacing['2xl'],
-  revealGate: layout.buttonHeightLg * 7 + spacing['3xl'],
-  walletKeys: layout.buttonHeightLg * 8 + spacing['4xl'] + spacing['2xl'],
+const SHEET_CHROME_PADDING = spacing.md;
+const HEADER_FALLBACK_HEIGHT = layout.minTouchTarget + spacing.lg + spacing.xs;
+const SHEET_MIN_HEIGHT = layout.buttonHeightLg * 2 + spacing['3xl'];
+const STEP_CONTENT_ESTIMATES: Record<Step, number> = {
+  root: 240,
+  passcode: 500,
+  revealGate: 440,
+  walletKeys: 420,
 };
 
 const HEADER_TITLES: Record<Step, string> = {
@@ -207,12 +212,14 @@ export function SecuritySettingsModal({
   const [revealPrivateKey, setRevealPrivateKey] = useState<string | null>(null);
   const [walletImportMethod, setWalletImportMethod] = useState<WalletImportMethod>('generated');
   const [visibleSecret, setVisibleSecret] = useState<VisibleSecret>(null);
+  const [headerHeight, setHeaderHeight] = useState(HEADER_FALLBACK_HEIGHT);
+  const [contentHeight, setContentHeight] = useState(0);
 
   const compactViewport = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compactViewport ? spacing.lg : spacing['2xl'];
   const sheetMaxWidth = 430;
-  const rootIconSize = dense ? 20 : compactViewport ? 22 : layout.iconSizeNav;
+  const rowIconSize = dense ? 18 : 20;
 
   const translateY = useSharedValue(windowHeight);
   const opacity = useSharedValue(0);
@@ -226,6 +233,7 @@ export function SecuritySettingsModal({
     (nextStep: Step, options: { clearToast?: boolean } = {}): void => {
       contentDirection.value = nextStep === 'root' ? -1 : 1;
       contentProgress.value = 0;
+      setContentHeight(0);
       setStep(nextStep);
       if (nextStep === 'root') {
         setEditingPasscode(false);
@@ -303,6 +311,7 @@ export function SecuritySettingsModal({
   // Animation
   useEffect(() => {
     if (visible) {
+      setContentHeight(0);
       setMounted(true);
       opacity.value = withTiming(1, { duration: 220 });
       translateY.value = withTiming(0, {
@@ -574,19 +583,115 @@ export function SecuritySettingsModal({
   // Layout
   // ---------------------------------------------------------------------------
 
-  const baseOverlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
-  const overlayPaddingBottom = baseOverlayPaddingBottom;
+  const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const compact = compactViewport;
-
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const sheetHeight = Math.max(
-    layout.buttonHeightLg * 4 + spacing['3xl'],
-    Math.min(SHEET_HEIGHTS[step], maxSheetHeight),
+  const resolvedHeaderHeight =
+    headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
+  const bodyMaxHeight = Math.max(
+    120,
+    maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING,
   );
+  const scrollOverflows = contentHeight > bodyMaxHeight;
+  const sheetHeight = useMemo(() => {
+    const chromeHeight = resolvedHeaderHeight + SHEET_CHROME_PADDING;
+
+    if (contentHeight <= 0) {
+      return Math.min(maxSheetHeight, chromeHeight + STEP_CONTENT_ESTIMATES[step]);
+    }
+
+    if (scrollOverflows) {
+      return maxSheetHeight;
+    }
+
+    return Math.min(
+      maxSheetHeight,
+      Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight),
+    );
+  }, [contentHeight, maxSheetHeight, resolvedHeaderHeight, scrollOverflows, step]);
 
   useEffect(() => {
     animatedSheetHeight.value = withTiming(sheetHeight, SHEET_SIZE_TIMING);
   }, [animatedSheetHeight, sheetHeight]);
+
+  const handleHeaderLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setHeaderHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
+  const handleContentLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setContentHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
+  const stepBody = (
+    <>
+      {step === 'root' ? (
+        <View style={styles.rootMenu}>
+          <SecurityRootStep
+            fingerprintEnabled={fingerprintEnabled}
+            hasPasscode={hasPasscode}
+            canReveal={canReveal}
+            compact={compact}
+            dense={dense}
+            iconSize={rowIconSize}
+            onToggleFingerprint={() => void toggleFingerprint()}
+            onGoPasscode={() => navigateToStep('passcode')}
+            onGoWalletKeys={() => goWalletKeys(canReveal)}
+          />
+        </View>
+      ) : null}
+
+      {step === 'passcode' ? (
+        <PreferenceStepLayout>
+          <PasscodeStep
+            hasPasscode={hasPasscode && !editingPasscode}
+            passcodeA={passcodeA}
+            passcodeB={passcodeB}
+            onChangePasscodeA={setPasscodeA}
+            onChangePasscodeB={setPasscodeB}
+            onSetPasscode={() => void handleSetPasscode()}
+            onChangePasscodeFlow={() => {
+              setPasscodeA('');
+              setPasscodeB('');
+              setEditingPasscode(true);
+            }}
+            compact={compact}
+          />
+        </PreferenceStepLayout>
+      ) : null}
+
+      {step === 'revealGate' ? (
+        <PreferenceStepLayout>
+          <AuthGateStep
+            buttonLabel={fingerprintEnabled ? 'Continue with fingerprint' : 'Continue'}
+            fingerprintEnabled={fingerprintEnabled}
+            hasPasscode={hasPasscode}
+            gatePasscode={gatePasscode}
+            onChangeGatePasscode={setGatePasscode}
+            onContinue={() => void handleGateContinue()}
+            compact={compact}
+          />
+        </PreferenceStepLayout>
+      ) : null}
+
+      {step === 'walletKeys' ? (
+        <PreferenceStepLayout>
+          <WalletKeysStep
+            walletImportMethod={walletImportMethod}
+            revealMnemonic={revealMnemonic}
+            revealPrivateKey={revealPrivateKey}
+            visibleSecret={visibleSecret}
+            onToggleVisibleSecret={setVisibleSecret}
+            onCopy={handleCopy}
+            onExportSecrets={(payload) => void handleExportSecrets(payload)}
+            onToast={setToast}
+            compact={compact}
+          />
+        </PreferenceStepLayout>
+      ) : null}
+    </>
+  );
 
   if (!mounted) return null;
 
@@ -611,7 +716,10 @@ export function SecuritySettingsModal({
           style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
         >
           {/* Header */}
-          <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
+          <View
+            style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}
+            onLayout={handleHeaderLayout}
+          >
             <View style={styles.headerLeft}>
               {step !== 'root' ? (
                 <Pressable
@@ -661,82 +769,29 @@ export function SecuritySettingsModal({
             </View>
           </View>
 
-          {/* Body — delegates to sub-components */}
-          <ScrollView
-            style={styles.body}
-            contentContainerStyle={[
-              styles.bodyContent,
-              step !== 'root' ? styles.bodySubStep : undefined,
-              compact && step !== 'root' ? styles.bodyCompact : undefined,
-            ]}
-            contentInsetAdjustmentBehavior="automatic"
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Animated.View style={[styles.stepContent, contentStyle]}>
-              {step === 'root' ? (
-                <SecurityRootStep
-                  fingerprintEnabled={fingerprintEnabled}
-                  hasPasscode={hasPasscode}
-                  canReveal={canReveal}
-                  compact={compact}
-                  dense={dense}
-                  iconSize={rootIconSize}
-                  onToggleFingerprint={() => void toggleFingerprint()}
-                  onGoPasscode={() => navigateToStep('passcode')}
-                  onGoWalletKeys={() => goWalletKeys(canReveal)}
-                />
-              ) : null}
+          {scrollOverflows ? (
+            <ScrollView
+              style={[styles.bodyScroll, { maxHeight: bodyMaxHeight }]}
+              contentContainerStyle={styles.bodyContent}
+              contentInsetAdjustmentBehavior="automatic"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={(_width, height) => {
+                const nextHeight = Math.ceil(height);
+                setContentHeight((current) => (current === nextHeight ? current : nextHeight));
+              }}
+            >
+              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
+            </ScrollView>
+          ) : (
+            <View style={styles.bodyStatic} onLayout={handleContentLayout}>
+              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
+            </View>
+          )}
 
-              {step === 'passcode' ? (
-                <PasscodeStep
-                  hasPasscode={hasPasscode && !editingPasscode}
-                  passcodeA={passcodeA}
-                  passcodeB={passcodeB}
-                  onChangePasscodeA={setPasscodeA}
-                  onChangePasscodeB={setPasscodeB}
-                  onSetPasscode={() => void handleSetPasscode()}
-                  onChangePasscodeFlow={() => {
-                    setPasscodeA('');
-                    setPasscodeB('');
-                    setEditingPasscode(true);
-                  }}
-                  compact={compact}
-                />
-              ) : null}
-
-              {step === 'revealGate' ? (
-                <AuthGateStep
-                  buttonLabel={fingerprintEnabled ? 'Continue with fingerprint' : 'Continue'}
-                  fingerprintEnabled={fingerprintEnabled}
-                  hasPasscode={hasPasscode}
-                  gatePasscode={gatePasscode}
-                  onChangeGatePasscode={setGatePasscode}
-                  onContinue={() => void handleGateContinue()}
-                  compact={compact}
-                />
-              ) : null}
-
-              {step === 'walletKeys' ? (
-                <WalletKeysStep
-                  walletImportMethod={walletImportMethod}
-                  revealMnemonic={revealMnemonic}
-                  revealPrivateKey={revealPrivateKey}
-                  visibleSecret={visibleSecret}
-                  onToggleVisibleSecret={setVisibleSecret}
-                  onCopy={handleCopy}
-                  onExportSecrets={(payload) => void handleExportSecrets(payload)}
-                  onToast={setToast}
-                  compact={compact}
-                />
-              ) : null}
-            </Animated.View>
-          </ScrollView>
-
-          {/* Toast */}
           {toast != null ? (
-            <View style={styles.toastContainer}>
+            <View style={styles.toastOverlay} pointerEvents="box-none">
               <View style={styles.toast}>
                 <Text variant="small" color={colors.text.primary}>
                   {toast}
@@ -771,6 +826,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     backgroundColor: colors.surface.cardElevated,
     boxShadow: SHEET_SHADOW,
+    paddingBottom: SHEET_CHROME_PADDING,
   },
   headerRow: {
     flexDirection: 'row',
@@ -803,26 +859,28 @@ const styles = StyleSheet.create({
     boxShadow: '0 8px 18px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
   },
   headerIconPlaceholder: { width: layout.minTouchTarget, height: layout.minTouchTarget },
-  body: { flex: 1 },
+  bodyScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  bodyStatic: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   bodyContent: {
-    paddingBottom: spacing.sm,
-  },
-  bodySubStep: {
-    paddingHorizontal: spacing.sm,
-    paddingTop: 0,
-    gap: spacing.xs,
-  },
-  bodyCompact: {
-    paddingTop: 0,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+    flexGrow: 0,
   },
   stepContent: {
     minWidth: 0,
   },
-  toastContainer: {
-    minHeight: layout.minTouchTarget,
-    justifyContent: 'center',
+  rootMenu: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  toastOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
   },

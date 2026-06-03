@@ -1,32 +1,43 @@
 import { StyleSheet } from 'react-native';
 
 import { colors } from '@/constants/colors';
-import { spacing } from '@/constants/spacing';
+import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
 import { PROMPT_ICON_SIZE } from '../constants';
+
+const COMPOSER_SHADOW =
+  '0 14px 32px rgba(0, 0, 0, 0.52), inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.35)';
 
 export const promptStyles = StyleSheet.create({
   promptDock: {
     paddingTop: spacing.sm,
   },
-  // Rounded card: input/placeholder on the top row, action controls beneath.
   prompt: {
-    borderRadius: spacing.xl,
+    borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
-    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.surface.cardElevated,
+    paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '0 6px 20px rgba(16, 16, 16, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: COMPOSER_SHADOW,
   },
-  // Top row holds the multiline text input.
   promptInputRow: {
-    minHeight: 28,
+    minHeight: 40,
     justifyContent: 'center',
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   promptInput: {
     fontFamily: fontFamily.ui,
@@ -36,11 +47,11 @@ export const promptStyles = StyleSheet.create({
     padding: 0,
     maxHeight: 120,
   },
-  // Bottom action row: leading (+) on the left, voice + send on the right.
   promptActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: spacing.xs,
   },
   promptActionGroup: {
     flexDirection: 'row',
@@ -50,20 +61,26 @@ export const promptStyles = StyleSheet.create({
   promptAccessory: {
     width: 36,
     height: 36,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
   },
-  // The dark circular "waveform" button on the right (idle entry to voice).
   voiceOrb: {
     width: PROMPT_ICON_SIZE,
     height: PROMPT_ICON_SIZE,
     borderRadius: PROMPT_ICON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.deepShadow,
+    backgroundColor: colors.brand.glossAccent,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
   },
   voiceOrbPressed: {
-    opacity: 0.82,
+    opacity: 0.88,
   },
   promptSend: {
     width: PROMPT_ICON_SIZE,
@@ -71,27 +88,32 @@ export const promptStyles = StyleSheet.create({
     borderRadius: PROMPT_ICON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brand.deepShadow,
+    backgroundColor: colors.brand.glossAccent,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
   },
   promptSendDisabled: {
-    backgroundColor: 'rgba(16, 16, 16, 0.4)',
+    backgroundColor: colors.glass.strongFill,
+    borderColor: colors.glass.rimSubtle,
   },
   promptSendPressed: {
-    opacity: 0.82,
+    opacity: 0.88,
   },
 
-  // --- Voice card (expanded recording / review state) ---
   voiceCard: {
-    borderRadius: spacing.xl,
+    borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.surface.cardElevated,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.md,
     gap: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '0 6px 20px rgba(16, 16, 16, 0.10), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: COMPOSER_SHADOW,
   },
   voiceTranscript: {
     fontFamily: fontFamily.ui,
@@ -120,20 +142,24 @@ export const promptStyles = StyleSheet.create({
   voiceControlNeutral: {
     width: PROMPT_ICON_SIZE,
     height: PROMPT_ICON_SIZE,
-    borderRadius: spacing.md,
+    borderRadius: radii.lg,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(16, 16, 16, 0.08)',
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
   },
   voiceControlPrimary: {
     width: PROMPT_ICON_SIZE,
     height: PROMPT_ICON_SIZE,
-    borderRadius: spacing.md,
+    borderRadius: radii.lg,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.brand.glossAccent,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
   },
   voiceControlDisabled: {
     opacity: 0.5,

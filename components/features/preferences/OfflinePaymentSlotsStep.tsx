@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { GlassToggle } from '@/components/ui/GlassToggle';
 import { PillButton } from '@/components/ui/PillButton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -337,17 +338,14 @@ export function OfflinePaymentSlotsStep({
               {statusLabel}
             </Text>
           </View>
-          <Pressable
-            style={[styles.toggle, draftEnabled ? styles.toggleActive : undefined]}
-            onPress={() => {
+          <GlassToggle
+            value={draftEnabled}
+            onValueChange={() => {
               if (!isMutatingSlots) setDraftEnabled((value) => !value);
             }}
             disabled={isMutatingSlots}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: draftEnabled, disabled: isMutatingSlots }}
-          >
-            <View style={[styles.toggleDot, draftEnabled ? styles.toggleDotActive : undefined]} />
-          </Pressable>
+            accessibilityLabel="Offline payment slots toggle"
+          />
         </View>
 
         <View style={styles.progressTrack}>
@@ -388,12 +386,7 @@ export function OfflinePaymentSlotsStep({
       </View>
 
       <View style={styles.noteCard}>
-        <Text
-          variant="small"
-          color={colors.semantic.warning}
-          align="center"
-          style={styles.noteText}
-        >
+        <Text variant="small" color={colors.text.secondary} align="center" style={styles.noteText}>
           Larger pools cost more SOL upfront but support more queued offline payments before
           reconnecting.
         </Text>
@@ -445,22 +438,13 @@ export function OfflinePaymentSlotsStep({
         </View>
       </View>
 
-      <View style={styles.estimateCard}>
-        <Text variant="small" color={colors.text.tertiary}>
-          Cost estimate
-        </Text>
-        <Text variant="bodyBold" color={colors.text.primary}>
-          {estimateLabel}
-        </Text>
-      </View>
-
       {pendingConfirmation != null ? (
         <View style={styles.confirmCard}>
           <View style={styles.confirmIcon}>
             <Ionicons
               name={pendingConfirmation === 'restore' ? 'refresh-outline' : 'warning-outline'}
               size={layout.iconSizeInline}
-              color={colors.semantic.warning}
+              color={colors.text.secondary}
             />
           </View>
           <View style={styles.confirmContent}>
@@ -481,7 +465,7 @@ export function OfflinePaymentSlotsStep({
               <View style={styles.confirmActionSlot}>
                 <PillButton
                   label={confirmationActionLabel}
-                  variant={pendingConfirmation === 'restore' ? 'danger' : 'primary'}
+                  variant="primary"
                   onPress={confirmPendingAction}
                 />
               </View>
@@ -490,30 +474,43 @@ export function OfflinePaymentSlotsStep({
         </View>
       ) : null}
 
-      <View style={styles.restoreRow}>
-        <View style={styles.restoreText}>
-          <View>
+      <View style={styles.footerPanel}>
+        <View style={styles.footerRow}>
+          <View style={styles.footerCopy}>
+            <Text variant="small" color={colors.text.tertiary}>
+              Cost estimate
+            </Text>
+            <Text variant="bodyBold" color={colors.text.primary}>
+              {estimateLabel}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.footerDivider} />
+        <View style={styles.footerRow}>
+          <View style={styles.footerCopy}>
             <Text variant="small" color={colors.text.tertiary}>
               Restore SOL
             </Text>
             <Text variant="bodyBold" color={colors.text.primary}>
               {canRestoreSol ? `${reclaimableSol} SOL` : '0 SOL'}
             </Text>
+            {restoreNotice != null ? (
+              <Text variant="small" color={colors.text.secondary} numberOfLines={2}>
+                {restoreNotice}
+              </Text>
+            ) : null}
           </View>
-          {restoreNotice != null ? (
-            <Text variant="small" color={colors.text.tertiary} numberOfLines={2}>
-              {restoreNotice}
-            </Text>
-          ) : null}
-        </View>
-        <View style={styles.restoreButtonSlot}>
-          <PillButton
-            label={slots.reclaimMutation.isPending ? 'Restoring' : 'Restore'}
-            variant="danger"
-            loading={slots.reclaimMutation.isPending}
-            disabled={slots.reclaimMutation.isPending || !slots.canUseNetwork || !canRestoreSol}
-            onPress={handleRestoreSol}
-          />
+          <View style={styles.restoreButtonSlot}>
+            <PillButton
+              label={slots.reclaimMutation.isPending ? 'Restoring' : 'Restore'}
+              variant="neutral"
+              loading={slots.reclaimMutation.isPending}
+              disabled={
+                slots.reclaimMutation.isPending || !slots.canUseNetwork || !canRestoreSol
+              }
+              onPress={handleRestoreSol}
+            />
+          </View>
         </View>
       </View>
 
@@ -528,11 +525,18 @@ export function OfflinePaymentSlotsStep({
   );
 }
 
+const GLASS_PANEL_SHADOW = [
+  'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+  'inset 0 -1px 2px rgba(0, 0, 0, 0.28)',
+  '0 6px 16px rgba(0, 0, 0, 0.28)',
+].join(', ');
+
 const styles = StyleSheet.create({
   container: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xs,
-    gap: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: 0,
+    gap: spacing.md,
   },
   statusCard: {
     borderRadius: radii.lg,
@@ -542,10 +546,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.glass.strongFill,
     padding: spacing.lg,
     gap: spacing.sm,
-    boxShadow: '0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: GLASS_PANEL_SHADOW,
   },
   statusHeader: {
     flexDirection: 'row',
@@ -568,41 +572,6 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: fontFamily.semiBold,
-  },
-  toggle: {
-    width: 60,
-    height: 34,
-    borderRadius: radii.full,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    padding: spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    backgroundColor: 'rgba(255, 255, 255, 0.84)',
-    boxShadow:
-      'inset 0 1px 1px rgba(255, 255, 255, 0.82), inset 0 -6px 12px rgba(16, 16, 16, 0.05)',
-  },
-  toggleActive: {
-    borderColor: colors.brand.glossAccent,
-    justifyContent: 'flex-end',
-    backgroundColor: colors.brand.glossAccent,
-  },
-  toggleDot: {
-    width: 24,
-    height: 24,
-    borderRadius: radii.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.78)',
-    backgroundColor: colors.text.secondary,
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.18)',
-  },
-  toggleDotActive: {
-    borderColor: 'rgba(255, 255, 255, 0.92)',
-    backgroundColor: colors.brand.whiteStream,
   },
   progressTrack: {
     height: 6,
@@ -638,20 +607,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stageChipSuccess: {
-    borderColor: 'rgba(22, 138, 100, 0.24)',
-    backgroundColor: 'rgba(185, 245, 216, 0.34)',
+    borderColor: colors.glass.rim,
+    backgroundColor: colors.glass.badgeFill,
   },
   stageChipInfo: {
-    borderColor: 'rgba(34, 122, 150, 0.24)',
-    backgroundColor: 'rgba(189, 239, 247, 0.42)',
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.smokeWash,
   },
   stageChipWarning: {
-    borderColor: 'rgba(154, 107, 22, 0.26)',
-    backgroundColor: 'rgba(255, 226, 122, 0.24)',
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.backgroundTint,
   },
   stageChipDanger: {
-    borderColor: 'rgba(199, 58, 58, 0.24)',
-    backgroundColor: 'rgba(255, 201, 201, 0.28)',
+    borderColor: 'rgba(255, 77, 90, 0.28)',
+    backgroundColor: 'rgba(255, 77, 90, 0.1)',
   },
   stageChipText: {
     fontFamily: fontFamily.medium,
@@ -660,17 +629,17 @@ const styles = StyleSheet.create({
   noteCard: {
     borderRadius: radii.lg,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(255, 247, 222, 0.62)',
+    backgroundColor: colors.glass.smokeWash,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 226, 122, 0.62)',
+    borderColor: colors.glass.rimSubtle,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: GLASS_PANEL_SHADOW,
   },
   noteText: {
     lineHeight: 18,
@@ -702,17 +671,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.glass.strongFill,
+    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.06)',
   },
   presetButtonActive: {
-    borderColor: colors.brand.glossAccent,
+    borderColor: colors.glass.rim,
     backgroundColor: colors.brand.glossAccent,
+    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.2)',
   },
   customRow: {
     minHeight: 48,
     borderRadius: radii.lg,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.glass.strongFill,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -723,9 +694,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.06)',
   },
   customRowActive: {
-    borderColor: colors.glass.accentVeil,
+    borderColor: colors.glass.rim,
     backgroundColor: colors.glass.smokeWash,
   },
   input: {
@@ -746,31 +718,19 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     textAlign: 'right',
   },
-  estimateCard: {
-    borderRadius: radii.lg,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
   confirmCard: {
     borderRadius: radii.lg,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(255, 247, 222, 0.72)',
+    backgroundColor: colors.glass.strongFill,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 226, 122, 0.7)',
+    borderColor: colors.glass.rim,
     padding: spacing.md,
     flexDirection: 'row',
     gap: spacing.sm,
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    boxShadow: GLASS_PANEL_SHADOW,
   },
   confirmIcon: {
     width: layout.buttonHeightSm,
@@ -779,9 +739,12 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.58)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 226, 122, 0.82)',
+    backgroundColor: colors.surface.backgroundTint,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
     flexShrink: 0,
   },
   confirmContent: {
@@ -801,27 +764,36 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  restoreRow: {
+  footerPanel: {
     borderRadius: radii.lg,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.glass.strongFill,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    padding: spacing.md,
+    overflow: 'hidden',
+    boxShadow: GLASS_PANEL_SHADOW,
+  },
+  footerRow: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
   },
-  restoreText: {
+  footerCopy: {
     flex: 1,
     minWidth: 0,
     gap: spacing.xs,
   },
+  footerDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.holdingsCard.divider,
+  },
   restoreButtonSlot: {
-    width: 132,
+    width: 124,
     flexShrink: 0,
   },
 });

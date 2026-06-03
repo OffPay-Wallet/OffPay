@@ -16,6 +16,9 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "typecheck:ai-proxy": "tsc -p workers/ai-proxy/tsconfig.json --noEmit",
+    "typecheck:api-worker": "tsc -p workers/api/tsconfig.json --noEmit",
+    "deploy:api-worker": "npx wrangler deploy --config workers/api/wrangler.toml",
+    "tail:api-worker": "npx wrangler tail --config workers/api/wrangler.toml",
     "verify:hardening": "node scripts/verify-client-hardening.js"
   },
   "dependencies": {
@@ -23,7 +26,9 @@
     "@ethersproject/shims": "^5.8.0",
     "@expo/vector-icons": "^15.0.3",
     "@noble/curves": "^2.0.1",
+    "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.2.0",
+    "@peculiar/x509": "^2.0.0",
     "@privy-io/expo": "^0.66.2",
     "@privy-io/expo-native-extensions": "^0.0.11",
     "@react-native-community/netinfo": "^11.4.1",
@@ -42,6 +47,7 @@
     "@umbra-privacy/umbra-codama": "3.0.0-rc.2",
     "bs58": "^6.0.0",
     "buffer": "^6.0.3",
+    "cbor-x": "^1.6.4",
     "expo": "~54.0.34",
     "expo-apple-authentication": "~8.0.8",
     "expo-application": "~7.0.8",
@@ -65,6 +71,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.11",
     "fast-text-encoding": "^1.0.6",
+    "hono": "^4.12.23",
     "lottie-react-native": "~7.3.1",
     "munim-bluetooth": "^0.3.27",
     "papaparse": "^5.5.3",
@@ -87,6 +94,7 @@
     "react-native-web": "~0.21.0",
     "react-native-webview": "13.15.0",
     "react-native-worklets": "0.5.1",
+    "reflect-metadata": "^0.2.2",
     "tweetnacl": "^1.0.3",
     "viem": "2.48.11",
     "zustand": "^5.0.12"

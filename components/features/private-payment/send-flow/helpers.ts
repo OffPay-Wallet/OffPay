@@ -30,6 +30,8 @@ import type { ProcessResultVariant } from '@/components/ui/ProcessResultScreen';
 import type { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import type { OfflineSupportedStablecoin, WalletBalanceResponse } from '@/types/offpay-api';
 
+import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
+
 import type { SendTokenOption } from './types';
 
 /**
@@ -48,6 +50,17 @@ export const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
  * through the SPL transfer path.
  */
 export const NATIVE_SOL_SEND_MINT = 'native-sol';
+
+export function lookupSendTokenValuation(
+  mint: string,
+  tokenValues: Readonly<Record<string, TokenValuationView>> | undefined,
+): TokenValuationView | undefined {
+  if (tokenValues == null) return undefined;
+  return (
+    tokenValues[mint] ??
+    (mint === NATIVE_SOL_SEND_MINT ? tokenValues[NATIVE_SOL_MINT] : undefined)
+  );
+}
 
 /**
  * Send-token option as produced by `getStablecoinOptions`. Re-uses

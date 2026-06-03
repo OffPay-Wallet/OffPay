@@ -9,7 +9,14 @@ import { HEADER_BUTTON_SIZE } from '../constants';
 export const headerStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.brand.glassTint,
+    backgroundColor: colors.surface.background,
+  },
+  chatBody: {
+    flex: 1,
+    position: 'relative',
+  },
+  chatScroll: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
@@ -58,11 +65,15 @@ export const headerStyles = StyleSheet.create({
     gap: 2,
   },
   welcomeEyebrow: {
-    fontFamily: fontFamily.uiMedium,
-    letterSpacing: 0.2,
+    fontFamily: fontFamily.moneyLight,
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: 0.4,
   },
   welcomeName: {
-    fontFamily: fontFamily.display,
+    fontFamily: fontFamily.moneyBold,
+    fontSize: 28,
+    lineHeight: 32,
   },
   intro: {
     marginTop: spacing.xl,

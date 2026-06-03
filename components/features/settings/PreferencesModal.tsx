@@ -19,6 +19,8 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+
+import type { LayoutChangeEvent } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -32,6 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/ui/Text';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
 import { SettingsLineItem } from '@/components/features/settings/SettingsLineItem';
+import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { NetworkStep } from '@/components/features/preferences/NetworkStep';
 import { OfflinePaymentSlotsStep } from '@/components/features/preferences/OfflinePaymentSlotsStep';
 import { WalletModeStep } from '@/components/features/preferences/WalletModeStep';
@@ -56,12 +59,10 @@ interface PreferencesModalProps {
   onClose: () => void;
 }
 
-const SHEET_HEIGHTS: Record<Step, number> = {
-  root: layout.buttonHeightLg * 3.5 + spacing['3xl'],
-  walletMode: layout.buttonHeightLg * 2.5 + spacing['3xl'],
-  offlinePayments: layout.buttonHeightLg * 10 + spacing['4xl'],
-  network: layout.buttonHeightLg * 2.5 + spacing['3xl'],
-};
+const PREFERENCE_MENU_DIVIDER_INSET = spacing.lg + 40 + spacing.md;
+const SHEET_CHROME_PADDING = spacing.md;
+const HEADER_FALLBACK_HEIGHT = layout.minTouchTarget + spacing.lg + spacing.md;
+const SHEET_MIN_HEIGHT = layout.buttonHeightLg * 2 + spacing['3xl'];
 
 const HEADER_TITLES: Record<Step, string> = {
   root: 'Preferences',
@@ -123,6 +124,8 @@ export function PreferencesModal({
   const network = usePreferencesStore((s) => s.network);
   const [optimisticWalletMode, setOptimisticWalletMode] = useState(walletMode);
   const [optimisticNetwork, setOptimisticNetwork] = useState(network);
+  const [headerHeight, setHeaderHeight] = useState(HEADER_FALLBACK_HEIGHT);
+  const [contentHeight, setContentHeight] = useState(0);
 
   const setWalletMode = usePreferencesStore((s) => s.setWalletMode);
   const setOfflinePaymentsEnabled = usePreferencesStore((s) => s.setOfflinePaymentsEnabled);
@@ -150,10 +153,30 @@ export function PreferencesModal({
 
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const sheetHeight = Math.max(
-    layout.buttonHeightLg * 4 + spacing['3xl'],
-    Math.min(SHEET_HEIGHTS[step], maxSheetHeight),
+  const resolvedHeaderHeight =
+    headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
+  const bodyMaxHeight = Math.max(
+    120,
+    maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING,
   );
+  const scrollOverflows = contentHeight > bodyMaxHeight;
+  const sheetHeight = useMemo(() => {
+    const chromeHeight = resolvedHeaderHeight + SHEET_CHROME_PADDING;
+
+    if (contentHeight <= 0) {
+      const stepEstimate = step === 'offlinePayments' ? 520 : SHEET_MIN_HEIGHT;
+      return Math.min(maxSheetHeight, chromeHeight + stepEstimate);
+    }
+
+    if (scrollOverflows) {
+      return maxSheetHeight;
+    }
+
+    return Math.min(
+      maxSheetHeight,
+      Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight),
+    );
+  }, [contentHeight, maxSheetHeight, resolvedHeaderHeight, scrollOverflows, step]);
 
   const translateY = useSharedValue(windowHeight);
   const opacity = useSharedValue(0);
@@ -164,6 +187,7 @@ export function PreferencesModal({
   // Animation
   useEffect(() => {
     if (visible) {
+      setContentHeight(0);
       setMounted(true);
       opacity.value = withTiming(1, { duration: 220 });
       translateY.value = withTiming(0, {
@@ -230,10 +254,21 @@ export function PreferencesModal({
   // Handlers
   // ---------------------------------------------------------------------------
 
+  const handleHeaderLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setHeaderHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
+  const handleContentLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setContentHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
   const navigateToStep = useCallback(
     (nextStep: Step): void => {
       contentDirection.value = nextStep === 'root' ? -1 : 1;
       contentProgress.value = 0;
+      setContentHeight(0);
       setStep(nextStep);
       requestAnimationFrame(() => {
         contentProgress.value = withTiming(1, NAV_TIMING);
@@ -330,6 +365,119 @@ export function PreferencesModal({
     ],
   );
 
+  const stepBody = (
+    <>
+      {step === 'root' ? (
+        <View style={styles.rootMenu}>
+          <SettingsSectionCard dividerInset={PREFERENCE_MENU_DIVIDER_INSET}>
+            <SettingsLineItem
+              icon={
+                <PuffyWifiIcon
+                  size={rootIconSize}
+                  color={colors.text.primary}
+                  focused
+                  off={optimisticWalletMode === 'offline'}
+                />
+              }
+              title="Wallet Mode"
+              subtitle={
+                optimisticWalletMode === 'online'
+                  ? 'Live OffPay services while connected'
+                  : 'Offline tools stay available even when online'
+              }
+              right={
+                <Text
+                  variant="small"
+                  color={colors.text.secondary}
+                  style={[styles.rightLabel, dense && styles.rightLabelDense]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.78}
+                  maxFontSizeMultiplier={1}
+                >
+                  {optimisticWalletMode === 'online' ? 'Online' : 'Offline'}
+                </Text>
+              }
+              compact={compact}
+              dense={dense}
+              onPress={() => navigateToStep('walletMode')}
+            />
+            <SettingsLineItem
+              icon={
+                <PuffyPaymentsIcon size={rootIconSize} color={colors.text.primary} focused />
+              }
+              title="Offline Payments"
+              subtitle={
+                offlinePaymentsEnabled
+                  ? `${offlinePaymentPoolSize} payment slots requested`
+                  : 'Prepare payment slots for offline P2P'
+              }
+              right={
+                <Text
+                  variant="small"
+                  color={colors.text.secondary}
+                  style={[styles.rightLabel, dense && styles.rightLabelDense]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.78}
+                  maxFontSizeMultiplier={1}
+                >
+                  {offlinePaymentsEnabled ? `${offlinePaymentPoolSize}` : 'Off'}
+                </Text>
+              }
+              compact={compact}
+              dense={dense}
+              onPress={() => navigateToStep('offlinePayments')}
+            />
+            <SettingsLineItem
+              icon={
+                <PuffyNetworkIcon size={rootIconSize} color={colors.text.primary} focused />
+              }
+              title="Network"
+              subtitle="Solana cluster"
+              right={
+                <Text
+                  variant="small"
+                  color={colors.text.secondary}
+                  style={[styles.rightLabel, dense && styles.rightLabelDense]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.78}
+                  maxFontSizeMultiplier={1}
+                >
+                  {networkLabel}
+                </Text>
+              }
+              compact={compact}
+              dense={dense}
+              onPress={() => navigateToStep('network')}
+            />
+          </SettingsSectionCard>
+        </View>
+      ) : null}
+
+      {step === 'walletMode' ? (
+        <WalletModeStep walletMode={optimisticWalletMode} onSelect={handleWalletModeSelect} />
+      ) : null}
+
+      {step === 'offlinePayments' ? (
+        <OfflinePaymentSlotsStep
+          enabled={offlinePaymentsEnabled}
+          poolSize={offlinePaymentPoolSize}
+          onEnabledChange={setOfflinePaymentsEnabled}
+          onPoolSizeChange={setOfflinePaymentPoolSize}
+        />
+      ) : null}
+
+      {step === 'network' ? (
+        <NetworkStep selectedNetwork={optimisticNetwork} onSelect={handleNetworkSelect} />
+      ) : null}
+    </>
+  );
+
   if (!mounted) return null;
 
   return (
@@ -353,7 +501,10 @@ export function PreferencesModal({
           style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
         >
           {/* Header */}
-          <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
+          <View
+            style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}
+            onLayout={handleHeaderLayout}
+          >
             <View style={styles.headerLeft}>
               {step !== 'root' ? (
                 <Pressable
@@ -401,135 +552,29 @@ export function PreferencesModal({
             </View>
           </View>
 
-          {/* Body — delegates to sub-components */}
-          <ScrollView
-            style={styles.body}
-            contentContainerStyle={[
-              styles.bodyContent,
-              step !== 'root' ? styles.bodySubStep : undefined,
-              compact && step !== 'root' ? styles.bodyCompact : undefined,
-            ]}
-            contentInsetAdjustmentBehavior="automatic"
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Animated.View style={[styles.stepContent, contentStyle]}>
-              {step === 'root' ? (
-                <>
-                  <SettingsLineItem
-                    icon={
-                      <PuffyWifiIcon
-                        size={rootIconSize}
-                        color={colors.text.primary}
-                        focused
-                        off={optimisticWalletMode === 'offline'}
-                      />
-                    }
-                    title="Wallet Mode"
-                    subtitle={
-                      optimisticWalletMode === 'online'
-                        ? 'Live OffPay services while connected'
-                        : 'Offline tools stay available even when online'
-                    }
-                    right={
-                      <Text
-                        variant="small"
-                        color={colors.text.secondary}
-                        style={[styles.rightLabel, dense && styles.rightLabelDense]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.78}
-                        maxFontSizeMultiplier={1}
-                      >
-                        {optimisticWalletMode === 'online' ? 'Online' : 'Offline'}
-                      </Text>
-                    }
-                    compact={compact}
-                    dense={dense}
-                    onPress={() => navigateToStep('walletMode')}
-                  />
-                  <View style={styles.divider} />
-
-                  <SettingsLineItem
-                    icon={
-                      <PuffyPaymentsIcon size={rootIconSize} color={colors.text.primary} focused />
-                    }
-                    title="Offline Payments"
-                    subtitle={
-                      offlinePaymentsEnabled
-                        ? `${offlinePaymentPoolSize} payment slots requested`
-                        : 'Prepare payment slots for offline P2P'
-                    }
-                    right={
-                      <Text
-                        variant="small"
-                        color={colors.text.secondary}
-                        style={[styles.rightLabel, dense && styles.rightLabelDense]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.78}
-                        maxFontSizeMultiplier={1}
-                      >
-                        {offlinePaymentsEnabled ? `${offlinePaymentPoolSize}` : 'Off'}
-                      </Text>
-                    }
-                    compact={compact}
-                    dense={dense}
-                    onPress={() => navigateToStep('offlinePayments')}
-                  />
-                  <View style={styles.divider} />
-
-                  <SettingsLineItem
-                    icon={
-                      <PuffyNetworkIcon size={rootIconSize} color={colors.text.primary} focused />
-                    }
-                    title="Network"
-                    subtitle="Solana cluster"
-                    right={
-                      <Text
-                        variant="small"
-                        color={colors.text.secondary}
-                        style={[styles.rightLabel, dense && styles.rightLabelDense]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.78}
-                        maxFontSizeMultiplier={1}
-                      >
-                        {networkLabel}
-                      </Text>
-                    }
-                    compact={compact}
-                    dense={dense}
-                    onPress={() => navigateToStep('network')}
-                  />
-                </>
-              ) : null}
-
-              {step === 'walletMode' ? (
-                <WalletModeStep
-                  walletMode={optimisticWalletMode}
-                  onSelect={handleWalletModeSelect}
-                />
-              ) : null}
-
-              {step === 'offlinePayments' ? (
-                <OfflinePaymentSlotsStep
-                  enabled={offlinePaymentsEnabled}
-                  poolSize={offlinePaymentPoolSize}
-                  onEnabledChange={setOfflinePaymentsEnabled}
-                  onPoolSizeChange={setOfflinePaymentPoolSize}
-                />
-              ) : null}
-
-              {step === 'network' ? (
-                <NetworkStep selectedNetwork={optimisticNetwork} onSelect={handleNetworkSelect} />
-              ) : null}
-            </Animated.View>
-          </ScrollView>
+          {/* Body — sheet height follows content; scroll only when offline step overflows. */}
+          {scrollOverflows ? (
+            <ScrollView
+              style={[styles.bodyScroll, { maxHeight: bodyMaxHeight }]}
+              contentContainerStyle={styles.bodyContent}
+              contentInsetAdjustmentBehavior="automatic"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={(_width, height) => {
+                const nextHeight = Math.ceil(height);
+                setContentHeight((current) => (current === nextHeight ? current : nextHeight));
+              }}
+            >
+              <Animated.View style={[styles.stepContent, contentStyle]}>
+                {stepBody}
+              </Animated.View>
+            </ScrollView>
+          ) : (
+            <View style={styles.bodyStatic} onLayout={handleContentLayout}>
+              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
+            </View>
+          )}
         </Animated.View>
       </View>
     </View>
@@ -564,9 +609,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.md,
   },
-  headerRowCompact: { paddingTop: spacing.md, paddingBottom: spacing.xs },
+  headerRowCompact: { paddingTop: spacing.md, paddingBottom: spacing.sm },
   headerLeft: { width: layout.minTouchTarget },
   headerRight: { width: layout.minTouchTarget, alignItems: 'flex-end' },
   headerIconBtn: {
@@ -599,24 +644,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
   },
-  body: { flex: 1 },
-  bodyContent: { paddingBottom: spacing.sm },
-  bodySubStep: {
-    paddingTop: 0,
-    gap: spacing.xs,
+  bodyScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
   },
-  bodyCompact: {
-    paddingTop: 0,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+  bodyStatic: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  bodyContent: {
+    flexGrow: 0,
   },
   stepContent: {
     minWidth: 0,
   },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.glass.rim,
-    marginHorizontal: spacing.lg,
-    opacity: 0.5,
+  rootMenu: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
   },
 });

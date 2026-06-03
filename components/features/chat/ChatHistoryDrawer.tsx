@@ -1,11 +1,6 @@
 /**
- * Slide-in drawer that lists scoped chat conversations (active +
- * archived). Pure presentation; the parent screen owns archive/unarchive/
- * delete intent and the open/close visibility flag.
- *
- * Uses FlashList for the conversation list so the drawer stays responsive
- * once history grows. Section headers are first-class list items with
- * their own recycler pool.
+ * Slide-in drawer that lists scoped chat conversations.
+ * Uses FlashList so the drawer stays responsive as history grows.
  */
 
 import React, { useCallback, useMemo } from 'react';
@@ -22,7 +17,6 @@ import type { AgenticChatMessage, AgenticConversation } from '@/store/agenticCha
 import { ConversationRow } from './ConversationRow';
 import { getConversationPreview } from './helpers';
 import { drawerStyles as styles } from './styles/drawer';
-import { headerStyles } from './styles/header';
 
 interface ChatHistoryDrawerProps {
   visible: boolean;
@@ -35,8 +29,6 @@ interface ChatHistoryDrawerProps {
   onClose: () => void;
   onNewChat: () => void;
   onOpenConversation: (conversation: AgenticConversation) => void;
-  onArchiveConversation: (conversationId: string) => void;
-  onUnarchiveConversation: (conversationId: string) => void;
   onDeleteConversation: (conversationId: string) => void;
 }
 
@@ -45,7 +37,6 @@ type DrawerListItem =
       kind: 'header';
       key: string;
       title: string;
-      archived: boolean;
     }
   | {
       kind: 'empty';
@@ -58,7 +49,6 @@ type DrawerListItem =
       conversation: AgenticConversation;
       preview: string;
       active: boolean;
-      archived: boolean;
     };
 
 export function ChatHistoryDrawer({
@@ -72,43 +62,22 @@ export function ChatHistoryDrawer({
   onClose,
   onNewChat,
   onOpenConversation,
-  onArchiveConversation,
-  onUnarchiveConversation,
   onDeleteConversation,
 }: ChatHistoryDrawerProps): React.JSX.Element {
   const items = useMemo<DrawerListItem[]>(() => {
-    const active = conversations.filter((conversation) => conversation.archivedAt == null);
-    const archived = conversations.filter((conversation) => conversation.archivedAt != null);
     const list: DrawerListItem[] = [];
 
-    list.push({ kind: 'header', key: 'recent-header', title: 'Recent', archived: false });
-    if (active.length === 0) {
+    list.push({ kind: 'header', key: 'recent-header', title: 'Recent' });
+    if (conversations.length === 0) {
       list.push({ kind: 'empty', key: 'recent-empty', label: 'No chats yet' });
     } else {
-      for (const conversation of active) {
+      for (const conversation of conversations) {
         list.push({
           kind: 'row',
-          key: `recent-${conversation.id}`,
+          key: conversation.id,
           conversation,
           preview: getConversationPreview(conversation.id, messages),
           active: conversation.id === activeConversationId,
-          archived: false,
-        });
-      }
-    }
-
-    list.push({ kind: 'header', key: 'archived-header', title: 'Archived chats', archived: true });
-    if (archived.length === 0) {
-      list.push({ kind: 'empty', key: 'archived-empty', label: 'No archived chats' });
-    } else {
-      for (const conversation of archived) {
-        list.push({
-          kind: 'row',
-          key: `archived-${conversation.id}`,
-          conversation,
-          preview: getConversationPreview(conversation.id, messages),
-          active: conversation.id === activeConversationId,
-          archived: true,
         });
       }
     }
@@ -126,14 +95,11 @@ export function ChatHistoryDrawer({
           <View style={styles.drawerSectionHeader}>
             <Text
               variant="captionBold"
-              color={colors.text.secondary}
+              color={colors.text.tertiary}
               style={styles.drawerSectionTitle}
             >
               {item.title}
             </Text>
-            {item.archived ? (
-              <Ionicons name="archive-outline" size={14} color={colors.text.tertiary} />
-            ) : null}
           </View>
         );
       }
@@ -151,15 +117,12 @@ export function ChatHistoryDrawer({
           conversation={item.conversation}
           preview={item.preview}
           active={item.active}
-          archived={item.archived}
           onOpen={() => onOpenConversation(item.conversation)}
-          onArchive={() => onArchiveConversation(item.conversation.id)}
-          onUnarchive={() => onUnarchiveConversation(item.conversation.id)}
           onDelete={() => onDeleteConversation(item.conversation.id)}
         />
       );
     },
-    [onArchiveConversation, onDeleteConversation, onOpenConversation, onUnarchiveConversation],
+    [onDeleteConversation, onOpenConversation],
   );
 
   return (
@@ -181,40 +144,40 @@ export function ChatHistoryDrawer({
             },
           ]}
         >
-          <View style={styles.drawerHeader}>
-            <View style={styles.drawerTitleStack}>
-              <Text variant="h3" color={colors.text.primary} style={styles.drawerTitle}>
-                Chats
-              </Text>
-              <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-                Local Yuga history
-              </Text>
+          <View style={styles.drawerChrome}>
+            <View style={styles.drawerHeader}>
+              <View style={styles.drawerTitleStack}>
+                <Text color={colors.text.primary} style={styles.drawerTitle} numberOfLines={1}>
+                  Chats
+                </Text>
+                <Text color={colors.text.secondary} style={styles.drawerSubtitle} numberOfLines={1}>
+                  Local Yuga history
+                </Text>
+              </View>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.drawerIconButton,
+                  pressed && styles.drawerRowPressed,
+                ]}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close chat history"
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={20} color={colors.text.primary} />
+              </Pressable>
             </View>
+
             <Pressable
-              style={({ pressed }) => [
-                styles.drawerIconButton,
-                pressed && headerStyles.headerButtonPressed,
-              ]}
-              onPress={onClose}
+              style={({ pressed }) => [styles.newChatRow, pressed && styles.drawerRowPressed]}
+              onPress={onNewChat}
               accessibilityRole="button"
-              accessibilityLabel="Close chat history"
-              hitSlop={8}
+              accessibilityLabel="Create new chat"
             >
-              <Ionicons name="close" size={20} color={colors.text.primary} />
+              <Ionicons name="create-outline" size={20} color={colors.text.onAccent} />
+              <Text style={styles.newChatLabel}>New chat</Text>
             </Pressable>
           </View>
-
-          <Pressable
-            style={({ pressed }) => [styles.newChatButton, pressed && styles.drawerRowPressed]}
-            onPress={onNewChat}
-            accessibilityRole="button"
-            accessibilityLabel="Create new chat"
-          >
-            <Ionicons name="create-outline" size={19} color={colors.brand.deepShadow} />
-            <Text variant="buttonSmall" color={colors.text.primary} style={styles.newChatLabel}>
-              New chat
-            </Text>
-          </Pressable>
 
           <View style={styles.drawerList}>
             <FlashList<DrawerListItem>

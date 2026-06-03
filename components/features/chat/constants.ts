@@ -21,3 +21,9 @@ export const AGENT_HISTORY_LIMIT = 12;
 export const AGENT_INTENT_PRIOR_TURNS = 3;
 
 export const CHAT_DRAWER_MAX_WIDTH = 380;
+
+/** Minimum clear space on the side opposite a bubble (keeps tails off the edge). */
+export const CHAT_BUBBLE_OPPOSITE_GUTTER = 48;
+
+/** Sharp corner on the bubble “tail” side. */
+export const CHAT_BUBBLE_TAIL_RADIUS = 4;

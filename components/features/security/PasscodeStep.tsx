@@ -4,8 +4,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { WaterKeypadButton } from '@/components/ui/WaterKeypadButton';
-
 import { PillButton } from '@/components/ui/PillButton';
 import { Text } from '@/components/ui/Text';
 import { PuffyRefreshIcon } from '@/components/ui/icons/PuffyRefreshIcon';
@@ -156,14 +156,17 @@ export function PasscodeStep({
 
   if (hasPasscode) {
     return (
-      <View style={[styles.block, styles.summaryBlock, compact ? styles.blockCompact : undefined]}>
-        <PillButton label="Change passcode" variant="primary" onPress={onChangePasscodeFlow} />
-      </View>
+      <SettingsSectionCard>
+        <View style={[styles.section, styles.summarySection, compact && styles.sectionCompact]}>
+          <PillButton label="Change passcode" variant="primary" onPress={onChangePasscodeFlow} />
+        </View>
+      </SettingsSectionCard>
     );
   }
 
   return (
-    <View style={[styles.block, compact ? styles.blockCompact : undefined]}>
+    <SettingsSectionCard>
+      <View style={[styles.section, compact && styles.sectionCompact]}>
       <View style={styles.passcodeFields}>
         <View style={styles.inputGroup}>
           <View style={styles.inputLabelRow}>
@@ -247,30 +250,24 @@ export function PasscodeStep({
           />
         </View>
       </View>
-    </View>
+      </View>
+    </SettingsSectionCard>
   );
 }
 
 const styles = StyleSheet.create({
-  block: {
-    gap: spacing.xs,
-    padding: spacing.sm,
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    boxShadow: '0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+  section: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    minWidth: 0,
   },
-  blockCompact: {
+  sectionCompact: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     gap: spacing.xs,
-    padding: spacing.sm,
   },
-  summaryBlock: {
-    minHeight: 82,
+  summarySection: {
     justifyContent: 'center',
   },
   passcodeFields: {
@@ -303,13 +300,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.44)',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.62)',
-    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.82)',
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
   },
   dotInputActive: {
     borderColor: colors.glass.accentVeil,
@@ -317,7 +310,7 @@ const styles = StyleSheet.create({
   },
   dotInputError: {
     borderColor: 'rgba(255, 90, 110, 0.48)',
-    backgroundColor: 'rgba(255, 232, 236, 0.54)',
+    backgroundColor: 'rgba(255, 77, 90, 0.12)',
   },
   dotRow: {
     flexDirection: 'row',
@@ -334,7 +327,6 @@ const styles = StyleSheet.create({
   dotFilled: {
     backgroundColor: colors.brand.glossAccent,
     borderColor: colors.brand.glossAccent,
-    boxShadow: '0 6px 14px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.82)',
   },
   dotError: {
     backgroundColor: colors.semantic.error,
@@ -370,11 +362,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
   },
   saveButtonSlot: {

@@ -6,9 +6,14 @@ import { radii, spacing } from '@/constants/spacing';
 
 interface SettingsSectionCardProps {
   children: React.ReactNode;
+  /** Divider inset from the left edge — defaults to settings-row icon alignment. */
+  dividerInset?: number;
 }
 
-export function SettingsSectionCard({ children }: SettingsSectionCardProps): React.JSX.Element {
+export function SettingsSectionCard({
+  children,
+  dividerInset,
+}: SettingsSectionCardProps): React.JSX.Element {
   const rows = React.Children.toArray(children);
 
   return (
@@ -16,7 +21,14 @@ export function SettingsSectionCard({ children }: SettingsSectionCardProps): Rea
       {rows.map((row, index) => (
         <React.Fragment key={`settings-row-${index}`}>
           {row}
-          {index < rows.length - 1 ? <View style={styles.divider} /> : null}
+          {index < rows.length - 1 ? (
+            <View
+              style={[
+                styles.divider,
+                dividerInset != null ? { marginLeft: dividerInset } : undefined,
+              ]}
+            />
+          ) : null}
         </React.Fragment>
       ))}
     </View>

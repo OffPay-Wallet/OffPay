@@ -11,6 +11,8 @@ import { memo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
+import { FiatUnitPriceText } from '@/components/ui/FiatUnitPriceText';
 import { SlotText } from '@/components/ui/SlotText';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
@@ -88,7 +90,7 @@ const TokenRow = memo(function TokenRow({
       ? valuation.unitPriceLabel
       : null;
   const iconSize = dense ? 30 : compact ? 32 : 38;
-  const valueColumnWidth = dense ? 72 : compact ? 86 : 118;
+  const valueColumnWidth = dense ? 84 : compact ? 100 : 132;
 
   return (
     <Pressable
@@ -163,33 +165,45 @@ const TokenRow = memo(function TokenRow({
       <View style={[styles.valueCol, { width: valueColumnWidth }]}>
         <SlotText
           value={fiatValueLabel}
-          variant="bodyBold"
-          color={colors.text.primary}
-          style={[
-            styles.fiatValue,
-            compact && styles.fiatValueCompact,
-            dense && styles.fiatValueDense,
-          ]}
           numberOfLines={1}
           adjustsFontSizeToFit
           minimumFontScale={0.58}
           maxFontSizeMultiplier={1}
-        />
+        >
+          <FiatMoneyText
+            value={fiatValueLabel}
+            size="list"
+            compact={compact || dense}
+            align="right"
+            color={colors.text.primary}
+            style={styles.fiatValueWrap}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.58}
+            maxFontSizeMultiplier={1}
+          />
+        </SlotText>
         {unitPriceLabel != null ? (
           <SlotText
             value={unitPriceLabel}
-            variant="small"
-            color={colors.text.secondary}
-            style={[
-              styles.unitPrice,
-              compact && styles.unitPriceCompact,
-              dense && styles.unitPriceDense,
-            ]}
             numberOfLines={1}
             adjustsFontSizeToFit
             minimumFontScale={0.62}
             maxFontSizeMultiplier={1}
-          />
+          >
+            <FiatUnitPriceText
+              value={unitPriceLabel}
+              size="caption"
+              compact={compact || dense}
+              align="right"
+              color={colors.text.secondary}
+              style={styles.unitPriceWrap}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.62}
+              maxFontSizeMultiplier={1}
+            />
+          </SlotText>
         ) : null}
       </View>
     </Pressable>
@@ -227,7 +241,7 @@ export function TokenRowSkeleton({
           style={styles.skeletonSubline}
         />
       </View>
-      <View style={[styles.valueCol, { width: dense ? 72 : compact ? 86 : 118 }]}>
+      <View style={[styles.valueCol, { width: dense ? 84 : compact ? 100 : 132 }]}>
         <SkeletonBlock width="78%" height={compact ? 13 : 15} radius={8} />
         <SkeletonBlock
           width="64%"
@@ -585,35 +599,11 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     minWidth: 0,
   },
-  fiatValue: {
-    fontFamily: fontFamily.moneyBold,
-    fontVariant: ['tabular-nums'],
-    textAlign: 'right',
-    fontSize: 13,
-    lineHeight: 17,
+  fiatValueWrap: {
+    alignSelf: 'flex-end',
   },
-  fiatValueCompact: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  fiatValueDense: {
-    fontSize: 11,
-    lineHeight: 14,
-  },
-  unitPrice: {
-    fontFamily: fontFamily.moneyLight,
-    fontVariant: ['tabular-nums'],
-    textAlign: 'right',
-    fontSize: 9,
-    lineHeight: 12,
-  },
-  unitPriceCompact: {
-    fontSize: 8,
-    lineHeight: 11,
-  },
-  unitPriceDense: {
-    fontSize: 7,
-    lineHeight: 10,
+  unitPriceWrap: {
+    alignSelf: 'flex-end',
   },
 
   /* Empty state */

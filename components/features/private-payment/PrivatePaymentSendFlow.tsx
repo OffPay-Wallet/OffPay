@@ -401,7 +401,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const amountValuationQuery = useOffpayPortfolioValuation({
     holdings: valuationHoldings,
     currency: displayCurrency,
-    enabled: (step === 'amount' || step === 'summary') && selectedToken != null,
+    enabled: step === 'token' || step === 'amount' || step === 'summary',
   });
   // Resolve the selected token's unit USD price from the valuation
   // result. Native SOL is keyed in holdings by its wrapped mint, while
@@ -1748,6 +1748,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     <SendTokenSelectStep
       query={query}
       tokens={filteredStablecoins}
+      tokenValuations={amountValuationQuery.data?.tokenValues}
       loading={balanceQuery.isLoading || capabilitiesQuery.isCapabilitiesPending}
       emptyMessage={baseDisabledReason ?? 'Only tokens with a positive balance can be sent.'}
       onQueryChange={setQuery}

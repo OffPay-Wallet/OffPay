@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { PillButton } from '@/components/ui/PillButton';
 import { Text } from '@/components/ui/Text';
 import { PuffyKeyIcon } from '@/components/ui/icons/PuffyKeyIcon';
@@ -98,7 +99,8 @@ function SecretCard({
   const displayValue = value == null ? '-' : isVisible ? value : getMaskedValue(kind, value);
 
   return (
-    <View style={styles.secretCard}>
+    <SettingsSectionCard>
+      <View style={styles.secretSection}>
       <View style={styles.secretTitleRow}>
         <Text variant="small" color={colors.text.secondary} style={styles.secretTitle}>
           {title}
@@ -156,7 +158,8 @@ function SecretCard({
           />
         </View>
       </View>
-    </View>
+      </View>
+    </SettingsSectionCard>
   );
 }
 
@@ -227,59 +230,63 @@ export function WalletKeysStep({
       </View>
 
       {isPrivyEmbeddedWallet ? (
-        <View style={styles.privyNotice}>
-          <Ionicons
-            name="shield-checkmark-outline"
-            size={layout.iconSizeInline}
-            color={colors.brand.glossAccent}
-          />
-          <Text variant="small" color={colors.text.secondary} style={styles.privyNoticeText}>
-            Privy manages this embedded wallet. OffPay cannot export a recovery phrase or private
-            key for it.
-          </Text>
-        </View>
+        <SettingsSectionCard>
+          <View style={styles.privyNotice}>
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={layout.iconSizeInline}
+              color={colors.brand.glossAccent}
+            />
+            <Text variant="small" color={colors.text.secondary} style={styles.privyNoticeText}>
+              Privy manages this embedded wallet. OffPay cannot export a recovery phrase or private
+              key for it.
+            </Text>
+          </View>
+        </SettingsSectionCard>
       ) : null}
 
       {pendingAction != null ? (
-        <View style={styles.warningCard}>
-          <View style={styles.warningIcon}>
-            <Ionicons
-              name={warningIcon}
-              size={layout.iconSizeInline}
-              color={colors.semantic.warning}
-            />
-          </View>
-          <View style={styles.warningContent}>
-            <Text variant="body" color={colors.text.primary} style={styles.warningTitle}>
-              {warningTitle}
-            </Text>
-            <Text variant="small" color={colors.text.secondary} style={styles.warningText}>
-              {warningText}
-            </Text>
-            <View
-              style={[styles.warningActions, compact ? styles.warningActionsCompact : undefined]}
-            >
+        <SettingsSectionCard>
+          <View style={styles.warningSection}>
+            <View style={styles.warningIcon}>
+              <Ionicons
+                name={warningIcon}
+                size={layout.iconSizeInline}
+                color={colors.semantic.warning}
+              />
+            </View>
+            <View style={styles.warningContent}>
+              <Text variant="body" color={colors.text.primary} style={styles.warningTitle}>
+                {warningTitle}
+              </Text>
+              <Text variant="small" color={colors.text.secondary} style={styles.warningText}>
+                {warningText}
+              </Text>
               <View
-                style={[styles.actionSlot, compact ? styles.warningActionSlotCompact : undefined]}
+                style={[styles.warningActions, compact ? styles.warningActionsCompact : undefined]}
               >
-                <PillButton
-                  label="Cancel"
-                  variant="neutral"
-                  onPress={() => setPendingAction(null)}
-                />
-              </View>
-              <View
-                style={[styles.actionSlot, compact ? styles.warningActionSlotCompact : undefined]}
-              >
-                <PillButton
-                  label={warningConfirmLabel}
-                  variant="primary"
-                  onPress={confirmWarning}
-                />
+                <View
+                  style={[styles.actionSlot, compact ? styles.warningActionSlotCompact : undefined]}
+                >
+                  <PillButton
+                    label="Cancel"
+                    variant="neutral"
+                    onPress={() => setPendingAction(null)}
+                  />
+                </View>
+                <View
+                  style={[styles.actionSlot, compact ? styles.warningActionSlotCompact : undefined]}
+                >
+                  <PillButton
+                    label={warningConfirmLabel}
+                    variant="primary"
+                    onPress={confirmWarning}
+                  />
+                </View>
               </View>
             </View>
           </View>
-        </View>
+        </SettingsSectionCard>
       ) : null}
 
       <SecretCard
@@ -323,14 +330,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     maxWidth: '100%',
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   keysBadgeText: {
     fontFamily: fontFamily.medium,
@@ -341,34 +344,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    minWidth: 0,
   },
   privyNoticeText: {
     flex: 1,
     minWidth: 0,
     lineHeight: 18,
   },
-  secretCard: {
-    padding: spacing.md,
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+  secretSection: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     gap: spacing.sm,
-    boxShadow: '0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    minWidth: 0,
   },
   secretTitleRow: {
     flexDirection: 'row',
@@ -386,16 +375,12 @@ const styles = StyleSheet.create({
     height: layout.buttonHeightSm,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.surface.backgroundTint,
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
     flexShrink: 0,
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
   },
   secretValueBox: {
     minHeight: 36,
@@ -404,13 +389,9 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.44)',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.62)',
-    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.82)',
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
   },
   secretValue: {
     lineHeight: 20,
@@ -424,19 +405,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  warningCard: {
+  warningSection: {
     flexDirection: 'row',
     gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    backgroundColor: 'rgba(255, 247, 222, 0.76)',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 226, 122, 0.7)',
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    minWidth: 0,
   },
   warningIcon: {
     width: layout.buttonHeightSm,
@@ -445,9 +419,9 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.58)',
+    backgroundColor: 'rgba(255, 196, 64, 0.14)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 226, 122, 0.82)',
+    borderColor: 'rgba(255, 196, 64, 0.32)',
     flexShrink: 0,
   },
   warningContent: {

@@ -41,6 +41,9 @@ expo-env.d.ts
 workers/ai-proxy/.dev.vars
 workers/ai-proxy/.dev.vars.*
 !workers/ai-proxy/.dev.vars.example
+workers/api/.dev.vars
+workers/api/.dev.vars.*
+!workers/api/.dev.vars.example
 
 # Local planning docs
 documentation/agentic-payments-system-design.md

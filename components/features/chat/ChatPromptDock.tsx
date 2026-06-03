@@ -22,6 +22,7 @@ import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 import { Text } from '@/components/ui/Text';
 
+import { AiLoaderLottie } from './AiLoaderLottie';
 import { VoiceWaveform } from './VoiceWaveform';
 import { promptStyles as styles } from './styles/prompt';
 
@@ -193,9 +194,9 @@ function ComposerCard({
               hitSlop={8}
             >
               {uploadBusy ? (
-                <ActivityIndicator size="small" color={colors.brand.deepShadow} />
+                <ActivityIndicator size="small" color={colors.text.primary} />
               ) : (
-                <Ionicons name="add" size={24} color={colors.brand.deepShadow} />
+                <Ionicons name="add" size={24} color={colors.text.primary} />
               )}
             </Pressable>
           ) : null}
@@ -222,10 +223,10 @@ function ComposerCard({
                 size={22}
                 color={
                   speech.state !== 'idle'
-                    ? colors.brand.actionFill
+                    ? colors.brand.glossAccent
                     : speech.muted
                       ? colors.text.tertiary
-                      : colors.brand.deepShadow
+                      : colors.text.primary
                 }
               />
             </Pressable>
@@ -248,9 +249,9 @@ function ComposerCard({
               hitSlop={8}
             >
               {busy ? (
-                <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+                <AiLoaderLottie size={20} tone="onLight" accessibilityLabel="Sending to Yuga" />
               ) : (
-                <Ionicons name="arrow-up" size={18} color={colors.brand.whiteStream} />
+                <Ionicons name="arrow-up" size={18} color={colors.text.onAccent} />
               )}
             </Pressable>
           ) : voice != null ? (
@@ -267,7 +268,7 @@ function ComposerCard({
               hitSlop={8}
             >
               {transcribing ? (
-                <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+                <ActivityIndicator size="small" color={colors.text.onAccent} />
               ) : (
                 <VoiceOrbGlyph />
               )}
@@ -287,9 +288,9 @@ function ComposerCard({
               hitSlop={8}
             >
               {busy ? (
-                <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+                <AiLoaderLottie size={20} tone="onLight" accessibilityLabel="Sending to Yuga" />
               ) : (
-                <Ionicons name="arrow-up" size={18} color={colors.brand.whiteStream} />
+                <Ionicons name="arrow-up" size={18} color={colors.text.onAccent} />
               )}
             </Pressable>
           )}
@@ -321,7 +322,7 @@ const orbStyles = StyleSheet.create({
   bar: {
     width: 2,
     borderRadius: 1,
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.text.onAccent,
   },
 });
 
@@ -352,7 +353,7 @@ function VoiceCard({ voice }: { voice: ChatVoiceControl }): React.JSX.Element {
             accessibilityLabel="Discard voice input"
             hitSlop={8}
           >
-            <Ionicons name="close" size={20} color={colors.brand.deepShadow} />
+            <Ionicons name="close" size={20} color={colors.text.primary} />
           </Pressable>
 
           <Pressable
@@ -369,7 +370,7 @@ function VoiceCard({ voice }: { voice: ChatVoiceControl }): React.JSX.Element {
             <Ionicons
               name={isReview ? 'checkmark' : 'stop'}
               size={20}
-              color={colors.brand.deepShadow}
+              color={colors.text.onAccent}
             />
           </Pressable>
         </View>

@@ -6,6 +6,7 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
   fetchUsdToCurrencyRate,
   formatFiatCurrency,
+  isUsdStablePriceSymbol,
   normalizeCurrency,
 } from '@/lib/currency-rates';
 import { pooledAllSettled } from '@/lib/perf/concurrency';
@@ -19,7 +20,6 @@ import { mark, measure } from '@/lib/perf/perf-marks';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
 
-const STABLE_SYMBOLS = new Set(['USDC', 'USDT']);
 const TOKEN_VALUATION_STALE_TIME_MS = 1000 * 60;
 const TOKEN_VALUATION_REFETCH_INTERVAL_MS = 1000 * 60 * 5;
 
@@ -61,7 +61,7 @@ function buildValuationsFromPrices(params: {
   const valuations: Record<string, TokenValuationView> = {};
 
   for (const item of params.priceInputs) {
-    const usdPrice = STABLE_SYMBOLS.has(item.priceSymbol)
+    const usdPrice = isUsdStablePriceSymbol(item.priceSymbol)
       ? 1
       : (params.unitUsdPrices[item.mint] ??
         (params.allowInputUsdPriceFallback ? item.usdPrice : null));
@@ -198,7 +198,7 @@ export function useOffpayTokenValuations({
           priceInputs,
           PRICE_CONCURRENCY_LIMIT,
           async (item) => {
-            if (STABLE_SYMBOLS.has(item.priceSymbol)) {
+            if (isUsdStablePriceSymbol(item.priceSymbol)) {
               return { ...item, usdPrice: 1 };
             }
 

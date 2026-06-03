@@ -10,6 +10,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -21,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
+import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { useAppToast } from '@/components/ui/AppToast';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
 import { Text } from '@/components/ui/Text';
@@ -48,8 +50,13 @@ const SHEET_SHADOW = [
   'inset 0 0 16px rgba(255, 255, 255, 0.03)',
   'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
 ].join(', ');
+const SHEET_CHROME_PADDING = spacing.md;
+const HEADER_FALLBACK_HEIGHT = layout.minTouchTarget + spacing.lg + spacing.sm;
+const FOOTER_FALLBACK_HEIGHT = layout.buttonHeightMd + spacing.sm + spacing.lg;
+const SHEET_MIN_HEIGHT = layout.buttonHeightLg * 2 + spacing['3xl'];
 const SHEET_OPEN_TIMING = { duration: 320, easing: Easing.out(Easing.poly(4)) } as const;
 const SHEET_CLOSE_TIMING = { duration: 220, easing: Easing.in(Easing.ease) } as const;
+const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
 const FADE_TIMING = { duration: 220 } as const;
 
 export function ProfileSettingsModal({
@@ -69,6 +76,9 @@ export function ProfileSettingsModal({
     sanitizeOffpayUsernameInput(username ?? ''),
   );
   const [saving, setSaving] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(HEADER_FALLBACK_HEIGHT);
+  const [footerHeight, setFooterHeight] = useState(FOOTER_FALLBACK_HEIGHT);
+  const [formHeight, setFormHeight] = useState(0);
 
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
@@ -76,10 +86,34 @@ export function ProfileSettingsModal({
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const sheetMaxWidth = 430;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const sheetHeight = Math.max(
-    layout.buttonHeightLg * 5,
-    Math.min(layout.buttonHeightLg * 7.5 + spacing['3xl'], maxSheetHeight),
+  const resolvedHeaderHeight =
+    headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
+  const resolvedFooterHeight =
+    footerHeight > 0 ? footerHeight : FOOTER_FALLBACK_HEIGHT;
+  const bodyMaxHeight = Math.max(
+    120,
+    maxSheetHeight - resolvedHeaderHeight - resolvedFooterHeight - SHEET_CHROME_PADDING,
   );
+  const scrollOverflows = formHeight > bodyMaxHeight;
+  const sheetHeight = useMemo(() => {
+    const chromeHeight = resolvedHeaderHeight + resolvedFooterHeight + SHEET_CHROME_PADDING;
+    const contentBlockHeight = formHeight > 0 ? formHeight : 280;
+
+    if (scrollOverflows) {
+      return maxSheetHeight;
+    }
+
+    return Math.min(
+      maxSheetHeight,
+      Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentBlockHeight),
+    );
+  }, [
+    formHeight,
+    maxSheetHeight,
+    resolvedFooterHeight,
+    resolvedHeaderHeight,
+    scrollOverflows,
+  ]);
   const avatarSize = dense ? 56 : compact ? 62 : 68;
   const usernameError = draftUsername.length > 0 ? getOffpayUsernameError(draftUsername) : null;
   const normalizedUsername = useMemo(
@@ -91,10 +125,12 @@ export function ProfileSettingsModal({
 
   const translateY = useSharedValue(windowHeight);
   const opacity = useSharedValue(0);
+  const animatedSheetHeight = useSharedValue(sheetHeight);
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
+      setFormHeight(0);
       setDraftUsername(sanitizeOffpayUsernameInput(username ?? ''));
       setSaving(false);
       opacity.value = withTiming(1, FADE_TIMING);
@@ -108,8 +144,28 @@ export function ProfileSettingsModal({
     opacity.value = withTiming(0, FADE_TIMING);
   }, [opacity, translateY, username, visible, windowHeight]);
 
+  useEffect(() => {
+    animatedSheetHeight.value = withTiming(sheetHeight, SHEET_SIZE_TIMING);
+  }, [animatedSheetHeight, sheetHeight]);
+
+  const handleHeaderLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setHeaderHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
+  const handleFooterLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setFooterHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
+  const handleFormLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setFormHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
   const backdropStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
   const sheetStyle = useAnimatedStyle(() => ({
+    height: animatedSheetHeight.value,
     transform: [{ translateY: translateY.value }],
   }));
   const contentStyle = useAnimatedStyle(() => ({
@@ -198,13 +254,12 @@ export function ProfileSettingsModal({
         accessibilityLabel="Profile settings"
       >
         <Animated.View
-          style={[
-            styles.sheet,
-            { width: '100%', maxWidth: sheetMaxWidth, height: sheetHeight },
-            sheetStyle,
-          ]}
+          style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
         >
-          <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
+          <View
+            style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}
+            onLayout={handleHeaderLayout}
+          >
             <View style={styles.headerSide}>
               <View style={styles.headerIconPlaceholder} />
             </View>
@@ -236,160 +291,71 @@ export function ProfileSettingsModal({
             </View>
           </View>
 
-          <ScrollView
-            style={styles.body}
-            contentContainerStyle={[
-              styles.bodyContent,
-              compact ? styles.bodyContentCompact : undefined,
-            ]}
-            contentInsetAdjustmentBehavior="automatic"
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-            keyboardShouldPersistTaps="handled"
+          {scrollOverflows ? (
+            <ScrollView
+              style={[styles.bodyScroll, { maxHeight: bodyMaxHeight }]}
+              contentContainerStyle={[
+                styles.bodyContent,
+                compact ? styles.bodyContentCompact : undefined,
+              ]}
+              contentInsetAdjustmentBehavior="automatic"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={(_width, height) => {
+                const nextHeight = Math.ceil(height);
+                setFormHeight((current) => (current === nextHeight ? current : nextHeight));
+              }}
+            >
+              <Animated.View style={[styles.form, contentStyle]}>
+                <ProfileFormFields
+                  avatarSize={avatarSize}
+                  dense={dense}
+                  pickingProfileImage={pickingProfileImage}
+                  saving={saving}
+                  profileImageUri={profileImageUri}
+                  pickProfileImage={pickProfileImage}
+                  clearProfileImage={clearProfileImage}
+                  draftUsername={draftUsername}
+                  handleChangeUsername={handleChangeUsername}
+                  handleSave={handleSave}
+                  usernameError={usernameError}
+                  normalizedUsername={normalizedUsername}
+                />
+              </Animated.View>
+            </ScrollView>
+          ) : (
+            <View
+              style={[
+                styles.bodyStatic,
+                styles.bodyContent,
+                compact ? styles.bodyContentCompact : undefined,
+              ]}
+              onLayout={handleFormLayout}
+            >
+              <Animated.View style={[styles.form, contentStyle]}>
+                <ProfileFormFields
+                  avatarSize={avatarSize}
+                  dense={dense}
+                  pickingProfileImage={pickingProfileImage}
+                  saving={saving}
+                  profileImageUri={profileImageUri}
+                  pickProfileImage={pickProfileImage}
+                  clearProfileImage={clearProfileImage}
+                  draftUsername={draftUsername}
+                  handleChangeUsername={handleChangeUsername}
+                  handleSave={handleSave}
+                  usernameError={usernameError}
+                  normalizedUsername={normalizedUsername}
+                />
+              </Animated.View>
+            </View>
+          )}
+
+          <View
+            style={[styles.footer, compact && styles.footerCompact]}
+            onLayout={handleFooterLayout}
           >
-            <Animated.View style={[styles.form, contentStyle]}>
-              <View style={styles.photoCard}>
-                <Pressable
-                  style={styles.avatarButton}
-                  onPress={() => {
-                    void pickProfileImage();
-                  }}
-                  disabled={pickingProfileImage || saving}
-                  accessibilityRole="button"
-                  accessibilityLabel="Change profile photo"
-                >
-                  <WalletAvatar size={avatarSize} solidFill />
-                  <View style={styles.avatarBadge}>
-                    {pickingProfileImage ? (
-                      <ActivityIndicator size="small" color={colors.text.onAccent} />
-                    ) : (
-                      <Ionicons name="camera-outline" size={14} color={colors.text.onAccent} />
-                    )}
-                  </View>
-                </Pressable>
-
-                <View style={styles.photoCopy}>
-                  <Text
-                    variant="body"
-                    color={colors.text.primary}
-                    style={[styles.cardTitle, dense && styles.cardTitleDense]}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1.05}
-                  >
-                    Profile photo
-                  </Text>
-                  <Text
-                    variant="small"
-                    color={colors.text.secondary}
-                    style={styles.cardSubtitle}
-                    numberOfLines={2}
-                    maxFontSizeMultiplier={1}
-                  >
-                    Stored locally on this device.
-                  </Text>
-                </View>
-
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.smallPillButton,
-                    pressed && !pickingProfileImage && !saving
-                      ? styles.smallPillButtonPressed
-                      : null,
-                  ]}
-                  onPress={() => {
-                    void pickProfileImage();
-                  }}
-                  disabled={pickingProfileImage || saving}
-                  accessibilityRole="button"
-                  accessibilityLabel="Change profile photo"
-                >
-                  {pickingProfileImage ? (
-                    <ActivityIndicator size="small" color={colors.text.primary} />
-                  ) : (
-                    <Ionicons
-                      name="image-outline"
-                      size={layout.iconSizeInline}
-                      color={colors.text.primary}
-                    />
-                  )}
-                </Pressable>
-              </View>
-
-              {profileImageUri != null ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.removePhotoRow,
-                    pressed && !saving ? styles.removePhotoRowPressed : null,
-                  ]}
-                  onPress={() => {
-                    void clearProfileImage();
-                  }}
-                  disabled={saving}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove profile photo"
-                >
-                  <Ionicons
-                    name="trash-outline"
-                    size={layout.iconSizeInline}
-                    color={colors.semantic.error}
-                  />
-                  <Text
-                    variant="buttonSmall"
-                    color={colors.semantic.error}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1.05}
-                    style={styles.removePhotoLabel}
-                  >
-                    Remove photo
-                  </Text>
-                </Pressable>
-              ) : null}
-
-              <View style={styles.inputCard}>
-                <Text
-                  variant="body"
-                  color={colors.text.primary}
-                  style={[styles.cardTitle, dense && styles.cardTitleDense]}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={1.05}
-                >
-                  Username
-                </Text>
-                <View style={[styles.inputShell, usernameError != null && styles.inputShellError]}>
-                  <Text variant="bodyBold" color={colors.text.tertiary} style={styles.atSign}>
-                    @
-                  </Text>
-                  <TextInput
-                    value={draftUsername}
-                    onChangeText={handleChangeUsername}
-                    placeholder="wallet01"
-                    placeholderTextColor={colors.text.placeholder}
-                    selectionColor={colors.brand.glossAccent}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="username"
-                    textContentType="username"
-                    maxLength={OFFPAY_USERNAME_MAX_LENGTH}
-                    style={styles.input}
-                    returnKeyType="done"
-                    onSubmitEditing={handleSave}
-                  />
-                </View>
-                <Text
-                  variant="small"
-                  color={usernameError != null ? colors.semantic.warning : colors.text.secondary}
-                  style={styles.helper}
-                  numberOfLines={2}
-                  maxFontSizeMultiplier={1.05}
-                >
-                  {usernameError ??
-                    `${normalizedUsername.length}/${OFFPAY_USERNAME_MAX_LENGTH} letters, numbers, or underscores`}
-                </Text>
-              </View>
-            </Animated.View>
-          </ScrollView>
-
-          <View style={[styles.footer, compact && styles.footerCompact]}>
             <Pressable
               style={({ pressed }) => [
                 styles.dialogButton,
@@ -444,6 +410,179 @@ export function ProfileSettingsModal({
   );
 }
 
+function ProfileFormFields({
+  avatarSize,
+  dense,
+  pickingProfileImage,
+  saving,
+  profileImageUri,
+  pickProfileImage,
+  clearProfileImage,
+  draftUsername,
+  handleChangeUsername,
+  handleSave,
+  usernameError,
+  normalizedUsername,
+}: {
+  avatarSize: number;
+  dense: boolean;
+  pickingProfileImage: boolean;
+  saving: boolean;
+  profileImageUri: string | null;
+  pickProfileImage: () => Promise<void>;
+  clearProfileImage: () => Promise<void>;
+  draftUsername: string;
+  handleChangeUsername: (value: string) => void;
+  handleSave: () => void;
+  usernameError: string | null;
+  normalizedUsername: string;
+}): React.JSX.Element {
+  return (
+    <>
+      <SettingsSectionCard>
+        <View style={[styles.photoRow, dense && styles.photoRowDense]}>
+          <Pressable
+            style={styles.avatarButton}
+            onPress={() => {
+              void pickProfileImage();
+            }}
+            disabled={pickingProfileImage || saving}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+          >
+            <WalletAvatar size={avatarSize} solidFill />
+            <View style={styles.avatarBadge}>
+              {pickingProfileImage ? (
+                <ActivityIndicator size="small" color={colors.text.onAccent} />
+              ) : (
+                <Ionicons name="camera-outline" size={14} color={colors.text.onAccent} />
+              )}
+            </View>
+          </Pressable>
+
+          <View style={styles.photoCopy}>
+            <Text
+              variant="body"
+              color={colors.text.primary}
+              style={[styles.cardTitle, dense && styles.cardTitleDense]}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.05}
+            >
+              Profile photo
+            </Text>
+            <Text
+              variant="small"
+              color={colors.text.secondary}
+              style={styles.cardSubtitle}
+              numberOfLines={2}
+              maxFontSizeMultiplier={1}
+            >
+              Stored locally on this device.
+            </Text>
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.smallPillButton,
+              pressed && !pickingProfileImage && !saving ? styles.smallPillButtonPressed : null,
+            ]}
+            onPress={() => {
+              void pickProfileImage();
+            }}
+            disabled={pickingProfileImage || saving}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+          >
+            {pickingProfileImage ? (
+              <ActivityIndicator size="small" color={colors.text.primary} />
+            ) : (
+              <Ionicons
+                name="image-outline"
+                size={layout.iconSizeInline}
+                color={colors.text.primary}
+              />
+            )}
+          </Pressable>
+        </View>
+      </SettingsSectionCard>
+
+      {profileImageUri != null ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.removePhotoRow,
+            pressed && !saving ? styles.removePhotoRowPressed : null,
+          ]}
+          onPress={() => {
+            void clearProfileImage();
+          }}
+          disabled={saving}
+          accessibilityRole="button"
+          accessibilityLabel="Remove profile photo"
+        >
+          <Ionicons
+            name="trash-outline"
+            size={layout.iconSizeInline}
+            color={colors.semantic.error}
+          />
+          <Text
+            variant="buttonSmall"
+            color={colors.semantic.error}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.05}
+            style={styles.removePhotoLabel}
+          >
+            Remove photo
+          </Text>
+        </Pressable>
+      ) : null}
+
+      <SettingsSectionCard>
+        <View style={[styles.usernameSection, dense && styles.usernameSectionDense]}>
+          <Text
+            variant="body"
+            color={colors.text.primary}
+            style={[styles.cardTitle, dense && styles.cardTitleDense]}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.05}
+          >
+            Username
+          </Text>
+          <View style={[styles.inputShell, usernameError != null && styles.inputShellError]}>
+            <Text variant="bodyBold" color={colors.text.tertiary} style={styles.atSign}>
+              @
+            </Text>
+            <TextInput
+              value={draftUsername}
+              onChangeText={handleChangeUsername}
+              placeholder="wallet01"
+              placeholderTextColor={colors.text.placeholder}
+              selectionColor={colors.brand.glossAccent}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="username"
+              textContentType="username"
+              maxLength={OFFPAY_USERNAME_MAX_LENGTH}
+              style={styles.input}
+              returnKeyType="done"
+              onSubmitEditing={handleSave}
+            />
+          </View>
+          <Text
+            variant="small"
+            color={usernameError != null ? colors.semantic.warning : colors.text.secondary}
+            style={styles.helper}
+            numberOfLines={2}
+            maxFontSizeMultiplier={1.05}
+          >
+            {usernameError ??
+              `${normalizedUsername.length}/${OFFPAY_USERNAME_MAX_LENGTH} letters, numbers, or underscores`}
+          </Text>
+        </View>
+      </SettingsSectionCard>
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -461,6 +600,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     backgroundColor: colors.surface.cardElevated,
     boxShadow: SHEET_SHADOW,
+    paddingBottom: SHEET_CHROME_PADDING,
   },
   headerRow: {
     flexDirection: 'row',
@@ -514,34 +654,47 @@ const styles = StyleSheet.create({
     fontSize: 23,
     lineHeight: 30,
   },
-  body: {
-    flex: 1,
+  bodyScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  bodyStatic: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
   bodyContent: {
+    flexGrow: 0,
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
   },
   bodyContentCompact: {
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
   },
   form: {
     gap: spacing.md,
   },
-  photoCard: {
-    minHeight: 92,
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    padding: spacing.md,
+  photoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: colors.surface.backgroundTint,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    minWidth: 0,
+  },
+  photoRowDense: {
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  usernameSection: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+    minWidth: 0,
+  },
+  usernameSectionDense: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   avatarButton: {
     position: 'relative',
@@ -559,7 +712,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.brand.glossAccent,
     borderWidth: 2,
-    borderColor: colors.surface.backgroundTint,
+    borderColor: colors.surface.cardElevated,
   },
   photoCopy: {
     flex: 1,
@@ -612,18 +765,6 @@ const styles = StyleSheet.create({
   removePhotoLabel: {
     flexShrink: 1,
     fontFamily: fontFamily.uiSemiBold,
-  },
-  inputCard: {
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    padding: spacing.md,
-    gap: spacing.sm,
-    backgroundColor: colors.surface.backgroundTint,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
   },
   inputShell: {
     minHeight: layout.buttonHeightMd,

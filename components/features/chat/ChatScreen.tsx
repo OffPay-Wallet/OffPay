@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
+import { ConfirmDialogCard } from '@/components/ui/ConfirmDialogCard';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
@@ -45,8 +46,8 @@ import { useWalletStore } from '@/store/walletStore';
 import { ChatHeader } from './ChatHeader';
 import { ChatHistoryDrawer } from './ChatHistoryDrawer';
 import { ChatMessageList } from './ChatMessageList';
+import { ChatPrivacyNote } from './ChatPrivacyNote';
 import { ChatPromptDock } from './ChatPromptDock';
-import { ChatSuggestions, type ChatSuggestion } from './ChatSuggestions';
 import { CHAT_DRAWER_MAX_WIDTH, PROMPT_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
 import { PayrollChatController } from '@/components/features/payroll/PayrollChatController';
@@ -81,8 +82,6 @@ export function ChatScreen(): React.JSX.Element {
   const conversations = useAgenticChatStore((s) => s.conversations);
   const activeConversationIdByScope = useAgenticChatStore((s) => s.activeConversationIdByScope);
   const setActiveConversation = useAgenticChatStore((s) => s.setActiveConversation);
-  const archiveConversation = useAgenticChatStore((s) => s.archiveConversation);
-  const unarchiveConversation = useAgenticChatStore((s) => s.unarchiveConversation);
   const deleteConversation = useAgenticChatStore((s) => s.deleteConversation);
   const updateMessage = useAgenticChatStore((s) => s.updateMessage);
   const updateAction = useAgenticChatStore((s) => s.updateAction);
@@ -104,6 +103,9 @@ export function ChatScreen(): React.JSX.Element {
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const [payrollPasteOpen, setPayrollPasteOpen] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(
+    null,
+  );
   // Declared early so the agent-submit callback can reach payroll intake
   // without a declaration-order cycle; assigned once intake is created.
   const payrollIntakeRef = useRef<ReturnType<typeof usePayrollChatIntake> | null>(null);
@@ -124,10 +126,8 @@ export function ChatScreen(): React.JSX.Element {
   );
   const activeConversation = useMemo(
     () =>
-      scopedConversations.find(
-        (conversation) =>
-          conversation.id === activeConversationId && conversation.archivedAt == null,
-      ) ?? null,
+      scopedConversations.find((conversation) => conversation.id === activeConversationId) ??
+      null,
     [activeConversationId, scopedConversations],
   );
   const scopedMessages = useMemo(
@@ -317,21 +317,6 @@ export function ChatScreen(): React.JSX.Element {
     },
   });
 
-  const handlePickSuggestion = useCallback(
-    (suggestion: ChatSuggestion) => {
-      if (agentBusy) {
-        // Don't trample an in-flight request. Seed the input so the user
-        // can send it once the current turn lands.
-        setPrompt(suggestion.prompt);
-        inputRef.current?.focus();
-        return;
-      }
-      setPrompt('');
-      submit(suggestion.prompt);
-    },
-    [agentBusy, submit],
-  );
-
   const handleBack = useCallback(() => {
     const target =
       previousRoute !== 'index' && previousRoute !== 'chat'
@@ -348,44 +333,28 @@ export function ChatScreen(): React.JSX.Element {
 
   const handleOpenConversation = useCallback(
     (conversation: AgenticConversation) => {
-      if (conversation.archivedAt != null) {
-        unarchiveConversation(conversation.id);
-      } else {
-        setActiveConversation(scope, conversation.id);
-      }
+      setActiveConversation(scope, conversation.id);
       setChatDrawerOpen(false);
     },
-    [scope, setActiveConversation, unarchiveConversation],
+    [scope, setActiveConversation],
   );
 
-  const handleArchiveConversation = useCallback(
-    (id: string) => {
-      archiveConversation(id);
-      showToast({
-        title: 'Chat archived',
-        message: 'You can find it under Archived chats.',
-        variant: 'success',
-      });
-    },
-    [archiveConversation, showToast],
-  );
+  const handleDeleteConversation = useCallback((id: string): void => {
+    setPendingDeleteConversationId(id);
+  }, []);
 
-  const handleDeleteConversation = useCallback(
-    (id: string) => {
-      Alert.alert('Delete chat?', 'This removes the chat from this device.', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteConversation(id);
-            showToast({ title: 'Chat deleted', message: 'The chat was removed.', variant: 'info' });
-          },
-        },
-      ]);
-    },
-    [deleteConversation, showToast],
-  );
+  const handleCancelDeleteConversation = useCallback((): void => {
+    setPendingDeleteConversationId(null);
+  }, []);
+
+  const handleConfirmDeleteConversation = useCallback((): void => {
+    if (pendingDeleteConversationId == null) return;
+
+    const id = pendingDeleteConversationId;
+    setPendingDeleteConversationId(null);
+    deleteConversation(id);
+    showToast({ title: 'Chat deleted', message: 'The chat was removed.', variant: 'info' });
+  }, [deleteConversation, pendingDeleteConversationId, showToast]);
 
   const canSubmit = prompt.trim().length > 0 && !agentBusy;
 
@@ -402,24 +371,25 @@ export function ChatScreen(): React.JSX.Element {
         onOpenHistory={() => setChatDrawerOpen(true)}
       />
 
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={[
-          headerStyles.scrollContent,
-          { paddingHorizontal: horizontalPadding, paddingBottom: bottomPadding },
-        ]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-      >
+      <View style={headerStyles.chatBody}>
+        <ScrollView
+          ref={scrollRef}
+          style={headerStyles.chatScroll}
+          contentContainerStyle={[
+            headerStyles.scrollContent,
+            { paddingHorizontal: horizontalPadding, paddingBottom: bottomPadding },
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+        >
         <View style={headerStyles.welcomeRow}>
           <View style={[headerStyles.welcomeAvatar, { width: avatarSize + 12, height: avatarSize + 12 }]}>
             <WalletAvatar size={avatarSize} solidFill />
           </View>
           <View style={headerStyles.welcomeText}>
             <Text
-              variant="caption"
               color={colors.text.secondary}
               style={headerStyles.welcomeEyebrow}
               numberOfLines={1}
@@ -427,7 +397,6 @@ export function ChatScreen(): React.JSX.Element {
               Hey there
             </Text>
             <Text
-              variant="h2"
               color={colors.text.primary}
               style={headerStyles.welcomeName}
               numberOfLines={1}
@@ -467,9 +436,7 @@ export function ChatScreen(): React.JSX.Element {
           </View>
         ) : null}
 
-        {scopedMessages.length === 0 ? (
-          <ChatSuggestions onPickSuggestion={handlePickSuggestion} />
-        ) : (
+        {scopedMessages.length > 0 ? (
           <ChatMessageList
             messages={scopedMessages}
             actionsById={actionsById}
@@ -478,8 +445,13 @@ export function ChatScreen(): React.JSX.Element {
             }}
             onCancelPrivateSend={cancelPrivateSend}
           />
-        )}
-      </ScrollView>
+        ) : null}
+        </ScrollView>
+
+        {scopedMessages.length === 0 ? (
+          <ChatPrivacyNote horizontalPadding={horizontalPadding} />
+        ) : null}
+      </View>
 
       <ChatPromptDock
         inputRef={inputRef}
@@ -549,12 +521,17 @@ export function ChatScreen(): React.JSX.Element {
         onClose={() => setChatDrawerOpen(false)}
         onNewChat={handleNewChat}
         onOpenConversation={handleOpenConversation}
-        onArchiveConversation={handleArchiveConversation}
-        onUnarchiveConversation={(id) => {
-          unarchiveConversation(id);
-          setChatDrawerOpen(false);
-        }}
         onDeleteConversation={handleDeleteConversation}
+      />
+
+      <ConfirmDialogCard
+        visible={pendingDeleteConversationId != null}
+        title="Delete chat?"
+        message="This removes the chat from this device."
+        confirmLabel="Delete"
+        destructive
+        onCancel={handleCancelDeleteConversation}
+        onConfirm={handleConfirmDeleteConversation}
       />
     </KeyboardAvoidingView>
   );

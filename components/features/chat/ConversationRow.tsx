@@ -13,16 +13,12 @@ import type { AgenticConversation } from '@/store/agenticChatStore';
 
 import { formatConversationTimestamp } from './helpers';
 import { drawerStyles as styles } from './styles/drawer';
-import { headerStyles } from './styles/header';
 
 interface ConversationRowProps {
   conversation: AgenticConversation;
   preview: string;
   active: boolean;
-  archived: boolean;
   onOpen: () => void;
-  onArchive: () => void;
-  onUnarchive: () => void;
   onDelete: () => void;
 }
 
@@ -30,10 +26,7 @@ export function ConversationRow({
   conversation,
   preview,
   active,
-  archived,
   onOpen,
-  onArchive,
-  onUnarchive,
   onDelete,
 }: ConversationRowProps): React.JSX.Element {
   return (
@@ -70,32 +63,13 @@ export function ConversationRow({
       </Pressable>
       <View style={styles.drawerRowActions}>
         <Pressable
-          style={({ pressed }) => [
-            styles.drawerMiniButton,
-            pressed && headerStyles.headerButtonPressed,
-          ]}
-          onPress={archived ? onUnarchive : onArchive}
-          accessibilityRole="button"
-          accessibilityLabel={archived ? 'Unarchive chat' : 'Archive chat'}
-          hitSlop={6}
-        >
-          <Ionicons
-            name={archived ? 'arrow-up-circle-outline' : 'archive-outline'}
-            size={17}
-            color={colors.text.secondary}
-          />
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [
-            styles.drawerMiniButton,
-            pressed && headerStyles.headerButtonPressed,
-          ]}
+          style={({ pressed }) => [styles.drawerMiniButton, pressed && styles.drawerRowPressed]}
           onPress={onDelete}
           accessibilityRole="button"
           accessibilityLabel="Delete chat"
           hitSlop={6}
         >
-          <Ionicons name="trash-outline" size={17} color={colors.semantic.error} />
+          <Ionicons name="trash-outline" size={18} color={colors.semantic.error} />
         </Pressable>
       </View>
     </View>

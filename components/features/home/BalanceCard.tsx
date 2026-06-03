@@ -504,6 +504,7 @@ export function BalanceCard({
                   >
                     <FiatMoneyText
                       value={displayedPortfolioValue}
+                      size="hero"
                       compact={compact}
                       style={styles.balanceAmount}
                       numberOfLines={1}

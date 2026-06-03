@@ -2,11 +2,13 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
+import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+import { parseFormattedFiatCurrency } from '@/lib/currency-rates';
 
 import { PrivateRouteSelector } from './PrivateRouteSelector';
 import type { PrivatePaymentRoute, PrivatePaymentRouteOption, SendTokenOption } from './types';
@@ -114,6 +116,10 @@ export function SendAmountStep({
       baseLineHeight: amountBaseLineHeight,
     });
   }, [amount, amountBaseFontSize, amountBaseLineHeight, amountRowWidth, symbolWidth]);
+  const fiatMetaParts = useMemo(
+    () => parseFormattedFiatCurrency(amountMetaLabel),
+    [amountMetaLabel],
+  );
 
   return (
     <Animated.View
@@ -182,9 +188,24 @@ export function SendAmountStep({
             {symbol}
           </Text>
         </View>
-        <Text variant="h3" color={colors.text.secondary} align="center" style={styles.metaLabel}>
-          {amountMetaLabel}
-        </Text>
+        {fiatMetaParts != null ? (
+          <FiatMoneyText
+            value={amountMetaLabel}
+            parts={fiatMetaParts}
+            size="list"
+            compact={compact}
+            color={colors.text.secondary}
+            style={styles.metaLabel}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
+            maxFontSizeMultiplier={1}
+          />
+        ) : (
+          <Text variant="h3" color={colors.text.secondary} align="center" style={styles.metaLabel}>
+            {amountMetaLabel}
+          </Text>
+        )}
       </View>
 
       <View style={styles.availableCard}>
@@ -192,7 +213,12 @@ export function SendAmountStep({
           <Text variant="small" color={colors.text.secondary}>
             Available To Send
           </Text>
-          <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
+          <Text
+            variant="bodyBold"
+            color={colors.text.primary}
+            style={styles.availableBalance}
+            numberOfLines={1}
+          >
             {token != null ? `${formatTokenBalance(token.balance, 5)} ${token.symbol}` : '--'}
           </Text>
         </View>
@@ -325,7 +351,11 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   metaLabel: {
-    fontFamily: fontFamily.semiBold,
+    alignSelf: 'center',
+  },
+  availableBalance: {
+    fontFamily: fontFamily.moneyLight,
+    includeFontPadding: false,
   },
   availableCard: {
     minHeight: 86,

@@ -17,7 +17,6 @@ export interface AgenticConversation extends AgenticChatScope {
   title: string;
   createdAt: number;
   updatedAt: number;
-  archivedAt: number | null;
 }
 
 export type AgenticPrivateSendStatus =
@@ -77,8 +76,6 @@ interface AgenticChatState {
   activeConversationIdByScope: Record<string, string | null>;
   createConversation: (scope: AgenticChatScope, title?: string) => string;
   setActiveConversation: (scope: AgenticChatScope, conversationId: string | null) => void;
-  archiveConversation: (id: string) => void;
-  unarchiveConversation: (id: string) => void;
   deleteConversation: (id: string) => void;
   addMessage: (message: AgenticChatMessage) => void;
   updateMessage: (id: string, patch: Partial<Omit<AgenticChatMessage, 'id'>>) => void;
@@ -148,7 +145,6 @@ export const useAgenticChatStore = create<AgenticChatState>()(
           network: scope.network,
           createdAt: now,
           updatedAt: now,
-          archivedAt: null,
         };
         const scopeKey = getAgenticConversationScopeKey(scope);
 
@@ -172,38 +168,6 @@ export const useAgenticChatStore = create<AgenticChatState>()(
             [getAgenticConversationScopeKey(scope)]: conversationId,
           },
         })),
-      archiveConversation: (id) =>
-        set((state) => {
-          const conversation = state.conversations.find((item) => item.id === id);
-          if (conversation == null) return state;
-
-          const nextActiveByScope = { ...state.activeConversationIdByScope };
-          const scopeKey = getAgenticConversationScopeKey(conversation);
-          if (nextActiveByScope[scopeKey] === id) {
-            nextActiveByScope[scopeKey] = null;
-          }
-
-          return {
-            conversations: state.conversations.map((item) =>
-              item.id === id ? { ...item, archivedAt: Date.now(), updatedAt: Date.now() } : item,
-            ),
-            activeConversationIdByScope: nextActiveByScope,
-          };
-        }),
-      unarchiveConversation: (id) =>
-        set((state) => {
-          const conversation = state.conversations.find((item) => item.id === id);
-          if (conversation == null) return state;
-          return {
-            conversations: state.conversations.map((item) =>
-              item.id === id ? { ...item, archivedAt: null, updatedAt: Date.now() } : item,
-            ),
-            activeConversationIdByScope: {
-              ...state.activeConversationIdByScope,
-              [getAgenticConversationScopeKey(conversation)]: id,
-            },
-          };
-        }),
       deleteConversation: (id) =>
         set((state) => {
           const conversation = state.conversations.find((item) => item.id === id);
@@ -308,7 +272,28 @@ export const useAgenticChatStore = create<AgenticChatState>()(
     }),
     {
       name: 'offpay-agentic-chat',
+      version: 1,
       storage: createJSONStorage(() => mmkvStorage),
+      migrate: (persistedState) => {
+        if (persistedState == null || typeof persistedState !== 'object') {
+          return persistedState as AgenticChatState;
+        }
+
+        const state = persistedState as {
+          conversations?: Array<AgenticConversation & { archivedAt?: number | null }>;
+        };
+
+        if (!Array.isArray(state.conversations)) {
+          return persistedState as AgenticChatState;
+        }
+
+        return {
+          ...(persistedState as AgenticChatState),
+          conversations: state.conversations
+            .filter((conversation) => conversation.archivedAt == null)
+            .map(({ archivedAt: _archivedAt, ...conversation }) => conversation),
+        };
+      },
     },
   ),
 );

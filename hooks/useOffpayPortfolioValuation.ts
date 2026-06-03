@@ -6,6 +6,7 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
   fetchUsdToCurrencyRate,
   formatFiatCurrency,
+  isUsdStablePriceSymbol,
   normalizeCurrency,
 } from '@/lib/currency-rates';
 import { pooledAllSettled } from '@/lib/perf/concurrency';
@@ -19,7 +20,6 @@ import { yieldToEventLoop, yieldToUi, yieldToUiIfNeeded } from '@/lib/perf/ui-wo
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
 
-const STABLE_SYMBOLS = new Set(['USDC', 'USDT']);
 const PORTFOLIO_VALUATION_STALE_TIME_MS = 60 * 1000;
 const PORTFOLIO_VALUATION_REFETCH_INTERVAL_MS = 1000 * 60 * 5;
 
@@ -77,7 +77,7 @@ function buildPortfolioValuationData(params: {
   let pricedCount = 0;
 
   for (const item of params.priceInputs) {
-    const usdPrice = STABLE_SYMBOLS.has(item.priceSymbol)
+    const usdPrice = isUsdStablePriceSymbol(item.priceSymbol)
       ? 1
       : (params.unitUsdPrices[item.mint] ??
         (params.allowProviderUsdPriceFallback ? item.usdPrice : null));
@@ -93,7 +93,7 @@ function buildPortfolioValuationData(params: {
   for (const holding of params.holdings) {
     const symbol = holding.symbol.trim().toUpperCase();
     const priceSymbol = holding.priceSymbol.trim().toUpperCase();
-    const usdPrice = STABLE_SYMBOLS.has(priceSymbol)
+    const usdPrice = isUsdStablePriceSymbol(priceSymbol)
       ? 1
       : (params.unitUsdPrices[holding.priceMint] ??
         (params.allowProviderUsdPriceFallback ? holding.usdPrice : null));
@@ -246,7 +246,7 @@ export function useOffpayPortfolioValuation({
         PRICE_CONCURRENCY_LIMIT,
         async (item) => {
           await yieldToEventLoop();
-          if (STABLE_SYMBOLS.has(item.priceSymbol)) {
+          if (isUsdStablePriceSymbol(item.priceSymbol)) {
             return { ...item, usdPrice: 1 };
           }
 

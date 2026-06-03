@@ -3,15 +3,16 @@
  * Shows fingerprint toggle, passcode, and wallet keys rows.
  */
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
-import { SettingsLineItem } from '@/components/features/settings/SettingsLineItem';
-import { PuffyChevronRightIcon } from '@/components/ui/icons/PuffyChevronRightIcon';
-import { PuffyFingerprintIcon } from '@/components/ui/icons/PuffyFingerprintIcon';
-import { PuffyKeyIcon } from '@/components/ui/icons/PuffyKeyIcon';
-import { PuffyShieldIcon } from '@/components/ui/icons/PuffyShieldIcon';
+import { SettingsRow } from '@/components/features/settings/SettingsRow';
+import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
+import { GlassToggle } from '@/components/ui/GlassToggle';
 import { colors } from '@/constants/colors';
-import { layout, radii, spacing } from '@/constants/spacing';
+import { spacing } from '@/constants/spacing';
+
+/** Aligns section dividers with SettingsRow icon wells (same as main settings list). */
+const SECURITY_MENU_DIVIDER_INSET = spacing.lg + 28 + spacing.md;
 
 interface SecurityRootStepProps {
   fingerprintEnabled: boolean;
@@ -31,103 +32,49 @@ export function SecurityRootStep({
   canReveal,
   compact = false,
   dense = false,
-  iconSize = layout.iconSizeNav,
+  iconSize = 20,
   onToggleFingerprint,
   onGoPasscode,
   onGoWalletKeys,
 }: SecurityRootStepProps): React.JSX.Element {
-  const accessorySize = dense ? 19 : 21;
+  const iconColor = colors.text.primary;
 
   return (
-    <>
-      <SettingsLineItem
-        icon={<PuffyFingerprintIcon size={iconSize} color={colors.text.primary} focused />}
-        title="Fingerprint"
+    <SettingsSectionCard dividerInset={SECURITY_MENU_DIVIDER_INSET}>
+      <SettingsRow
+        iconNode={<Ionicons name="finger-print" size={iconSize} color={iconColor} />}
+        label="Fingerprint"
         subtitle={fingerprintEnabled ? 'Enabled for wallet unlock' : 'Set up fingerprint unlock'}
-        right={
-          <Pressable
-            style={[styles.toggle, fingerprintEnabled ? styles.toggleOn : styles.toggleOff]}
-            onPress={onToggleFingerprint}
-            accessibilityRole="switch"
+        rightNode={
+          <GlassToggle
+            value={fingerprintEnabled}
+            onValueChange={onToggleFingerprint}
             accessibilityLabel="Fingerprint toggle"
-            accessibilityState={{ checked: fingerprintEnabled }}
-            hitSlop={6}
-          >
-            <View
-              style={[
-                styles.toggleKnob,
-                fingerprintEnabled ? styles.toggleKnobOn : styles.toggleKnobOff,
-              ]}
-            />
-          </Pressable>
+          />
         }
         compact={compact}
         dense={dense}
         onPress={onToggleFingerprint}
       />
 
-      <View style={styles.divider} />
-
-      <SettingsLineItem
-        icon={<PuffyShieldIcon size={iconSize} color={colors.text.primary} focused />}
-        title="App Passcode"
+      <SettingsRow
+        iconNode={<Ionicons name="lock-closed" size={iconSize} color={iconColor} />}
+        label="App Passcode"
         subtitle={hasPasscode ? 'Enabled (6-digit)' : 'Set a 6-digit passcode'}
-        right={<PuffyChevronRightIcon size={accessorySize} color={colors.text.tertiary} focused />}
         compact={compact}
         dense={dense}
         onPress={onGoPasscode}
       />
 
-      <View style={styles.divider} />
-
-      <SettingsLineItem
-        icon={<PuffyKeyIcon size={iconSize} color={colors.text.primary} focused />}
-        title="Wallet Keys"
+      <SettingsRow
+        iconNode={<Ionicons name="key" size={iconSize} color={iconColor} />}
+        label="Wallet Keys"
         subtitle="Reveal private key and recovery phrase"
-        right={<PuffyChevronRightIcon size={accessorySize} color={colors.text.tertiary} focused />}
         compact={compact}
         dense={dense}
         onPress={onGoWalletKeys}
         disabled={!canReveal}
       />
-    </>
+    </SettingsSectionCard>
   );
 }
-
-const styles = StyleSheet.create({
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.holdingsCard.divider,
-    marginHorizontal: spacing.md,
-  },
-  toggle: {
-    width: layout.buttonHeightMd + spacing.sm,
-    height: layout.avatarSm,
-    borderRadius: radii.full,
-    padding: 3,
-    justifyContent: 'center',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.72)',
-  },
-  toggleOn: {
-    backgroundColor: colors.glass.smokeWash,
-    borderColor: colors.glass.accentVeil,
-    alignItems: 'flex-end',
-  },
-  toggleOff: {
-    backgroundColor: colors.glass.textBacking,
-    borderColor: colors.glass.rimSubtle,
-    alignItems: 'flex-start',
-  },
-  toggleKnob: {
-    width: layout.iconSizeNav,
-    height: layout.iconSizeNav,
-    borderRadius: radii.full,
-    boxShadow: '0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
-  },
-  toggleKnobOn: { backgroundColor: colors.brand.glossAccent },
-  toggleKnobOff: { backgroundColor: colors.glass.strongFill },
-});

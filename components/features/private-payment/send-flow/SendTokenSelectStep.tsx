@@ -2,6 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
+import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
+import { FiatUnitPriceText } from '@/components/ui/FiatUnitPriceText';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
@@ -9,12 +11,15 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { formatTokenBalance } from '@/lib/api/offpay-wallet-data';
+import { lookupSendTokenValuation } from './helpers';
 
+import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
 import type { SendTokenOption } from './types';
 
 interface SendTokenSelectStepProps {
   query: string;
   tokens: SendTokenOption[];
+  tokenValuations?: Readonly<Record<string, TokenValuationView>>;
   loading: boolean;
   emptyMessage: string;
   onQueryChange: (value: string) => void;
@@ -56,9 +61,14 @@ function TokenLoadingRow({
   );
 }
 
+function hasNumericLabel(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /\d/.test(value);
+}
+
 export function SendTokenSelectStep({
   query,
   tokens,
+  tokenValuations,
   loading,
   emptyMessage,
   onQueryChange,
@@ -128,7 +138,16 @@ export function SendTokenSelectStep({
             <TokenLoadingRow key={`send-token-loading-${index}`} compact={compact} dense={dense} />
           ))
         ) : tokens.length > 0 ? (
-          tokens.map((token) => (
+          tokens.map((token) => {
+            const valuation = lookupSendTokenValuation(token.mint, tokenValuations);
+            const fiatValueLabel = hasNumericLabel(valuation?.fiatValueLabel)
+              ? valuation.fiatValueLabel
+              : null;
+            const unitPriceLabel = hasNumericLabel(valuation?.unitPriceLabel)
+              ? valuation.unitPriceLabel
+              : null;
+
+            return (
             <Pressable
               key={token.mint}
               style={({ pressed }) => [styles.tokenRowShell, pressed && styles.rowPressed]}
@@ -186,30 +205,61 @@ export function SendTokenSelectStep({
                   </Text>
                 </View>
                 <View style={[styles.balanceColumn, { width: balanceColumnWidth }]}>
-                  <Text
-                    variant="bodyBold"
-                    color={colors.text.primary}
-                    style={[styles.balanceValue, dense && styles.balanceValueDense]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.64}
-                    maxFontSizeMultiplier={1}
-                  >
-                    {formatTokenBalance(token.balance, 5)}
-                  </Text>
-                  <Text
-                    variant="small"
-                    color={colors.text.secondary}
-                    style={styles.balanceSymbol}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1}
-                  >
-                    {token.symbol}
-                  </Text>
+                  {fiatValueLabel != null ? (
+                    <FiatMoneyText
+                      value={fiatValueLabel}
+                      size="list"
+                      compact={compact || dense}
+                      align="right"
+                      color={colors.text.primary}
+                      style={styles.fiatValueWrap}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.58}
+                      maxFontSizeMultiplier={1}
+                    />
+                  ) : (
+                    <Text
+                      variant="bodyBold"
+                      color={colors.text.primary}
+                      style={[styles.balanceValue, dense && styles.balanceValueDense]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.64}
+                      maxFontSizeMultiplier={1}
+                    >
+                      {formatTokenBalance(token.balance, 5)}
+                    </Text>
+                  )}
+                  {unitPriceLabel != null ? (
+                    <FiatUnitPriceText
+                      value={unitPriceLabel}
+                      size="caption"
+                      compact={compact || dense}
+                      align="right"
+                      color={colors.text.secondary}
+                      style={styles.unitPriceWrap}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.62}
+                      maxFontSizeMultiplier={1}
+                    />
+                  ) : (
+                    <Text
+                      variant="small"
+                      color={colors.text.secondary}
+                      style={[styles.balanceMeta, dense && styles.balanceMetaDense]}
+                      numberOfLines={1}
+                      maxFontSizeMultiplier={1}
+                    >
+                      {formatTokenBalance(token.balance, 5)} {token.symbol}
+                    </Text>
+                  )}
                 </View>
               </View>
             </Pressable>
-          ))
+            );
+          })
         ) : (
           <View style={styles.emptyShell}>
             <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.emptyState]}>
@@ -350,16 +400,32 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   balanceValue: {
-    fontFamily: fontFamily.uiSemiBold,
-    fontVariant: ['tabular-nums'],
+    fontFamily: fontFamily.moneyBold,
     textAlign: 'right',
+    fontSize: 14,
+    lineHeight: 18,
+    includeFontPadding: false,
   },
   balanceValueDense: {
     fontSize: 13,
     lineHeight: 17,
   },
-  balanceSymbol: {
+  balanceMeta: {
+    fontFamily: fontFamily.moneyLight,
     textAlign: 'right',
+    fontSize: 11,
+    lineHeight: 14,
+    includeFontPadding: false,
+  },
+  balanceMetaDense: {
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  fiatValueWrap: {
+    alignSelf: 'flex-end',
+  },
+  unitPriceWrap: {
+    alignSelf: 'flex-end',
   },
   emptyShell: {
     borderRadius: radii['2xl'],

@@ -4,8 +4,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { WaterKeypadButton } from '@/components/ui/WaterKeypadButton';
-
 import { PillButton } from '@/components/ui/PillButton';
 import { Text } from '@/components/ui/Text';
 import { PuffyRefreshIcon } from '@/components/ui/icons/PuffyRefreshIcon';
@@ -114,7 +114,8 @@ export function AuthGateStep({
   };
 
   return (
-    <View style={[styles.block, compact ? styles.blockCompact : undefined]}>
+    <SettingsSectionCard>
+      <View style={[styles.section, compact && styles.sectionCompact]}>
       {showDescription ? (
         <Text variant="small" color={colors.text.secondary} style={styles.description}>
           {description}
@@ -186,27 +187,22 @@ export function AuthGateStep({
           {helperText}
         </Text>
       ) : null}
-    </View>
+      </View>
+    </SettingsSectionCard>
   );
 }
 
 const styles = StyleSheet.create({
-  block: {
-    gap: spacing.xs,
-    padding: spacing.sm,
-    borderRadius: radii.xl,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    boxShadow: '0 2px 8px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)',
+  section: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    minWidth: 0,
   },
-  blockCompact: {
+  sectionCompact: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     gap: spacing.xs,
-    padding: spacing.sm,
   },
   description: {
     lineHeight: 18,
@@ -238,13 +234,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.44)',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.62)',
-    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.82)',
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
   },
   dotInputActive: {
     borderColor: colors.glass.accentVeil,
@@ -265,7 +257,6 @@ const styles = StyleSheet.create({
   dotFilled: {
     backgroundColor: colors.brand.glossAccent,
     borderColor: colors.brand.glossAccent,
-    boxShadow: '0 6px 14px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.82)',
   },
   dotEmpty: {
     backgroundColor: colors.surface.cardElevated,
@@ -296,11 +287,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    backgroundColor: colors.glass.textBacking,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
   },
   continueButtonSlot: {

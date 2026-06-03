@@ -45,7 +45,7 @@ export function SelectableCard({
         <View style={styles.textWrap}>
           <View style={styles.titleRow}>
             <Text
-              variant="body"
+              variant="bodyBold"
               color={colors.text.primary}
               style={styles.title}
               numberOfLines={1}
@@ -73,17 +73,17 @@ export function SelectableCard({
   );
 }
 
+const CARD_BORDER_WIDTH = 1;
+
 const styles = StyleSheet.create({
   card: {
     borderRadius: radii.lg,
     borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
+    borderWidth: CARD_BORDER_WIDTH,
     borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.glass.textBacking,
-    paddingVertical: spacing.md,
+    minHeight: 72,
+    paddingVertical: spacing.lg,
     paddingHorizontal: spacing.lg,
     minWidth: 0,
     boxShadow: [
@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minWidth: 0,
   },
-  textWrap: { flex: 1, minWidth: 0, marginRight: spacing.md, gap: 4 },
+  textWrap: { flex: 1, minWidth: 0, marginRight: spacing.lg, gap: spacing.xs },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -117,7 +117,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     minWidth: 0,
   },
-  title: { fontFamily: fontFamily.medium, minWidth: 0, flexShrink: 1 },
+  title: { fontFamily: fontFamily.uiSemiBold, minWidth: 0, flexShrink: 1 },
   badge: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: radii.xs,
@@ -127,8 +127,8 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: 10 },
   radio: {
-    width: 22,
-    height: 22,
+    width: 24,
+    height: 24,
     borderRadius: radii.full,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -138,8 +138,8 @@ const styles = StyleSheet.create({
   },
   radioActive: { borderColor: colors.text.primary },
   radioDot: {
-    width: 10,
-    height: 10,
+    width: 11,
+    height: 11,
     borderRadius: radii.full,
     backgroundColor: colors.text.primary,
   },
