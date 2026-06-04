@@ -55,6 +55,15 @@ import { usePayrollChatIntake } from '@/hooks/payroll/usePayrollChatIntake';
 import { usePayrollResume } from '@/hooks/payroll/usePayrollResume';
 import { useAgenticVoice } from '@/hooks/agentic-chat/useAgenticVoice';
 import { useAgenticSpeech } from '@/hooks/agentic-chat/useAgenticSpeech';
+import {
+  generatePayrollAgentReply,
+  fallbackPayrollAgentReply,
+  type PayrollAgentReplyEvent,
+} from '@/lib/agentic-payments/payroll-agent-reply';
+import { revealAssistantMessageText } from '@/hooks/agentic-chat/revealAssistantMessageText';
+import { createAgenticId } from './helpers';
+
+import type { PayrollStageOutcome } from '@/hooks/payroll/usePayrollChatIntake';
 
 export function ChatScreen(): React.JSX.Element {
   const router = useRouter();
@@ -84,6 +93,7 @@ export function ChatScreen(): React.JSX.Element {
   const updateMessage = useAgenticChatStore((s) => s.updateMessage);
   const updateAction = useAgenticChatStore((s) => s.updateAction);
   const createConversation = useAgenticChatStore((s) => s.createConversation);
+  const addMessage = useAgenticChatStore((s) => s.addMessage);
 
   const { scope, scopeKey } = useAgenticChatScope();
   useAgenticPendingSweep(scope);
@@ -105,6 +115,11 @@ export function ChatScreen(): React.JSX.Element {
   // Declared early so the agent-submit callback can reach payroll intake
   // without a declaration-order cycle; assigned once intake is created.
   const payrollIntakeRef = useRef<ReturnType<typeof usePayrollChatIntake> | null>(null);
+  const announcePayrollStageOutcomeRef = useRef<((outcome: PayrollStageOutcome) => void) | null>(
+    null,
+  );
+  const announcedPayrollRunIdsRef = useRef<Set<string>>(new Set());
+  const payrollReplyControllersRef = useRef<Set<AbortController>>(new Set());
   const inputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
   const keyboardOffset = useMemo(() => {
@@ -186,7 +201,11 @@ export function ChatScreen(): React.JSX.Element {
     walletId: activeWalletId,
     onPayrollIntent: (source) => {
       if (source === 'upload') {
-        void payrollIntakeRef.current?.pickFile();
+        const intake = payrollIntakeRef.current;
+        if (intake == null) return;
+        void intake.pickFile().then((result) => {
+          if (result != null) announcePayrollStageOutcomeRef.current?.(result);
+        });
       } else {
         setPayrollPasteOpen(true);
       }
@@ -230,6 +249,61 @@ export function ChatScreen(): React.JSX.Element {
   // Prefer an actively-staged run; otherwise offer the most recent resumable
   // run recovered from a prior session.
   const activePayrollRunId = payrollIntake.activeRunId ?? payrollResume.resumableRunId;
+
+  const addPayrollAssistantMessage = useCallback(
+    async (event: PayrollAgentReplyEvent) => {
+      const conversationId = activeConversation?.id ?? createConversation(scope, 'Payroll batch');
+      const messageId = createAgenticId('payroll-assistant');
+      addMessage({
+        id: messageId,
+        role: 'assistant',
+        text: '',
+        pending: true,
+        createdAt: Date.now(),
+        conversationId,
+        walletAddress: scope.walletAddress,
+        network: scope.network,
+      });
+
+      const controller = new AbortController();
+      payrollReplyControllersRef.current.add(controller);
+      try {
+        const reply = await generatePayrollAgentReply(event, { signal: controller.signal });
+        await revealAssistantMessageText(messageId, reply, { signal: controller.signal });
+      } catch {
+        if (!controller.signal.aborted) {
+          await revealAssistantMessageText(messageId, fallbackPayrollAgentReply(event));
+        }
+      } finally {
+        payrollReplyControllersRef.current.delete(controller);
+      }
+    },
+    [activeConversation?.id, addMessage, createConversation, scope],
+  );
+
+  const announcePayrollStageOutcome = useCallback(
+    (outcome: PayrollStageOutcome) => {
+      if (outcome.status === 'staged') {
+        if (announcedPayrollRunIdsRef.current.has(outcome.runId)) return;
+        announcedPayrollRunIdsRef.current.add(outcome.runId);
+        const { summary } = outcome;
+        void addPayrollAssistantMessage({
+          kind: 'staged',
+          recipientCount: summary.recipientCount,
+          network: summary.network,
+          routePolicy: summary.routePolicy,
+          requiresUmbraSetup: summary.requiresUmbraSetup,
+        });
+        return;
+      }
+
+      if (outcome.status === 'mapping_required') {
+        void addPayrollAssistantMessage({ kind: 'mapping_required', network: scope.network });
+      }
+    },
+    [addPayrollAssistantMessage, scope.network],
+  );
+  announcePayrollStageOutcomeRef.current = announcePayrollStageOutcome;
 
   const handleSetupUmbraForPayroll = useCallback(async () => {
     if (scope.walletAddress == null || scope.network == null) {
@@ -297,6 +371,16 @@ export function ChatScreen(): React.JSX.Element {
     });
     return () => cancelAnimationFrame(frame);
   }, [promptDockHeight, scopedMessages.length]);
+
+  useEffect(
+    () => () => {
+      for (const controller of payrollReplyControllersRef.current) {
+        controller.abort('chat screen unmounted');
+      }
+      payrollReplyControllersRef.current.clear();
+    },
+    [],
+  );
 
   // Migrate legacy messages with a missing `conversationId` once.
   useEffect(() => {
@@ -443,33 +527,17 @@ export function ChatScreen(): React.JSX.Element {
             </View>
           </View>
 
-          {activePayrollRunId != null ? (
-            <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.lg }}>
-              <PayrollChatController
-                runId={activePayrollRunId}
-                walletId={activeWalletId}
-                summary={payrollIntake.activeRunId != null ? payrollIntake.summary : null}
-                onSetupUmbra={handleSetupUmbraForPayroll}
-                onRefreshRoutes={
-                  payrollIntake.activeRunId != null ? payrollIntake.refreshRoutes : undefined
-                }
-                onSpeakOutcome={(phrase) => {
-                  void speech.speak(phrase, { payrollMode: true });
-                }}
-                setupBusy={mixerRegisterMutation.isPending}
-              />
-            </View>
-          ) : null}
-
           {payrollIntake.error != null ? (
-            <View style={{ paddingHorizontal: horizontalPadding, paddingBottom: spacing.sm }}>
+            <View style={headerStyles.payrollErrorWrap}>
               <Text variant="caption" color={colors.semantic.error}>
                 {payrollIntake.error}
               </Text>
             </View>
           ) : null}
 
-          {scopedMessages.length > 0 ? <View style={headerStyles.messageBottomAnchor} /> : null}
+          {scopedMessages.length > 0 || activePayrollRunId != null ? (
+            <View style={headerStyles.messageBottomAnchor} />
+          ) : null}
 
           {scopedMessages.length > 0 ? (
             <ChatMessageList
@@ -481,9 +549,45 @@ export function ChatScreen(): React.JSX.Element {
               onCancelPrivateSend={cancelPrivateSend}
             />
           ) : null}
+
+          {activePayrollRunId != null ? (
+            <View style={headerStyles.payrollCardWrap}>
+              <PayrollChatController
+                runId={activePayrollRunId}
+                walletId={activeWalletId}
+                summary={payrollIntake.activeRunId != null ? payrollIntake.summary : null}
+                onSetupUmbra={handleSetupUmbraForPayroll}
+                onRefreshRoutes={
+                  payrollIntake.activeRunId != null ? payrollIntake.refreshRoutes : undefined
+                }
+                onRoutePolicyChange={(policy) => {
+                  void payrollIntake.updateRoutePolicy(policy);
+                }}
+                onSpeakOutcome={(phrase) => {
+                  void speech.speak(phrase, { payrollMode: true });
+                }}
+                onAnnounceOutcome={(outcome) => {
+                  void addPayrollAssistantMessage({
+                    kind: 'outcome',
+                    status: outcome.status,
+                    totalCount: outcome.progress.total,
+                    sentCount: outcome.progress.done,
+                    failedCount: outcome.progress.failed,
+                    blockedCount: outcome.progress.blocked,
+                    claimsPending: outcome.claimsPending,
+                    network: outcome.network,
+                  });
+                }}
+                setupBusy={mixerRegisterMutation.isPending}
+              />
+            </View>
+          ) : null}
         </ScrollView>
 
-        {scopedMessages.length === 0 ? (
+        {scopedMessages.length === 0 &&
+        activePayrollRunId == null &&
+        payrollIntake.error == null &&
+        payrollIntake.mappingRequest == null ? (
           <ChatPrivacyNote horizontalPadding={horizontalPadding} />
         ) : null}
       </View>
@@ -500,7 +604,9 @@ export function ChatScreen(): React.JSX.Element {
         onChangeText={setPrompt}
         onSubmit={handleSubmit}
         onUpload={() => {
-          void payrollIntake.pickFile();
+          void payrollIntake.pickFile().then((result) => {
+            if (result != null) announcePayrollStageOutcome(result);
+          });
         }}
         onUploadLongPress={() => setPayrollPasteOpen(true)}
         onPastePayroll={() => setPayrollPasteOpen(true)}
@@ -531,6 +637,7 @@ export function ChatScreen(): React.JSX.Element {
         onClose={() => setPayrollPasteOpen(false)}
         onSubmit={async (fileName, text) => {
           const result = await payrollIntake.stageFromText(fileName, text);
+          announcePayrollStageOutcome(result);
           if (result.status === 'staged' || result.status === 'mapping_required') {
             setPayrollPasteOpen(false);
             return true;
@@ -548,7 +655,7 @@ export function ChatScreen(): React.JSX.Element {
           suggestedMapping={payrollIntake.mappingRequest.suggestedMapping}
           onClose={payrollIntake.cancelMapping}
           onSubmit={(mapping) => {
-            void payrollIntake.stageWithMapping(mapping);
+            void payrollIntake.stageWithMapping(mapping).then(announcePayrollStageOutcome);
           }}
         />
       ) : null}

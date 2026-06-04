@@ -25,6 +25,16 @@ export const headerStyles = StyleSheet.create({
     flexGrow: 1,
     minHeight: spacing.md,
   },
+  payrollErrorWrap: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  payrollCardWrap: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.lg,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

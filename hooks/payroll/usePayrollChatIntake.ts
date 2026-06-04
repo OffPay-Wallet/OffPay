@@ -71,7 +71,7 @@ export interface PayrollMappingRequest {
 }
 
 export type PayrollStageOutcome =
-  | { status: 'staged' }
+  | { status: 'staged'; runId: string; summary: PayrollConfirmationSummary }
   | { status: 'mapping_required' }
   | { status: 'blocked'; message: string }
   | { status: 'error'; message: string };
@@ -83,11 +83,12 @@ export interface UsePayrollChatIntakeResult {
   error: string | null;
   /** Set when the file parsed but columns need manual mapping. */
   mappingRequest: PayrollMappingRequest | null;
-  pickFile: () => Promise<void>;
+  pickFile: () => Promise<PayrollStageOutcome | null>;
   stageFromText: (fileName: string, text: string) => Promise<PayrollStageOutcome>;
   /** Re-stage the pending mapping-request file with a user-chosen mapping. */
   stageWithMapping: (mapping: PayrollColumnMapping) => Promise<PayrollStageOutcome>;
   cancelMapping: () => void;
+  updateRoutePolicy: (policy: PayrollRoutePolicy) => Promise<void>;
   refreshRoutes: () => Promise<void>;
   reset: () => void;
 }
@@ -131,6 +132,7 @@ export function usePayrollChatIntake(
 ): UsePayrollChatIntakeResult {
   const createRun = usePayrollStore((state) => state.createRun);
   const replaceRows = usePayrollStore((state) => state.replaceRows);
+  const setRunPolicy = usePayrollStore((state) => state.setRunPolicy);
   const setRunRoutesDirty = usePayrollStore((state) => state.setRunRoutesDirty);
   const getRun = usePayrollStore((state) => state.getRun);
   const getRows = usePayrollStore((state) => state.getRows);
@@ -347,7 +349,7 @@ export function usePayrollChatIntake(
         replaceRows(staged.run.id, routed.rows);
         setActiveRunId(staged.run.id);
         setSummary(routed.summary);
-        return { status: 'staged' };
+        return { status: 'staged', runId: staged.run.id, summary: routed.summary };
       } catch (caught) {
         if (isAbortError(caught)) {
           const message = 'Payroll staging was cancelled.';
@@ -374,15 +376,15 @@ export function usePayrollChatIntake(
     ],
   );
 
-  const pickFile = useCallback(async () => {
+  const pickFile = useCallback(async (): Promise<PayrollStageOutcome | null> => {
     setError(null);
     const picked = await pickPayrollFile();
     if (!picked.ok) {
       setError(picked.message);
-      return;
+      return { status: 'error', message: picked.message };
     }
-    if (picked.cancelled) return;
-    await stage(picked.file.fileName, picked.file.mimeType, picked.file.text);
+    if (picked.cancelled) return null;
+    return stage(picked.file.fileName, picked.file.mimeType, picked.file.text);
   }, [stage]);
 
   const stageFromText = useCallback(
@@ -432,6 +434,50 @@ export function usePayrollChatIntake(
     }
   }, [activeRunId, getRun, getRows, params.balance, replaceRows, routeRows, setRunRoutesDirty]);
 
+  const updateRoutePolicy = useCallback(
+    async (policy: PayrollRoutePolicy) => {
+      setError(null);
+      if (activeRunId == null) return;
+      const run = getRun(activeRunId);
+      if (run == null || run.routePolicy === policy) return;
+      if (run.status !== 'ready' && run.status !== 'draft') {
+        setError('Payroll route can only be changed before confirming the batch.');
+        return;
+      }
+
+      const token = resolveTokenContextForRun(params.balance, run);
+      if (token == null) {
+        setError('Payroll token balance is no longer available. Refresh the wallet and try again.');
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const nextRun: PayrollRun = { ...run, routePolicy: policy, routesDirty: false };
+        const routed = await routeRows(nextRun, getRows(activeRunId), token);
+        setRunPolicy(activeRunId, policy);
+        replaceRows(activeRunId, routed.rows);
+        setRunRoutesDirty(activeRunId, false);
+        setSummary(routed.summary);
+      } catch (caught) {
+        if (isAbortError(caught)) return;
+        setError(caught instanceof Error ? caught.message : 'Failed to update payroll route.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      activeRunId,
+      getRun,
+      getRows,
+      params.balance,
+      replaceRows,
+      routeRows,
+      setRunPolicy,
+      setRunRoutesDirty,
+    ],
+  );
+
   const reset = useCallback(() => {
     setActiveRunId(null);
     setSummary(null);
@@ -450,6 +496,7 @@ export function usePayrollChatIntake(
       stageFromText,
       stageWithMapping,
       cancelMapping,
+      updateRoutePolicy,
       refreshRoutes,
       reset,
     }),
@@ -463,6 +510,7 @@ export function usePayrollChatIntake(
       stageFromText,
       stageWithMapping,
       cancelMapping,
+      updateRoutePolicy,
       refreshRoutes,
       reset,
     ],

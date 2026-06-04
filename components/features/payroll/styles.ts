@@ -73,6 +73,47 @@ export const payrollStyles = StyleSheet.create({
     fontSize: 12,
     color: colors.text.primary,
   },
+  routePickerBlock: {
+    gap: spacing.xs,
+  },
+  routePicker: {
+    minHeight: 42,
+    borderRadius: 22,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.backgroundTint,
+    padding: 3,
+    flexDirection: 'row',
+    gap: 3,
+  },
+  routePickerOption: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+  },
+  routePickerOptionSelected: {
+    backgroundColor: colors.brand.whiteStream,
+  },
+  routePickerOptionPressed: {
+    backgroundColor: colors.surface.pressed,
+  },
+  routePickerText: {
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 12,
+    color: colors.text.secondary,
+    textAlign: 'center',
+  },
+  routePickerTextSelected: {
+    color: colors.text.onAccent,
+  },
+  routePickerTextDisabled: {
+    opacity: 0.64,
+  },
   warningText: {
     fontFamily: fontFamily.ui,
     fontSize: 13,
@@ -83,6 +124,44 @@ export const payrollStyles = StyleSheet.create({
     fontSize: 12,
     color: colors.text.secondary,
   },
+  payrollBackgroundStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  payrollReceiptList: {
+    gap: spacing.xs,
+  },
+  payrollReceiptRow: {
+    minHeight: 38,
+    borderRadius: spacing.sm,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.backgroundTint,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  payrollReceiptRowPressed: {
+    opacity: 0.72,
+  },
+  payrollReceiptLabel: {
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 12,
+    color: colors.text.secondary,
+  },
+  payrollReceiptHash: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: fontFamily.mono,
+    fontSize: 12,
+    color: colors.text.primary,
+  },
   typedConfirmInput: {
     height: 44,
     borderRadius: spacing.sm,
@@ -92,7 +171,7 @@ export const payrollStyles = StyleSheet.create({
     fontFamily: fontFamily.uiSemiBold,
     fontSize: 15,
     color: colors.text.primary,
-    backgroundColor: colors.glass.clearFill,
+    backgroundColor: colors.surface.backgroundTint,
   },
   primaryButton: {
     height: 48,

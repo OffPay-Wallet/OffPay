@@ -86,10 +86,10 @@ export function PayrollColumnMapSheet({
           </View>
 
           <Text style={styles.claimNote}>
-            We could not detect the columns. Tap a column to assign each role.
+            Choose the columns for this batch. Wallet and amount are required.
           </Text>
 
-          <ScrollView style={mapStyles.scroll}>
+          <ScrollView style={mapStyles.scroll} contentContainerStyle={mapStyles.scrollContent}>
             {ROLES.map(({ role, label, required }) => (
               <View key={role} style={mapStyles.roleBlock}>
                 <Text style={styles.statLabel}>
@@ -148,10 +148,12 @@ const mapStyles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: colors.surface.cardElevated,
+    backgroundColor: colors.surface.backgroundAlt,
     borderTopLeftRadius: spacing.xl,
     borderTopRightRadius: spacing.xl,
     borderCurve: 'continuous',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border.subtle,
     padding: spacing.xl,
     gap: spacing.md,
     maxHeight: '80%',
@@ -159,27 +161,29 @@ const mapStyles = StyleSheet.create({
   scroll: {
     maxHeight: 360,
   },
+  scrollContent: {
+    gap: spacing.md,
+  },
   roleBlock: {
     gap: spacing.xs,
-    marginBottom: spacing.md,
   },
   chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.xs,
   },
   chip: {
+    minHeight: 56,
+    justifyContent: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: spacing.sm,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border.strong,
-    backgroundColor: colors.glass.clearFill,
-    minWidth: 96,
+    borderColor: colors.border.default,
+    backgroundColor: colors.surface.backgroundTint,
+    gap: spacing.xs,
   },
   chipSelected: {
-    backgroundColor: colors.brand.glossAccent,
-    borderColor: colors.brand.deepShadow,
+    backgroundColor: colors.brand.graphiteDepth,
+    borderColor: colors.border.accent,
   },
   chipText: {
     fontFamily: 'Geist-SemiBold',
@@ -187,7 +191,7 @@ const mapStyles = StyleSheet.create({
     color: colors.text.primary,
   },
   chipTextSelected: {
-    color: colors.brand.deepShadow,
+    color: colors.text.primary,
   },
   chipPreview: {
     fontFamily: 'GeistMono-Regular',

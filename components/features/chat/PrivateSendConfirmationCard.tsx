@@ -4,18 +4,20 @@
  * buttons. Tx and queue ids open Solscan when tapped.
  */
 
-import React from 'react';
-import { ActivityIndicator, Linking, Pressable, View } from 'react-native';
+import React, { useCallback } from 'react';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+import { useAppToast } from '@/components/ui/AppToast';
 
 import type { AgenticPrivateSendAction } from '@/store/agenticChatStore';
 
 import { ConfirmationRow } from './ConfirmationRow';
-import { buildSolscanTxUrl, formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface PrivateSendConfirmationCardProps {
@@ -45,6 +47,14 @@ export function PrivateSendConfirmationCard({
   const submitting = action.status === 'submitting';
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const { showToast } = useAppToast();
+  const copyHash = useCallback(
+    async (value: string, label: string) => {
+      await Clipboard.setStringAsync(value);
+      showToast({ title: 'Copied', message: `${label} copied to clipboard.`, variant: 'success' });
+    },
+    [showToast],
+  );
 
   return (
     <View style={styles.confirmationCard}>
@@ -77,9 +87,9 @@ export function PrivateSendConfirmationCard({
             mono
             onPress={() => {
               if (action.signature == null) return;
-              void Linking.openURL(buildSolscanTxUrl(action.signature, action.network));
+              void copyHash(action.signature, 'Transaction hash');
             }}
-            accessibilityLabel="Open transaction in Solscan"
+            accessibilityLabel="Copy transaction hash"
           />
         ) : null}
         {action.txId != null ? (
@@ -89,9 +99,9 @@ export function PrivateSendConfirmationCard({
             mono
             onPress={() => {
               if (action.txId == null) return;
-              void Linking.openURL(buildSolscanTxUrl(action.txId, action.network));
+              void copyHash(action.txId, 'Queue id');
             }}
-            accessibilityLabel="Open queued transaction in Solscan"
+            accessibilityLabel="Copy queued transaction id"
           />
         ) : null}
       </View>

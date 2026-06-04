@@ -1,7 +1,6 @@
 /**
  * One row in the agentic transfer confirmation card. Optionally tappable —
- * when `onPress` is provided the row renders as an underlined link so the
- * user can open the signature in Solscan.
+ * transaction rows use this to copy the full local signature/queue id.
  */
 
 import React from 'react';
@@ -51,8 +50,8 @@ export function ConfirmationRow({
       {onPress != null ? (
         <Pressable
           onPress={onPress}
-          accessibilityRole="link"
-          accessibilityLabel={accessibilityLabel ?? `Open ${label}`}
+          accessibilityRole="button"
+          accessibilityLabel={accessibilityLabel ?? `Copy ${label}`}
           hitSlop={6}
           style={({ pressed }) => [
             styles.confirmationRowLink,

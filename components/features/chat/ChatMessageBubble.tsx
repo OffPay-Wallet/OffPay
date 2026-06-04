@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { View } from 'react-native';
+import Animated, { Easing, FadeInUp, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
 import { useAgentThinkingPhrase } from '@/hooks/agentic-chat/useAgentThinkingPhrase';
@@ -16,6 +17,9 @@ import { ChatBubble } from './ChatBubble';
 import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
 import { SwapConfirmationCard } from './SwapConfirmationCard';
 import { messageStyles as styles } from './styles/message';
+
+const MESSAGE_ENTERING = FadeInUp.duration(170).easing(Easing.out(Easing.cubic));
+const MESSAGE_LAYOUT = LinearTransition.duration(190).easing(Easing.out(Easing.cubic));
 
 interface ChatMessageBubbleProps {
   message: AgenticChatMessage;
@@ -65,31 +69,43 @@ export function ChatMessageBubble({
     if (!hasText) return null;
 
     return (
-      <View style={[styles.messageRow, styles.messageRowUser]}>
+      <Animated.View
+        entering={MESSAGE_ENTERING}
+        layout={MESSAGE_LAYOUT}
+        style={[styles.messageRow, styles.messageRowUser]}
+      >
         <ChatBubble variant="user">
           <Text style={styles.bubbleTextUser}>{message.text}</Text>
         </ChatBubble>
-      </View>
+      </Animated.View>
     );
   }
 
   if (showThinkingOnly) {
     return (
-      <View style={[styles.messageRow, styles.messageRowAgent]}>
+      <Animated.View
+        entering={MESSAGE_ENTERING}
+        layout={MESSAGE_LAYOUT}
+        style={[styles.messageRow, styles.messageRowAgent]}
+      >
         <ChatBubble variant="agent">
           <AgentThinkingContent statusPhrase={thinkingPhrase} />
         </ChatBubble>
-      </View>
+      </Animated.View>
     );
   }
 
   if (showStreamRow) {
     return (
-      <View style={[styles.messageRow, styles.messageRowAgent]}>
+      <Animated.View
+        entering={MESSAGE_ENTERING}
+        layout={MESSAGE_LAYOUT}
+        style={[styles.messageRow, styles.messageRowAgent]}
+      >
         <ChatBubble variant="agent">
           <AgentStreamContent text={message.text} />
         </ChatBubble>
-      </View>
+      </Animated.View>
     );
   }
 
@@ -98,7 +114,11 @@ export function ChatMessageBubble({
   }
 
   return (
-    <View style={[styles.messageRow, styles.messageRowAgent]}>
+    <Animated.View
+      entering={MESSAGE_ENTERING}
+      layout={MESSAGE_LAYOUT}
+      style={[styles.messageRow, styles.messageRowAgent]}
+    >
       <View style={styles.agentMessageStack}>
         {hasText ? (
           <ChatBubble variant="agent">
@@ -106,7 +126,11 @@ export function ChatMessageBubble({
           </ChatBubble>
         ) : null}
         {action != null ? (
-          <View style={styles.actionCardWrap}>
+          <Animated.View
+            entering={MESSAGE_ENTERING}
+            layout={MESSAGE_LAYOUT}
+            style={styles.actionCardWrap}
+          >
             {action.kind === 'swap' ? (
               <SwapConfirmationCard
                 action={action}
@@ -120,9 +144,9 @@ export function ChatMessageBubble({
                 onCancel={onCancelPrivateSend}
               />
             )}
-          </View>
+          </Animated.View>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }

@@ -176,8 +176,7 @@ function looksLikeAmount(value: string): boolean {
   return atomic != null && /^\d+$/.test(atomic) && BigInt(atomic) > 0n;
 }
 
-function parseManualPayrollLine(line: string): Record<string, string> | null {
-  const parts = splitManualLine(line);
+function parseManualPayrollParts(parts: string[]): Record<string, string> | null {
   if (parts.length < 2) return null;
 
   const recipientIndex = parts.findIndex(isValidSolanaAddress);
@@ -210,6 +209,32 @@ function parseManualPayrollLine(line: string): Record<string, string> | null {
   };
 }
 
+function parseManualPayrollLine(line: string): Record<string, string> | null {
+  return parseManualPayrollParts(splitManualLine(line));
+}
+
+function parseHeaderlessManualGroups(
+  lines: string[],
+  groupSize: 2 | 3,
+): Record<string, string>[] | null {
+  if (lines.length === 0 || lines.length % groupSize !== 0) return null;
+
+  const records: Record<string, string>[] = [];
+  for (let index = 0; index < lines.length; index += groupSize) {
+    const firstLineParts = splitManualLine(lines[index] ?? '');
+    if (!firstLineParts.some(isValidSolanaAddress)) return null;
+
+    const parts = [
+      ...firstLineParts,
+      ...lines.slice(index + 1, index + groupSize).flatMap(splitManualLine),
+    ];
+    const record = parseManualPayrollParts(parts);
+    if (record == null) return null;
+    records.push(record);
+  }
+  return records;
+}
+
 function parseHeaderlessManualText(text: string): PayrollTable | null {
   const lines = text
     .split(/\r?\n/)
@@ -220,7 +245,16 @@ function parseHeaderlessManualText(text: string): PayrollTable | null {
   const records: Record<string, string>[] = [];
   for (const line of lines) {
     const record = parseManualPayrollLine(line);
-    if (record == null) return null;
+    if (record == null) {
+      if (records.length > 0) return null;
+      const groupedRecords =
+        parseHeaderlessManualGroups(lines, 2) ?? parseHeaderlessManualGroups(lines, 3);
+      if (groupedRecords == null) return null;
+      return {
+        headers: ['label', 'recipient', 'amount', 'token'],
+        records: groupedRecords,
+      };
+    }
     records.push(record);
   }
 
@@ -250,6 +284,11 @@ export async function parsePayrollTable(
   }
 
   try {
+    const manualTable = params.format === 'json' ? null : parseHeaderlessManualText(text);
+    if (manualTable != null) {
+      return { ok: true, table: manualTable };
+    }
+
     let table: PayrollTable;
     switch (params.format) {
       case 'json':
@@ -262,9 +301,7 @@ export async function parsePayrollTable(
         table = await parseDelimited(text, '\t', params.signal);
         break;
       case 'txt':
-        table =
-          parseHeaderlessManualText(text) ??
-          (await parseDelimited(text, detectDelimiter(text), params.signal));
+        table = await parseDelimited(text, detectDelimiter(text), params.signal);
         break;
     }
 

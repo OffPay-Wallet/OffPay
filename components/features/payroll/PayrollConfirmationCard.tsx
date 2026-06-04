@@ -1,7 +1,7 @@
 /**
  * In-chat payroll confirmation card. Presentation only — all totals and
  * gating come from `buildPayrollConfirmationSummary`. The single "Start
- * payroll" control begins the whole batch; there are no per-recipient
+ * confirmation control begins the whole batch; there are no per-recipient
  * prompts after this. Large batches require a typed confirmation that voice
  * cannot satisfy on its own.
  */
@@ -23,6 +23,7 @@ import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { payrollStyles as styles } from './styles';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import type { PayrollRoutePolicy } from '@/lib/payroll/payroll-types';
 
 interface PayrollConfirmationCardProps {
   summary: PayrollConfirmationSummary;
@@ -30,8 +31,15 @@ interface PayrollConfirmationCardProps {
   onStart: () => void;
   onOpenDetails?: () => void;
   onSetupUmbra?: () => void;
+  onRoutePolicyChange?: (policy: PayrollRoutePolicy) => void;
   setupBusy?: boolean;
 }
+
+const ROUTE_POLICY_OPTIONS: { policy: PayrollRoutePolicy; label: string }[] = [
+  { policy: 'private_auto', label: 'Auto' },
+  { policy: 'umbra_only', label: 'Umbra' },
+  { policy: 'magicblock_only', label: 'MagicBlock' },
+];
 
 function Stat({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
@@ -48,6 +56,7 @@ export function PayrollConfirmationCard({
   onStart,
   onOpenDetails,
   onSetupUmbra,
+  onRoutePolicyChange,
   setupBusy = false,
 }: PayrollConfirmationCardProps): React.JSX.Element {
   const [typed, setTyped] = useState('');
@@ -76,6 +85,40 @@ export function PayrollConfirmationCard({
         <Stat label="Total" value={`${summary.totalDisplay} ${summary.tokenSymbol}`} />
         <Stat label="Network" value={summary.network} />
         <Stat label="Wallet" value={shortenWalletAddress(summary.walletAddress)} />
+      </View>
+
+      <View style={styles.routePickerBlock}>
+        <Text style={styles.statLabel}>Route</Text>
+        <View style={styles.routePicker}>
+          {ROUTE_POLICY_OPTIONS.map((option) => {
+            const selected = summary.routePolicy === option.policy;
+            return (
+              <Pressable
+                key={option.policy}
+                onPress={() => onRoutePolicyChange?.(option.policy)}
+                disabled={busy || selected || onRoutePolicyChange == null}
+                style={({ pressed }) => [
+                  styles.routePickerOption,
+                  selected && styles.routePickerOptionSelected,
+                  pressed && !selected && styles.routePickerOptionPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Use ${option.label} payroll route`}
+                accessibilityState={{ selected, disabled: busy || onRoutePolicyChange == null }}
+              >
+                <Text
+                  style={[
+                    styles.routePickerText,
+                    selected && styles.routePickerTextSelected,
+                    busy && styles.routePickerTextDisabled,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       <View style={styles.badgeRow}>
@@ -188,7 +231,7 @@ export function PayrollConfirmationCard({
         onPress={onStart}
         disabled={!canStart}
         accessibilityRole="button"
-        accessibilityLabel="Start payroll"
+        accessibilityLabel="Confirm payroll batch"
         accessibilityState={{ disabled: !canStart }}
       >
         {busy ? (
@@ -196,7 +239,7 @@ export function PayrollConfirmationCard({
         ) : (
           <>
             <Ionicons name="send" size={16} color={colors.brand.whiteStream} />
-            <Text style={styles.primaryButtonText}>Start payroll</Text>
+            <Text style={styles.primaryButtonText}>Confirm batch</Text>
           </>
         )}
       </Pressable>

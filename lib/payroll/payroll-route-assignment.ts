@@ -62,9 +62,7 @@ export const PAYROLL_ROUTE_UNAVAILABLE_MESSAGE = 'No private route is ready for 
  * the confirmation card. Only rows currently in `ready` are routed; invalid /
  * settled rows are ignored here.
  */
-export function assignPayrollRoutes(
-  params: AssignPayrollRoutesParams,
-): PayrollRouteAssignment {
+export function assignPayrollRoutes(params: AssignPayrollRoutesParams): PayrollRouteAssignment {
   const shareMint = routesShareMint(params.facts.network, params.mint);
   const rows: PayrollRouteAssignmentRow[] = [];
   const split: PayrollRouteSplit = { umbra: 0, magicblock: 0, blocked: 0, claimRequired: 0 };
@@ -72,8 +70,7 @@ export function assignPayrollRoutes(
   for (const row of params.rows) {
     if (row.status !== 'ready') continue;
 
-    const recipient =
-      params.recipientFactsByAddress[row.recipient] ?? DEFAULT_RECIPIENT_FACTS;
+    const recipient = params.recipientFactsByAddress[row.recipient] ?? DEFAULT_RECIPIENT_FACTS;
     const decision = resolvePayrollRoute({
       policy: params.policy,
       facts: params.facts,

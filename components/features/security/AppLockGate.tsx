@@ -44,6 +44,27 @@ const BACKGROUND_LOCK_GRACE_AFTER_UNLOCK_MS = 900;
 
 type KeyKind = 'digit' | 'fingerprint' | 'clear' | 'delete';
 
+function requestAppAnimationFrame(callback: () => void): number {
+  const frameGlobal = globalThis as typeof globalThis & {
+    requestAnimationFrame?: typeof requestAnimationFrame;
+  };
+  if (typeof frameGlobal.requestAnimationFrame === 'function') {
+    return frameGlobal.requestAnimationFrame(() => callback());
+  }
+  return setTimeout(callback, 0) as unknown as number;
+}
+
+function cancelAppAnimationFrame(handle: number): void {
+  const frameGlobal = globalThis as typeof globalThis & {
+    cancelAnimationFrame?: typeof cancelAnimationFrame;
+  };
+  if (typeof frameGlobal.cancelAnimationFrame === 'function') {
+    frameGlobal.cancelAnimationFrame(handle);
+    return;
+  }
+  clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
+}
+
 function isAppActive(): boolean {
   return AppState.currentState === 'active';
 }
@@ -162,7 +183,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const [locked, setLocked] = useState(expectedInitialLock);
   const [hasPasscode, setHasPasscode] = useState(expectedInitialLock);
   const [fingerprintEnabled, setFingerprintEnabled] = useState(false);
-  const [passcode, setPasscode] = useState('');
+  const [passcodeLength, setPasscodeLength] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -171,6 +192,8 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const lockMutationIdRef = useRef(0);
   const lockWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const passcodeRef = useRef('');
+  const passcodeRenderFrameRef = useRef<number | null>(null);
+  const passcodeUnlockFrameRef = useRef<number | null>(null);
   const lockedRef = useRef(expectedInitialLock);
   const unlockingRef = useRef(false);
   const hasUnlockedThisSessionRef = useRef(false);
@@ -207,10 +230,42 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
     setUnlocking(nextUnlocking);
   }, []);
 
-  const setPasscodeValue = useCallback((next: string | ((current: string) => string)): void => {
-    const nextValue = typeof next === 'function' ? next(passcodeRef.current) : next;
-    passcodeRef.current = nextValue;
-    setPasscode(nextValue);
+  const cancelPasscodeRenderFrame = useCallback((): void => {
+    if (passcodeRenderFrameRef.current == null) return;
+    cancelAppAnimationFrame(passcodeRenderFrameRef.current);
+    passcodeRenderFrameRef.current = null;
+  }, []);
+
+  const flushPasscodeLength = useCallback((): void => {
+    cancelPasscodeRenderFrame();
+    setPasscodeLength(passcodeRef.current.length);
+  }, [cancelPasscodeRenderFrame]);
+
+  const schedulePasscodeLengthRender = useCallback((): void => {
+    if (passcodeRenderFrameRef.current != null) return;
+    passcodeRenderFrameRef.current = requestAppAnimationFrame(() => {
+      passcodeRenderFrameRef.current = null;
+      setPasscodeLength(passcodeRef.current.length);
+    });
+  }, []);
+
+  const setPasscodeValue = useCallback(
+    (next: string | ((current: string) => string), options?: { immediate?: boolean }): void => {
+      const nextValue = typeof next === 'function' ? next(passcodeRef.current) : next;
+      passcodeRef.current = nextValue;
+      if (options?.immediate === true) {
+        flushPasscodeLength();
+        return;
+      }
+      schedulePasscodeLengthRender();
+    },
+    [flushPasscodeLength, schedulePasscodeLengthRender],
+  );
+
+  const cancelScheduledPasscodeUnlock = useCallback((): void => {
+    if (passcodeUnlockFrameRef.current == null) return;
+    cancelAppAnimationFrame(passcodeUnlockFrameRef.current);
+    passcodeUnlockFrameRef.current = null;
   }, []);
 
   const inputDisabled = unlocking || resetting || resetConfirmVisible;
@@ -333,7 +388,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
     hasUnlockedThisSessionRef.current = true;
     ignoreBackgroundLockUntilRef.current = Date.now() + BACKGROUND_LOCK_GRACE_AFTER_UNLOCK_MS;
     useWalletStore.setState({ publicKey: nextPublicKey });
-    setPasscodeValue('');
+    setPasscodeValue('', { immediate: true });
     setToast(null);
     setLockedState(false);
     setChecking(false);
@@ -417,6 +472,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
 
   const handleFingerprintUnlock = useCallback(async (): Promise<void> => {
     if (unlocking || resetting || resetConfirmVisible || !fingerprintEnabled) return;
+    cancelScheduledPasscodeUnlock();
     setUnlockingState(true);
     try {
       const result = await authenticateWithBiometrics({
@@ -439,6 +495,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
     }
   }, [
     fingerprintEnabled,
+    cancelScheduledPasscodeUnlock,
     resetConfirmVisible,
     resetting,
     scheduleBackgroundLock,
@@ -521,14 +578,14 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
         if (!ok) {
           setToast('Incorrect wallet password.');
           triggerShake();
-          setPasscodeValue('');
+          setPasscodeValue('', { immediate: true });
           return;
         }
         await unlockWallet();
       } catch {
         setToast('Could not unlock wallet.');
         triggerShake();
-        setPasscodeValue('');
+        setPasscodeValue('', { immediate: true });
       } finally {
         setUnlockingState(false);
         if (AppState.currentState === 'background') {
@@ -548,6 +605,20 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
     ],
   );
 
+  const schedulePasscodeUnlock = useCallback(
+    (candidate: string): void => {
+      cancelScheduledPasscodeUnlock();
+      passcodeUnlockFrameRef.current = requestAppAnimationFrame(() => {
+        passcodeUnlockFrameRef.current = requestAppAnimationFrame(() => {
+          passcodeUnlockFrameRef.current = null;
+          if (passcodeRef.current !== candidate || unlockingRef.current) return;
+          void handlePasscodeUnlock(candidate);
+        });
+      });
+    },
+    [cancelScheduledPasscodeUnlock, handlePasscodeUnlock],
+  );
+
   const handleDigit = useCallback(
     (digit: string): void => {
       if (inputDisabled) return;
@@ -557,21 +628,30 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       const nextPasscode = `${currentPasscode}${digit}`;
       setPasscodeValue(nextPasscode);
       if (nextPasscode.length === 6) {
-        void handlePasscodeUnlock(nextPasscode);
+        schedulePasscodeUnlock(nextPasscode);
       }
     },
-    [handlePasscodeUnlock, inputDisabled, setPasscodeValue],
+    [inputDisabled, schedulePasscodeUnlock, setPasscodeValue],
   );
 
   const handleDelete = useCallback((): void => {
     if (unlocking || resetting || resetConfirmVisible) return;
-    setPasscodeValue((current) => current.slice(0, -1));
-  }, [resetting, resetConfirmVisible, setPasscodeValue, unlocking]);
+    cancelScheduledPasscodeUnlock();
+    setPasscodeValue((current) => current.slice(0, -1), { immediate: true });
+  }, [cancelScheduledPasscodeUnlock, resetting, resetConfirmVisible, setPasscodeValue, unlocking]);
 
   const handleClear = useCallback((): void => {
     if (unlocking || resetting || resetConfirmVisible) return;
-    setPasscodeValue('');
-  }, [resetting, resetConfirmVisible, setPasscodeValue, unlocking]);
+    cancelScheduledPasscodeUnlock();
+    setPasscodeValue('', { immediate: true });
+  }, [cancelScheduledPasscodeUnlock, resetting, resetConfirmVisible, setPasscodeValue, unlocking]);
+
+  useEffect(() => {
+    return () => {
+      cancelPasscodeRenderFrame();
+      cancelScheduledPasscodeUnlock();
+    };
+  }, [cancelPasscodeRenderFrame, cancelScheduledPasscodeUnlock]);
 
   const handleForgotPasswordReset = useCallback(async (): Promise<void> => {
     if (resetting) return;
@@ -579,7 +659,8 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
     setResetConfirmVisible(false);
     setResetting(true);
     setToast(null);
-    setPasscodeValue('');
+    cancelScheduledPasscodeUnlock();
+    setPasscodeValue('', { immediate: true });
     clearPendingBackgroundLock();
     lockMutationIdRef.current += 1;
     loadRequestIdRef.current += 1;
@@ -603,6 +684,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
     }
   }, [
     clearPendingBackgroundLock,
+    cancelScheduledPasscodeUnlock,
     queryClient,
     resetting,
     router,
@@ -614,9 +696,10 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const handleForgotPasswordPress = useCallback((): void => {
     if (unlocking || resetting) return;
 
+    cancelScheduledPasscodeUnlock();
     setToast(null);
     setResetConfirmVisible(true);
-  }, [resetting, unlocking]);
+  }, [cancelScheduledPasscodeUnlock, resetting, unlocking]);
 
   const handleCancelResetConfirm = useCallback((): void => {
     if (resetting) return;
@@ -667,8 +750,8 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
             key={key}
             kind="clear"
             label="x"
-            disabled={passcode.length === 0 || inputDisabled}
-            muted={passcode.length === 0}
+            disabled={passcodeLength === 0 || inputDisabled}
+            muted={passcodeLength === 0}
             frameStyle={keyFrameStyle}
             onPress={handleClear}
           />
@@ -680,8 +763,8 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
             key={key}
             kind="delete"
             label="<"
-            disabled={passcode.length === 0 || inputDisabled}
-            muted={passcode.length === 0}
+            disabled={passcodeLength === 0 || inputDisabled}
+            muted={passcodeLength === 0}
             frameStyle={keyFrameStyle}
             onPress={handleDelete}
           />
@@ -705,7 +788,7 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       handleDelete,
       inputDisabled,
       keyFrameStyle,
-      passcode.length,
+      passcodeLength,
     ],
   );
 
@@ -739,12 +822,12 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
           <>
             <Animated.View
               style={[styles.dotRow, shakeStyle]}
-              accessibilityLabel={`${passcode.length} of 6 digits entered`}
+              accessibilityLabel={`${passcodeLength} of 6 digits entered`}
             >
               {Array.from({ length: 6 }).map((_, index) => (
                 <View
                   key={index}
-                  style={[styles.dot, index < passcode.length ? styles.dotFilled : styles.dotEmpty]}
+                  style={[styles.dot, index < passcodeLength ? styles.dotFilled : styles.dotEmpty]}
                 />
               ))}
             </Animated.View>

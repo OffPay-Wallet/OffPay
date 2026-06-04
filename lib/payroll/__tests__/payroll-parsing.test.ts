@@ -92,6 +92,56 @@ describe('parsePayrollTable', () => {
     });
   });
 
+  it('parses headerless wallet and amount lines without asking for mapping', async () => {
+    const result = await parsePayrollTable({
+      text:
+        '11111111111111111111111111111111\n' +
+        '100\n' +
+        'So11111111111111111111111111111111111111112\n' +
+        '50',
+      format: 'txt',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.table?.headers).toEqual(['label', 'recipient', 'amount', 'token']);
+    expect(result.table?.records).toHaveLength(2);
+    expect(result.table?.records[0]).toMatchObject({
+      recipient: '11111111111111111111111111111111',
+      amount: '100',
+    });
+    expect(result.table?.records[1]).toMatchObject({
+      recipient: 'So11111111111111111111111111111111111111112',
+      amount: '50',
+    });
+  });
+
+  it('parses headerless CSV rows as manual payroll rows', async () => {
+    const result = await parsePayrollTable({
+      text:
+        '11111111111111111111111111111111,100\n' + 'So11111111111111111111111111111111111111112,50',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.table?.headers).toEqual(['label', 'recipient', 'amount', 'token']);
+    expect(result.table?.records).toHaveLength(2);
+  });
+
+  it('keeps one-row CSV files with headers in table mode', async () => {
+    const result = await parsePayrollTable({
+      text: 'wallet,amount\n11111111111111111111111111111111,100',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.table?.headers).toEqual(['wallet', 'amount']);
+    expect(result.table?.records).toHaveLength(1);
+    expect(result.table?.records[0]).toMatchObject({
+      wallet: '11111111111111111111111111111111',
+      amount: '100',
+    });
+  });
+
   it('disambiguates duplicate headers deterministically', async () => {
     const result = await parsePayrollTable({
       text: 'amount,amount,wallet\n1,2,addr1',

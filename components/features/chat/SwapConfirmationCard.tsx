@@ -1,14 +1,16 @@
-import React from 'react';
-import { ActivityIndicator, Linking, Pressable, View } from 'react-native';
+import React, { useCallback } from 'react';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+import { useAppToast } from '@/components/ui/AppToast';
 import type { AgenticSwapAction } from '@/store/agenticChatStore';
 
 import { ConfirmationRow } from './ConfirmationRow';
-import { buildSolscanTxUrl, formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface SwapConfirmationCardProps {
@@ -26,6 +28,18 @@ export function SwapConfirmationCard({
   const submitting = action.status === 'submitting';
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const { showToast } = useAppToast();
+  const copyHash = useCallback(
+    async (value: string) => {
+      await Clipboard.setStringAsync(value);
+      showToast({
+        title: 'Copied',
+        message: 'Transaction hash copied to clipboard.',
+        variant: 'success',
+      });
+    },
+    [showToast],
+  );
 
   return (
     <View style={styles.confirmationCard}>
@@ -60,9 +74,9 @@ export function SwapConfirmationCard({
             mono
             onPress={() => {
               if (action.signature == null) return;
-              void Linking.openURL(buildSolscanTxUrl(action.signature, action.network));
+              void copyHash(action.signature);
             }}
-            accessibilityLabel="Open swap transaction in Solscan"
+            accessibilityLabel="Copy swap transaction hash"
           />
         ) : null}
       </View>

@@ -4,7 +4,10 @@ import {
   routesShareMint,
 } from '@/lib/payroll/payroll-route-assignment';
 
-import type { PayrollRecipientFacts, PayrollRouteFacts } from '@/lib/payroll/payroll-route-readiness';
+import type {
+  PayrollRecipientFacts,
+  PayrollRouteFacts,
+} from '@/lib/payroll/payroll-route-readiness';
 import type { PayrollRow } from '@/lib/payroll/payroll-types';
 import type { OffpayNetwork } from '@/types/offpay-api';
 

@@ -124,10 +124,12 @@ const pasteStyles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: colors.surface.cardElevated,
+    backgroundColor: colors.surface.backgroundAlt,
     borderTopLeftRadius: spacing.xl,
     borderTopRightRadius: spacing.xl,
     borderCurve: 'continuous',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border.subtle,
     padding: spacing.xl,
     gap: spacing.md,
   },
@@ -144,7 +146,7 @@ const pasteStyles = StyleSheet.create({
     fontFamily: 'GeistMono-Regular',
     fontSize: 13,
     color: colors.text.primary,
-    backgroundColor: colors.glass.clearFill,
+    backgroundColor: colors.surface.backgroundTint,
     textAlignVertical: 'top',
   },
   errorText: {
