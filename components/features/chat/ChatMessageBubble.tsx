@@ -8,15 +8,26 @@ import { View } from 'react-native';
 import Animated, { Easing, FadeInUp, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
+import {
+  PayrollChatController,
+  type PayrollOutcomeAnnouncement,
+} from '@/components/features/payroll/PayrollChatController';
 import { useAgentThinkingPhrase } from '@/hooks/agentic-chat/useAgentThinkingPhrase';
 
-import type { AgenticChatAction, AgenticChatMessage } from '@/store/agenticChatStore';
+import type {
+  AgenticChatAction,
+  AgenticChatMessage,
+  AgenticPrivateSendAction,
+} from '@/store/agenticChatStore';
 
 import { AiLoaderLottie } from './AiLoaderLottie';
 import { ChatBubble } from './ChatBubble';
 import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
 import { SwapConfirmationCard } from './SwapConfirmationCard';
 import { messageStyles as styles } from './styles/message';
+
+import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import type { PayrollRoutePolicy } from '@/lib/payroll/payroll-types';
 
 const MESSAGE_ENTERING = FadeInUp.duration(170).easing(Easing.out(Easing.cubic));
 const MESSAGE_LAYOUT = LinearTransition.duration(190).easing(Easing.out(Easing.cubic));
@@ -26,6 +37,19 @@ interface ChatMessageBubbleProps {
   action?: AgenticChatAction;
   onConfirmPrivateSend: (action: AgenticChatAction) => void;
   onCancelPrivateSend: (action: AgenticChatAction) => void;
+  onChangePrivateSendRoute: (
+    action: AgenticPrivateSendAction,
+    route: AgenticPrivateSendAction['route'],
+  ) => void;
+  activePayrollRunId?: string | null;
+  walletId: string | null;
+  payrollSummary: PayrollConfirmationSummary | null;
+  payrollSetupBusy?: boolean;
+  onSetupPayrollUmbra?: () => void;
+  onRefreshPayrollRoutes?: () => Promise<void>;
+  onPayrollRoutePolicyChange?: (policy: PayrollRoutePolicy) => void;
+  onSpeakPayrollOutcome?: (phrase: string) => void;
+  onAnnouncePayrollOutcome?: (outcome: PayrollOutcomeAnnouncement) => void;
 }
 
 function AgentThinkingContent({ statusPhrase }: { statusPhrase: string }): React.JSX.Element {
@@ -57,6 +81,16 @@ export function ChatMessageBubble({
   action,
   onConfirmPrivateSend,
   onCancelPrivateSend,
+  onChangePrivateSendRoute,
+  activePayrollRunId,
+  walletId,
+  payrollSummary,
+  payrollSetupBusy = false,
+  onSetupPayrollUmbra,
+  onRefreshPayrollRoutes,
+  onPayrollRoutePolicyChange,
+  onSpeakPayrollOutcome,
+  onAnnouncePayrollOutcome,
 }: ChatMessageBubbleProps): React.JSX.Element | null {
   const fromUser = message.role === 'user';
   const hasText = message.text.trim().length > 0;
@@ -131,7 +165,23 @@ export function ChatMessageBubble({
             layout={MESSAGE_LAYOUT}
             style={styles.actionCardWrap}
           >
-            {action.kind === 'swap' ? (
+            {action.kind === 'payroll' ? (
+              <PayrollChatController
+                runId={action.runId}
+                walletId={walletId}
+                summary={action.runId === activePayrollRunId ? payrollSummary : action.summary}
+                onSetupUmbra={onSetupPayrollUmbra}
+                onRefreshRoutes={
+                  action.runId === activePayrollRunId ? onRefreshPayrollRoutes : undefined
+                }
+                onRoutePolicyChange={
+                  action.runId === activePayrollRunId ? onPayrollRoutePolicyChange : undefined
+                }
+                onSpeakOutcome={onSpeakPayrollOutcome}
+                onAnnounceOutcome={onAnnouncePayrollOutcome}
+                setupBusy={payrollSetupBusy}
+              />
+            ) : action.kind === 'swap' ? (
               <SwapConfirmationCard
                 action={action}
                 onConfirm={onConfirmPrivateSend}
@@ -142,6 +192,7 @@ export function ChatMessageBubble({
                 action={action}
                 onConfirm={onConfirmPrivateSend}
                 onCancel={onCancelPrivateSend}
+                onRouteChange={onChangePrivateSendRoute}
               />
             )}
           </Animated.View>

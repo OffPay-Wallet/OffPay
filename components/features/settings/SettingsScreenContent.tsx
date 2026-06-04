@@ -13,6 +13,7 @@ import {
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { useIsFocused } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
@@ -44,6 +45,7 @@ export function SettingsScreenContent({
   bottomPadding,
 }: SettingsScreenContentProps): React.JSX.Element {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const { showToast } = useAppToast();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
@@ -103,6 +105,11 @@ export function SettingsScreenContent({
     if (destroying) return;
     setConfirmVisible(true);
   }, [destroying]);
+
+  const handleOpenAccounts = useCallback((): void => {
+    if (!isFocused) return;
+    router.push('/accounts');
+  }, [isFocused, router]);
 
   const handleCancelConfirm = useCallback((): void => {
     if (destroying) return;
@@ -171,7 +178,7 @@ export function SettingsScreenContent({
                     label="Accounts"
                     compact={compact}
                     dense={dense}
-                    onPress={() => router.push('/accounts')}
+                    onPress={handleOpenAccounts}
                   />
                   <SettingsRow
                     iconNode={

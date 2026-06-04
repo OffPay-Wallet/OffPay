@@ -78,11 +78,13 @@ describe('payrollStore', () => {
   });
 
   it('retries only failed rows without an on-chain artifact', () => {
-    usePayrollStore.getState().createRun(makeRun(), [
-      makeRow('run-1-row-2', { status: 'failed' }),
-      makeRow('run-1-row-3', { status: 'failed', signature: 'already-sent' }),
-      makeRow('run-1-row-4', { status: 'submitted', signature: 'sig' }),
-    ]);
+    usePayrollStore
+      .getState()
+      .createRun(makeRun(), [
+        makeRow('run-1-row-2', { status: 'failed' }),
+        makeRow('run-1-row-3', { status: 'failed', signature: 'already-sent' }),
+        makeRow('run-1-row-4', { status: 'submitted', signature: 'sig' }),
+      ]);
 
     const reset = usePayrollStore.getState().prepareRetryFailedRows('run-1');
 
@@ -110,10 +112,12 @@ describe('payrollStore', () => {
   });
 
   it('reconciles orphaned sending rows to failed-needs-verify', () => {
-    usePayrollStore.getState().createRun(makeRun(), [
-      makeRow('run-1-row-2', { status: 'sending' }),
-      makeRow('run-1-row-3', { status: 'sending', signature: 'broadcast-sig' }),
-    ]);
+    usePayrollStore
+      .getState()
+      .createRun(makeRun(), [
+        makeRow('run-1-row-2', { status: 'sending' }),
+        makeRow('run-1-row-3', { status: 'sending', signature: 'broadcast-sig' }),
+      ]);
 
     const reconciled = usePayrollStore.getState().reconcileInterruptedRows('run-1');
 
@@ -133,6 +137,38 @@ describe('payrollStore', () => {
     expect(usePayrollStore.getState().getRun('run-1')?.cursor).toBe(3);
   });
 
+  it('updates the run token and marks routes dirty', () => {
+    usePayrollStore.getState().createRun(makeRun(), [makeRow('run-1-row-2')]);
+
+    usePayrollStore.getState().setRunToken('run-1', {
+      mint: 'mint-2',
+      symbol: 'USDT',
+      decimals: 6,
+    });
+
+    expect(usePayrollStore.getState().getRun('run-1')).toMatchObject({
+      tokenMint: 'mint-2',
+      tokenSymbol: 'USDT',
+      tokenDecimals: 6,
+      routesDirty: true,
+    });
+  });
+
+  it('keeps run row ids in sync when rows are replaced', () => {
+    usePayrollStore
+      .getState()
+      .createRun(makeRun(), [makeRow('run-1-row-2'), makeRow('run-1-row-3')]);
+
+    usePayrollStore
+      .getState()
+      .replaceRows('run-1', [makeRow('run-1-row-3'), makeRow('run-1-row-manual-1')]);
+
+    expect(usePayrollStore.getState().getRun('run-1')).toMatchObject({
+      rowIds: ['run-1-row-3', 'run-1-row-manual-1'],
+      routesDirty: true,
+    });
+  });
+
   it('deletes a run and its rows', () => {
     usePayrollStore.getState().createRun(makeRun(), [makeRow('run-1-row-2')]);
     usePayrollStore.getState().deleteRun('run-1');
@@ -141,10 +177,12 @@ describe('payrollStore', () => {
   });
 
   it('demotes orphaned running runs to paused and reconciles their sending rows on launch', () => {
-    usePayrollStore.getState().createRun(makeRun({ status: 'running' }), [
-      makeRow('run-1-row-2', { status: 'sending' }),
-      makeRow('run-1-row-3', { status: 'submitted', signature: 'sig' }),
-    ]);
+    usePayrollStore
+      .getState()
+      .createRun(makeRun({ status: 'running' }), [
+        makeRow('run-1-row-2', { status: 'sending' }),
+        makeRow('run-1-row-3', { status: 'submitted', signature: 'sig' }),
+      ]);
 
     const demoted = usePayrollStore.getState().reconcileOrphanedRunsOnLaunch();
 
@@ -157,9 +195,9 @@ describe('payrollStore', () => {
   });
 
   it('leaves non-orphaned runs untouched on launch', () => {
-    usePayrollStore.getState().createRun(makeRun({ status: 'paused' }), [
-      makeRow('run-1-row-2', { status: 'ready' }),
-    ]);
+    usePayrollStore
+      .getState()
+      .createRun(makeRun({ status: 'paused' }), [makeRow('run-1-row-2', { status: 'ready' })]);
 
     const demoted = usePayrollStore.getState().reconcileOrphanedRunsOnLaunch();
 
@@ -170,7 +208,9 @@ describe('payrollStore', () => {
 
   describe('setRowSkipped', () => {
     it('toggles a ready row to skipped and back', () => {
-      usePayrollStore.getState().createRun(makeRun(), [makeRow('run-1-row-2', { status: 'ready' })]);
+      usePayrollStore
+        .getState()
+        .createRun(makeRun(), [makeRow('run-1-row-2', { status: 'ready' })]);
 
       expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-2', true)).toBe(true);
       expect(usePayrollStore.getState().getRows('run-1')[0].status).toBe('skipped');
@@ -181,7 +221,9 @@ describe('payrollStore', () => {
     });
 
     it('can clear the route-dirty marker after routes refresh', () => {
-      usePayrollStore.getState().createRun(makeRun(), [makeRow('run-1-row-2', { status: 'ready' })]);
+      usePayrollStore
+        .getState()
+        .createRun(makeRun(), [makeRow('run-1-row-2', { status: 'ready' })]);
 
       expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-2', true)).toBe(true);
       expect(usePayrollStore.getState().getRun('run-1')?.routesDirty).toBe(true);
@@ -191,10 +233,12 @@ describe('payrollStore', () => {
     });
 
     it('never skips settled or invalid rows', () => {
-      usePayrollStore.getState().createRun(makeRun(), [
-        makeRow('run-1-row-2', { status: 'submitted', signature: 'sig' }),
-        makeRow('run-1-row-3', { status: 'invalid', validationError: 'bad' }),
-      ]);
+      usePayrollStore
+        .getState()
+        .createRun(makeRun(), [
+          makeRow('run-1-row-2', { status: 'submitted', signature: 'sig' }),
+          makeRow('run-1-row-3', { status: 'invalid', validationError: 'bad' }),
+        ]);
 
       expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-2', true)).toBe(false);
       expect(usePayrollStore.getState().setRowSkipped('run-1', 'run-1-row-3', true)).toBe(false);

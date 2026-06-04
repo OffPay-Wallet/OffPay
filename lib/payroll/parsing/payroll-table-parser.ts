@@ -141,10 +141,10 @@ async function parseJson(text: string, signal?: AbortSignal): Promise<PayrollTab
 
   const rows = Array.isArray(parsed)
     ? parsed
-    : parsed != null &&
-        typeof parsed === 'object' &&
-        Array.isArray((parsed as { rows?: unknown }).rows)
-      ? (parsed as { rows: unknown[] }).rows
+    : parsed != null && typeof parsed === 'object'
+      ? ((['rows', 'data', 'items', 'employees', 'recipients', 'payroll'] as const)
+          .map((key) => (parsed as Record<string, unknown>)[key])
+          .find((value): value is unknown[] => Array.isArray(value)) ?? null)
       : null;
 
   if (rows == null) {
@@ -295,10 +295,14 @@ export async function parsePayrollTable(
         table = await parseJson(text, params.signal);
         break;
       case 'csv':
-        table = await parseDelimited(text, ',', params.signal);
+        table = await parseDelimited(text, detectDelimiter(text), params.signal);
         break;
       case 'tsv':
-        table = await parseDelimited(text, '\t', params.signal);
+        table = await parseDelimited(
+          text,
+          text.includes('\t') ? '\t' : detectDelimiter(text),
+          params.signal,
+        );
         break;
       case 'txt':
         table = await parseDelimited(text, detectDelimiter(text), params.signal);

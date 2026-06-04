@@ -6,6 +6,7 @@ import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import {
   errorCodeFromUnknown,
   hydrateStringArg,
+  isExplicitMagicBlockPrivateBalanceRequest,
   isNetworkReady,
   requireWalletAndNetwork,
   validatorErrorCode,
@@ -17,7 +18,7 @@ export const getPrivatePaymentBalanceTool: AgenticToolDefinition = {
   schema: {
     name: 'get_private_payment_balance',
     description:
-      'Returns MagicBlock private-payment balance summary for the active wallet. No wallet address or mint is returned.',
+      'Returns MagicBlock private-payment balance summary for the active wallet. This is not the generic private/encrypted/Umbra vault balance tool. No wallet address or mint is returned.',
     parameters: {
       type: 'object',
       properties: {
@@ -29,6 +30,10 @@ export const getPrivatePaymentBalanceTool: AgenticToolDefinition = {
     },
   },
   run: async (call, context) => {
+    if (!isExplicitMagicBlockPrivateBalanceRequest(context.userText)) {
+      return { error: { code: 'use_umbra_vault_balance' } };
+    }
+
     const scope = requireWalletAndNetwork({
       walletAddress: context.scope.walletAddress,
       network: context.scope.network,
@@ -59,19 +64,29 @@ export const getPrivatePaymentBalanceTool: AgenticToolDefinition = {
 
     try {
       const response = await getPrivatePaymentBalance(scope.walletAddress, scope.network, mint);
-      const responseDecimals = response.decimals ?? decimals;
+      const responseToken =
+        context.balance?.tokens.find((token) => token.mint === response.mint) ?? null;
+      const responseDecimals = response.decimals ?? decimals ?? responseToken?.decimals ?? null;
+      const responseSymbol = response.symbol ?? tokenSymbol ?? responseToken?.symbol ?? null;
+      const publicBalance =
+        responseDecimals == null
+          ? response.baseBalance
+          : formatAtomicAmount(response.baseBalance, responseDecimals);
+      const privateBalance =
+        responseDecimals == null
+          ? response.privateBalance
+          : formatAtomicAmount(response.privateBalance, responseDecimals);
+
       return {
         result: {
           status: 'ok',
-          symbol: response.symbol ?? tokenSymbol,
-          baseBalance:
-            responseDecimals == null
-              ? response.baseBalance
-              : formatAtomicAmount(response.baseBalance, responseDecimals),
-          privateBalance:
-            responseDecimals == null
-              ? response.privateBalance
-              : formatAtomicAmount(response.privateBalance, responseDecimals),
+          route: 'magicblock',
+          routeLabel: 'MagicBlock private-payment balance',
+          network: scope.network,
+          symbol: responseSymbol,
+          publicBalance,
+          privateBalance,
+          privateBalanceIsZero: response.privateBalance === '0',
           decimals: responseDecimals ?? null,
         },
       };

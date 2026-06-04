@@ -33,7 +33,7 @@ export const getUmbraBalancesTool: AgenticToolDefinition = {
   schema: {
     name: 'get_umbra_balances',
     description:
-      'Explicit Umbra-only read. Returns encrypted Umbra balance summaries for supported tokens. No encrypted account addresses or mints are returned.',
+      'Returns Umbra vault balance summaries for private/encrypted/shielded/vault balance requests. No encrypted account addresses or mints are returned.',
     parameters: {
       type: 'object',
       properties: {
@@ -83,6 +83,9 @@ export const getUmbraBalancesTool: AgenticToolDefinition = {
       return {
         result: {
           status: 'ok',
+          route: 'umbra',
+          routeLabel: 'Umbra vault balance',
+          network: scope.network,
           vaultState: result.vaultState ?? null,
           vaultRegistered: result.vaultRegistered ?? null,
           vaultCanShield: result.vaultCanShield ?? null,

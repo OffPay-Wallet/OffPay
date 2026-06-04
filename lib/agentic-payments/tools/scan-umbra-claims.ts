@@ -4,7 +4,7 @@ import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 
 import {
   errorCodeFromUnknown,
-  isExplicitUmbraReadRequest,
+  isExplicitUmbraClaimScanRequest,
   isNetworkReady,
   readCappedInteger,
   readStringArg,
@@ -38,7 +38,7 @@ export const scanUmbraClaimsTool: AgenticToolDefinition = {
       network: context.scope.network,
     });
     if (!scope.ok) return { error: { code: scope.code } };
-    if (!isExplicitUmbraReadRequest(context.userText)) {
+    if (!isExplicitUmbraClaimScanRequest(context.userText)) {
       return { error: { code: 'requires_explicit_umbra_scan_request' } };
     }
     if (!isNetworkReady(context)) return { error: { code: 'network_unavailable' } };

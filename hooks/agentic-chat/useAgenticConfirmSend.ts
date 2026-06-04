@@ -13,10 +13,12 @@
  * confirmation card.
  */
 
+import { Platform } from 'react-native';
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useAppToast } from '@/components/ui/AppToast';
+import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { agenticSendOutcomeSpeech } from '@/lib/agentic-payments/send-outcome-speech';
 import { validateAgenticNormalSendDraft } from '@/lib/agentic-payments/normal-send';
 import { validateAgenticPrivateSendDraft } from '@/lib/agentic-payments/private-send';
@@ -27,6 +29,13 @@ import {
 } from '@/lib/api/offpay-wallet-query-keys';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
+import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
+import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
+import {
+  resolveTransferTokenForRoute,
+  routeKind,
+  type AgenticTransferRoute,
+} from '@/lib/agentic-payments/transfer-route-token';
 import {
   useAgenticChatStore,
   type AgenticChatAction,
@@ -59,6 +68,10 @@ interface SubmitResult {
 export interface UseAgenticConfirmSendResult {
   confirm: (action: AgenticChatAction) => Promise<void>;
   cancel: (action: AgenticChatAction) => void;
+  changeRoute: (
+    action: AgenticChatAction,
+    route: AgenticPrivateSendAction['route'],
+  ) => Promise<void>;
 }
 
 export function useAgenticConfirmSend({
@@ -84,9 +97,60 @@ export function useAgenticConfirmSend({
     [updateAction],
   );
 
+  const changeRoute = useCallback(
+    async (action: AgenticChatAction, route: AgenticPrivateSendAction['route']): Promise<void> => {
+      if (!isTransferAction(action) || action.status !== 'needs_confirmation') return;
+      if (action.route === route) return;
+      if (scope.walletAddress !== action.walletAddress || scope.network !== action.network) {
+        const message = 'Switch back to this draft wallet/network first.';
+        updateAction(action.id, { errorMessage: message });
+        showToast({ title: 'Route blocked', message, variant: 'error' });
+        return;
+      }
+
+      const validation = validateTransferActionForRoute({
+        action,
+        route,
+        scope,
+        walletMode,
+        canUseNetwork,
+        balance,
+        capabilities,
+        knownWallets,
+      });
+
+      if (!validation.ok) {
+        updateAction(action.id, { errorMessage: validation.message });
+        showToast({ title: 'Route unavailable', message: validation.message, variant: 'error' });
+        return;
+      }
+
+      updateAction(action.id, {
+        kind: routeKind(route),
+        route,
+        ...validation.draft,
+        status: 'needs_confirmation',
+        signature: null,
+        txId: null,
+        errorMessage: null,
+      });
+    },
+    [
+      balance,
+      canUseNetwork,
+      capabilities,
+      knownWallets,
+      scope,
+      showToast,
+      updateAction,
+      walletMode,
+    ],
+  );
+
   const confirm = useCallback(
     async (action: AgenticChatAction): Promise<void> => {
       if (action.status !== 'needs_confirmation') return;
+      if (action.kind === 'payroll') return;
 
       if (scope.walletAddress !== action.walletAddress || scope.network !== action.network) {
         const message =
@@ -107,26 +171,16 @@ export function useAgenticConfirmSend({
         return;
       }
 
-      const userText =
-        action.selfRecipientRequested === true || action.recipient === action.walletAddress
-          ? `${action.amount} ${action.tokenSymbol} to my own wallet on ${action.network}`
-          : `${action.amount} ${action.tokenSymbol} to ${action.recipient} on ${action.network}`;
-      const validationInput = {
-        input: { recipient: action.recipient, amount: action.amount, token: action.tokenMint },
-        userText,
-        knownWallets: [...knownWallets],
-        walletAddress: scope.walletAddress,
-        network: scope.network,
+      const validation = validateTransferActionForRoute({
+        action,
+        route: action.route,
+        scope,
         walletMode,
         canUseNetwork,
         balance,
         capabilities,
-        allowSelfRecipient: action.selfRecipientRequested === true,
-      };
-      const validation =
-        action.route === 'normal' || action.route === 'umbra'
-          ? validateAgenticNormalSendDraft(validationInput)
-          : validateAgenticPrivateSendDraft(validationInput);
+        knownWallets,
+      });
       if (!validation.ok) {
         updateAction(action.id, { status: 'failed', errorMessage: validation.message });
         showToast({ title: 'Confirmation blocked', message: validation.message, variant: 'error' });
@@ -232,13 +286,106 @@ export function useAgenticConfirmSend({
     ],
   );
 
-  return { confirm, cancel };
+  return { confirm, cancel, changeRoute };
+}
+
+function isTransferAction(action: AgenticChatAction): action is AgenticPrivateSendAction {
+  return action.kind === 'private_send' || action.kind === 'normal_send';
 }
 
 type SubmittableDraft = Omit<
   AgenticPrivateSendAction,
   'id' | 'kind' | 'status' | 'route' | 'createdAt' | 'updatedAt'
 >;
+
+type TransferRouteValidation =
+  | { ok: true; draft: SubmittableDraft }
+  | { ok: false; message: string };
+
+function validateTransferActionForRoute(params: {
+  action: AgenticPrivateSendAction;
+  route: AgenticTransferRoute;
+  scope: AgenticChatScope;
+  walletMode: 'online' | 'offline';
+  canUseNetwork: boolean;
+  balance: WalletBalanceResponse | null | undefined;
+  capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
+  knownWallets: ReadonlyArray<{ name: string; address: string; active: boolean }>;
+}): TransferRouteValidation {
+  const tokenInput = resolveTokenInputForRoute(params);
+  if (!tokenInput.ok) return tokenInput;
+
+  const userText =
+    params.action.selfRecipientRequested === true ||
+    params.action.recipient === params.action.walletAddress
+      ? `${params.action.amount} ${params.action.tokenSymbol} to my own wallet on ${params.action.network}`
+      : `${params.action.amount} ${params.action.tokenSymbol} to ${params.action.recipient} on ${params.action.network}`;
+
+  const validationInput = {
+    input: {
+      recipient: params.action.recipient,
+      amount: params.action.amount,
+      token: tokenInput.token,
+    },
+    userText,
+    knownWallets: [...params.knownWallets],
+    walletAddress: params.scope.walletAddress,
+    network: params.scope.network,
+    walletMode: params.walletMode,
+    canUseNetwork: params.canUseNetwork,
+    balance: params.balance,
+    capabilities: params.capabilities,
+    allowSelfRecipient: params.action.selfRecipientRequested === true,
+  };
+
+  const validation =
+    params.route === 'magicblock'
+      ? validateAgenticPrivateSendDraft(validationInput)
+      : validateAgenticNormalSendDraft(validationInput);
+
+  return validation.ok ? { ok: true, draft: validation.draft } : validation;
+}
+
+function resolveTokenInputForRoute(params: {
+  action: AgenticPrivateSendAction;
+  route: AgenticTransferRoute;
+  walletMode: 'online' | 'offline';
+  canUseNetwork: boolean;
+  balance: WalletBalanceResponse | null | undefined;
+  capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
+}): { ok: true; token: string } | { ok: false; message: string } {
+  if (params.route === 'umbra') {
+    const blocker = getUmbraRouteBlocker(params);
+    if (blocker != null) return { ok: false, message: blocker };
+  }
+
+  return resolveTransferTokenForRoute(params);
+}
+
+function getUmbraRouteBlocker(params: {
+  action: AgenticPrivateSendAction;
+  walletMode: 'online' | 'offline';
+  canUseNetwork: boolean;
+  capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
+}): string | null {
+  if (!isUmbraNetworkSupported(params.action.network)) {
+    return 'Umbra is not available on this network.';
+  }
+  if (params.walletMode !== 'online' || !params.canUseNetwork) {
+    return 'Umbra route needs online mode.';
+  }
+  if (Platform.OS === 'web' || !isRnZkProverNativeModuleAvailable()) {
+    return 'Umbra route needs the native app.';
+  }
+  if (
+    !isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution') ||
+    !isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p') ||
+    !isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.rpcBroadcast')
+  ) {
+    return 'Umbra route is unavailable right now.';
+  }
+  return null;
+}
 
 interface RunSubmitterParams {
   action: AgenticPrivateSendAction;

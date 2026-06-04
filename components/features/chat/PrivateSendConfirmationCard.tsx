@@ -24,7 +24,17 @@ interface PrivateSendConfirmationCardProps {
   action: AgenticPrivateSendAction;
   onConfirm: (action: AgenticPrivateSendAction) => void;
   onCancel: (action: AgenticPrivateSendAction) => void;
+  onRouteChange?: (
+    action: AgenticPrivateSendAction,
+    route: AgenticPrivateSendAction['route'],
+  ) => void;
 }
+
+const ROUTE_OPTIONS: { route: AgenticPrivateSendAction['route']; label: string }[] = [
+  { route: 'normal', label: 'Normal' },
+  { route: 'umbra', label: 'Umbra' },
+  { route: 'magicblock', label: 'MagicBlock' },
+];
 
 function routeIconName(route: AgenticPrivateSendAction['route']): keyof typeof Ionicons.glyphMap {
   if (route === 'normal') return 'paper-plane-outline';
@@ -33,15 +43,16 @@ function routeIconName(route: AgenticPrivateSendAction['route']): keyof typeof I
 }
 
 function routeLabel(route: AgenticPrivateSendAction['route']): string {
-  if (route === 'normal') return 'Normal transfer';
-  if (route === 'umbra') return 'Umbra private P2P';
-  return 'MagicBlock private send';
+  if (route === 'normal') return 'Normal';
+  if (route === 'umbra') return 'Umbra';
+  return 'MagicBlock';
 }
 
 export function PrivateSendConfirmationCard({
   action,
   onConfirm,
   onCancel,
+  onRouteChange,
 }: PrivateSendConfirmationCardProps): React.JSX.Element {
   const canAct = action.status === 'needs_confirmation';
   const submitting = action.status === 'submitting';
@@ -79,7 +90,45 @@ export function PrivateSendConfirmationCard({
           label="Network"
           value={action.network === 'mainnet' ? 'Solana Mainnet' : 'Solana Devnet'}
         />
-        <ConfirmationRow label="Route" value={routeLabel(action.route)} />
+        {canAct && onRouteChange != null ? (
+          <View style={styles.routeChoiceBlock}>
+            <Text variant="small" color={colors.text.tertiary} style={styles.confirmationRowLabel}>
+              Route
+            </Text>
+            <View style={styles.routeChoice}>
+              {ROUTE_OPTIONS.map((option) => {
+                const selected = action.route === option.route;
+                return (
+                  <Pressable
+                    key={option.route}
+                    onPress={() => onRouteChange(action, option.route)}
+                    disabled={selected || submitting}
+                    style={({ pressed }) => [
+                      styles.routeChoiceOption,
+                      selected && styles.routeChoiceOptionSelected,
+                      pressed && !selected && styles.routeChoiceOptionPressed,
+                      submitting && styles.actionButtonDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Use ${option.label} route`}
+                    accessibilityState={{ selected, disabled: selected || submitting }}
+                  >
+                    <Text
+                      variant="small"
+                      color={selected ? colors.text.onAccent : colors.text.secondary}
+                      style={[styles.routeChoiceText, selected && styles.routeChoiceTextSelected]}
+                      numberOfLines={1}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : (
+          <ConfirmationRow label="Route" value={routeLabel(action.route)} />
+        )}
         {action.signature != null ? (
           <ConfirmationRow
             label="Tx"
@@ -106,7 +155,7 @@ export function PrivateSendConfirmationCard({
         ) : null}
       </View>
 
-      {failed && action.errorMessage != null ? (
+      {action.errorMessage != null ? (
         <Text variant="small" color={colors.semantic.error} style={styles.confirmationError}>
           {action.errorMessage}
         </Text>

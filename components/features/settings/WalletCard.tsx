@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, View, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { WalletAccountDetails } from '@/components/features/settings/WalletAccountDetails';
@@ -20,11 +21,13 @@ export function WalletCard({ compact = false, dense = false }: WalletCardProps):
   const accountName = useWalletStore((s) => s.accountName);
   const publicKey = useWalletStore((s) => s.publicKey);
   const router = useRouter();
+  const isFocused = useIsFocused();
   const avatarSize = dense ? 38 : compact ? 42 : 48;
   const actionButtonSize = dense ? 38 : compact ? 40 : layout.minTouchTarget;
   const actionIconSize = dense ? 18 : layout.iconSizeInline;
 
   const handleOpenAccounts = (): void => {
+    if (!isFocused) return;
     router.push('/accounts');
   };
 

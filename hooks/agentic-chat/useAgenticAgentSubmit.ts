@@ -266,6 +266,10 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
   let pendingToolCalls: AgentToolCall[] = [];
   let pendingToolResults: AgentToolResult[] = [];
   let attachedActionId: string | null = null;
+  const canReadUmbraVaultBalance = isOffpayFeatureAvailable(
+    params.capabilities ?? null,
+    'umbra.execution',
+  );
 
   for (let turnIndex = 0; turnIndex < MAX_TOOL_TURNS; turnIndex += 1) {
     const turn = await sendAgentTurn(
@@ -288,9 +292,11 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.rpcBroadcast'),
             swap: isOffpayFeatureAvailable(params.capabilities ?? null, 'swap.normalSwap'),
             umbra:
-              isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution') &&
+              canReadUmbraVaultBalance &&
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p'),
-            privateBalance: isOffpayFeatureAvailable(
+            umbraVaultBalance: canReadUmbraVaultBalance,
+            privateBalance: canReadUmbraVaultBalance,
+            magicblockPrivateBalance: isOffpayFeatureAvailable(
               params.capabilities ?? null,
               'payment.privateBalance',
             ),

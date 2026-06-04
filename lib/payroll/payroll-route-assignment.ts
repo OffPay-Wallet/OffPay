@@ -1,5 +1,6 @@
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { isKnownStablecoinMint } from '@/lib/policy/stablecoin-policy';
+import { payrollBlockReasonCopy } from '@/lib/payroll/payroll-copy';
 import {
   resolvePayrollRoute,
   type PayrollRecipientFacts,
@@ -116,11 +117,15 @@ export function applyRouteAssignment(
     if (entry == null) return row;
 
     if (entry.route == null) {
+      const reasonCopy =
+        entry.blockedReasons.length > 0
+          ? entry.blockedReasons.map(payrollBlockReasonCopy).join(' ')
+          : PAYROLL_ROUTE_UNAVAILABLE_MESSAGE;
       return {
         ...row,
         route: null,
         status: 'invalid',
-        validationError: PAYROLL_ROUTE_UNAVAILABLE_MESSAGE,
+        validationError: reasonCopy,
         updatedAt: now,
       };
     }

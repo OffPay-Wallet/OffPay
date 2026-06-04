@@ -28,6 +28,10 @@ interface PayrollState {
   replaceRows: (runId: string, rows: PayrollRow[]) => void;
   setRunStatus: (runId: string, status: PayrollRunStatus) => void;
   setRunPolicy: (runId: string, policy: PayrollRoutePolicy) => void;
+  setRunToken: (
+    runId: string,
+    token: { mint: string; symbol: string; decimals: number } | null,
+  ) => void;
   setRunRoutesDirty: (runId: string, dirty: boolean) => void;
   setRunCursor: (runId: string, cursor: number) => void;
   updateRow: (runId: string, rowId: string, patch: Partial<Omit<PayrollRow, 'id'>>) => void;
@@ -68,9 +72,7 @@ function touchRun(run: PayrollRun): PayrollRun {
 function pruneRuns(runs: Record<string, PayrollRun>): Record<string, PayrollRun> {
   const entries = Object.values(runs);
   if (entries.length <= MAX_RUNS) return runs;
-  const keep = entries
-    .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, MAX_RUNS);
+  const keep = entries.sort((left, right) => right.updatedAt - left.updatedAt).slice(0, MAX_RUNS);
   const next: Record<string, PayrollRun> = {};
   for (const run of keep) next[run.id] = run;
   return next;
@@ -120,10 +122,14 @@ export const usePayrollStore = create<PayrollState>()(
 
       replaceRows: (runId, rows) =>
         set((state) => {
-          if (state.runs[runId] == null) return state;
+          const run = state.runs[runId];
+          if (run == null) return state;
           return {
             rowsByRun: { ...state.rowsByRun, [runId]: rows },
-            runs: { ...state.runs, [runId]: touchRun(state.runs[runId]) },
+            runs: {
+              ...state.runs,
+              [runId]: touchRun({ ...run, rowIds: rows.map((row) => row.id), routesDirty: true }),
+            },
           };
         }),
 
@@ -139,6 +145,24 @@ export const usePayrollStore = create<PayrollState>()(
           const run = state.runs[runId];
           if (run == null) return state;
           return { runs: { ...state.runs, [runId]: touchRun({ ...run, routePolicy: policy }) } };
+        }),
+
+      setRunToken: (runId, token) =>
+        set((state) => {
+          const run = state.runs[runId];
+          if (run == null) return state;
+          return {
+            runs: {
+              ...state.runs,
+              [runId]: touchRun({
+                ...run,
+                tokenMint: token?.mint ?? null,
+                tokenSymbol: token?.symbol ?? null,
+                tokenDecimals: token?.decimals ?? null,
+                routesDirty: true,
+              }),
+            },
+          };
         }),
 
       setRunRoutesDirty: (runId, dirty) =>
@@ -208,7 +232,12 @@ export const usePayrollStore = create<PayrollState>()(
             // touched — this is the double-pay guard.
             if (row.status === 'failed' && isPayrollRowSendable(row)) {
               reset += 1;
-              return { ...row, status: 'ready' as PayrollRowStatus, validationError: null, updatedAt: Date.now() };
+              return {
+                ...row,
+                status: 'ready' as PayrollRowStatus,
+                validationError: null,
+                updatedAt: Date.now(),
+              };
             }
             return row;
           });

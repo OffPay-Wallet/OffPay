@@ -2,8 +2,10 @@ import { ProviderError } from '../http';
 import type { AgentChatRequest, AgentMessage } from '../types';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
-const SOLANA_BASE58_PATTERN = /(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,88}(?![1-9A-HJ-NP-Za-km-z])/g;
-const SOLANA_BASE58_TEST_PATTERN = /(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,88}(?![1-9A-HJ-NP-Za-km-z])/;
+const SOLANA_BASE58_PATTERN =
+  /(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,88}(?![1-9A-HJ-NP-Za-km-z])/g;
+const SOLANA_BASE58_TEST_PATTERN =
+  /(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,88}(?![1-9A-HJ-NP-Za-km-z])/;
 const SNS_PATTERN = /\b[a-z0-9][a-z0-9_-]{1,62}\.sol\b/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const IP_PATTERN = /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g;
@@ -14,7 +16,8 @@ const PRECISE_AMOUNT_PATTERN = /\b\d+\.\d{7,}\b/g;
 const PRECISE_AMOUNT_TEST_PATTERN = /\b\d+\.\d{7,}\b/;
 const BEARER_OR_API_KEY_PATTERN =
   /\b(?:bearer\s+[a-z0-9._~+/-]{20,}|(?:sk|rk|pk|AIza|cfut|gh[pousr]|xox[baprs])[_-][a-z0-9_-]{20,})\b/i;
-const SECRET_URL_PATTERN = /\bhttps?:\/\/\S*[?&](?:token|secret|key|api_key|apikey|access_token)=([^&\s]{12,})/i;
+const SECRET_URL_PATTERN =
+  /\bhttps?:\/\/\S*[?&](?:token|secret|key|api_key|apikey|access_token)=([^&\s]{12,})/i;
 const PRIVATE_KEY_HINT_PATTERN =
   /\b(?:private\s*key|secret\s*key|seed\s*phrase|mnemonic|recovery\s*phrase)\b/i;
 const LONG_SECRET_PATTERN = /\b[1-9A-HJ-NP-Za-km-z]{64,128}\b/;
@@ -132,7 +135,7 @@ function sanitizeIntentContext(value: AgentChatRequest['context']): AgentChatReq
       ? value.tokenSymbols.filter((entry) => typeof entry === 'string').slice(0, 24)
       : undefined,
     supportedActions: Array.isArray(value.supportedActions)
-      ? value.supportedActions.filter((entry) => typeof entry === 'string').slice(0, 12)
+      ? value.supportedActions.filter((entry) => typeof entry === 'string').slice(0, 24)
       : undefined,
   };
 }

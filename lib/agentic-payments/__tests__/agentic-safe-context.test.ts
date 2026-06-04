@@ -31,8 +31,12 @@ const capabilities: CapabilitiesResponse['capabilities'] = {
     privateInitMint: available,
     privateBalance: available,
     privateSend: available,
+    umbraPrivateP2p: available,
     settle: available,
     rpcBroadcast: available,
+  },
+  umbra: {
+    execution: available,
   },
   offline: {
     supportedStablecoins: [
@@ -92,8 +96,28 @@ describe('buildAgentSafeContext (privacy-narrowed)', () => {
       walletBalance: true,
       normalSend: true,
       privateSend: true,
+      swap: true,
+      umbra: true,
+      umbraVaultBalance: true,
+      privateBalance: true,
+      magicblockPrivateBalance: true,
     });
-    expect(context.supportedActions).toEqual(['draft_normal_send', 'draft_private_send', 'stage_payroll']);
+    expect(context.supportedActions).toEqual([
+      'get_client_capabilities',
+      'get_wallet_balance',
+      'get_wallet_history',
+      'resolve_recipient',
+      'get_normal_transfer_fee',
+      'get_swap_tokens',
+      'get_swap_price',
+      'prepare_swap_quote',
+      'get_private_payment_balance',
+      'scan_umbra_claims',
+      'get_umbra_balances',
+      'draft_normal_send',
+      'draft_private_send',
+      'stage_payroll',
+    ]);
     expect(context.tokenSymbols).toEqual(['SOL', 'USDC']);
   });
 

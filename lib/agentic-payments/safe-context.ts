@@ -41,6 +41,7 @@ interface BuildAgentSafeContextParams {
 export function buildAgentSafeContext(params: BuildAgentSafeContextParams): AgentSafeContext {
   const capabilities = params.capabilities ?? null;
   const tokenSymbols = collectTokenSymbols(params.balance);
+  const umbraVaultBalance = isOffpayFeatureAvailable(capabilities, 'umbra.execution');
 
   return {
     network: params.network ?? undefined,
@@ -54,10 +55,10 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
         isOffpayFeatureAvailable(capabilities, 'payment.privateSend') &&
         isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast'),
       swap: isOffpayFeatureAvailable(capabilities, 'swap.normalSwap'),
-      umbra:
-        isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
-        isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p'),
-      privateBalance: isOffpayFeatureAvailable(capabilities, 'payment.privateBalance'),
+      umbra: umbraVaultBalance && isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p'),
+      umbraVaultBalance,
+      privateBalance: umbraVaultBalance,
+      magicblockPrivateBalance: isOffpayFeatureAvailable(capabilities, 'payment.privateBalance'),
     },
     supportedActions: [
       'get_client_capabilities',

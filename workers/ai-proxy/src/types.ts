@@ -53,8 +53,14 @@ export type AiIntentContext = {
   locale?: string;
   capabilities?: {
     networkAvailable?: boolean;
+    walletBalance?: boolean;
     normalSend?: boolean;
     privateSend?: boolean;
+    swap?: boolean;
+    umbra?: boolean;
+    umbraVaultBalance?: boolean;
+    magicblockPrivateBalance?: boolean;
+    privateBalance?: boolean;
   };
   tokenSymbols?: string[];
   supportedActions?: string[];

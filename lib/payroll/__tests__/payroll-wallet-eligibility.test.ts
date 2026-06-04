@@ -1,4 +1,6 @@
 import {
+  buildPayrollTokenContexts,
+  resolveKnownPayrollTokenContext,
   resolvePayrollTokenContext,
   walletCanSignPayroll,
 } from '@/lib/payroll/payroll-wallet-eligibility';
@@ -14,7 +16,18 @@ function balanceWith(tokens: WalletBalanceResponse['tokens']): WalletBalanceResp
   } as WalletBalanceResponse;
 }
 
-function token(overrides: Partial<WalletBalanceResponse['tokens'][number]>): WalletBalanceResponse['tokens'][number] {
+function devnetBalanceWith(tokens: WalletBalanceResponse['tokens']): WalletBalanceResponse {
+  return {
+    address: 'wallet-1',
+    network: 'devnet',
+    solBalance: 1,
+    tokens,
+  } as WalletBalanceResponse;
+}
+
+function token(
+  overrides: Partial<WalletBalanceResponse['tokens'][number]>,
+): WalletBalanceResponse['tokens'][number] {
   return {
     mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     name: 'USD Coin',
@@ -45,7 +58,7 @@ describe('walletCanSignPayroll', () => {
 describe('resolvePayrollTokenContext', () => {
   it('resolves mint/decimals and converts the UI balance to atomic', () => {
     const context = resolvePayrollTokenContext(balanceWith([token({})]), 'USDC');
-    expect(context).toEqual({
+    expect(context).toMatchObject({
       mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
       symbol: 'USDC',
       decimals: 6,
@@ -64,5 +77,35 @@ describe('resolvePayrollTokenContext', () => {
   it('returns null when the token is not held', () => {
     expect(resolvePayrollTokenContext(balanceWith([token({ symbol: 'USDT' })]), 'USDC')).toBeNull();
     expect(resolvePayrollTokenContext(null, 'USDC')).toBeNull();
+  });
+
+  it('adds Umbra devnet token aliases for validation', () => {
+    const [context] = buildPayrollTokenContexts(
+      devnetBalanceWith([
+        token({
+          mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+          symbol: 'dUSDC',
+        }),
+      ]),
+    );
+    expect(context.aliases).toEqual(['USDC']);
+  });
+
+  it('resolves known stablecoins with zero balance when the wallet does not hold them', () => {
+    expect(resolveKnownPayrollTokenContext('USDC', 'mainnet')).toMatchObject({
+      mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      symbol: 'USDC',
+      decimals: 6,
+      balanceAtomic: '0',
+    });
+  });
+
+  it('resolves explicit Umbra devnet token symbols with aliases and zero balance', () => {
+    expect(resolveKnownPayrollTokenContext('dUSDC', 'devnet')).toMatchObject({
+      mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+      symbol: 'dUSDC',
+      aliases: ['USDC'],
+      balanceAtomic: '0',
+    });
   });
 });

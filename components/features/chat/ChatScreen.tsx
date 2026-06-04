@@ -71,6 +71,10 @@ import { createAgenticId } from './helpers';
 
 import type { PayrollStageOutcome } from '@/hooks/payroll/usePayrollChatIntake';
 
+function payrollActionId(runId: string): string {
+  return `payroll-action-${runId}`;
+}
+
 const EMPTY_CHAT_MESSAGES: readonly AgenticChatMessage[] = [];
 const EMPTY_CHAT_ACTIONS: readonly AgenticChatAction[] = [];
 
@@ -101,6 +105,7 @@ export function ChatScreen(): React.JSX.Element {
   const updateAction = useAgenticChatStore((s) => s.updateAction);
   const createConversation = useAgenticChatStore((s) => s.createConversation);
   const addMessage = useAgenticChatStore((s) => s.addMessage);
+  const upsertAction = useAgenticChatStore((s) => s.upsertAction);
 
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
@@ -115,6 +120,9 @@ export function ChatScreen(): React.JSX.Element {
   const [promptDockHeight, setPromptDockHeight] = useState(PROMPT_HEIGHT);
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(
     null,
+  );
+  const [payrollReplyPendingRunIds, setPayrollReplyPendingRunIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
   );
   // Declared early so the agent-submit callback can reach payroll intake
   // without a declaration-order cycle; assigned once intake is created.
@@ -186,6 +194,13 @@ export function ChatScreen(): React.JSX.Element {
     for (const action of scopedActions) byId.set(action.id, action);
     return byId;
   }, [scopedActions]);
+  const payrollActionRunIds = useMemo(() => {
+    const runIds = new Set<string>();
+    for (const action of scopedActions) {
+      if (action.kind === 'payroll') runIds.add(action.runId);
+    }
+    return runIds;
+  }, [scopedActions]);
   const drawerMessages = useAgenticChatStore(
     useShallow((s) => {
       if (!chatDrawerOpen) return EMPTY_CHAT_MESSAGES;
@@ -252,7 +267,11 @@ export function ChatScreen(): React.JSX.Element {
     },
   });
 
-  const { confirm: confirmPrivateSend, cancel: cancelPrivateSend } = useAgenticConfirmSend({
+  const {
+    confirm: confirmPrivateSend,
+    cancel: cancelPrivateSend,
+    changeRoute: changePrivateSendRoute,
+  } = useAgenticConfirmSend({
     scope,
     walletMode: effectiveWalletMode,
     canUseNetwork,
@@ -289,10 +308,22 @@ export function ChatScreen(): React.JSX.Element {
   // Prefer an actively-staged run; otherwise offer the most recent resumable
   // run recovered from a prior session.
   const activePayrollRunId = payrollIntake.activeRunId ?? payrollResume.resumableRunId;
+  const showActivePayrollCard =
+    activePayrollRunId != null && !payrollReplyPendingRunIds.has(activePayrollRunId);
+  const showTransientPayrollCard =
+    activePayrollRunId != null &&
+    showActivePayrollCard &&
+    !payrollActionRunIds.has(activePayrollRunId);
 
   const addPayrollAssistantMessage = useCallback(
-    async (event: PayrollAgentReplyEvent) => {
-      const conversationId = activeConversation?.id ?? createConversation(scope, 'Payroll batch');
+    async (
+      event: PayrollAgentReplyEvent,
+      options: { conversationId?: string; actionId?: string } = {},
+    ) => {
+      const conversationId =
+        options.conversationId ??
+        activeConversation?.id ??
+        createConversation(scope, 'Payroll batch');
       const messageId = createAgenticId('payroll-assistant');
       addMessage({
         id: messageId,
@@ -303,6 +334,7 @@ export function ChatScreen(): React.JSX.Element {
         conversationId,
         walletAddress: scope.walletAddress,
         network: scope.network,
+        actionId: options.actionId,
       });
 
       const controller = new AbortController();
@@ -326,13 +358,40 @@ export function ChatScreen(): React.JSX.Element {
       if (outcome.status === 'staged') {
         if (announcedPayrollRunIdsRef.current.has(outcome.runId)) return;
         announcedPayrollRunIdsRef.current.add(outcome.runId);
+        setPayrollReplyPendingRunIds((current) => new Set(current).add(outcome.runId));
         const { summary } = outcome;
-        void addPayrollAssistantMessage({
-          kind: 'staged',
-          recipientCount: summary.recipientCount,
+        const now = Date.now();
+        const conversationId = activeConversation?.id ?? createConversation(scope, 'Payroll batch');
+        const actionId = payrollActionId(outcome.runId);
+        upsertAction({
+          id: actionId,
+          kind: 'payroll',
+          status: 'needs_confirmation',
+          walletAddress: summary.walletAddress,
           network: summary.network,
-          routePolicy: summary.routePolicy,
-          requiresUmbraSetup: summary.requiresUmbraSetup,
+          runId: outcome.runId,
+          summary,
+          conversationId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        void addPayrollAssistantMessage(
+          {
+            kind: 'staged',
+            recipientCount: summary.recipientCount,
+            blockedCount: summary.invalidCount,
+            network: summary.network,
+            routePolicy: summary.routePolicy,
+            requiresUmbraSetup: summary.requiresUmbraSetup,
+          },
+          { conversationId, actionId },
+        ).finally(() => {
+          setPayrollReplyPendingRunIds((current) => {
+            if (!current.has(outcome.runId)) return current;
+            const next = new Set(current);
+            next.delete(outcome.runId);
+            return next;
+          });
         });
         return;
       }
@@ -341,9 +400,22 @@ export function ChatScreen(): React.JSX.Element {
         void addPayrollAssistantMessage({ kind: 'mapping_required', network: scope.network });
       }
     },
-    [addPayrollAssistantMessage, scope.network],
+    [activeConversation?.id, addPayrollAssistantMessage, createConversation, scope, upsertAction],
   );
   announcePayrollStageOutcomeRef.current = announcePayrollStageOutcome;
+
+  useEffect(() => {
+    if (payrollIntake.activeRunId == null || payrollIntake.summary == null) return;
+    for (const action of scopedActions) {
+      if (
+        action.kind === 'payroll' &&
+        action.runId === payrollIntake.activeRunId &&
+        action.summary !== payrollIntake.summary
+      ) {
+        updateAction(action.id, { summary: payrollIntake.summary });
+      }
+    }
+  }, [payrollIntake.activeRunId, payrollIntake.summary, scopedActions, updateAction]);
 
   const handleSetupUmbraForPayroll = useCallback(async () => {
     if (scope.walletAddress == null || scope.network == null) {
@@ -581,10 +653,37 @@ export function ChatScreen(): React.JSX.Element {
                 void confirmPrivateSend(action);
               }}
               onCancelPrivateSend={cancelPrivateSend}
+              onChangePrivateSendRoute={(action, route) => {
+                void changePrivateSendRoute(action, route);
+              }}
+              activePayrollRunId={payrollIntake.activeRunId}
+              walletId={activeWalletId}
+              payrollSummary={payrollIntake.summary}
+              payrollSetupBusy={mixerRegisterMutation.isPending}
+              onSetupPayrollUmbra={handleSetupUmbraForPayroll}
+              onRefreshPayrollRoutes={payrollIntake.refreshRoutes}
+              onPayrollRoutePolicyChange={(policy) => {
+                void payrollIntake.updateRoutePolicy(policy);
+              }}
+              onSpeakPayrollOutcome={(phrase) => {
+                void speech.speak(phrase, { payrollMode: true });
+              }}
+              onAnnouncePayrollOutcome={(outcome) => {
+                void addPayrollAssistantMessage({
+                  kind: 'outcome',
+                  status: outcome.status,
+                  totalCount: outcome.progress.total,
+                  sentCount: outcome.progress.done,
+                  failedCount: outcome.progress.failed,
+                  blockedCount: outcome.progress.blocked,
+                  claimsPending: outcome.claimsPending,
+                  network: outcome.network,
+                });
+              }}
             />
           ) : null}
 
-          {activePayrollRunId != null ? (
+          {activePayrollRunId != null && showTransientPayrollCard ? (
             <View style={headerStyles.payrollCardWrap}>
               <PayrollChatController
                 runId={activePayrollRunId}

@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { mmkvStorage } from '@/lib/cache/mmkv-storage';
 
+import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 export type AgenticChatRole = 'user' | 'assistant';
@@ -92,7 +93,26 @@ export interface AgenticSwapAction {
   errorMessage?: string | null;
 }
 
-export type AgenticChatAction = AgenticPrivateSendAction | AgenticSwapAction;
+export interface AgenticPayrollAction {
+  id: string;
+  kind: 'payroll';
+  status: AgenticActionStatus;
+  walletAddress: string;
+  network: OffpayNetwork;
+  runId: string;
+  summary: PayrollConfirmationSummary;
+  conversationId?: string | null;
+  createdAt: number;
+  updatedAt: number;
+  errorMessage?: string | null;
+}
+
+export type AgenticChatAction = AgenticPrivateSendAction | AgenticSwapAction | AgenticPayrollAction;
+
+type AgenticActionPatch =
+  | Partial<Omit<AgenticPrivateSendAction, 'id'>>
+  | Partial<Omit<AgenticSwapAction, 'id'>>
+  | Partial<Omit<AgenticPayrollAction, 'id'>>;
 
 export interface AgenticChatMessage {
   id: string;
@@ -117,10 +137,7 @@ interface AgenticChatState {
   addMessage: (message: AgenticChatMessage) => void;
   updateMessage: (id: string, patch: Partial<Omit<AgenticChatMessage, 'id'>>) => void;
   upsertAction: (action: AgenticChatAction) => void;
-  updateAction: (
-    id: string,
-    patch: Partial<Omit<AgenticPrivateSendAction, 'id'>> | Partial<Omit<AgenticSwapAction, 'id'>>,
-  ) => void;
+  updateAction: (id: string, patch: AgenticActionPatch) => void;
   clearMessages: (scope?: { walletAddress: string | null; network: OffpayNetwork | null }) => void;
 }
 
@@ -166,6 +183,28 @@ function touchConversation(
       updatedAt: Math.max(conversation.updatedAt, timestamp),
     };
   });
+}
+
+function pruneActions(
+  actions: AgenticChatAction[],
+  messages: readonly AgenticChatMessage[],
+  pinnedActionId?: string,
+): AgenticChatAction[] {
+  const referencedActionIds = new Set(
+    messages
+      .map((message) => message.actionId)
+      .filter((actionId): actionId is string => typeof actionId === 'string'),
+  );
+  if (pinnedActionId != null) referencedActionIds.add(pinnedActionId);
+  const referenced: AgenticChatAction[] = [];
+  const unreferenced: AgenticChatAction[] = [];
+
+  for (const action of actions) {
+    if (referencedActionIds.has(action.id)) referenced.push(action);
+    else unreferenced.push(action);
+  }
+
+  return [...referenced, ...unreferenced].slice(0, Math.max(MAX_ACTIONS, referencedActionIds.size));
 }
 
 export const useAgenticChatStore = create<AgenticChatState>()(
@@ -257,9 +296,10 @@ export const useAgenticChatStore = create<AgenticChatState>()(
         })),
       upsertAction: (action) =>
         set((state) => ({
-          actions: [action, ...state.actions.filter((item) => item.id !== action.id)].slice(
-            0,
-            MAX_ACTIONS,
+          actions: pruneActions(
+            [action, ...state.actions.filter((item) => item.id !== action.id)],
+            state.messages,
+            action.id,
           ),
           conversations: touchConversation(
             state.conversations,

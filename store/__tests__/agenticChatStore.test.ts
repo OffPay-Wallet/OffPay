@@ -1,5 +1,41 @@
 import { getAgenticConversationScopeKey, useAgenticChatStore } from '@/store/agenticChatStore';
 
+import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+
+function payrollSummary(): PayrollConfirmationSummary {
+  return {
+    walletAddress: 'wallet-1',
+    network: 'devnet',
+    tokenSymbol: 'USDC',
+    tokenMint: 'mint-1',
+    recipientCount: 1,
+    totalAtomic: '1000000',
+    totalDisplay: '1',
+    totalLabel: '1 USDC',
+    tokenBreakdown: [
+      {
+        tokenSymbol: 'USDC',
+        tokenMint: 'mint-1',
+        tokenDecimals: 6,
+        recipientCount: 1,
+        totalAtomic: '1000000',
+        totalDisplay: '1',
+      },
+    ],
+    isMixedTokenRun: false,
+    routePolicy: 'private_auto',
+    split: { umbra: 1, magicblock: 0, blocked: 0, claimRequired: 1 },
+    invalidCount: 0,
+    skippedCount: 0,
+    claimRequiredCount: 1,
+    requiresUmbraSetup: false,
+    hasSufficientBalanceForRun: true,
+    requiresTypedConfirmation: false,
+    showLargeBatchWarning: false,
+    unprobedRecipientCount: 0,
+  };
+}
+
 describe('agenticChatStore', () => {
   const scope = { walletAddress: 'wallet-1', network: 'devnet' as const };
 
@@ -72,5 +108,82 @@ describe('agenticChatStore', () => {
         getAgenticConversationScopeKey(scope)
       ],
     ).toBeNull();
+  });
+
+  it('deletes a chat with linked payroll action cards', () => {
+    const conversationId = useAgenticChatStore.getState().createConversation(scope, 'Payroll');
+
+    useAgenticChatStore.getState().addMessage({
+      id: 'message-1',
+      role: 'assistant',
+      text: 'Payroll staged.',
+      createdAt: 1,
+      walletAddress: scope.walletAddress,
+      network: scope.network,
+      conversationId,
+      actionId: 'payroll-action-1',
+    });
+    useAgenticChatStore.getState().upsertAction({
+      id: 'payroll-action-1',
+      kind: 'payroll',
+      status: 'needs_confirmation',
+      walletAddress: scope.walletAddress,
+      network: scope.network,
+      runId: 'run-1',
+      summary: payrollSummary(),
+      conversationId,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    useAgenticChatStore.getState().deleteConversation(conversationId);
+
+    expect(useAgenticChatStore.getState().messages).toEqual([]);
+    expect(useAgenticChatStore.getState().actions).toEqual([]);
+  });
+
+  it('keeps an action card while a chat message still references it', () => {
+    const conversationId = useAgenticChatStore.getState().createConversation(scope, 'Draft');
+    useAgenticChatStore.getState().addMessage({
+      id: 'message-1',
+      role: 'assistant',
+      text: 'Confirm this draft.',
+      createdAt: 1,
+      walletAddress: scope.walletAddress,
+      network: scope.network,
+      conversationId,
+      actionId: 'referenced-action',
+    });
+    useAgenticChatStore.getState().upsertAction({
+      id: 'referenced-action',
+      kind: 'payroll',
+      status: 'needs_confirmation',
+      walletAddress: scope.walletAddress,
+      network: scope.network,
+      runId: 'run-1',
+      summary: payrollSummary(),
+      conversationId,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    for (let index = 0; index < 120; index += 1) {
+      useAgenticChatStore.getState().upsertAction({
+        id: `unreferenced-action-${index}`,
+        kind: 'payroll',
+        status: 'needs_confirmation',
+        walletAddress: scope.walletAddress,
+        network: scope.network,
+        runId: `run-${index + 2}`,
+        summary: payrollSummary(),
+        conversationId,
+        createdAt: index + 2,
+        updatedAt: index + 2,
+      });
+    }
+
+    expect(
+      useAgenticChatStore.getState().actions.some((action) => action.id === 'referenced-action'),
+    ).toBe(true);
   });
 });

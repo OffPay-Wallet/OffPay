@@ -112,7 +112,12 @@ describe('validatePayrollRows', () => {
       headers: ['name', 'wallet', 'amount', 'token'],
       records,
     });
-    const mappingWithToken = { recipient: 'wallet', amount: 'amount', token: 'token', label: 'name' };
+    const mappingWithToken = {
+      recipient: 'wallet',
+      amount: 'amount',
+      token: 'token',
+      label: 'name',
+    };
 
     it('blocks a row whose token cell differs from the run token', async () => {
       const result = await validatePayrollRows({
@@ -138,6 +143,17 @@ describe('validatePayrollRows', () => {
         senderAddress: SENDER,
       });
       expect(result.validCount).toBe(2);
+    });
+
+    it('accepts a row whose token cell matches a run token alias', async () => {
+      const result = await validatePayrollRows({
+        runId: 'run-tok3',
+        table: tableWithToken([{ name: 'ByAlias', wallet: ADDR_A, amount: '10', token: 'USDC' }]),
+        mapping: mappingWithToken,
+        token: { ...TOKEN, symbol: 'dUSDC', aliases: ['USDC'] },
+        senderAddress: SENDER,
+      });
+      expect(result.validCount).toBe(1);
     });
   });
 

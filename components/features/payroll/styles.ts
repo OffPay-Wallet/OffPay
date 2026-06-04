@@ -13,7 +13,7 @@ export const payrollStyles = StyleSheet.create({
     borderColor: colors.glass.rim,
     padding: spacing.lg,
     gap: spacing.md,
-    boxShadow: '0 2px 10px rgba(16, 16, 16, 0.08)',
+    boxShadow: '0 16px 34px rgba(0, 0, 0, 0.28)',
   },
   headerRow: {
     flexDirection: 'row',
@@ -33,13 +33,32 @@ export const payrollStyles = StyleSheet.create({
     color: colors.text.secondary,
     flexShrink: 1,
   },
+  routeSummaryPill: {
+    maxWidth: '46%',
+    minHeight: 30,
+    borderRadius: 15,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.clearFill,
+    paddingHorizontal: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  routeSummaryText: {
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 12,
+    color: colors.text.secondary,
+  },
   statRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   stat: {
-    minWidth: 92,
+    flexBasis: '47%',
+    flexGrow: 1,
+    minWidth: 0,
     gap: 2,
   },
   statLabel: {
@@ -77,7 +96,7 @@ export const payrollStyles = StyleSheet.create({
     gap: spacing.xs,
   },
   routePicker: {
-    minHeight: 42,
+    minHeight: 40,
     borderRadius: 22,
     borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
@@ -89,12 +108,12 @@ export const payrollStyles = StyleSheet.create({
   },
   routePickerOption: {
     flex: 1,
-    minHeight: 36,
+    minHeight: 34,
     borderRadius: 18,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: 4,
   },
   routePickerOptionSelected: {
     backgroundColor: colors.brand.whiteStream,
@@ -104,7 +123,7 @@ export const payrollStyles = StyleSheet.create({
   },
   routePickerText: {
     fontFamily: fontFamily.uiSemiBold,
-    fontSize: 12,
+    fontSize: 11,
     color: colors.text.secondary,
     textAlign: 'center',
   },
@@ -163,7 +182,7 @@ export const payrollStyles = StyleSheet.create({
     color: colors.text.primary,
   },
   typedConfirmInput: {
-    height: 44,
+    height: 40,
     borderRadius: spacing.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border.strong,
@@ -174,14 +193,14 @@ export const payrollStyles = StyleSheet.create({
     backgroundColor: colors.surface.backgroundTint,
   },
   primaryButton: {
-    height: 48,
-    borderRadius: 24,
+    height: 44,
+    borderRadius: 22,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.brand.deepShadow,
     flexDirection: 'row',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   primaryButtonDisabled: {
     backgroundColor: 'rgba(16, 16, 16, 0.4)',
@@ -193,23 +212,35 @@ export const payrollStyles = StyleSheet.create({
   },
   secondaryRow: {
     flexDirection: 'row',
+    gap: spacing.md,
+  },
+  payrollActionStack: {
     gap: spacing.sm,
   },
   secondaryButton: {
     flex: 1,
-    height: 44,
-    borderRadius: 22,
+    height: 40,
+    borderRadius: 20,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
     backgroundColor: colors.glass.clearFill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
   },
   secondaryButtonText: {
     fontFamily: fontFamily.uiSemiBold,
-    fontSize: 14,
+    fontSize: 13,
     color: colors.text.primary,
+  },
+  dangerSecondaryButton: {
+    borderColor: 'rgba(255, 65, 96, 0.32)',
+    backgroundColor: 'rgba(255, 65, 96, 0.08)',
+  },
+  dangerSecondaryButtonText: {
+    color: colors.semantic.error,
   },
   // Row preview list
   rowItem: {

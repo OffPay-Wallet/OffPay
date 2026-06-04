@@ -7,7 +7,14 @@
 import React from 'react';
 import { View } from 'react-native';
 
-import type { AgenticChatAction, AgenticChatMessage } from '@/store/agenticChatStore';
+import type {
+  AgenticChatAction,
+  AgenticChatMessage,
+  AgenticPrivateSendAction,
+} from '@/store/agenticChatStore';
+import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import type { PayrollOutcomeAnnouncement } from '@/components/features/payroll/PayrollChatController';
+import type { PayrollRoutePolicy } from '@/lib/payroll/payroll-types';
 
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { messageStyles as styles } from './styles/message';
@@ -17,6 +24,19 @@ interface ChatMessageListProps {
   actionsById: ReadonlyMap<string, AgenticChatAction>;
   onConfirmPrivateSend: (action: AgenticChatAction) => void;
   onCancelPrivateSend: (action: AgenticChatAction) => void;
+  onChangePrivateSendRoute: (
+    action: AgenticPrivateSendAction,
+    route: AgenticPrivateSendAction['route'],
+  ) => void;
+  activePayrollRunId?: string | null;
+  walletId: string | null;
+  payrollSummary: PayrollConfirmationSummary | null;
+  payrollSetupBusy?: boolean;
+  onSetupPayrollUmbra?: () => void;
+  onRefreshPayrollRoutes?: () => Promise<void>;
+  onPayrollRoutePolicyChange?: (policy: PayrollRoutePolicy) => void;
+  onSpeakPayrollOutcome?: (phrase: string) => void;
+  onAnnouncePayrollOutcome?: (outcome: PayrollOutcomeAnnouncement) => void;
 }
 
 export function ChatMessageList({
@@ -24,6 +44,16 @@ export function ChatMessageList({
   actionsById,
   onConfirmPrivateSend,
   onCancelPrivateSend,
+  onChangePrivateSendRoute,
+  activePayrollRunId,
+  walletId,
+  payrollSummary,
+  payrollSetupBusy,
+  onSetupPayrollUmbra,
+  onRefreshPayrollRoutes,
+  onPayrollRoutePolicyChange,
+  onSpeakPayrollOutcome,
+  onAnnouncePayrollOutcome,
 }: ChatMessageListProps): React.JSX.Element {
   return (
     <View style={styles.messageList}>
@@ -34,6 +64,16 @@ export function ChatMessageList({
           action={message.actionId != null ? actionsById.get(message.actionId) : undefined}
           onConfirmPrivateSend={onConfirmPrivateSend}
           onCancelPrivateSend={onCancelPrivateSend}
+          onChangePrivateSendRoute={onChangePrivateSendRoute}
+          activePayrollRunId={activePayrollRunId}
+          walletId={walletId}
+          payrollSummary={payrollSummary}
+          payrollSetupBusy={payrollSetupBusy}
+          onSetupPayrollUmbra={onSetupPayrollUmbra}
+          onRefreshPayrollRoutes={onRefreshPayrollRoutes}
+          onPayrollRoutePolicyChange={onPayrollRoutePolicyChange}
+          onSpeakPayrollOutcome={onSpeakPayrollOutcome}
+          onAnnouncePayrollOutcome={onAnnouncePayrollOutcome}
         />
       ))}
     </View>

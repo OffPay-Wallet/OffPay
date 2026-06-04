@@ -25,7 +25,7 @@ export function createPayrollRowSubmitter(
     if (route === 'magicblock') {
       return submitViaMagicBlock(context, row.recipient, row.amountAtomic, row.tokenMint);
     }
-    return submitViaUmbra(context, row.recipient, row.amountDisplay, row.tokenMint);
+    return submitViaUmbra(context, row.recipient, row.amountDisplay, row.tokenMint, row.tokenSymbol);
   };
 }
 
@@ -64,13 +64,14 @@ async function submitViaUmbra(
   recipient: string,
   amountDisplay: string,
   mint: string,
+  symbol: string,
 ): Promise<PayrollSubmitOutcome> {
   const { sendUmbraPrivateP2PFromPublicBalance } = await import('@/lib/umbra/umbra-execution');
   const result = await sendUmbraPrivateP2PFromPublicBalance({
     walletAddress: context.walletAddress,
     walletId: context.walletId,
     network: context.network,
-    token: context.tokenSymbol,
+    token: symbol || context.tokenSymbol,
     tokenMint: mint,
     amount: amountDisplay,
     recipient,

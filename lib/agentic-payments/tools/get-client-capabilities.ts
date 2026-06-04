@@ -25,6 +25,7 @@ export const getClientCapabilitiesTool: AgenticToolDefinition = {
     const capabilities = context.capabilities ?? null;
     if (context.scope.network == null) return { error: { code: 'network_not_selected' } };
     if (capabilities == null) return { result: { status: 'loading' } };
+    const umbraVaultBalanceAvailable = isOffpayFeatureAvailable(capabilities, 'umbra.execution');
 
     return {
       result: {
@@ -52,6 +53,14 @@ export const getClientCapabilitiesTool: AgenticToolDefinition = {
             capabilities.payment.privateSend.reason,
           ),
           privateBalance: capabilityResult(
+            umbraVaultBalanceAvailable,
+            capabilities.umbra?.execution?.reason,
+          ),
+          umbraVaultBalance: capabilityResult(
+            umbraVaultBalanceAvailable,
+            capabilities.umbra?.execution?.reason,
+          ),
+          magicblockPrivatePaymentBalance: capabilityResult(
             isOffpayFeatureAvailable(capabilities, 'payment.privateBalance'),
             capabilities.payment.privateBalance.reason,
           ),

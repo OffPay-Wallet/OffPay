@@ -2,6 +2,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
 
 import { runAgenticTools, type AgenticToolRunnerContext } from '@/lib/agentic-payments/agent-tools';
+import * as offpayApiClient from '@/lib/api/offpay-api-client';
 
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
 
@@ -109,6 +110,72 @@ describe('runAgenticTools', () => {
 
     // Tool result must NOT contain English copy — only structured codes.
     expect(run.results[0].result).toEqual({ status: 'loading' });
+  });
+
+  it('returns wallet balance with USD portfolio value before token units', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-wallet-balance', name: 'get_wallet_balance', args: {} }],
+      {
+        ...baseContext,
+        balance: { ...balance, nativeSolUsdPrice: 100 },
+        userText: 'what is my balance',
+      },
+    );
+
+    expect(run.results[0].result).toMatchObject({
+      status: 'ok',
+      portfolioValueUsd: 190,
+      portfolioValueUsdLabel: '$ 190.00',
+      valuationCurrency: 'USD',
+      valuationCoverage: 'complete',
+      pricedAssetCount: 3,
+      unpricedAssetCount: 0,
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(walletAddress);
+    expect(JSON.stringify(run.results[0].result)).not.toContain(usdcMint);
+  });
+
+  it('rejects generic private balance reads from the MagicBlock rail tool', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-private-balance', name: 'get_private_payment_balance', args: {} }],
+      {
+        ...baseContext,
+        userText: 'what is my private balance',
+      },
+    );
+
+    expect(run.results[0].error?.code).toBe('use_umbra_vault_balance');
+  });
+
+  it('returns an explicit MagicBlock private-payment balance summary without addresses or mints', async () => {
+    jest.spyOn(offpayApiClient, 'getPrivatePaymentBalance').mockResolvedValueOnce({
+      address: walletAddress,
+      mint: usdcMint,
+      baseBalance: '20000000',
+      privateBalance: '0',
+    });
+
+    const run = await runAgenticTools(
+      [{ id: 'call-private-balance', name: 'get_private_payment_balance', args: {} }],
+      {
+        ...baseContext,
+        userText: 'what is my MagicBlock private-payment balance',
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.results[0].result).toMatchObject({
+      status: 'ok',
+      route: 'magicblock',
+      routeLabel: 'MagicBlock private-payment balance',
+      network: 'devnet',
+      symbol: 'USDC',
+      publicBalance: '20',
+      privateBalance: '0',
+      privateBalanceIsZero: true,
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(walletAddress);
+    expect(JSON.stringify(run.results[0].result)).not.toContain(usdcMint);
   });
 
   it('returns SOL balance as a human-readable amount only', async () => {

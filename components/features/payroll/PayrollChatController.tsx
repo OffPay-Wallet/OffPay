@@ -111,6 +111,7 @@ export function PayrollChatController({
       routePolicy: summary.routePolicy,
       split: summary.split,
       requiresUmbraSetup: summary.requiresUmbraSetup,
+      hasSufficientBalanceForRun: summary.hasSufficientBalanceForRun,
       unprobedRecipientCount: summary.unprobedRecipientCount,
     });
   }, [summary, rows, run]);
@@ -231,6 +232,7 @@ export function PayrollChatController({
           onOpenDetails={openDetails}
           onSetupUmbra={onSetupUmbra}
           onRoutePolicyChange={onRoutePolicyChange}
+          onCancel={cancel}
           setupBusy={setupBusy}
         />
       </Animated.View>

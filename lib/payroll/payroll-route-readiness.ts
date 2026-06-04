@@ -69,7 +69,6 @@ function evaluateSharedGates(facts: PayrollRouteFacts): PayrollRouteBlockReason[
   if (!facts.online) reasons.push('network_offline');
   if (!facts.capabilitiesLoaded) reasons.push('capabilities_loading');
   if (!facts.rpcReady) reasons.push('rpc_unavailable');
-  if (!facts.hasTokenBalanceForRun) reasons.push('insufficient_balance');
   if (!facts.hasFeeSol) reasons.push('insufficient_fee_sol');
   // NOTE: token support is intentionally NOT gated here. Umbra and
   // MagicBlock support different mints (notably on devnet, where Umbra uses

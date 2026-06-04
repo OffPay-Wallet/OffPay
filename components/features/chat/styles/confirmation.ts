@@ -67,6 +67,39 @@ export const confirmationStyles = StyleSheet.create({
   confirmationError: {
     lineHeight: 16,
   },
+  routeChoiceBlock: {
+    gap: spacing.xs,
+  },
+  routeChoice: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    padding: 3,
+    borderRadius: radii.full,
+    backgroundColor: colors.surface.backgroundTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border.subtle,
+  },
+  routeChoiceOption: {
+    flex: 1,
+    minHeight: 30,
+    borderRadius: radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+  },
+  routeChoiceOptionSelected: {
+    backgroundColor: colors.brand.whiteStream,
+  },
+  routeChoiceOptionPressed: {
+    backgroundColor: colors.glass.clearFill,
+  },
+  routeChoiceText: {
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 12,
+  },
+  routeChoiceTextSelected: {
+    color: colors.brand.deepShadow,
+  },
   confirmationActions: {
     flexDirection: 'row',
     gap: spacing.sm,

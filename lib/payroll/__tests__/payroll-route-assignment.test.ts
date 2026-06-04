@@ -12,6 +12,7 @@ import type { PayrollRow } from '@/lib/payroll/payroll-types';
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 const MAINNET_USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const MAINNET_USDT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 const DEVNET_UMBRA_USDC = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
 const DEVNET_MAGICBLOCK_USDC = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
@@ -69,6 +70,10 @@ const UNREGISTERED: PayrollRecipientFacts = { isSelf: false, umbraRecipientRegis
 describe('routesShareMint', () => {
   it('is true for mainnet USDC (shared by both routes)', () => {
     expect(routesShareMint('mainnet', MAINNET_USDC)).toBe(true);
+  });
+
+  it('is true for mainnet USDT (shared by both routes)', () => {
+    expect(routesShareMint('mainnet', MAINNET_USDT)).toBe(true);
   });
 
   it('is false on devnet where Umbra and MagicBlock use different USDC mints', () => {
@@ -159,5 +164,6 @@ describe('applyRouteAssignment', () => {
     const applied = applyRouteAssignment(rows, assignment, facts);
     expect(applied[0]).toMatchObject({ route: 'umbra', requiresRecipientClaim: true });
     expect(applied[1]).toMatchObject({ status: 'invalid', route: null });
+    expect(applied[1].validationError).toBe('Recipient is not Umbra-ready.');
   });
 });

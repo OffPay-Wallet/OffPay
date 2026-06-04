@@ -32,6 +32,7 @@ interface PayrollConfirmationCardProps {
   onOpenDetails?: () => void;
   onSetupUmbra?: () => void;
   onRoutePolicyChange?: (policy: PayrollRoutePolicy) => void;
+  onCancel?: () => void;
   setupBusy?: boolean;
 }
 
@@ -57,6 +58,7 @@ export function PayrollConfirmationCard({
   onOpenDetails,
   onSetupUmbra,
   onRoutePolicyChange,
+  onCancel,
   setupBusy = false,
 }: PayrollConfirmationCardProps): React.JSX.Element {
   const [typed, setTyped] = useState('');
@@ -64,6 +66,7 @@ export function PayrollConfirmationCard({
 
   const typedOk = !summary.requiresTypedConfirmation || isTypedConfirmationValid(summary, typed);
   const blockedBySetup = summary.requiresUmbraSetup;
+  const balanceBlocked = !summary.hasSufficientBalanceForRun;
   const { canStart, needsBlockedAck } = resolvePayrollStartGate({
     summary,
     typedConfirmationOk: typedOk,
@@ -74,15 +77,19 @@ export function PayrollConfirmationCard({
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Review payroll</Text>
-        <Text style={styles.sourceName} numberOfLines={1}>
-          {payrollRoutePolicyCopy(summary.routePolicy)}
+        <Text style={styles.title} numberOfLines={1}>
+          Review payroll
         </Text>
+        <View style={styles.routeSummaryPill}>
+          <Text style={styles.routeSummaryText} numberOfLines={1}>
+            {payrollRoutePolicyCopy(summary.routePolicy)}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.statRow}>
         <Stat label="Recipients" value={String(summary.recipientCount)} />
-        <Stat label="Total" value={`${summary.totalDisplay} ${summary.tokenSymbol}`} />
+        <Stat label="Total" value={summary.totalLabel} />
         <Stat label="Network" value={summary.network} />
         <Stat label="Wallet" value={shortenWalletAddress(summary.walletAddress)} />
       </View>
@@ -112,6 +119,9 @@ export function PayrollConfirmationCard({
                     selected && styles.routePickerTextSelected,
                     busy && styles.routePickerTextDisabled,
                   ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
                 >
                   {option.label}
                 </Text>
@@ -144,24 +154,25 @@ export function PayrollConfirmationCard({
 
       {summary.claimRequiredCount > 0 ? (
         <Text style={styles.claimNote}>
-          {summary.claimRequiredCount} Umbra recipient
-          {summary.claimRequiredCount === 1 ? '' : 's'} must claim funds in their own wallet before
-          the payment is spendable.
+          {summary.claimRequiredCount} Umbra claim
+          {summary.claimRequiredCount === 1 ? '' : 's'} pending.
         </Text>
       ) : null}
 
       {summary.unprobedRecipientCount > 0 ? (
         <Text style={styles.claimNote}>
           {summary.unprobedRecipientCount} recipient
-          {summary.unprobedRecipientCount === 1 ? ' was' : 's were'} not checked for the Umbra route
-          (large batch) and will use MagicBlock where allowed.
+          {summary.unprobedRecipientCount === 1 ? '' : 's'} not Umbra-checked.
         </Text>
       ) : null}
 
       {summary.showLargeBatchWarning ? (
+        <Text style={styles.warningText}>Large batch. Payments run one by one.</Text>
+      ) : null}
+
+      {balanceBlocked ? (
         <Text style={styles.warningText}>
-          Large batch ({summary.recipientCount} recipients). Execution runs one at a time and may
-          take a while.
+          Not enough balance. Add funds or choose another token.
         </Text>
       ) : null}
 
@@ -179,18 +190,14 @@ export function PayrollConfirmationCard({
             color={ackBlocked ? colors.brand.deepShadow : colors.text.tertiary}
           />
           <Text style={styles.claimNote}>
-            Skip {summary.invalidCount} blocked row{summary.invalidCount === 1 ? '' : 's'} and pay
-            the {summary.recipientCount} valid recipient
-            {summary.recipientCount === 1 ? '' : 's'} only.
+            Skip {summary.invalidCount} blocked row{summary.invalidCount === 1 ? '' : 's'}
           </Text>
         </Pressable>
       ) : null}
 
       {blockedBySetup ? (
         <>
-          <Text style={styles.warningText}>
-            Umbra needs a one-time setup on this wallet before payroll can start.
-          </Text>
+          <Text style={styles.warningText}>Umbra setup required before payroll can start.</Text>
           <Pressable
             style={[styles.secondaryButton, setupBusy && styles.primaryButtonDisabled]}
             onPress={onSetupUmbra}
@@ -210,9 +217,7 @@ export function PayrollConfirmationCard({
 
       {summary.requiresTypedConfirmation && !blockedBySetup ? (
         <View>
-          <Text style={styles.statLabel}>
-            Type the recipient count ({summary.recipientCount}) or total to confirm
-          </Text>
+          <Text style={styles.statLabel}>Type {summary.recipientCount} or total</Text>
           <TextInput
             value={typed}
             onChangeText={setTyped}
@@ -226,34 +231,56 @@ export function PayrollConfirmationCard({
         </View>
       ) : null}
 
-      <Pressable
-        style={[styles.primaryButton, !canStart && styles.primaryButtonDisabled]}
-        onPress={onStart}
-        disabled={!canStart}
-        accessibilityRole="button"
-        accessibilityLabel="Confirm payroll batch"
-        accessibilityState={{ disabled: !canStart }}
-      >
-        {busy ? (
-          <ActivityIndicator size="small" color={colors.brand.whiteStream} />
-        ) : (
-          <>
-            <Ionicons name="send" size={16} color={colors.brand.whiteStream} />
-            <Text style={styles.primaryButtonText}>Confirm batch</Text>
-          </>
-        )}
-      </Pressable>
-
-      {onOpenDetails != null ? (
+      <View style={styles.payrollActionStack}>
         <Pressable
-          style={styles.secondaryButton}
-          onPress={onOpenDetails}
+          style={[styles.primaryButton, !canStart && styles.primaryButtonDisabled]}
+          onPress={onStart}
+          disabled={!canStart}
           accessibilityRole="button"
-          accessibilityLabel="Open payroll details"
+          accessibilityLabel="Confirm payroll batch"
+          accessibilityState={{ disabled: !canStart }}
         >
-          <Text style={styles.secondaryButtonText}>Review rows</Text>
+          {busy ? (
+            <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+          ) : (
+            <>
+              <Ionicons name="send" size={15} color={colors.brand.whiteStream} />
+              <Text style={styles.primaryButtonText}>Confirm</Text>
+            </>
+          )}
         </Pressable>
-      ) : null}
+
+        {onOpenDetails != null || onCancel != null ? (
+          <View style={styles.secondaryRow}>
+            {onOpenDetails != null ? (
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={onOpenDetails}
+                accessibilityRole="button"
+                accessibilityLabel="Open payroll details"
+              >
+                <Ionicons name="list-outline" size={15} color={colors.text.primary} />
+                <Text style={styles.secondaryButtonText}>Rows</Text>
+              </Pressable>
+            ) : null}
+            {onCancel != null ? (
+              <Pressable
+                style={[styles.secondaryButton, styles.dangerSecondaryButton]}
+                onPress={onCancel}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel payroll"
+                accessibilityState={{ disabled: busy }}
+              >
+                <Ionicons name="close" size={15} color={colors.semantic.error} />
+                <Text style={[styles.secondaryButtonText, styles.dangerSecondaryButtonText]}>
+                  Cancel
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }

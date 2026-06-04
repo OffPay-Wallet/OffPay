@@ -5,6 +5,10 @@ import type { PayrollTokenContext } from '@/lib/payroll/payroll-validation';
 const ADDR_A = '8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz';
 const ADDR_B = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const SENDER = '5FHwkrdxntdK24hgQU8qgBjn35Y1zwhz1GZdTh7DTLBy';
+const UPLOAD_ADDR_A = '2VyJghegXGD7rPxS5HzemSWWjv64N8v8bThJoMRmTeEs';
+const UPLOAD_ADDR_B = '7QwF7coGDHUwDWTfpN72LpKas1udWQzz25BKZ4EW3pw7';
+const UPLOAD_ADDR_C = '3Fonz13DskC7R8xGQAzKi6GhNG3PJkc74S3uucRfjQ23';
+const UPLOAD_ADDR_D = 'BaHT6CUCQNxbDpUSNdjR1o76zwX2W9LmrDAQsUFPq24u';
 
 const TOKEN: PayrollTokenContext = {
   mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -81,5 +85,34 @@ describe('stagePayroll', () => {
     if (!result.ok) return;
     expect(result.summary.validCount).toBe(1);
     expect(result.run.routePolicy).toBe('umbra_only');
+  });
+
+  it('stages recipient,amount,token CSV uploads and keeps duplicates as review rows', async () => {
+    const result = await stagePayroll({
+      fileName: 'payroll.csv',
+      text: [
+        'recipient,amount,token',
+        `${UPLOAD_ADDR_A},4,USDC`,
+        `${UPLOAD_ADDR_B},4,USDC`,
+        `${UPLOAD_ADDR_C},4,USDC`,
+        `${UPLOAD_ADDR_D},4,USDC`,
+        `${UPLOAD_ADDR_C},4,USDC`,
+      ].join('\n'),
+      walletAddress: SENDER,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      token: TOKEN,
+      routePolicy: 'private_auto',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary.validCount).toBe(4);
+    expect(result.summary.invalidCount).toBe(1);
+    expect(result.summary.duplicateCount).toBe(1);
+    expect(result.rows[4]).toMatchObject({
+      status: 'invalid',
+      validationError: 'Duplicate recipient — remove or merge this row.',
+    });
   });
 });

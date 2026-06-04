@@ -28,6 +28,10 @@ describe('payroll format resolution', () => {
       ok: true,
       format: 'json',
     });
+    expect(resolvePayrollFormat('payroll', 'application/vnd.ms-excel')).toEqual({
+      ok: true,
+      format: 'csv',
+    });
   });
 
   it('detects delimiters and binary content', () => {
@@ -67,6 +71,30 @@ describe('parsePayrollTable', () => {
       format: 'txt',
     });
     expect(txt.table?.records[0]).toMatchObject({ amount: '100' });
+  });
+
+  it('auto-detects semicolon and pipe delimiters even for CSV uploads', async () => {
+    const semicolon = await parsePayrollTable({
+      text: 'wallet;amount\n11111111111111111111111111111111;10',
+      format: 'csv',
+    });
+    expect(semicolon.ok).toBe(true);
+    expect(semicolon.table?.headers).toEqual(['wallet', 'amount']);
+    expect(semicolon.table?.records[0]).toMatchObject({
+      wallet: '11111111111111111111111111111111',
+      amount: '10',
+    });
+
+    const pipe = await parsePayrollTable({
+      text: 'wallet|amount\n11111111111111111111111111111111|10',
+      format: 'csv',
+    });
+    expect(pipe.ok).toBe(true);
+    expect(pipe.table?.headers).toEqual(['wallet', 'amount']);
+    expect(pipe.table?.records[0]).toMatchObject({
+      wallet: '11111111111111111111111111111111',
+      amount: '10',
+    });
   });
 
   it('parses headerless manual payroll rows', async () => {
@@ -159,6 +187,16 @@ describe('parsePayrollTable', () => {
     expect(result.table?.records[0]).toMatchObject({ wallet: 'addr1', amount: '100' });
   });
 
+  it('parses common JSON row wrappers', async () => {
+    const result = await parsePayrollTable({
+      text: JSON.stringify({ employees: [{ wallet: 'addr1', amount: 100 }] }),
+      format: 'json',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.table?.headers).toEqual(['wallet', 'amount']);
+    expect(result.table?.records[0]).toMatchObject({ wallet: 'addr1', amount: '100' });
+  });
+
   it('rejects empty, invalid JSON, and binary content', async () => {
     expect((await parsePayrollTable({ text: '', format: 'csv' })).ok).toBe(false);
     expect((await parsePayrollTable({ text: '{bad json', format: 'json' })).ok).toBe(false);
@@ -188,6 +226,39 @@ describe('inferPayrollColumns', () => {
     expect(inference.mapping.label).toBe('employee');
     expect(inference.confidence).toBe(1);
     expect(inference.needsManualMapping).toBe(false);
+  });
+
+  it('infers recipient and amount from values when headers are unique', () => {
+    const inference = inferPayrollColumns({
+      headers: ['column_a', 'column_b', 'column_c'],
+      records: [
+        {
+          column_a: '11111111111111111111111111111111',
+          column_b: '10',
+          column_c: 'Alice',
+        },
+      ],
+    });
+    expect(inference.mapping.recipient).toBe('column_a');
+    expect(inference.mapping.amount).toBe('column_b');
+    expect(inference.mapping.token).toBeNull();
+    expect(inference.needsManualMapping).toBe(false);
+  });
+
+  it('does not treat known payroll token mints as recipient columns', () => {
+    const inference = inferPayrollColumns({
+      headers: ['column_a', 'column_b', 'column_c'],
+      records: [
+        {
+          column_a: '8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz',
+          column_b: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          column_c: '10',
+        },
+      ],
+    });
+    expect(inference.mapping.recipient).toBe('column_a');
+    expect(inference.mapping.amount).toBe('column_c');
+    expect(inference.mapping.token).toBe('column_b');
   });
 
   it('flags manual mapping when recipient or amount is missing', () => {

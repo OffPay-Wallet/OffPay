@@ -11,6 +11,7 @@ import type { PayrollRow } from '@/lib/payroll/payroll-types';
 export interface PayrollTokenContext {
   mint: string;
   symbol: string;
+  aliases?: readonly string[];
   decimals: number;
   /** Atomic balance available for the whole run, for an early total check. */
   balanceAtomic: string | null;
@@ -45,7 +46,12 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-function idempotencyKey(runId: string, recipient: string, amountAtomic: string, mint: string): string {
+function idempotencyKey(
+  runId: string,
+  recipient: string,
+  amountAtomic: string,
+  mint: string,
+): string {
   return `${runId}:${recipient}:${mint}:${amountAtomic}`;
 }
 
@@ -60,7 +66,9 @@ function tokenCellMatchesRun(cell: string, token: PayrollTokenContext): boolean 
   const normalized = cell.trim();
   if (normalized.length === 0) return true;
   if (normalized === token.mint) return true;
-  return normalized.toUpperCase() === token.symbol.toUpperCase();
+  const upper = normalized.toUpperCase();
+  if (upper === token.symbol.toUpperCase()) return true;
+  return token.aliases?.some((alias) => alias.toUpperCase() === upper) === true;
 }
 
 /**
@@ -174,12 +182,12 @@ export async function validatePayrollRows(
     } else if (recipient === params.senderAddress) {
       invalid('Self-payment is not allowed in payroll.');
     } else if (!tokenCellMatchesRun(tokenRaw, token)) {
-      invalid(
-        `Row token "${tokenRaw.trim()}" does not match the payroll token ${token.symbol}.`,
-      );
+      invalid(`Row token "${tokenRaw.trim()}" does not match the payroll token ${token.symbol}.`);
     } else if (amountRaw.trim().length === 0) {
       invalid('Missing amount.');
-    } else if (fractionDigitCount(sanitizeDecimalInput(amountRaw, token.decimals + 2)) > token.decimals) {
+    } else if (
+      fractionDigitCount(sanitizeDecimalInput(amountRaw, token.decimals + 2)) > token.decimals
+    ) {
       // Reject over-precise amounts instead of silently truncating. We
       // sanitize with extra fraction headroom first so a value like
       // `1.1234567` is preserved long enough to be detected as too precise

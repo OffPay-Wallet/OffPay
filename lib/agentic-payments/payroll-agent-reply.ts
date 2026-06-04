@@ -14,6 +14,7 @@ export type PayrollAgentReplyEvent =
   | {
       kind: 'staged';
       recipientCount: number;
+      blockedCount: number;
       network: OffpayNetwork;
       routePolicy: PayrollRoutePolicy;
       requiresUmbraSetup: boolean;
@@ -67,6 +68,12 @@ export function fallbackPayrollAgentReply(event: PayrollAgentReplyEvent): string
   }
 
   if (event.kind === 'staged') {
+    if (event.recipientCount === 0 && event.blockedCount > 0) {
+      return `I parsed the payroll, but all ${event.blockedCount} row${
+        event.blockedCount === 1 ? '' : 's'
+      } need review before they can be sent.`;
+    }
+
     return `I prepared a payroll batch for ${event.recipientCount} recipient${
       event.recipientCount === 1 ? '' : 's'
     }. Review and confirm it below.`;
@@ -107,6 +114,7 @@ function serializeSafePayrollEvent(event: PayrollAgentReplyEvent): string {
     return JSON.stringify({
       kind: event.kind,
       recipientCount: event.recipientCount,
+      blockedCount: event.blockedCount,
       network: event.network,
       routePolicy: event.routePolicy,
       requiresUmbraSetup: event.requiresUmbraSetup,

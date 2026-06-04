@@ -34,6 +34,8 @@ export type AgentSafeContext = {
     privateSend: boolean;
     swap?: boolean;
     umbra?: boolean;
+    umbraVaultBalance?: boolean;
+    magicblockPrivateBalance?: boolean;
     privateBalance?: boolean;
   };
   supportedActions?: string[];
@@ -96,6 +98,8 @@ export type AiIntentContext = {
     privateSend: boolean;
     swap?: boolean;
     umbra?: boolean;
+    umbraVaultBalance?: boolean;
+    magicblockPrivateBalance?: boolean;
     privateBalance?: boolean;
   };
   tokenSymbols?: string[];

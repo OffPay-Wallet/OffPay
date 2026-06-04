@@ -49,6 +49,16 @@ describe('payroll route readiness', () => {
     expect(evaluateMagicBlockReadiness(facts).blockedReasons).toContain('wallet_cannot_sign');
   });
 
+  it('does not mark routes invalid just because the payroll total exceeds balance', () => {
+    const facts = readyFacts({ hasTokenBalanceForRun: false });
+    expect(evaluateUmbraReadiness(facts, registeredRecipient).blockedReasons).not.toContain(
+      'insufficient_balance',
+    );
+    expect(evaluateMagicBlockReadiness(facts).blockedReasons).not.toContain(
+      'insufficient_balance',
+    );
+  });
+
   it('disables Umbra when the native prover is missing but keeps MagicBlock', () => {
     const facts = readyFacts({ umbraNativeProverAvailable: false });
     expect(evaluateUmbraReadiness(facts, registeredRecipient).ready).toBe(false);

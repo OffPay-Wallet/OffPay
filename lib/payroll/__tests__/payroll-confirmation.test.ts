@@ -63,9 +63,22 @@ describe('buildPayrollConfirmationSummary', () => {
     expect(summary.recipientCount).toBe(2);
     expect(summary.totalAtomic).toBe('3500000');
     expect(summary.totalDisplay).toBe('3.5');
+    expect(summary.totalLabel).toBe('3.5 USDC');
     expect(summary.invalidCount).toBe(1);
     expect(summary.skippedCount).toBe(1);
     expect(summary.claimRequiredCount).toBe(2);
+  });
+
+  it('renders mixed-token totals without collapsing atomic units', () => {
+    const usdtRow = makeRow('b', 'ready', '2000000');
+    usdtRow.tokenMint = 'mint-2';
+    usdtRow.tokenSymbol = 'USDT';
+
+    const summary = buildSummary([makeRow('a', 'ready', '1000000'), usdtRow]);
+
+    expect(summary.isMixedTokenRun).toBe(true);
+    expect(summary.totalLabel).toBe('1 USDC + 2 USDT');
+    expect(summary.tokenBreakdown).toHaveLength(2);
   });
 
   it('requires typed confirmation at or above the threshold', () => {
@@ -152,6 +165,19 @@ describe('resolvePayrollStartGate', () => {
       blockedAcknowledged: false,
       busy: false,
     });
+    expect(gate.canStart).toBe(false);
+  });
+
+  it('blocks start for insufficient balance without changing row validity', () => {
+    const summary = buildSummary([makeRow('a', 'ready')], { hasSufficientBalanceForRun: false });
+    const gate = resolvePayrollStartGate({
+      summary,
+      typedConfirmationOk: true,
+      blockedAcknowledged: false,
+      busy: false,
+    });
+    expect(summary.recipientCount).toBe(1);
+    expect(summary.invalidCount).toBe(0);
     expect(gate.canStart).toBe(false);
   });
 

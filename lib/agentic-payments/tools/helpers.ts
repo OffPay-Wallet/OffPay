@@ -228,7 +228,29 @@ export function readCappedInteger(params: {
 }
 
 export function isExplicitUmbraReadRequest(userText: string): boolean {
-  return /\b(umbra|claim|claims|private\s+p2p|encrypted\s+balance|shielded\s+balance|vault)\b/i.test(
-    userText,
+  const text = userText.trim();
+  return (
+    /\bumbra\b/i.test(text) ||
+    /\b(private|encrypted|shielded|stealth)\s+balances?\b/i.test(text) ||
+    /\b(vault|vaults)\b/i.test(text)
+  );
+}
+
+export function isExplicitUmbraClaimScanRequest(userText: string): boolean {
+  const text = userText.trim();
+  return (
+    (/\bumbra\b/i.test(text) && /\b(claim|claims)\b/i.test(text)) ||
+    /\b(pending\s+claims?|claim\s+scan|scan\s+claims?|check\s+claims?)\b/i.test(text)
+  );
+}
+
+export function isExplicitMagicBlockPrivateBalanceRequest(userText: string): boolean {
+  const text = userText.trim();
+  const hasMagicBlock = /\b(magic\s*block|magicblock)\b/i.test(text);
+  const asksBalance = /\b(balance|balances|funds|holdings)\b/i.test(text);
+  return (
+    (hasMagicBlock && asksBalance) ||
+    /\bprivate[-\s]*payment\s+balances?\b/i.test(text) ||
+    /\bpayment\s+rail\s+balances?\b/i.test(text)
   );
 }

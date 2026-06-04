@@ -29,10 +29,14 @@ import { pickPayrollFile } from '@/lib/payroll/payroll-file-intake';
 import { probeRecipientRegistration } from '@/lib/payroll/payroll-recipient-registration';
 import { umbraBlockedOnlyBySenderSetup } from '@/lib/payroll/payroll-route-readiness';
 import {
+  buildPayrollTokenContexts,
+  resolveKnownPayrollTokenContext,
   resolvePayrollTokenContext,
+  resolvePayrollTokenContextByIdentifier,
   walletCanSignPayroll,
 } from '@/lib/payroll/payroll-wallet-eligibility';
 import { stagePayroll } from '@/lib/payroll/payroll-staging';
+import { inferPayrollTokenIdentifier } from '@/lib/payroll/payroll-token-inference';
 import { isAbortError } from '@/lib/perf/abort';
 import { usePayrollStore } from '@/store/payrollStore';
 
@@ -95,9 +99,23 @@ export interface UsePayrollChatIntakeResult {
 
 function restoreRouteBlockedRows(rows: readonly PayrollRow[]): PayrollRow[] {
   return rows.map((row) =>
-    row.status === 'invalid' && row.validationError === PAYROLL_ROUTE_UNAVAILABLE_MESSAGE
+    row.status === 'invalid' && isRouteBlockValidationError(row.validationError)
       ? { ...row, status: 'ready', validationError: null, route: null }
       : row,
+  );
+}
+
+function isRouteBlockValidationError(message: string | null): boolean {
+  if (message == null) return false;
+  if (message === PAYROLL_ROUTE_UNAVAILABLE_MESSAGE) return true;
+  return !(
+    message === 'Recipient is not a valid Solana wallet address.' ||
+    message === 'Self-payment is not allowed in payroll.' ||
+    message === 'Missing amount.' ||
+    message === 'Amount must be greater than zero.' ||
+    message === 'Duplicate recipient — remove or merge this row.' ||
+    message.startsWith('Row token "') ||
+    message.startsWith('Amount has more than ')
   );
 }
 
@@ -108,9 +126,12 @@ function resolveTokenContextForRun(
   if (run.tokenMint == null || run.tokenSymbol == null || run.tokenDecimals == null) return null;
   const token = balance?.tokens.find((entry) => entry.mint === run.tokenMint && !entry.spam);
   if (token == null) return null;
+  const umbraToken = getUmbraTokenByMint(run.network, run.tokenMint);
   return {
     mint: run.tokenMint,
     symbol: run.tokenSymbol,
+    aliases:
+      umbraToken == null ? [] : [...new Set([umbraToken.symbol, ...(umbraToken.aliases ?? [])])],
     decimals: run.tokenDecimals,
     balanceAtomic: decimalInputToAtomicAmount(token.balance ?? '0', run.tokenDecimals),
   };
@@ -120,11 +141,75 @@ function readyRowsFitBalance(rows: readonly PayrollRow[], token: PayrollTokenCon
   if (token.balanceAtomic == null || !/^\d+$/.test(token.balanceAtomic)) return false;
   let total = 0n;
   for (const row of rows) {
-    if (row.status === 'ready' && /^\d+$/.test(row.amountAtomic)) {
+    if (row.status === 'ready' && row.tokenMint === token.mint && /^\d+$/.test(row.amountAtomic)) {
       total += BigInt(row.amountAtomic);
     }
   }
   return total <= BigInt(token.balanceAtomic);
+}
+
+function readyRowsFitBalances(
+  rows: readonly PayrollRow[],
+  tokensByMint: ReadonlyMap<string, PayrollTokenContext>,
+): boolean {
+  const totalsByMint = new Map<string, bigint>();
+  for (const row of rows) {
+    if (row.status !== 'ready' || !/^\d+$/.test(row.amountAtomic)) continue;
+    totalsByMint.set(
+      row.tokenMint,
+      (totalsByMint.get(row.tokenMint) ?? 0n) + BigInt(row.amountAtomic),
+    );
+  }
+
+  for (const [mint, total] of totalsByMint) {
+    const token = tokensByMint.get(mint);
+    if (token?.balanceAtomic == null || !/^\d+$/.test(token.balanceAtomic)) return false;
+    if (total > BigInt(token.balanceAtomic)) return false;
+  }
+  return true;
+}
+
+function fallbackTokenContextFromRow(row: PayrollRow): PayrollTokenContext {
+  return {
+    mint: row.tokenMint,
+    symbol: row.tokenSymbol,
+    aliases: [],
+    decimals: row.tokenDecimals,
+    balanceAtomic: null,
+  };
+}
+
+async function resolvePayrollTokenForInput(params: {
+  balance: WalletBalanceResponse | null | undefined;
+  network: OffpayNetwork | null;
+  preferredSymbol: string;
+  fileName: string;
+  mimeType: string | null;
+  text: string;
+  mappingOverride?: PayrollColumnMapping;
+}): Promise<PayrollTokenContext | null> {
+  const inferredIdentifier = await inferPayrollTokenIdentifier({
+    fileName: params.fileName,
+    mimeType: params.mimeType,
+    text: params.text,
+    mappingOverride: params.mappingOverride,
+  });
+
+  if (inferredIdentifier != null) {
+    const inferredToken =
+      resolvePayrollTokenContextByIdentifier(params.balance, inferredIdentifier, params.network) ??
+      resolveKnownPayrollTokenContext(inferredIdentifier, params.network);
+    if (inferredToken != null) return inferredToken;
+  }
+
+  const preferredToken =
+    resolvePayrollTokenContext(params.balance, params.preferredSymbol) ??
+    resolvePayrollTokenContextByIdentifier(params.balance, params.preferredSymbol, params.network) ??
+    resolveKnownPayrollTokenContext(params.preferredSymbol, params.network);
+  if (preferredToken != null) return preferredToken;
+
+  const availableTokens = buildPayrollTokenContexts(params.balance);
+  return availableTokens.length === 1 ? availableTokens[0] : null;
 }
 
 export function usePayrollChatIntake(
@@ -164,8 +249,18 @@ export function usePayrollChatIntake(
   }, [scopeKey]);
 
   const routeRows = useCallback(
-    async (run: PayrollRun, rows: readonly PayrollRow[], token: PayrollTokenContext) => {
+    async (run: PayrollRun, rows: readonly PayrollRow[], defaultToken?: PayrollTokenContext) => {
       const rowsForRouting = restoreRouteBlockedRows(rows);
+      const tokenContextsByMint = new Map<string, PayrollTokenContext>();
+      for (const token of buildPayrollTokenContexts(params.balance)) {
+        tokenContextsByMint.set(token.mint, token);
+      }
+      if (defaultToken != null) tokenContextsByMint.set(defaultToken.mint, defaultToken);
+      for (const row of rowsForRouting) {
+        if (!tokenContextsByMint.has(row.tokenMint)) {
+          tokenContextsByMint.set(row.tokenMint, fallbackTokenContextFromRow(row));
+        }
+      }
 
       // Determine Umbra eligibility before paying for network probes. When
       // Umbra can't be used at all (no prover, capability off, unsupported
@@ -175,51 +270,28 @@ export function usePayrollChatIntake(
         isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution') &&
         isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p') &&
         isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.rpcBroadcast');
-      const umbraTokenSupported = getUmbraTokenByMint(run.network, token.mint) != null;
-      const umbraEligible =
-        run.routePolicy !== 'magicblock_only' &&
-        umbraProverAvailable &&
-        umbraCapabilityAvailable &&
-        umbraTokenSupported;
-
-      // Gather REAL run-level readiness: sender mixer registration, vault
-      // fee account readiness, and SOL fee buffer (replaces placeholders).
-      const runReadiness = await gatherPayrollRunReadiness({
-        walletAddress: run.walletAddress,
-        walletId,
-        network: run.network,
-        mint: token.mint,
-        solLamports: params.balance?.solBalance ?? 0,
-        umbraEligible,
-      });
-
-      const facts = buildPayrollRouteFacts({
-        network: run.network,
-        mint: token.mint,
-        capabilities: params.capabilities ?? null,
-        walletCanSign: walletCanSignPayroll(params.importMethod),
-        online: params.canUseNetwork,
-        rpcReady: params.canUseNetwork,
-        hasTokenBalanceForRun: readyRowsFitBalance(rowsForRouting, token),
-        hasFeeSol: runReadiness.hasFeeSol,
-        umbraNativeProverAvailable: umbraProverAvailable,
-        umbraVaultFeeReady: runReadiness.umbraVaultFeeReady,
-        umbraSenderMixerRegistered: runReadiness.umbraSenderMixerRegistered,
-      });
 
       // Probe REAL per-recipient Umbra registration (batched, capped,
-      // cached) so `private_auto` can actually choose Umbra. Skipped when
-      // Umbra is ineligible — every recipient then routes via MagicBlock.
+      // cached) so `private_auto` can actually choose Umbra. Skipped when no
+      // selected token can use Umbra — every recipient then routes via
+      // MagicBlock or becomes route-blocked for that token.
       const recipientFactsByAddress: Record<string, PayrollRecipientFacts> = {};
-      const sendableRecipients = rowsForRouting
-        .filter((row) => row.status === 'ready')
-        .map((row) => row.recipient);
+      const readyRows = rowsForRouting.filter((row) => row.status === 'ready');
+      const anyUmbraEligibleToken = readyRows.some((row) => {
+        const token = tokenContextsByMint.get(row.tokenMint) ?? fallbackTokenContextFromRow(row);
+        return (
+          run.routePolicy !== 'magicblock_only' &&
+          umbraProverAvailable &&
+          umbraCapabilityAvailable &&
+          getUmbraTokenByMint(run.network, token.mint) != null
+        );
+      });
 
       let registeredByAddress: Record<string, boolean> = {};
       let unprobedRecipientCount = 0;
-      if (umbraEligible) {
+      if (anyUmbraEligibleToken) {
         const probe = await probeRecipientRegistration({
-          recipients: sendableRecipients,
+          recipients: readyRows.map((row) => row.recipient),
           network: run.network,
           signerWalletAddress: run.walletAddress,
           walletId,
@@ -238,41 +310,96 @@ export function usePayrollChatIntake(
         };
       }
 
-      const assignment = assignPayrollRoutes({
-        rows: rowsForRouting,
-        policy: run.routePolicy,
-        facts,
-        mint: token.mint,
-        recipientFactsByAddress,
-      });
-      const routedRows = applyRouteAssignment(rowsForRouting, assignment, recipientFactsByAddress);
+      const assignment = {
+        rows: [] as ReturnType<typeof assignPayrollRoutes>['rows'],
+        split: { umbra: 0, magicblock: 0, blocked: 0, claimRequired: 0 },
+        mintWouldChangeOnFallback: false,
+      };
+      let requiresUmbraSetup = false;
 
-      // Mainnet preflight: detect when Umbra would be usable for at least
-      // one recipient IF the sender completed one-time mixer setup. This is
-      // computed independently of the assignment so an unregistered sender
-      // does NOT silently fall back to MagicBlock under `private_auto` — we
-      // surface the setup step first. Only applies when sender setup is the
-      // SOLE blocker (prover/vault/token/recipient all pass).
-      const requiresUmbraSetup =
-        run.network === 'mainnet' &&
-        umbraEligible &&
-        !runReadiness.umbraSenderMixerRegistered &&
-        rowsForRouting.some(
-          (row) =>
-            row.status === 'ready' &&
+      const readyRowsByMint = new Map<string, PayrollRow[]>();
+      for (const row of readyRows) {
+        const list = readyRowsByMint.get(row.tokenMint) ?? [];
+        list.push(row);
+        readyRowsByMint.set(row.tokenMint, list);
+      }
+
+      for (const [mint, tokenRows] of readyRowsByMint) {
+        const firstRow = tokenRows[0];
+        if (firstRow == null) continue;
+        const token = tokenContextsByMint.get(mint) ?? fallbackTokenContextFromRow(firstRow);
+        const umbraEligible =
+          run.routePolicy !== 'magicblock_only' &&
+          umbraProverAvailable &&
+          umbraCapabilityAvailable &&
+          getUmbraTokenByMint(run.network, token.mint) != null;
+
+        // Gather REAL run-level readiness per selected mint: sender mixer
+        // registration, vault fee readiness, and SOL fee buffer.
+        const runReadiness = await gatherPayrollRunReadiness({
+          walletAddress: run.walletAddress,
+          walletId,
+          network: run.network,
+          mint: token.mint,
+          solLamports: params.balance?.solBalance ?? 0,
+          umbraEligible,
+        });
+
+        const facts = buildPayrollRouteFacts({
+          network: run.network,
+          mint: token.mint,
+          capabilities: params.capabilities ?? null,
+          walletCanSign: walletCanSignPayroll(params.importMethod),
+          online: params.canUseNetwork,
+          rpcReady: params.canUseNetwork,
+          hasTokenBalanceForRun: readyRowsFitBalance(tokenRows, token),
+          hasFeeSol: runReadiness.hasFeeSol,
+          umbraNativeProverAvailable: umbraProverAvailable,
+          umbraVaultFeeReady: runReadiness.umbraVaultFeeReady,
+          umbraSenderMixerRegistered: runReadiness.umbraSenderMixerRegistered,
+        });
+
+        const tokenAssignment = assignPayrollRoutes({
+          rows: tokenRows,
+          policy: run.routePolicy,
+          facts,
+          mint: token.mint,
+          recipientFactsByAddress,
+        });
+        assignment.rows.push(...tokenAssignment.rows);
+        assignment.split.umbra += tokenAssignment.split.umbra;
+        assignment.split.magicblock += tokenAssignment.split.magicblock;
+        assignment.split.blocked += tokenAssignment.split.blocked;
+        assignment.split.claimRequired += tokenAssignment.split.claimRequired;
+        assignment.mintWouldChangeOnFallback ||= tokenAssignment.mintWouldChangeOnFallback;
+
+        requiresUmbraSetup ||=
+          run.network === 'mainnet' &&
+          umbraEligible &&
+          !runReadiness.umbraSenderMixerRegistered &&
+          tokenRows.some((row) =>
             umbraBlockedOnlyBySenderSetup(facts, recipientFactsByAddress[row.recipient]),
-        );
+          );
+      }
+
+      const routedRows = applyRouteAssignment(rowsForRouting, assignment, recipientFactsByAddress);
+      const hasSufficientBalanceForRun = readyRowsFitBalances(routedRows, tokenContextsByMint);
+      const summaryToken =
+        defaultToken ??
+        (run.tokenMint != null ? tokenContextsByMint.get(run.tokenMint) : undefined) ??
+        tokenContextsByMint.get(readyRows[0]?.tokenMint ?? '');
 
       const summary = buildPayrollConfirmationSummary({
         walletAddress: run.walletAddress,
         network: run.network,
-        tokenSymbol: token.symbol,
-        tokenMint: token.mint,
-        tokenDecimals: token.decimals,
+        tokenSymbol: summaryToken?.symbol ?? run.tokenSymbol ?? '',
+        tokenMint: summaryToken?.mint ?? run.tokenMint ?? '',
+        tokenDecimals: summaryToken?.decimals ?? run.tokenDecimals ?? 6,
         rows: routedRows,
         routePolicy: run.routePolicy,
         split: assignment.split,
         requiresUmbraSetup,
+        hasSufficientBalanceForRun,
         unprobedRecipientCount,
       });
 
@@ -295,9 +422,17 @@ export function usePayrollChatIntake(
         return { status: 'error', message };
       }
 
-      const token = resolvePayrollTokenContext(params.balance, tokenSymbol);
+      const token = await resolvePayrollTokenForInput({
+        balance: params.balance,
+        network: params.network,
+        preferredSymbol: tokenSymbol,
+        fileName,
+        mimeType,
+        text,
+        mappingOverride,
+      });
       if (token == null) {
-        const message = `No ${tokenSymbol} balance found in the active wallet.`;
+        const message = 'No supported payroll token balance found in the active wallet.';
         setError(message);
         return { status: 'error', message };
       }
@@ -336,11 +471,9 @@ export function usePayrollChatIntake(
 
         setMappingRequest(null);
         const routed = await routeRows(staged.run, staged.rows, token);
-        if (routed.summary.recipientCount === 0) {
+        if (staged.summary.validCount === 0) {
           const message =
-            staged.summary.validCount > 0
-              ? 'No payable payroll rows are ready. Check the pasted rows, token, network, or route support and try again.'
-              : 'No valid payroll rows found. Check the recipient and amount columns and try again.';
+            'No valid payroll rows found. Check the recipient and amount columns and try again.';
           setError(message);
           return { status: 'blocked', message };
         }
@@ -415,14 +548,10 @@ export function usePayrollChatIntake(
     const run = getRun(activeRunId);
     if (run == null) return;
     const token = resolveTokenContextForRun(params.balance, run);
-    if (token == null) {
-      setError('Payroll token balance is no longer available. Refresh the wallet and try again.');
-      return;
-    }
 
     setBusy(true);
     try {
-      const routed = await routeRows(run, getRows(activeRunId), token);
+      const routed = await routeRows(run, getRows(activeRunId), token ?? undefined);
       replaceRows(activeRunId, routed.rows);
       setRunRoutesDirty(activeRunId, false);
       setSummary(routed.summary);
@@ -446,15 +575,11 @@ export function usePayrollChatIntake(
       }
 
       const token = resolveTokenContextForRun(params.balance, run);
-      if (token == null) {
-        setError('Payroll token balance is no longer available. Refresh the wallet and try again.');
-        return;
-      }
 
       setBusy(true);
       try {
         const nextRun: PayrollRun = { ...run, routePolicy: policy, routesDirty: false };
-        const routed = await routeRows(nextRun, getRows(activeRunId), token);
+        const routed = await routeRows(nextRun, getRows(activeRunId), token ?? undefined);
         setRunPolicy(activeRunId, policy);
         replaceRows(activeRunId, routed.rows);
         setRunRoutesDirty(activeRunId, false);

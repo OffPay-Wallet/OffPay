@@ -15,7 +15,18 @@ const EXTENSION_FORMATS: Record<string, PayrollFileFormat> = {
   json: 'json',
 };
 
-const REJECTED_EXTENSIONS = new Set(['xlsx', 'xls', 'pdf', 'docx', 'doc', 'numbers', 'png', 'jpg', 'jpeg', 'heic']);
+const REJECTED_EXTENSIONS = new Set([
+  'xlsx',
+  'xls',
+  'pdf',
+  'docx',
+  'doc',
+  'numbers',
+  'png',
+  'jpg',
+  'jpeg',
+  'heic',
+]);
 
 export const PAYROLL_EXPORT_GUIDANCE =
   'This file type is not supported. Export it as CSV or TSV and upload again.';
@@ -54,7 +65,9 @@ export function resolvePayrollFormat(
   const mime = mimeType?.toLowerCase() ?? '';
   if (mime.includes('json')) return { ok: true, format: 'json' };
   if (mime.includes('tab-separated')) return { ok: true, format: 'tsv' };
-  if (mime.includes('csv')) return { ok: true, format: 'csv' };
+  if (mime.includes('csv') || mime.includes('comma-separated') || mime.includes('vnd.ms-excel')) {
+    return { ok: true, format: 'csv' };
+  }
   if (mime.includes('text/plain')) return { ok: true, format: 'txt' };
 
   return { ok: false, message: PAYROLL_EXPORT_GUIDANCE };
