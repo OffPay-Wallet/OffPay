@@ -1,7 +1,6 @@
 import React, { memo, useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
@@ -38,7 +37,7 @@ interface UmbraReceiveCardProps {
     accessibilityLabel: string;
     /**
      * When the setup is already complete the card swaps the action
-     * button for an inline "Active" pill with a green check.
+     * button for an inline "Active" pill.
      */
     completed?: boolean;
   };
@@ -105,108 +104,106 @@ const SetupSection = memo(function SetupSection({
   completed,
 }: SetupSectionProps): React.JSX.Element {
   return (
-    <Animated.View layout={LinearTransition.duration(200)}>
-      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
-        <Text
-          variant="bodyBold"
-          color={colors.text.primary}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.82}
-          maxFontSizeMultiplier={1.1}
-          style={styles.cardHeading}
-        >
-          {title}
-        </Text>
-        <View style={styles.setupRow}>
-          {/* Left column — STATUS box. */}
-          <View style={styles.setupCell}>
-            <View style={styles.setupStatusChip}>
+    <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
+      <Text
+        variant="bodyBold"
+        color={colors.text.primary}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        maxFontSizeMultiplier={1.1}
+        style={styles.cardHeading}
+      >
+        {title}
+      </Text>
+      <View style={styles.setupRow}>
+        {/* Left column — STATUS box. */}
+        <View style={styles.setupCell}>
+          <View style={styles.setupStatusChip}>
+            <Text
+              variant="caption"
+              color={colors.text.inverse}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+              maxFontSizeMultiplier={1.1}
+              style={styles.setupStatusChipText}
+            >
+              STATUS
+            </Text>
+          </View>
+        </View>
+
+        {/* Vertical divider between the two columns. */}
+        <View style={styles.setupDivider} />
+
+        {/* Right column — Active pill or Set up action. */}
+        <View style={[styles.setupCell, styles.setupCellEnd]}>
+          {completed ? (
+            <View style={styles.setupActiveBadge}>
               <Text
-                variant="caption"
-                color={colors.text.inverse}
+                variant="bodyBold"
+                color={colors.text.onAccent}
                 numberOfLines={1}
                 adjustsFontSizeToFit
-                minimumFontScale={0.85}
+                minimumFontScale={0.78}
                 maxFontSizeMultiplier={1.1}
-                style={styles.setupStatusChipText}
+                style={styles.setupActiveText}
               >
-                STATUS
+                Active
               </Text>
+              <View style={styles.setupActiveIconWrap}>
+                <Ionicons name="checkmark" size={14} color={colors.text.primary} />
+              </View>
             </View>
-          </View>
-
-          {/* Vertical divider between the two columns. */}
-          <View style={styles.setupDivider} />
-
-          {/* Right column — Active pill or Set up action. */}
-          <View style={[styles.setupCell, styles.setupCellEnd]}>
-            {completed ? (
-              <View style={styles.setupActiveBadge}>
+          ) : (
+            <Pressable
+              onPress={onPress}
+              disabled={disabled || loading}
+              accessibilityRole="button"
+              accessibilityLabel={accessibilityLabel}
+              accessibilityState={{ disabled, busy: loading }}
+              style={({ pressed }) => [
+                styles.setupActionButton,
+                disabled && !loading && styles.ctaButtonDisabled,
+                pressed && !(disabled || loading) ? styles.pressed : null,
+              ]}
+            >
+              {loading ? (
+                <View style={styles.ctaButtonContent}>
+                  <LazyLoadingSpinner size={18} color={colors.text.inverse} />
+                  {loadingLabel != null && loadingLabel.length > 0 ? (
+                    <Text
+                      variant="button"
+                      color={colors.text.inverse}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.78}
+                      maxFontSizeMultiplier={1.1}
+                      style={styles.setupActionText}
+                    >
+                      {loadingLabel}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : (
                 <Text
-                  variant="bodyBold"
-                  color={colors.text.onAccent}
+                  variant="button"
+                  color={colors.text.inverse}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.78}
                   maxFontSizeMultiplier={1.1}
-                  style={styles.setupActiveText}
+                  style={styles.setupActionText}
                 >
-                  Active
+                  {buttonLabel}
                 </Text>
-                <View style={styles.setupActiveIconWrap}>
-                  <Ionicons name="checkmark" size={14} color={colors.text.primary} />
-                </View>
-              </View>
-            ) : (
-              <Pressable
-                onPress={onPress}
-                disabled={disabled || loading}
-                accessibilityRole="button"
-                accessibilityLabel={accessibilityLabel}
-                accessibilityState={{ disabled, busy: loading }}
-                style={({ pressed }) => [
-                  styles.setupActionButton,
-                  disabled && !loading && styles.ctaButtonDisabled,
-                  pressed && !(disabled || loading) ? styles.pressed : null,
-                ]}
-              >
-                {loading ? (
-                  <View style={styles.ctaButtonContent}>
-                    <LazyLoadingSpinner size={18} color={colors.text.inverse} />
-                    {loadingLabel != null && loadingLabel.length > 0 ? (
-                      <Text
-                        variant="button"
-                        color={colors.text.inverse}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.78}
-                        maxFontSizeMultiplier={1.1}
-                        style={styles.setupActionText}
-                      >
-                        {loadingLabel}
-                      </Text>
-                    ) : null}
-                  </View>
-                ) : (
-                  <Text
-                    variant="button"
-                    color={colors.text.inverse}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                    maxFontSizeMultiplier={1.1}
-                    style={styles.setupActionText}
-                  >
-                    {buttonLabel}
-                  </Text>
-                )}
-              </Pressable>
-            )}
-          </View>
+              )}
+            </Pressable>
+          )}
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
 });
 
@@ -322,153 +319,151 @@ const ClaimSection = memo(function ClaimSection({
   const hiddenClaimCount = Math.max(0, pendingCount - visibleClaims.length);
 
   return (
-    <Animated.View layout={LinearTransition.duration(200)}>
-      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
-        <View style={styles.claimHeaderRow}>
-          {/* Left — PENDING chip with count when active. */}
-          <View style={styles.setupStatusChip}>
+    <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
+      <View style={styles.claimHeaderRow}>
+        {/* Left — PENDING chip with count when active. */}
+        <View style={styles.setupStatusChip}>
+          <Text
+            variant="caption"
+            color={colors.text.inverse}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.85}
+            maxFontSizeMultiplier={1.1}
+            style={styles.setupStatusChipText}
+          >
+            {hasPending ? `PENDING · ${pendingCount}` : 'PENDING'}
+          </Text>
+        </View>
+
+        {/* Right — View all link is always visible so the user can
+              inspect history (or the empty-state explainer) regardless
+              of whether anything is pending right now. */}
+        {onViewAllPress != null ? (
+          <Pressable
+            onPress={onViewAllPress}
+            accessibilityRole="button"
+            accessibilityLabel="View all pending Umbra claims"
+            hitSlop={8}
+            style={({ pressed }) => [styles.claimViewAllPressable, pressed && styles.pressed]}
+          >
+            <Text
+              variant="captionBold"
+              color={colors.text.primary}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.1}
+              style={styles.claimViewAllText}
+            >
+              View all
+            </Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.text.primary} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {hasPending ? (
+        <Text
+          variant="small"
+          color={colors.text.secondary}
+          numberOfLines={2}
+          maxFontSizeMultiplier={1}
+          align="center"
+          style={styles.descriptionText}
+        >
+          Ready to settle into your encrypted balance.
+        </Text>
+      ) : (
+        <Text
+          variant="bodyBold"
+          color={colors.text.primary}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.1}
+          align="center"
+          style={styles.claimEmptyTitle}
+        >
+          No pending claims
+        </Text>
+      )}
+
+      {hasPending && visibleClaims.length > 0 ? (
+        <View style={styles.claimPreviewList}>
+          {visibleClaims.map((utxo) => (
+            <ClaimPreviewRow key={utxo.id} utxo={utxo} />
+          ))}
+          {hiddenClaimCount > 0 ? (
             <Text
               variant="caption"
+              color={colors.text.tertiary}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1}
+              align="center"
+              style={styles.claimPreviewMoreText}
+            >
+              +{hiddenClaimCount} more in all claims
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {status != null && status.length > 0 ? (
+        <Text
+          variant="small"
+          color={statusColor}
+          numberOfLines={2}
+          maxFontSizeMultiplier={1}
+          align="center"
+          style={styles.descriptionText}
+        >
+          {status}
+        </Text>
+      ) : null}
+
+      <View style={styles.claimButtonWrap}>
+        <Pressable
+          onPress={onPress}
+          disabled={claimDisabled || loading}
+          accessibilityRole="button"
+          accessibilityLabel={accessibilityLabel}
+          accessibilityState={{ disabled: claimDisabled || loading, busy: loading }}
+          style={({ pressed }) => [
+            styles.claimActionButton,
+            claimDisabled && !loading && styles.ctaButtonDisabled,
+            pressed && !(claimDisabled || loading) ? styles.pressed : null,
+          ]}
+        >
+          {loading ? (
+            <View style={styles.ctaButtonContent}>
+              <LazyLoadingSpinner size={18} color={colors.text.inverse} />
+              {loadingLabel != null && loadingLabel.length > 0 ? (
+                <Text
+                  variant="button"
+                  color={colors.text.inverse}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.78}
+                  maxFontSizeMultiplier={1.1}
+                  style={styles.setupActionText}
+                >
+                  {loadingLabel}
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <Text
+              variant="button"
               color={colors.text.inverse}
               numberOfLines={1}
               adjustsFontSizeToFit
-              minimumFontScale={0.85}
+              minimumFontScale={0.78}
               maxFontSizeMultiplier={1.1}
-              style={styles.setupStatusChipText}
+              style={styles.setupActionText}
             >
-              {hasPending ? `PENDING · ${pendingCount}` : 'PENDING'}
+              {buttonLabel}
             </Text>
-          </View>
-
-          {/* Right — View all link is always visible so the user can
-              inspect history (or the empty-state explainer) regardless
-              of whether anything is pending right now. */}
-          {onViewAllPress != null ? (
-            <Pressable
-              onPress={onViewAllPress}
-              accessibilityRole="button"
-              accessibilityLabel="View all pending Umbra claims"
-              hitSlop={8}
-              style={({ pressed }) => [styles.claimViewAllPressable, pressed && styles.pressed]}
-            >
-              <Text
-                variant="captionBold"
-                color={colors.text.primary}
-                numberOfLines={1}
-                maxFontSizeMultiplier={1.1}
-                style={styles.claimViewAllText}
-              >
-                View all
-              </Text>
-              <Ionicons name="chevron-forward" size={14} color={colors.text.primary} />
-            </Pressable>
-          ) : null}
-        </View>
-
-        {hasPending ? (
-          <Text
-            variant="small"
-            color={colors.text.secondary}
-            numberOfLines={2}
-            maxFontSizeMultiplier={1}
-            align="center"
-            style={styles.descriptionText}
-          >
-            Ready to settle into your encrypted balance.
-          </Text>
-        ) : (
-          <Text
-            variant="bodyBold"
-            color={colors.text.primary}
-            numberOfLines={1}
-            maxFontSizeMultiplier={1.1}
-            align="center"
-            style={styles.claimEmptyTitle}
-          >
-            No pending claims
-          </Text>
-        )}
-
-        {hasPending && visibleClaims.length > 0 ? (
-          <View style={styles.claimPreviewList}>
-            {visibleClaims.map((utxo) => (
-              <ClaimPreviewRow key={utxo.id} utxo={utxo} />
-            ))}
-            {hiddenClaimCount > 0 ? (
-              <Text
-                variant="caption"
-                color={colors.text.tertiary}
-                numberOfLines={1}
-                maxFontSizeMultiplier={1}
-                align="center"
-                style={styles.claimPreviewMoreText}
-              >
-                +{hiddenClaimCount} more in all claims
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-
-        {status != null && status.length > 0 ? (
-          <Text
-            variant="small"
-            color={statusColor}
-            numberOfLines={2}
-            maxFontSizeMultiplier={1}
-            align="center"
-            style={styles.descriptionText}
-          >
-            {status}
-          </Text>
-        ) : null}
-
-        <View style={styles.claimButtonWrap}>
-          <Pressable
-            onPress={onPress}
-            disabled={claimDisabled || loading}
-            accessibilityRole="button"
-            accessibilityLabel={accessibilityLabel}
-            accessibilityState={{ disabled: claimDisabled || loading, busy: loading }}
-            style={({ pressed }) => [
-              styles.claimActionButton,
-              claimDisabled && !loading && styles.ctaButtonDisabled,
-              pressed && !(claimDisabled || loading) ? styles.pressed : null,
-            ]}
-          >
-            {loading ? (
-              <View style={styles.ctaButtonContent}>
-                <LazyLoadingSpinner size={18} color={colors.text.inverse} />
-                {loadingLabel != null && loadingLabel.length > 0 ? (
-                  <Text
-                    variant="button"
-                    color={colors.text.inverse}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                    maxFontSizeMultiplier={1.1}
-                    style={styles.setupActionText}
-                  >
-                    {loadingLabel}
-                  </Text>
-                ) : null}
-              </View>
-            ) : (
-              <Text
-                variant="button"
-                color={colors.text.inverse}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.78}
-                maxFontSizeMultiplier={1.1}
-                style={styles.setupActionText}
-              >
-                {buttonLabel}
-              </Text>
-            )}
-          </Pressable>
-        </View>
+          )}
+        </Pressable>
       </View>
-    </Animated.View>
+    </View>
   );
 });
 
@@ -483,76 +478,68 @@ export const UmbraReceiveCard = memo(function UmbraReceiveCard({
   revealKey,
 }: UmbraReceiveCardProps): React.JSX.Element {
   return (
-    <Animated.View
-      entering={FadeIn.duration(220)}
-      exiting={FadeOut.duration(160)}
-      layout={LinearTransition.duration(200)}
-    >
-      <View style={styles.container}>
-        {/* Unavailable */}
-        {unavailableMessage != null ? (
-          <Animated.View entering={FadeIn.duration(180)}>
-            <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
-              <Text
-                variant="caption"
-                color={colors.text.tertiary}
-                numberOfLines={1}
-                maxFontSizeMultiplier={1}
-                style={styles.eyebrow}
-              >
-                UNAVAILABLE
-              </Text>
-              <Text
-                variant="small"
-                color={colors.text.secondary}
-                numberOfLines={4}
-                maxFontSizeMultiplier={1}
-                style={styles.descriptionText}
-              >
-                {unavailableMessage}
-              </Text>
-            </View>
-          </Animated.View>
-        ) : null}
+    <View style={styles.container}>
+      {/* Unavailable */}
+      {unavailableMessage != null ? (
+        <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
+          <Text
+            variant="caption"
+            color={colors.text.tertiary}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1}
+            style={styles.eyebrow}
+          >
+            UNAVAILABLE
+          </Text>
+          <Text
+            variant="small"
+            color={colors.text.secondary}
+            numberOfLines={4}
+            maxFontSizeMultiplier={1}
+            style={styles.descriptionText}
+          >
+            {unavailableMessage}
+          </Text>
+        </View>
+      ) : null}
 
-        {/* Setup */}
-        {unavailableMessage == null && setupPanel != null ? (
-          <StaggerRevealItem index={0} trigger={revealKey}>
-            <SetupSection
-              title={setupPanel.title}
-              buttonLabel={setupPanel.buttonLabel}
-              loadingLabel={setupPanel.loadingLabel}
-              onPress={setupPanel.onPress}
-              disabled={setupPanel.disabled}
-              loading={setupPanel.loading}
-              accessibilityLabel={setupPanel.accessibilityLabel}
-              completed={setupPanel.completed === true}
-            />
-          </StaggerRevealItem>
-        ) : null}
+      {/* Setup */}
+      {unavailableMessage == null && setupPanel != null ? (
+        <StaggerRevealItem index={0} trigger={revealKey}>
+          <SetupSection
+            title={setupPanel.title}
+            buttonLabel={setupPanel.buttonLabel}
+            loadingLabel={setupPanel.loadingLabel}
+            onPress={setupPanel.onPress}
+            disabled={setupPanel.disabled}
+            loading={setupPanel.loading}
+            accessibilityLabel={setupPanel.accessibilityLabel}
+            completed={setupPanel.completed === true}
+          />
+        </StaggerRevealItem>
+      ) : null}
 
-        {/* Claim */}
-        {unavailableMessage == null && pendingClaimPanel != null ? (
-          <StaggerRevealItem index={1} trigger={revealKey}>
-            <ClaimSection
-              status={pendingClaimPanel.status}
-              statusTone={pendingClaimPanel.statusTone}
-              buttonLabel={pendingClaimPanel.buttonLabel}
-              loadingLabel={pendingClaimPanel.loadingLabel}
-              onPress={pendingClaimPanel.onPress}
-              onViewAllPress={pendingClaimPanel.onViewAllPress}
-              disabled={pendingClaimPanel.disabled}
-              loading={pendingClaimPanel.loading}
-              allowEmptyAction={pendingClaimPanel.allowEmptyAction}
-              accessibilityLabel={pendingClaimPanel.accessibilityLabel}
-              pendingCount={pendingClaimPanel.pendingCount}
-              pendingClaims={pendingClaimPanel.pendingClaims}
-              previewLimit={pendingClaimPanel.previewLimit}
-            />
-          </StaggerRevealItem>
-        ) : null}
-      </View>
-    </Animated.View>
+      {/* Claim */}
+      {unavailableMessage == null && pendingClaimPanel != null ? (
+        <StaggerRevealItem index={1} trigger={revealKey}>
+          <ClaimSection
+            status={pendingClaimPanel.status}
+            statusTone={pendingClaimPanel.statusTone}
+            buttonLabel={pendingClaimPanel.buttonLabel}
+            loadingLabel={pendingClaimPanel.loadingLabel}
+            onPress={pendingClaimPanel.onPress}
+            onViewAllPress={pendingClaimPanel.onViewAllPress}
+            disabled={pendingClaimPanel.disabled}
+            loading={pendingClaimPanel.loading}
+            allowEmptyAction={pendingClaimPanel.allowEmptyAction}
+            accessibilityLabel={pendingClaimPanel.accessibilityLabel}
+            pendingCount={pendingClaimPanel.pendingCount}
+            pendingClaims={pendingClaimPanel.pendingClaims}
+            previewLimit={pendingClaimPanel.previewLimit}
+          />
+        </StaggerRevealItem>
+      ) : null}
+    </View>
   );
 });
 
@@ -695,9 +682,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.semantic.success,
     flexShrink: 1,
     maxWidth: '100%',
-    // Faint green accent — small ambient halo, no bloom.
-    boxShadow:
-      '0 0 6px rgba(22, 138, 100, 0.35), 0 6px 14px rgba(22, 138, 100, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.28)',
+    boxShadow: [
+      '0 0 6px rgba(247, 247, 242, 0.16)',
+      '0 6px 14px rgba(0, 0, 0, 0.24)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.28)',
+    ].join(', '),
   },
   setupActiveText: {
     fontFamily: fontFamily.semiBold,

@@ -97,7 +97,9 @@ const RouteCard = memo(function RouteCard({
       <Animated.View pointerEvents="none" style={[styles.routeCardFill, fillStyle]} />
       <Text
         variant="bodyBold"
-        color={disabled ? colors.text.tertiary : colors.text.primary}
+        color={
+          disabled ? colors.text.tertiary : selected ? colors.text.onAccent : colors.text.primary
+        }
         align="center"
         numberOfLines={1}
         adjustsFontSizeToFit
@@ -109,7 +111,13 @@ const RouteCard = memo(function RouteCard({
       </Text>
       <Text
         variant="small"
-        color={disabled ? colors.text.tertiary : colors.text.secondary}
+        color={
+          disabled
+            ? colors.text.tertiary
+            : selected
+              ? colors.brand.deepShadow
+              : colors.text.secondary
+        }
         align="center"
         numberOfLines={1}
         maxFontSizeMultiplier={1}
@@ -127,7 +135,7 @@ const styles = StyleSheet.create({
   },
   routeGrid: {
     flexDirection: 'row',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   routeGridStacked: {
     flexDirection: 'column',
@@ -141,24 +149,27 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.frostFill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: [
+      '0 10px 22px rgba(0, 0, 0, 0.32)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.13)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.24)',
+    ].join(', '),
   },
   routeCardStacked: {
     minHeight: 48,
   },
   routeCardFill: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.glass.smokeWash,
+    backgroundColor: colors.brand.glossAccent,
     borderRadius: radii.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border.accent,
+    borderWidth: 0,
   },
   routeCardDisabled: {
     opacity: 0.62,

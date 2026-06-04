@@ -72,6 +72,7 @@ import {
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { presentWalletTransactionEventNotification } from '@/lib/notifications/local-notifications';
 import { loadOfflinePaymentSlotSnapshot } from '@/lib/offline/offline-payment-slots';
 import { parseRecipientInput, type RecipientCandidate } from '@/lib/identity/recipient-parser';
 import { resolveSnsName } from '@/lib/identity/sns';
@@ -1075,6 +1076,14 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     });
   }, [sendResult, showToast]);
 
+  const handleResend = useCallback(() => {
+    Keyboard.dismiss();
+    setSendResult(null);
+    setSendProcessResult(null);
+    setResultTransitionDirection('backward');
+    transitionToStep('amount', 'backward');
+  }, [transitionToStep]);
+
   const getCurrentModeLabel = useCallback(
     (token: StablecoinOption | null): string => {
       if (effectiveWalletMode === 'offline') return 'Offline P2P';
@@ -1424,6 +1433,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
               recipient: walletAddress,
             });
           }
+          void presentWalletTransactionEventNotification({
+            identifier: `wallet-transaction-${network}-${result.txId}`,
+            type: 'send',
+            amountLabel: `-${displayAmount} ${result.tokenSymbol}`,
+            signature: result.txId,
+          });
           if (effectiveRecipientAddress === walletAddress) {
             const nextResult: SendResultView = {
               status: 'queued',
@@ -1556,6 +1571,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             recipient: effectiveRecipientAddress,
             network,
           };
+          void presentWalletTransactionEventNotification({
+            identifier: `wallet-transaction-${network}-${result.signature}`,
+            type: 'send',
+            amountLabel: `-${displayAmount} ${selectedToken.symbol}`,
+            signature: result.signature,
+          });
           setSendResult(nextResult);
           setResultTransitionDirection('forward');
           setSendProcessResult(
@@ -1643,6 +1664,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
 
         if (!mountedRef.current) return;
         const id = result.status === 'submitted' ? result.signature : result.txId;
+        void presentWalletTransactionEventNotification({
+          identifier: `wallet-transaction-${network}-${id}`,
+          type: 'send',
+          amountLabel: `-${displayAmount} ${selectedToken.symbol}`,
+          signature: id,
+        });
         addPrivateReceipt({
           id,
           status: result.status,
@@ -1948,13 +1975,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         onCancel={() => transitionToStep('amount', 'backward')}
         onConfirm={handleSubmit}
         onResultAction={sendResult != null ? () => void handleTransactionAction() : undefined}
-        resultActionLabel={
-          sendResult == null
-            ? undefined
-            : sendResult.status === 'queued'
-              ? 'Copy offline id'
-              : 'View transaction'
-        }
+        onResend={handleResend}
         onDone={closeToHome}
       />
     </View>

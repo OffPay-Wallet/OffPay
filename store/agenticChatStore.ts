@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { mmkvStorage } from '@/lib/cache/mmkv-storage';
+import { usePayrollStore } from '@/store/payrollStore';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
 import type { OffpayNetwork } from '@/types/offpay-api';
@@ -133,7 +134,7 @@ interface AgenticChatState {
   activeConversationIdByScope: Record<string, string | null>;
   createConversation: (scope: AgenticChatScope, title?: string) => string;
   setActiveConversation: (scope: AgenticChatScope, conversationId: string | null) => void;
-  deleteConversation: (id: string) => void;
+  deleteConversation: (id: string) => string[];
   addMessage: (message: AgenticChatMessage) => void;
   updateMessage: (id: string, patch: Partial<Omit<AgenticChatMessage, 'id'>>) => void;
   upsertAction: (action: AgenticChatAction) => void;
@@ -247,7 +248,8 @@ export const useAgenticChatStore = create<AgenticChatState>()(
             [getAgenticConversationScopeKey(scope)]: conversationId,
           },
         })),
-      deleteConversation: (id) =>
+      deleteConversation: (id) => {
+        const deletedPayrollRunIds = new Set<string>();
         set((state) => {
           const conversation = state.conversations.find((item) => item.id === id);
           const nextActiveByScope = { ...state.activeConversationIdByScope };
@@ -266,6 +268,13 @@ export const useAgenticChatStore = create<AgenticChatState>()(
               .filter((actionId): actionId is string => typeof actionId === 'string'),
           );
 
+          for (const action of state.actions) {
+            if (action.kind !== 'payroll') continue;
+            if (action.conversationId === id || removedActionIds.has(action.id)) {
+              deletedPayrollRunIds.add(action.runId);
+            }
+          }
+
           return {
             conversations: state.conversations.filter((item) => item.id !== id),
             messages: state.messages.filter((message) => message.conversationId !== id),
@@ -274,7 +283,14 @@ export const useAgenticChatStore = create<AgenticChatState>()(
             ),
             activeConversationIdByScope: nextActiveByScope,
           };
-        }),
+        });
+
+        for (const runId of deletedPayrollRunIds) {
+          usePayrollStore.getState().deleteRun(runId);
+        }
+
+        return [...deletedPayrollRunIds];
+      },
       addMessage: (message) =>
         set((state) => ({
           messages: [message, ...state.messages.filter((item) => item.id !== message.id)].slice(

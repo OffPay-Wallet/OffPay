@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PuffyChatIcon } from '@/components/ui/icons/PuffyChatIcon';
 import { PuffyHistoryIcon } from '@/components/ui/icons/PuffyHistoryIcon';
 import { PuffyHomeIcon } from '@/components/ui/icons/PuffyHomeIcon';
+import { PuffyRwaIcon } from '@/components/ui/icons/PuffyRwaIcon';
 import { PuffySettingsIcon } from '@/components/ui/icons/PuffySettingsIcon';
 import { PuffyShoppingIcon } from '@/components/ui/icons/PuffyShoppingIcon';
 import { Text } from '@/components/ui/Text';
@@ -131,6 +132,7 @@ const TAB_LABELS: Record<string, string> = {
   history: 'History',
   settings: 'Settings',
   chat: 'Chat',
+  rwas: 'RWAs',
   shopping: 'Shopping',
 };
 
@@ -148,6 +150,13 @@ interface QuickAction {
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
+  {
+    id: 'rwas',
+    label: 'RWAs',
+    routeName: 'rwas',
+    Icon: PuffyRwaIcon,
+    tint: colors.brand.deepShadow,
+  },
   {
     id: 'shopping',
     label: 'Shop',
@@ -198,7 +207,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     (entry) => entry.originalIndex === visualActiveOriginalIndex,
   );
   // Active route lives in the bar's primary set when this is true.
-  // Routes like `chat` / `shopping` (reachable via the FAB stack) are
+  // Routes like `chat` / `shopping` / `rwas` (reachable via the FAB stack) are
   // not in the primary set, so the slider pill should fade away and
   // every primary tab should render in its inactive style.
   const hasPrimaryActiveRoute = visualActivePrimaryIndex >= 0;
@@ -345,7 +354,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       return;
     }
 
-    // When the active route isn't a primary tab (chat / shopping),
+    // When the active route isn't a primary tab (chat / shopping / rwas),
     // fade the pill out so Home doesn't appear highlighted by default.
     sliderOpacity.value = withTiming(hasPrimaryActiveRoute ? 1 : 0, {
       duration: 160,
@@ -506,7 +515,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         </View>
       </Animated.View>
 
-      {/* Quick-action stack — labelled rows ("Shopping", "Chat") that
+      {/* Quick-action stack — labelled rows ("RWAs", "Shopping", "Chat") that
           fade in/out together with the FAB toggle. */}
       <Animated.View
         pointerEvents={fabExpanded ? 'auto' : 'none'}

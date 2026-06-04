@@ -67,6 +67,7 @@ import {
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { presentWalletTransactionEventNotification } from '@/lib/notifications/local-notifications';
 import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
@@ -823,8 +824,7 @@ export function SwapScreen(): React.JSX.Element {
   const quoteNow = Date.now();
   const quoteExpiresInMs = quoteQuery.data == null ? null : quoteQuery.data.expiresAt - quoteNow;
   const quoteExpired = quoteExpiresInMs != null && quoteExpiresInMs <= 0;
-  const reviewQuoteExpiresInMs =
-    reviewSwap == null ? null : reviewSwap.quote.expiresAt - quoteNow;
+  const reviewQuoteExpiresInMs = reviewSwap == null ? null : reviewSwap.quote.expiresAt - quoteNow;
   const reviewQuoteExpired = reviewQuoteExpiresInMs != null && reviewQuoteExpiresInMs <= 0;
 
   const buildReviewDetailRows = useCallback(
@@ -1000,6 +1000,15 @@ export function SwapScreen(): React.JSX.Element {
 
       const sentAmount = formatAtomicAmount(quote.inAmount, payToken.decimals ?? 6, 6);
       const receivedAmount = formatAtomicAmount(quote.outAmount, receiveToken.decimals ?? 6, 6);
+      if (network != null) {
+        void presentWalletTransactionEventNotification({
+          identifier: `wallet-transaction-${network}-${result.signature}`,
+          type: 'swap',
+          amountLabel: `+${receivedAmount} ${receiveToken.symbol}`,
+          secondaryAmountLabel: `-${sentAmount} ${payToken.symbol}`,
+          signature: result.signature,
+        });
+      }
       const resultScreen = buildSwapProcessResult({
         variant: 'success',
         title: 'Swap complete',
@@ -1096,6 +1105,15 @@ export function SwapScreen(): React.JSX.Element {
         review.receiveDecimals != null
           ? formatAtomicAmount(result.settledAmount, review.receiveDecimals, 6)
           : result.settledAmount;
+      if (network != null) {
+        void presentWalletTransactionEventNotification({
+          identifier: `wallet-transaction-${network}-${result.settlementSignature}`,
+          type: 'swap',
+          amountLabel: `+${receivedAmount} ${review.receiveLeg.symbol}`,
+          secondaryAmountLabel: `-${review.payLeg.amount} ${review.payLeg.symbol}`,
+          signature: result.settlementSignature,
+        });
+      }
       const resultScreen = buildPrivateSwapProcessResult({
         review,
         variant: 'success',

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { useAppToast } from '@/components/ui/AppToast';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
-import { presentIncomingTransferNotification } from '@/lib/notifications/local-notifications';
+import { presentWalletTransactionEventNotification } from '@/lib/notifications/local-notifications';
 import { startOfflineBleReceiver } from '@/lib/offline/offline-ble-transport';
 import { enqueueReceivedOfflineSignedPayment } from '@/lib/offline/offline-payments';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
@@ -46,7 +46,10 @@ export function useOfflineBleReceiver(options?: { enabled?: boolean }): void {
         handledTxIdsRef.current.add(payload.txId);
 
         try {
-          if (payload.recipientTokenAccount == null || payload.recipientTokenAccount.trim().length === 0) {
+          if (
+            payload.recipientTokenAccount == null ||
+            payload.recipientTokenAccount.trim().length === 0
+          ) {
             throw new Error('Received offline payment is missing the recipient token account.');
           }
 
@@ -96,10 +99,11 @@ export function useOfflineBleReceiver(options?: { enabled?: boolean }): void {
             variant: 'success',
             notificationId: `offline-received-${network}-${verification.txId}`,
           });
-          void presentIncomingTransferNotification({
+          void presentWalletTransactionEventNotification({
             identifier: `offline-received-${network}-${verification.txId}`,
-            title: 'Payment received',
-            body: `${payload.amount} ${payload.tokenSymbol} received offline.`,
+            type: 'receive',
+            amountLabel: `+${payload.amount} ${payload.tokenSymbol}`,
+            signature: verification.txId,
           });
           useSettlementEngineStore.getState().requestRun();
         } catch (error) {

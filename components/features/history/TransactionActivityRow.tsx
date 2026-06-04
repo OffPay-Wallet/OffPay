@@ -33,7 +33,7 @@ export interface ActivityTransactionRowData {
 }
 
 const AMOUNT_COLORS: Record<OffpayDisplayTone, string> = {
-  positive: colors.semantic.success,
+  positive: colors.semantic.receive,
   negative: colors.semantic.error,
   neutral: colors.text.secondary,
   failed: colors.semantic.error,

@@ -73,6 +73,7 @@ const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_ROUTE_MINT = 'native-sol';
 const RECEIVE_CONTENT_MAX_WIDTH = 430;
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 384;
+const UMBRA_INLINE_AUTO_SCAN_PAGE_LIMIT = 96;
 const UMBRA_AUTO_SCAN_DELAY_MS = 1400;
 const UMBRA_AUTO_SCAN_TIMEOUT_MS = 5000;
 const UMBRA_MIXER_REGISTRATION_RECHECK_MS = 6 * 60 * 60 * 1000;
@@ -163,8 +164,6 @@ function isNativeSolRequest(mint: string | null, token: string | null): boolean 
 }
 
 export function ReceiveTokenFlow(): React.JSX.Element {
-  useOfflineBleReceiver();
-
   const router = useRouter();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
@@ -202,6 +201,8 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const [infoOpen, setInfoOpen] = useState(false);
   const [receiveRoute, setReceiveRoute] = useState<PrivatePaymentRoute>('normal');
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('standard');
+  const [closingReceiveMode, setClosingReceiveMode] = useState<ReceiveMode | null>(null);
+  useOfflineBleReceiver({ enabled: receiveMode === 'standard' });
   const [claimingUmbra, setClaimingUmbra] = useState(false);
   const [claimResult, setClaimResult] = useState<UmbraExecutionResult | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
@@ -212,6 +213,8 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const [hasCheckedUmbraClaims, setHasCheckedUmbraClaims] = useState(false);
   const scanningUmbraClaimsRef = useRef(false);
   const scanAbortControllerRef = useRef<AbortController | null>(null);
+  const closingReceiveRef = useRef(false);
+  const closeFrameRef = useRef<number | null>(null);
   const pendingClaimToastRef = useRef<string | null>(null);
   const pendingClaimAutoScanKeyRef = useRef<string | null>(null);
   const umbraCacheInvalidator = useUmbraCacheInvalidator();
@@ -468,8 +471,10 @@ export function ReceiveTokenFlow(): React.JSX.Element {
 
   const [renderedReceiveMode, setRenderedReceiveMode] = useState<ReceiveMode>('standard');
   const modeContentOpacity = useSharedValue(1);
+  const closingPrivateReceive = closingReceiveMode === 'private';
   const isUmbraSurfaceVisible =
-    renderedReceiveMode === 'private' && (canShowUmbraReceiveRoute || pendingClaimCount > 0);
+    (renderedReceiveMode === 'private' || closingPrivateReceive) &&
+    (closingPrivateReceive || canShowUmbraReceiveRoute || pendingClaimCount > 0);
 
   // Crossfade the content area out on mode change. The fade-out runs
   // first; once it lands we commit the new mode, then snap the
@@ -497,13 +502,50 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   }));
 
   const handleClose = useCallback(() => {
-    if (router.canGoBack()) {
-      router.back();
+    const modeAtClose =
+      renderedReceiveMode === 'private' || receiveMode === 'private' ? 'private' : 'standard';
+    closingReceiveRef.current = true;
+    abortUmbraPendingClaimScan('Receive screen closing.');
+    pendingClaimAutoScanKeyRef.current = null;
+    scanningUmbraClaimsRef.current = false;
+
+    if (closeFrameRef.current != null) {
+      cancelAnimationFrame(closeFrameRef.current);
+      closeFrameRef.current = null;
+    }
+
+    const navigateAway = (): void => {
+      if (router.canGoBack()) {
+        router.back();
+        return;
+      }
+
+      router.navigate('/(tabs)' as never);
+    };
+
+    if (modeAtClose === 'private' && renderedReceiveMode !== 'private') {
+      setClosingReceiveMode('private');
+      closeFrameRef.current = requestAnimationFrame(() => {
+        closeFrameRef.current = null;
+        navigateAway();
+      });
       return;
     }
 
-    router.navigate('/(tabs)' as never);
-  }, [router]);
+    navigateAway();
+  }, [abortUmbraPendingClaimScan, receiveMode, renderedReceiveMode, router]);
+
+  useEffect(
+    () => () => {
+      closingReceiveRef.current = true;
+      abortUmbraPendingClaimScan('Receive screen unmounted.');
+      if (closeFrameRef.current != null) {
+        cancelAnimationFrame(closeFrameRef.current);
+        closeFrameRef.current = null;
+      }
+    },
+    [abortUmbraPendingClaimScan],
+  );
 
   const handleViewAllPendingClaims = useCallback(() => {
     router.push('/umbra-pending-claims' as never);
@@ -561,8 +603,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   }, [abortUmbraPendingClaimScan, receiveMode]);
 
   const scanUmbraPendingClaims = useCallback(
-    (options?: { silent?: boolean }) => {
+    (options?: { pageLimit?: number; silent?: boolean }) => {
       const silent = options?.silent === true;
+      if (closingReceiveRef.current) return;
       if (walletAddress == null || walletId == null || network == null || !canScanUmbraClaims) {
         setPendingClaimResult(null);
         return;
@@ -608,6 +651,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           network,
           walletAddress,
         );
+        const pageLimit = options?.pageLimit ?? UMBRA_CLAIM_SCAN_PAGE_LIMIT;
         const result = await scanUmbraPrivateP2PClaims({
           walletAddress,
           walletId,
@@ -615,19 +659,19 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           scanMode: 'recent',
           excludedInsertionIndices: latestClaimedUmbraIndexSet,
           signal,
-          pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+          pageLimit,
         });
-        if (signal.aborted) return;
+        if (signal.aborted || closingReceiveRef.current) return;
         const count = result.pendingClaimCount ?? 0;
         setPendingClaimResult(count > 0 ? result : null);
         setHasCheckedUmbraClaims(true);
         measure('receive.umbraClaims.scan', startedAt, {
           network,
           pendingCount: count,
-          pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+          pageLimit,
         });
         if (count > 0) {
-          if (canUseUmbraClaim) {
+          if (canUseUmbraClaim && !closingReceiveRef.current) {
             setReceiveRoute('umbra');
             // Auto-flip the segmented divider to the private surface
             // when a pending claim appears so the Claim button is the
@@ -646,6 +690,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         }
       })()
         .catch((error) => {
+          if (signal.aborted || closingReceiveRef.current) return;
           if (error instanceof Error && error.name === 'AbortError') return;
           setPendingClaimResult(null);
           setHasCheckedUmbraClaims(true);
@@ -656,7 +701,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
             scanAbortControllerRef.current = null;
           }
           scanningUmbraClaimsRef.current = false;
-          if (!screenSignal.aborted && !silent) {
+          if (!screenSignal.aborted && !closingReceiveRef.current && !silent) {
             setScanningUmbraClaims(false);
           }
         });
@@ -706,7 +751,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     const scheduled = scheduleUiWorkAfterFirstPaint(
       async () => {
         await yieldToUi();
-        scanLatestRef.current();
+        scanLatestRef.current({ pageLimit: UMBRA_INLINE_AUTO_SCAN_PAGE_LIMIT, silent: true });
       },
       { fallbackDelayMs: UMBRA_AUTO_SCAN_DELAY_MS, timeoutMs: UMBRA_AUTO_SCAN_TIMEOUT_MS },
     );

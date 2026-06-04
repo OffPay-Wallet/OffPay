@@ -26,6 +26,7 @@ export const TAB_ROUTE_HREFS = {
   index: '/(tabs)',
   chat: '/(tabs)/chat',
   history: '/(tabs)/history',
+  rwas: '/(tabs)/rwas',
   scanner: '/(tabs)/scanner',
   settings: '/(tabs)/settings',
   shopping: '/(tabs)/shopping',

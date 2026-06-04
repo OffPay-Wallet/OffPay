@@ -12,7 +12,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { UmbraVaultActionPanel } from '@/components/features/umbra-vault/umbra-vault-action-panel';
@@ -1155,7 +1154,7 @@ function UmbraVaultContentBody({
       ]}
     >
       {showHeader ? (
-        <Animated.View entering={FadeIn.duration(320)} style={styles.header}>
+        <View style={styles.header}>
           <Pressable
             style={styles.headerIconBtn}
             accessibilityRole="button"
@@ -1183,7 +1182,7 @@ function UmbraVaultContentBody({
               color={colors.brand.glossAccent}
             />
           </View>
-        </Animated.View>
+        </View>
       ) : null}
 
       <UmbraVaultPortfolioCard

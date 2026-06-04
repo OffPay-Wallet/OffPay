@@ -27,6 +27,7 @@ import {
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { presentWalletTransactionEventNotification } from '@/lib/notifications/local-notifications';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
@@ -205,6 +206,14 @@ export function useAgenticConfirmSend({
         });
 
         const id = result.status === 'submitted' ? result.signature : result.txId;
+        if (id != null) {
+          void presentWalletTransactionEventNotification({
+            identifier: `wallet-transaction-${validation.draft.network}-${id}`,
+            type: 'send',
+            amountLabel: `-${validation.draft.amount} ${validation.draft.tokenSymbol}`,
+            signature: id,
+          });
+        }
         const message =
           action.route === 'normal'
             ? 'Yuga normal payment submitted'
@@ -568,6 +577,15 @@ async function confirmSwapAction(params: {
       signedTransaction,
       network: action.network,
     });
+    const outputAmount = formatAtomicAmount(quote.outAmount, action.outputDecimals);
+
+    void presentWalletTransactionEventNotification({
+      identifier: `wallet-transaction-${action.network}-${result.signature}`,
+      type: 'swap',
+      amountLabel: `+${outputAmount} ${action.outputSymbol}`,
+      secondaryAmountLabel: `-${action.inputAmount} ${action.inputSymbol}`,
+      signature: result.signature,
+    });
 
     await invalidateAfterTransfer({
       queryClient,
@@ -583,7 +601,7 @@ async function confirmSwapAction(params: {
       quoteId: quote.quoteId,
       unsignedTransaction: quote.unsignedTransaction,
       outputRawAmount: quote.outAmount,
-      outputAmount: formatAtomicAmount(quote.outAmount, action.outputDecimals),
+      outputAmount,
       expiresAt: quote.expiresAt,
       priceImpactPct: quote.priceImpactPct,
       fee: quote.fee,

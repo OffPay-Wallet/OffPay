@@ -7,7 +7,6 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { buildWalletHistoryGroups } from '@/lib/api/offpay-wallet-data';
 import { TransactionCard } from './TransactionCard';
 
@@ -35,6 +34,7 @@ interface HistoryListProps {
   transactionsQuery: UseOffpayWalletTransactionsResult;
   localReceipts?: readonly (OffpayLocalReceiptViewInput | OfflinePaymentReceipt)[];
   includeUnmatchedLocalReceipts?: boolean;
+  tokenLogos: TokenLogoLookup;
   onTransactionPress?: (transaction: OffpayHistoryTransactionView) => void;
 }
 
@@ -124,11 +124,11 @@ export function HistoryList({
   transactionsQuery,
   localReceipts = [],
   includeUnmatchedLocalReceipts = true,
+  tokenLogos,
   onTransactionPress,
 }: HistoryListProps): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
-  const tokenLogos = useOffpayTokenLogoMap();
   const sections = useMemo(() => {
     return buildWalletHistoryGroups({
       transactions: transactionsQuery.transactions,

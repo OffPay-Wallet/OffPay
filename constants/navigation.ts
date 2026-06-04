@@ -1,5 +1,7 @@
 import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
 
+import { colors } from '@/constants/colors';
+
 /**
  * App-wide native stack options.
  *
@@ -14,7 +16,7 @@ export const globalScreenOptions: NativeStackNavigationOptions = {
   gestureEnabled: true,
   animation: 'ios_from_right',
   animationTypeForReplace: 'push',
-  contentStyle: { backgroundColor: 'transparent' },
+  contentStyle: { backgroundColor: colors.backgroundGradient.base },
 };
 
 export const holdingsScreenOptions: NativeStackNavigationOptions = globalScreenOptions;

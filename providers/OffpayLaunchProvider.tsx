@@ -11,11 +11,12 @@ import { useOffpayWalletWarmStart } from '@/hooks/useOffpayWalletWarmStart';
 import { useSettlementEngine } from '@/hooks/useSettlementEngine';
 import { useAppToast } from '@/components/ui/AppToast';
 import {
-  prewarmIncomingTransferPermission,
-  presentIncomingTransferNotification,
+  prewarmWalletTransactionNotificationPermission,
+  presentWalletTransactionEventNotification,
 } from '@/lib/notifications/local-notifications';
 import { setOffpayNetworkAccessAllowed } from '@/lib/api/offpay-api-client';
 import {
+  isDisplayableWalletActivityEvent,
   mapWalletActivityEventForRecentActivity,
 } from '@/lib/api/offpay-wallet-data';
 import { getOfflineNonceReadiness } from '@/lib/offline/offline-payments';
@@ -46,7 +47,7 @@ function OffpayWalletLiveUpdates(): null {
   const { network } = useOffpayNetwork();
   const walletAddress = useWalletStore((state) => state.publicKey);
   const { showToast } = useAppToast();
-  const notifiedSignaturesRef = React.useRef(new Set<string>());
+  const handledSignaturesRef = React.useRef(new Set<string>());
 
   React.useEffect(() => {
     if (!__DEV__) return;
@@ -68,54 +69,62 @@ function OffpayWalletLiveUpdates(): null {
   ]);
 
   React.useEffect(() => {
-    notifiedSignaturesRef.current.clear();
+    handledSignaturesRef.current.clear();
   }, [network, walletAddress]);
 
   // The wallet activity stream already normalizes direction and
   // amount data before it lands here. Keep this provider narrow:
-  // surface toasts from the stream and let screen-level queries own
-  // full transaction history. Mounting a history query globally just
-  // to enrich toasts adds avoidable startup and invalidation work.
+  // surface mobile transaction notifications from the stream and let
+  // screen-level queries own full transaction history. Mounting a
+  // history query globally just to enrich transient alerts adds
+  // avoidable startup and invalidation work.
   React.useEffect(() => {
-    const activity = walletActivityStream.lastActivity;
     const network = walletActivityStream.network;
-    if (activity == null || network == null) return;
-    if (notifiedSignaturesRef.current.has(activity.signature)) return;
+    if (network == null) return;
 
-    const direction = activity.direction;
-    if (direction !== 'receive' && direction !== 'send') {
+    for (const activity of walletActivityStream.activityEvents) {
+      if (!isDisplayableWalletActivityEvent(activity)) continue;
+      if (handledSignaturesRef.current.has(activity.signature)) continue;
+
+      handledSignaturesRef.current.add(activity.signature);
+      const view = mapWalletActivityEventForRecentActivity(activity);
+
+      void presentWalletTransactionEventNotification({
+        identifier: `wallet-transaction-${network}-${view.id}`,
+        type: view.type,
+        amountLabel: view.amountLabel,
+        secondaryAmountLabel: view.secondaryAmountLabel,
+        signature: activity.signature,
+      });
+
+      if (view.type !== 'receive' && view.type !== 'send') {
+        if (__DEV__) {
+          console.log('[wallet-live-updates] mobile notification only', {
+            type: activity.type,
+            displayType: view.type,
+            signature: activity.signature,
+          });
+        }
+        continue;
+      }
+
+      const amount = view.amountLabel ?? view.secondaryAmountLabel;
+      const message = amount != null ? `${amount} ${view.subtitle}` : view.subtitle;
       if (__DEV__) {
-        console.log('[wallet-live-updates] activity without direction; skipping toast', {
+        console.log('[wallet-live-updates] WS toast', {
           type: activity.type,
+          direction: view.type,
           signature: activity.signature,
         });
       }
-      return;
-    }
-
-    notifiedSignaturesRef.current.add(activity.signature);
-    const view = mapWalletActivityEventForRecentActivity(activity);
-    const amount = view.amountLabel ?? view.secondaryAmountLabel;
-    const message = amount != null ? `${amount} ${view.subtitle}` : view.subtitle;
-    if (__DEV__) {
-      console.log('[wallet-live-updates] WS toast', {
-        type: activity.type,
-        direction,
-        signature: activity.signature,
+      showToast({
+        title: view.title,
+        message,
+        variant: view.amountTone === 'negative' ? 'info' : 'success',
+        persistToNotificationCenter: false,
       });
     }
-    showToast({
-      title: view.title,
-      message,
-      variant: view.amountTone === 'negative' ? 'info' : 'success',
-      notificationId: `wallet-incoming-${network}-${view.id}`,
-    });
-    void presentIncomingTransferNotification({
-      identifier: `wallet-incoming-${network}-${view.id}`,
-      title: view.title,
-      body: message,
-    });
-  }, [showToast, walletActivityStream.lastActivity, walletActivityStream.network]);
+  }, [showToast, walletActivityStream.activityEvents, walletActivityStream.network]);
 
   return null;
 }
@@ -160,7 +169,7 @@ export function OffpayLaunchProvider({
   // `expo-notifications` doesn't compete with the launch sequence.
   useEffect(() => {
     if (!firstPaintReady) return;
-    prewarmIncomingTransferPermission();
+    prewarmWalletTransactionNotificationPermission();
   }, [firstPaintReady]);
 
   useLaunchOrchestrator({ adapters: launchAdapters });

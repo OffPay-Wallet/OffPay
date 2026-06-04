@@ -15,6 +15,7 @@
  * — works without a GestureHandlerRootView, which this app does not
  * mount). Dismiss is locked while sending.
  */
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PanResponder, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import LottieView from 'lottie-react-native';
@@ -23,9 +24,11 @@ import Animated, {
   cancelAnimation,
   FadeIn,
   LinearTransition,
+  interpolate,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
@@ -69,9 +72,10 @@ interface SendSummarySheetProps {
   result: SendSummarySheetResult | null;
   onCancel: () => void;
   onConfirm: () => void;
-  /** Optional explorer / copy action shown on success. */
+  /** Opens Solscan for submitted payments, copies reference for queued ones. */
   onResultAction?: () => void;
-  resultActionLabel?: string;
+  /** Returns to the amount/route entry state with current inputs preserved. */
+  onResend: () => void;
   onDone: () => void;
 }
 
@@ -83,6 +87,34 @@ const PHASE_FADE_MS = 280;
 const DISMISS_DRAG_RATIO = 0.32;
 const CIRCLE_SIZE = 120;
 const RING_THICKNESS = 4;
+const SUCCESS_LOTTIE_META = successLottie as { fr?: number; ip?: number; op?: number };
+const SUCCESS_LOTTIE_DURATION_MS =
+  SUCCESS_LOTTIE_META.fr != null &&
+  SUCCESS_LOTTIE_META.fr > 0 &&
+  SUCCESS_LOTTIE_META.op != null &&
+  SUCCESS_LOTTIE_META.ip != null
+    ? Math.round(
+        ((SUCCESS_LOTTIE_META.op - SUCCESS_LOTTIE_META.ip) / SUCCESS_LOTTIE_META.fr) * 1000,
+      )
+    : 1400;
+const SUCCESS_CONFETTI_DELAY_MS = Math.max(520, SUCCESS_LOTTIE_DURATION_MS - 360);
+const SUCCESS_CONFETTI_VISIBLE_MS = 980;
+const SUCCESS_LOTTIE_GREEN_COLOR = '[0,0.788000009574,0.522000002394,1]';
+const SUCCESS_LOTTIE_WHITE_COLOR = '[1,1,1,1]';
+const whiteSuccessLottie = JSON.parse(
+  JSON.stringify(successLottie).replaceAll(SUCCESS_LOTTIE_GREEN_COLOR, SUCCESS_LOTTIE_WHITE_COLOR),
+) as typeof successLottie;
+
+const CONFETTI_PARTICLES = [
+  { x: -74, y: -64, rotate: -34, delay: 0, width: 5, height: 13, color: colors.brand.whiteStream },
+  { x: -46, y: -86, rotate: 24, delay: 40, width: 4, height: 10, color: colors.text.secondary },
+  { x: -18, y: -76, rotate: -18, delay: 80, width: 5, height: 5, color: colors.semantic.error },
+  { x: 20, y: -88, rotate: 38, delay: 20, width: 4, height: 12, color: colors.brand.whiteStream },
+  { x: 54, y: -72, rotate: -28, delay: 70, width: 5, height: 11, color: colors.text.secondary },
+  { x: 78, y: -46, rotate: 32, delay: 110, width: 5, height: 5, color: colors.brand.whiteStream },
+  { x: -82, y: -18, rotate: 18, delay: 130, width: 4, height: 10, color: colors.text.tertiary },
+  { x: 82, y: -12, rotate: -22, delay: 150, width: 4, height: 10, color: colors.semantic.error },
+] as const;
 
 export function SendSummarySheet({
   visible,
@@ -100,13 +132,14 @@ export function SendSummarySheet({
   onCancel,
   onConfirm,
   onResultAction,
-  resultActionLabel,
+  onResend,
   onDone,
 }: SendSummarySheetProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
   const [sheetHeight, setSheetHeight] = useState(0);
+  const [showSuccessConfetti, setShowSuccessConfetti] = useState(false);
 
   const progress = useSharedValue(0);
   const dragY = useSharedValue(0);
@@ -148,6 +181,26 @@ export function SendSummarySheet({
       cancelAnimation(ringSpin);
     };
   }, [phase, ringSpin]);
+
+  useEffect(() => {
+    if (phase !== 'success' || result?.status !== 'submitted') {
+      setShowSuccessConfetti(false);
+      return undefined;
+    }
+
+    setShowSuccessConfetti(false);
+    const showTimer = setTimeout(() => {
+      setShowSuccessConfetti(true);
+    }, SUCCESS_CONFETTI_DELAY_MS);
+    const hideTimer = setTimeout(() => {
+      setShowSuccessConfetti(false);
+    }, SUCCESS_CONFETTI_DELAY_MS + SUCCESS_CONFETTI_VISIBLE_MS);
+
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
+  }, [phase, result?.status]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -250,7 +303,19 @@ export function SendSummarySheet({
                   entering={FadeIn.duration(PHASE_FADE_MS)}
                   style={styles.statusInner}
                 >
-                  <LottieView source={successLottie} autoPlay loop={false} style={styles.lottie} />
+                  {showSuccessConfetti ? <SuccessConfetti /> : null}
+                  <LottieView
+                    source={whiteSuccessLottie}
+                    autoPlay
+                    loop={false}
+                    style={styles.lottie}
+                  />
+                  <Ionicons
+                    name="checkmark"
+                    size={42}
+                    color={colors.brand.deepShadow}
+                    style={styles.successCheckOverlay}
+                  />
                 </Animated.View>
               )}
             </View>
@@ -306,30 +371,42 @@ export function SendSummarySheet({
           </>
         ) : null}
 
-        {/* ── Detail rows: shown on review and on success (fade in) ── */}
-        {phase === 'review' || isSuccess ? (
-          <Animated.View
-            key={`details-${phase}`}
-            entering={isSuccess ? FadeIn.duration(PHASE_FADE_MS).delay(120) : undefined}
-            style={styles.detailCard}
-          >
+        {/* ── Detail rows: review keeps fee details; success stays minimal. ── */}
+        {phase === 'review' ? (
+          <Animated.View key="details-review" style={styles.detailCard}>
             <SummaryRow label="To" value={shortenWalletAddress(recipientAddress)} />
-            {isSuccess ? (
-              <SummaryRow label="Amount" value={`${result?.amount ?? amount} ${symbol}`} />
-            ) : null}
             <SummaryRow label="Network" value={network === 'devnet' ? 'Solana Devnet' : 'Solana'} />
-            {isSuccess ? (
-              <SummaryRow
-                label={queued ? 'Offline id' : 'Transaction'}
-                value={result != null ? shortenWalletAddress(result.id) : '—'}
-                last
-              />
-            ) : (
-              <>
-                <SummaryRow label="Mode" value={modeLabel} />
-                <SummaryRow label="Network fee" value={networkFeeLabel} last />
-              </>
-            )}
+            <SummaryRow label="Mode" value={modeLabel} />
+            <SummaryRow label="Network fee" value={networkFeeLabel} last />
+          </Animated.View>
+        ) : null}
+
+        {isSuccess ? (
+          <Animated.View
+            key="details-success"
+            entering={FadeIn.duration(PHASE_FADE_MS).delay(120)}
+            style={styles.successSummaryCard}
+          >
+            <View pointerEvents="none" style={styles.successSummaryGloss} />
+            <Text
+              variant="h2"
+              color={colors.text.primary}
+              align="center"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.68}
+              style={styles.successAmount}
+            >
+              {result?.amount ?? amount} {symbol}
+            </Text>
+            <SummaryRow label="To" value={shortenWalletAddress(recipientAddress)} />
+            <SummaryRow
+              label={queued ? 'Offline id' : 'Transaction'}
+              value={result != null ? shortenWalletAddress(result.id) : '—'}
+              onPress={result != null ? onResultAction : undefined}
+              actionIcon={queued ? 'copy-outline' : 'open-outline'}
+              last
+            />
           </Animated.View>
         ) : null}
 
@@ -358,20 +435,18 @@ export function SendSummarySheet({
 
         {isSuccess ? (
           <View style={styles.successActions}>
-            {onResultAction != null && resultActionLabel != null ? (
-              <Pressable
-                style={({ pressed }) => [styles.secondaryButton, pressed && styles.textPressed]}
-                onPress={onResultAction}
-                accessibilityRole="button"
-                accessibilityLabel={resultActionLabel}
-              >
-                <Text variant="button" color={colors.brand.actionFill}>
-                  {resultActionLabel}
-                </Text>
-              </Pressable>
-            ) : null}
             <Pressable
-              style={({ pressed }) => [styles.doneButton, pressed && styles.donePressed]}
+              style={({ pressed }) => [styles.resendButton, pressed && styles.actionPressed]}
+              onPress={onResend}
+              accessibilityRole="button"
+              accessibilityLabel="Send again with these details"
+            >
+              <Text variant="button" color={colors.text.primary}>
+                Resend
+              </Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.doneButton, pressed && styles.actionPressed]}
               onPress={onDone}
               accessibilityRole="button"
               accessibilityLabel="Done"
@@ -391,24 +466,104 @@ function SummaryRow({
   label,
   value,
   last,
+  onPress,
+  actionIcon,
 }: {
   label: string;
   value: string;
   last?: boolean;
+  onPress?: () => void;
+  actionIcon?: keyof typeof Ionicons.glyphMap;
 }): React.JSX.Element {
-  return (
-    <View style={[styles.summaryRow, last && styles.summaryRowLast]}>
+  const content = (
+    <>
       <Text variant="caption" color={colors.text.secondary} style={styles.summaryLabel}>
         {label}
       </Text>
-      <Text
-        variant="captionBold"
-        color={colors.text.primary}
-        numberOfLines={1}
-        style={styles.summaryValue}
+      <View style={styles.summaryValueWrap}>
+        <Text
+          variant="captionBold"
+          color={colors.text.primary}
+          numberOfLines={1}
+          style={styles.summaryValue}
+        >
+          {value}
+        </Text>
+        {actionIcon != null ? (
+          <Ionicons name={actionIcon} size={16} color={colors.text.primary} />
+        ) : null}
+      </View>
+    </>
+  );
+
+  if (onPress != null) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="link"
+        accessibilityLabel={`${label} ${value}`}
+        style={({ pressed }) => [
+          styles.summaryRow,
+          styles.summaryRowPressable,
+          last && styles.summaryRowLast,
+          pressed && styles.textPressed,
+        ]}
       >
-        {value}
-      </Text>
+        {content}
+      </Pressable>
+    );
+  }
+
+  return <View style={[styles.summaryRow, last && styles.summaryRowLast]}>{content}</View>;
+}
+
+function ConfettiParticle({
+  particle,
+}: {
+  particle: (typeof CONFETTI_PARTICLES)[number];
+}): React.JSX.Element {
+  const burst = useSharedValue(0);
+
+  useEffect(() => {
+    burst.value = 0;
+    burst.value = withDelay(
+      particle.delay,
+      withTiming(1, { duration: 680, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [burst, particle.delay]);
+
+  const particleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(burst.value, [0, 0.14, 0.78, 1], [0, 1, 1, 0]),
+    transform: [
+      { translateX: interpolate(burst.value, [0, 1], [0, particle.x]) },
+      { translateY: interpolate(burst.value, [0, 1], [0, particle.y]) },
+      { rotate: `${interpolate(burst.value, [0, 1], [0, particle.rotate])}deg` },
+      { scale: interpolate(burst.value, [0, 0.18, 1], [0.55, 1, 0.86]) },
+    ],
+  }));
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.confettiParticle,
+        {
+          width: particle.width,
+          height: particle.height,
+          backgroundColor: particle.color,
+        },
+        particleStyle,
+      ]}
+    />
+  );
+}
+
+function SuccessConfetti(): React.JSX.Element {
+  return (
+    <View pointerEvents="none" style={styles.confettiLayer}>
+      {CONFETTI_PARTICLES.map((particle, index) => (
+        <ConfettiParticle key={`${particle.x}-${particle.y}-${index}`} particle={particle} />
+      ))}
     </View>
   );
 }
@@ -424,7 +579,7 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(16, 16, 16, 0.42)',
+    backgroundColor: 'rgba(0, 0, 0, 0.56)',
   },
   sheet: {
     position: 'absolute',
@@ -436,11 +591,19 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radii['2xl'],
     borderTopRightRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.brand.whiteStream,
+    backgroundColor: colors.brand.graphiteDepth,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     gap: spacing.md,
-    boxShadow: '0 -8px 28px rgba(16, 16, 16, 0.18)',
+    borderTopWidth: 1,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    boxShadow: [
+      '0 -18px 42px rgba(0, 0, 0, 0.48)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.5)',
+    ].join(', '),
   },
   grabberZone: {
     alignItems: 'center',
@@ -451,7 +614,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 5,
     borderRadius: radii.full,
-    backgroundColor: colors.glass.depthShadow,
+    backgroundColor: colors.text.tertiary,
   },
   grabberHidden: {
     opacity: 0,
@@ -489,6 +652,19 @@ const styles = StyleSheet.create({
     width: CIRCLE_SIZE,
     height: CIRCLE_SIZE,
   },
+  successCheckOverlay: {
+    position: 'absolute',
+  },
+  confettiLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  confettiParticle: {
+    position: 'absolute',
+    borderRadius: 2,
+  },
   statusTitle: {
     fontFamily: fontFamily.semiBold,
     fontSize: 18,
@@ -506,7 +682,12 @@ const styles = StyleSheet.create({
   },
   warningBox: {
     borderRadius: radii.xl,
-    backgroundColor: colors.semantic.warning,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.brand.glassTint,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     alignItems: 'center',
@@ -520,10 +701,47 @@ const styles = StyleSheet.create({
   detailCard: {
     borderRadius: radii.xl,
     borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.glass.frostFill,
+    backgroundColor: colors.brand.glassTint,
     overflow: 'hidden',
+    boxShadow: ['0 10px 26px rgba(0, 0, 0, 0.3)', 'inset 0 1px 1px rgba(255, 255, 255, 0.1)'].join(
+      ', ',
+    ),
+  },
+  successSummaryCard: {
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.brand.glassTint,
+    overflow: 'hidden',
+    boxShadow: [
+      '0 18px 42px rgba(0, 0, 0, 0.46)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.32)',
+    ].join(', '),
+  },
+  successSummaryGloss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '46%',
+    backgroundColor: colors.glass.smokeWash,
+    opacity: 0.78,
+  },
+  successAmount: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
+    fontFamily: fontFamily.semiBold,
   },
   summaryRow: {
     minHeight: 46,
@@ -535,15 +753,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
   },
+  summaryRowPressable: {
+    backgroundColor: colors.surface.backgroundTint,
+  },
   summaryRowLast: {
     borderBottomWidth: 0,
   },
   summaryLabel: {
     flexShrink: 0,
   },
-  summaryValue: {
+  summaryValueWrap: {
     flex: 1,
     minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing.xs,
+  },
+  summaryValue: {
+    minWidth: 0,
+    flexShrink: 1,
     textAlign: 'right',
     fontSize: 13,
     lineHeight: 17,
@@ -552,19 +781,32 @@ const styles = StyleSheet.create({
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: radii.full,
   },
   textPressed: {
     opacity: 0.6,
   },
   successActions: {
+    flexDirection: 'row',
     gap: spacing.sm,
   },
-  secondaryButton: {
-    minHeight: 44,
+  resendButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    backgroundColor: colors.brand.glassTint,
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: [
+      '0 10px 24px rgba(0, 0, 0, 0.28)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.14)',
+    ].join(', '),
   },
   doneButton: {
+    flex: 1,
     minHeight: 52,
     borderRadius: radii.full,
     borderCurve: 'continuous',
@@ -572,7 +814,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  donePressed: {
+  actionPressed: {
     opacity: 0.82,
   },
 });

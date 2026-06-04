@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { Easing, FadeInUp, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
@@ -241,16 +242,17 @@ export function PayrollChatController({
 
   return (
     <Animated.View entering={CARD_ENTERING} layout={CARD_LAYOUT} style={styles.card}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>Payroll · {humanStatus(status)}</Text>
-        {progress != null ? (
-          <Text style={styles.sourceName}>
-            {progress.done}/{progress.total} sent
-            {progress.failed > 0 ? ` · ${progress.failed} failed` : ''}
-            {progress.blocked > 0 ? ` · ${progress.blocked} blocked` : ''}
-          </Text>
-        ) : null}
+      <View style={styles.runStatusHeader}>
+        <View style={styles.runStatusTitleBlock}>
+          <Text style={styles.runStatusEyebrow}>Payroll</Text>
+          <Text style={styles.runStatusTitle}>{humanStatusTitle(status)}</Text>
+        </View>
+        <View style={[styles.runStatusPill, status === 'cancelled' && styles.runStatusPillMuted]}>
+          <Text style={styles.runStatusPillText}>{humanStatusBadge(status)}</Text>
+        </View>
       </View>
+
+      {progress != null ? <PayrollProgressSummary progress={progress} /> : null}
 
       {isRunning ? (
         <View style={styles.payrollBackgroundStatus}>
@@ -262,7 +264,13 @@ export function PayrollChatController({
       ) : null}
 
       {terminal ? (
-        <PayrollReceiptList receipts={receipts} onCopy={copyReceipt} onOpenDetails={openDetails} />
+        <PayrollReceiptList
+          receipts={receipts}
+          status={status}
+          progress={progress}
+          onCopy={copyReceipt}
+          onOpenDetails={openDetails}
+        />
       ) : null}
 
       <View style={styles.secondaryRow}>
@@ -282,6 +290,26 @@ export function PayrollChatController({
         </Text>
       ) : null}
     </Animated.View>
+  );
+}
+
+function PayrollProgressSummary({ progress }: { progress: PayrollProgress }): React.JSX.Element {
+  return (
+    <View style={styles.runMetricRow}>
+      <RunMetric label="Sent" value={String(progress.done)} />
+      {progress.total > 0 ? <RunMetric label="To pay" value={String(progress.total)} /> : null}
+      {progress.failed > 0 ? <RunMetric label="Failed" value={String(progress.failed)} /> : null}
+      {progress.blocked > 0 ? <RunMetric label="Blocked" value={String(progress.blocked)} /> : null}
+    </View>
+  );
+}
+
+function RunMetric({ label, value }: { label: string; value: string }): React.JSX.Element {
+  return (
+    <View style={styles.runMetricPill}>
+      <Text style={styles.runMetricValue}>{value}</Text>
+      <Text style={styles.runMetricLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -305,15 +333,19 @@ function rowToReceipt(row: PayrollRow): PayrollReceipt | null {
 
 function PayrollReceiptList({
   receipts,
+  status,
+  progress,
   onCopy,
   onOpenDetails,
 }: {
   receipts: PayrollReceipt[];
+  status: PayrollRunStatus;
+  progress: PayrollProgress | null;
   onCopy: (receipt: PayrollReceipt) => void;
   onOpenDetails: () => void;
 }): React.JSX.Element {
   if (receipts.length === 0) {
-    return <Text style={styles.claimNote}>No transaction hash was recorded for this run.</Text>;
+    return <PayrollEmptyReceiptState status={status} progress={progress} />;
   }
 
   const visibleReceipts = receipts.slice(0, MAX_CHAT_RECEIPTS);
@@ -355,6 +387,42 @@ function PayrollReceiptList({
   );
 }
 
+function PayrollEmptyReceiptState({
+  status,
+  progress,
+}: {
+  status: PayrollRunStatus;
+  progress: PayrollProgress | null;
+}): React.JSX.Element {
+  const isCancelled = status === 'cancelled';
+  const blockedCopy =
+    progress != null && progress.blocked > 0
+      ? `${progress.blocked} blocked row${progress.blocked === 1 ? '' : 's'} stayed unpaid.`
+      : null;
+
+  return (
+    <View style={styles.emptyReceiptCard}>
+      <View style={[styles.emptyReceiptIcon, isCancelled && styles.emptyReceiptIconMuted]}>
+        <Ionicons
+          name={isCancelled ? 'close' : 'document-text-outline'}
+          size={16}
+          color={isCancelled ? colors.text.secondary : colors.text.primary}
+        />
+      </View>
+      <View style={styles.emptyReceiptCopy}>
+        <Text style={styles.emptyReceiptTitle}>
+          {isCancelled ? 'Cancelled before sending' : 'No receipt recorded'}
+        </Text>
+        <Text style={styles.emptyReceiptBody}>
+          {isCancelled
+            ? `No transaction was submitted.${blockedCopy != null ? ` ${blockedCopy}` : ''}`
+            : 'No transaction hash was recorded for this run.'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function PayrollSecondaryButton({
   label,
   onPress,
@@ -392,5 +460,47 @@ function humanStatus(status: string): string {
       return 'failed';
     default:
       return status;
+  }
+}
+
+function humanStatusTitle(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'Running';
+    case 'paused':
+      return 'Paused';
+    case 'completed':
+      return 'Complete';
+    case 'completed_with_claims_pending':
+      return 'Claims pending';
+    case 'completed_with_errors':
+      return 'Needs review';
+    case 'cancelled':
+      return 'Cancelled';
+    case 'failed':
+      return 'Failed';
+    default:
+      return status;
+  }
+}
+
+function humanStatusBadge(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'Sending';
+    case 'paused':
+      return 'Paused';
+    case 'completed':
+      return 'Sent';
+    case 'completed_with_claims_pending':
+      return 'Claims';
+    case 'completed_with_errors':
+      return 'Review';
+    case 'cancelled':
+      return 'Not sent';
+    case 'failed':
+      return 'Failed';
+    default:
+      return humanStatus(status);
   }
 }

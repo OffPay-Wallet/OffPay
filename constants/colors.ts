@@ -30,8 +30,10 @@ const brand = {
 
 /** Semantic colors - dark-theme role accents */
 const semantic = {
-  /** Settlement confirmed, positive amounts, receive */
+  /** Settlement confirmed and success chrome */
   success: '#F7F7F2',
+  /** Received funds and positive token deltas */
+  receive: '#31E981',
   /** Failed transactions, negative amounts, warnings */
   error: '#FF4D5A',
   /** Pending states, caution */

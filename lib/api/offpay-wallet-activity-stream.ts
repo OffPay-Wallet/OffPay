@@ -1,4 +1,5 @@
 import { getWalletTransactions } from '@/lib/api/offpay-api-client';
+import { isDisplayableWalletPaymentTransaction } from '@/lib/api/offpay-wallet-data';
 
 import type {
   OffpayNetwork,
@@ -98,6 +99,7 @@ export async function connectWalletActivityStream(
           .filter((transaction) => !trackedSignatures.has(transaction.signature))
           .reverse();
         for (const transaction of unseen) {
+          if (!isDisplayableWalletPaymentTransaction(transaction)) continue;
           rememberSignature(trackedSignatures, transaction.signature);
           handlers.onActivity?.(toActivityEvent(transaction));
         }

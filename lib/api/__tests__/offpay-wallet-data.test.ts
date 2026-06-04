@@ -5,6 +5,7 @@ import {
   buildVisibleTokenHoldings,
   groupLocalReceiptsByDate,
   groupWalletTransactionsByDate,
+  isDisplayableWalletActivityEvent,
   isDisplayableWalletPaymentTransaction,
   isWalletActivityIncomingP2pTransfer,
   isWalletTransactionIncomingP2pTransfer,
@@ -319,6 +320,27 @@ describe('offpay-wallet-data', () => {
       tokenSymbol: 'SOL',
       tokenName: 'Solana',
     });
+  });
+
+  it('filters unenriched unknown stream events instead of notifying placeholders', () => {
+    const event = buildActivityEvent({
+      type: 'unknown',
+      description: 'Unknown',
+      amount: null,
+      rawAmount: null,
+      direction: null,
+      sender: null,
+      recipient: null,
+      tokenMint: null,
+      tokenSymbol: null,
+      tokenName: null,
+      tokenLogo: null,
+      tokenDecimals: null,
+      counterparties: [],
+    });
+
+    expect(isDisplayableWalletActivityEvent(event)).toBe(false);
+    expect(isWalletActivityIncomingP2pTransfer(event)).toBe(false);
   });
 
   it('enriches backend history rows with matching local offline receipt data', () => {

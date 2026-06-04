@@ -66,6 +66,7 @@ import {
   fallbackPayrollAgentReply,
   type PayrollAgentReplyEvent,
 } from '@/lib/agentic-payments/payroll-agent-reply';
+import { usePayrollStore } from '@/store/payrollStore';
 import { revealAssistantMessageText } from '@/hooks/agentic-chat/revealAssistantMessageText';
 import { createAgenticId } from './helpers';
 
@@ -101,6 +102,7 @@ export function ChatScreen(): React.JSX.Element {
 
   const setActiveConversation = useAgenticChatStore((s) => s.setActiveConversation);
   const deleteConversation = useAgenticChatStore((s) => s.deleteConversation);
+  const deletePayrollRun = usePayrollStore((s) => s.deleteRun);
   const updateMessage = useAgenticChatStore((s) => s.updateMessage);
   const updateAction = useAgenticChatStore((s) => s.updateAction);
   const createConversation = useAgenticChatStore((s) => s.createConversation);
@@ -543,9 +545,10 @@ export function ChatScreen(): React.JSX.Element {
 
   const handleNewChat = useCallback(() => {
     setPrompt('');
+    payrollIntake.reset();
     setActiveConversation(scope, null);
     setChatDrawerOpen(false);
-  }, [scope, setActiveConversation]);
+  }, [payrollIntake, scope, setActiveConversation]);
 
   const handleOpenConversation = useCallback(
     (conversation: AgenticConversation) => {
@@ -567,10 +570,44 @@ export function ChatScreen(): React.JSX.Element {
     if (pendingDeleteConversationId == null) return;
 
     const id = pendingDeleteConversationId;
+    const deletingActiveConversation = activeConversation?.id === id;
+    const activePayrollRunIdAtDelete = payrollIntake.activeRunId;
     setPendingDeleteConversationId(null);
-    deleteConversation(id);
+    const deletedPayrollRunIds = deleteConversation(id);
+    const deletedPayrollRunIdSet = new Set(deletedPayrollRunIds);
+    if (
+      deletingActiveConversation &&
+      activePayrollRunIdAtDelete != null &&
+      !deletedPayrollRunIdSet.has(activePayrollRunIdAtDelete)
+    ) {
+      deletePayrollRun(activePayrollRunIdAtDelete);
+      deletedPayrollRunIdSet.add(activePayrollRunIdAtDelete);
+    }
+    if (
+      deletingActiveConversation ||
+      (activePayrollRunIdAtDelete != null && deletedPayrollRunIdSet.has(activePayrollRunIdAtDelete))
+    ) {
+      payrollIntake.reset();
+    }
+    if (deletedPayrollRunIdSet.size > 0) {
+      setPayrollReplyPendingRunIds((current) => {
+        let changed = false;
+        const next = new Set(current);
+        for (const runId of deletedPayrollRunIdSet) {
+          changed = next.delete(runId) || changed;
+        }
+        return changed ? next : current;
+      });
+    }
     showToast({ title: 'Chat deleted', message: 'The chat was removed.', variant: 'info' });
-  }, [deleteConversation, pendingDeleteConversationId, showToast]);
+  }, [
+    activeConversation?.id,
+    deleteConversation,
+    deletePayrollRun,
+    payrollIntake,
+    pendingDeleteConversationId,
+    showToast,
+  ]);
 
   const canSubmit = prompt.trim().length > 0 && !agentBusy;
   const handlePromptDockLayout = useCallback((event: LayoutChangeEvent) => {

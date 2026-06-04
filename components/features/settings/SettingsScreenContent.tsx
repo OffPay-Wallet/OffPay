@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -9,6 +9,15 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import Animated, {
+  Easing,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
@@ -36,6 +45,14 @@ const SUPPORT_EMAIL = 'hello@offpay.app';
 const SUPPORT_EMAIL_URL = `mailto:${SUPPORT_EMAIL}`;
 const X_HANDLE = '@OffPaySolana';
 const X_PROFILE_URL = 'https://x.com/OffPaySolana';
+const RESET_CONFIRM_SCRIM_DURATION_MS = 360;
+const RESET_CONFIRM_CARD_DURATION_MS = 560;
+const RESET_CONFIRM_CONTENT_DURATION_MS = 460;
+const RESET_CONFIRM_BLUR_DURATION_MS = 300;
+const RESET_CONFIRM_CONTENT_DELAY_MS = 24;
+const RESET_CONFIRM_IOS_EASING = Easing.bezier(0.2, 0.82, 0.2, 1);
+const RESET_CONFIRM_CLOSE_DURATION_MS = 340;
+const RESET_CONFIRM_CLOSE_EASING = Easing.bezier(0.36, 0, 0.66, 1);
 
 interface SettingsScreenContentProps {
   bottomPadding: number;
@@ -73,9 +90,12 @@ export function SettingsScreenContent({
   const dialogTitleLineHeight = dialogTitleFontSize + 6;
   const dialogBodyFontSize = dense ? 13 : compact ? 14 : 15;
   const dialogBodyLineHeight = dialogBodyFontSize + 6;
+  const resetConfirmInitialTranslateY = Math.min(220, Math.max(128, windowHeight * 0.24));
 
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [confirmClosing, setConfirmClosing] = useState(false);
   const [destroying, setDestroying] = useState(false);
+  const confirmClosingRef = useRef(false);
   // Preferences & Security open as inline bottom sheets layered over
   // the settings screen — not as separate routes — so tapping a card
   // slides the sheet up over the dimmed settings list instead of
@@ -83,8 +103,35 @@ export function SettingsScreenContent({
   const [preferencesVisible, setPreferencesVisible] = useState(false);
   const [profileVisible, setProfileVisible] = useState(false);
   const [securityVisible, setSecurityVisible] = useState(false);
+  const resetConfirmScrim = useSharedValue(0);
+  const resetConfirmMotion = useSharedValue(0);
+  const resetConfirmContent = useSharedValue(0);
+  const resetConfirmBlur = useSharedValue(0);
   const showOverlay = useOverlayVisibilityStore((s) => s.showOverlay);
   const hideOverlay = useOverlayVisibilityStore((s) => s.hideOverlay);
+
+  const resetConfirmScrimStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(resetConfirmScrim.value, [0, 1], [0, 1]),
+  }));
+
+  const resetConfirmCardStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(resetConfirmContent.value, [0, 0.22, 1], [0, 1, 1]),
+    transform: [
+      {
+        translateY: interpolate(
+          resetConfirmMotion.value,
+          [0, 1],
+          [resetConfirmInitialTranslateY, 0],
+        ),
+      },
+      { scale: interpolate(resetConfirmMotion.value, [0, 1], [0.9, 1]) },
+    ],
+  }));
+
+  const resetConfirmBlurStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(resetConfirmBlur.value, [0, 1], [1, 0]),
+    filter: [{ blur: interpolate(resetConfirmBlur.value, [0, 1], [3.5, 0]) }],
+  }));
 
   // Hide the floating tab bar while a settings sheet is open. Keyed by a
   // stable overlay id so overlapping opens/closes stay consistent, and
@@ -101,8 +148,59 @@ export function SettingsScreenContent({
     return () => hideOverlay(overlayId);
   }, [anySettingsSheetOpen, showOverlay, hideOverlay]);
 
+  useEffect(() => {
+    if (!confirmVisible) {
+      resetConfirmScrim.value = 0;
+      resetConfirmMotion.value = 0;
+      resetConfirmContent.value = 0;
+      resetConfirmBlur.value = 0;
+      return;
+    }
+
+    resetConfirmScrim.value = 0;
+    resetConfirmMotion.value = 0;
+    resetConfirmContent.value = 0;
+    resetConfirmBlur.value = 0;
+    confirmClosingRef.current = false;
+    setConfirmClosing(false);
+
+    resetConfirmScrim.value = withTiming(1, {
+      duration: RESET_CONFIRM_SCRIM_DURATION_MS,
+      easing: RESET_CONFIRM_IOS_EASING,
+    });
+    resetConfirmContent.value = withDelay(
+      RESET_CONFIRM_CONTENT_DELAY_MS,
+      withTiming(1, {
+        duration: RESET_CONFIRM_CONTENT_DURATION_MS,
+        easing: RESET_CONFIRM_IOS_EASING,
+      }),
+    );
+    resetConfirmMotion.value = withDelay(
+      RESET_CONFIRM_CONTENT_DELAY_MS,
+      withTiming(1, {
+        duration: RESET_CONFIRM_CARD_DURATION_MS,
+        easing: RESET_CONFIRM_IOS_EASING,
+      }),
+    );
+    resetConfirmBlur.value = withDelay(
+      RESET_CONFIRM_CONTENT_DELAY_MS,
+      withTiming(1, {
+        duration: RESET_CONFIRM_BLUR_DURATION_MS,
+        easing: RESET_CONFIRM_IOS_EASING,
+      }),
+    );
+  }, [
+    confirmVisible,
+    resetConfirmBlur,
+    resetConfirmContent,
+    resetConfirmMotion,
+    resetConfirmScrim,
+  ]);
+
   const handleOpenConfirm = useCallback((): void => {
     if (destroying) return;
+    confirmClosingRef.current = false;
+    setConfirmClosing(false);
     setConfirmVisible(true);
   }, [destroying]);
 
@@ -111,10 +209,47 @@ export function SettingsScreenContent({
     router.push('/accounts');
   }, [isFocused, router]);
 
-  const handleCancelConfirm = useCallback((): void => {
-    if (destroying) return;
+  const finishConfirmClose = useCallback((): void => {
+    confirmClosingRef.current = false;
+    setConfirmClosing(false);
     setConfirmVisible(false);
-  }, [destroying]);
+  }, []);
+
+  const handleCancelConfirm = useCallback((): void => {
+    if (destroying || confirmClosingRef.current) return;
+
+    confirmClosingRef.current = true;
+    setConfirmClosing(true);
+    resetConfirmScrim.value = withTiming(0, {
+      duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+      easing: RESET_CONFIRM_CLOSE_EASING,
+    });
+    resetConfirmContent.value = withTiming(0, {
+      duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+      easing: RESET_CONFIRM_CLOSE_EASING,
+    });
+    resetConfirmBlur.value = withTiming(0, {
+      duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+      easing: RESET_CONFIRM_CLOSE_EASING,
+    });
+    resetConfirmMotion.value = withTiming(
+      0,
+      {
+        duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+        easing: RESET_CONFIRM_CLOSE_EASING,
+      },
+      (finished) => {
+        if (finished) runOnJS(finishConfirmClose)();
+      },
+    );
+  }, [
+    destroying,
+    finishConfirmClose,
+    resetConfirmBlur,
+    resetConfirmContent,
+    resetConfirmMotion,
+    resetConfirmScrim,
+  ]);
 
   const handleConfirmDestroy = useCallback((): void => {
     if (destroying) return;
@@ -329,7 +464,7 @@ export function SettingsScreenContent({
       <Modal
         visible={confirmVisible}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={handleCancelConfirm}
         statusBarTranslucent
       >
@@ -338,14 +473,23 @@ export function SettingsScreenContent({
           accessibilityViewIsModal
           accessibilityLabel="Reset wallet confirmation"
         >
-          <Pressable
-            style={styles.confirmScrim}
-            onPress={handleCancelConfirm}
-            disabled={destroying}
-            accessibilityRole="button"
-            accessibilityLabel="Cancel reset"
-          />
-          <View style={[styles.confirmCard, { maxWidth: dialogMaxWidth }]}>
+          <Animated.View style={[styles.confirmScrim, resetConfirmScrimStyle]}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={handleCancelConfirm}
+              disabled={destroying || confirmClosing}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel reset"
+            />
+          </Animated.View>
+          <Animated.View
+            style={[styles.confirmCard, { maxWidth: dialogMaxWidth }, resetConfirmCardStyle]}
+          >
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.confirmCardBlurVeil, resetConfirmBlurStyle]}
+            />
+            <View pointerEvents="none" style={styles.confirmCardGloss} />
             <Text
               variant="h3"
               color={colors.text.primary}
@@ -386,7 +530,7 @@ export function SettingsScreenContent({
                   pressed ? styles.confirmCancelButtonPressed : null,
                 ]}
                 onPress={handleCancelConfirm}
-                disabled={destroying}
+                disabled={destroying || confirmClosing}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel reset"
               >
@@ -413,10 +557,10 @@ export function SettingsScreenContent({
                   destroying ? styles.resetButtonDisabled : null,
                 ]}
                 onPress={handleConfirmDestroy}
-                disabled={destroying}
+                disabled={destroying || confirmClosing}
                 accessibilityRole="button"
                 accessibilityLabel="Confirm reset and erase this device"
-                accessibilityState={{ busy: destroying, disabled: destroying }}
+                accessibilityState={{ busy: destroying, disabled: destroying || confirmClosing }}
               >
                 {destroying ? (
                   <ActivityIndicator size="small" color={colors.brand.whiteStream} />
@@ -437,7 +581,7 @@ export function SettingsScreenContent({
                 )}
               </Pressable>
             </View>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
 
@@ -500,12 +644,34 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: radii.xl,
     borderCurve: 'continuous',
-    backgroundColor: colors.surface.cardElevated,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.brand.graphiteDepth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     padding: spacing.xl,
     gap: spacing.md,
-    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 36px rgba(0, 0, 0, 0.44)',
+    overflow: 'hidden',
+    boxShadow: [
+      '0 24px 54px rgba(0, 0, 0, 0.56)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.42)',
+    ].join(', '),
+  },
+  confirmCardGloss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '52%',
+    backgroundColor: colors.glass.smokeWash,
+    opacity: 0.86,
+  },
+  confirmCardBlurVeil: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.brand.graphiteDepth,
+    zIndex: 2,
   },
   confirmTitle: {
     textAlign: 'center',
@@ -535,12 +701,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.glassTint,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+    boxShadow: [
+      '0 10px 22px rgba(0, 0, 0, 0.28)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.14)',
+    ].join(', '),
   },
   confirmCancelButtonPressed: {
-    backgroundColor: colors.brand.glassTint,
+    opacity: 0.82,
   },
   confirmResetButton: {
     backgroundColor: colors.semantic.error,
+    boxShadow: [
+      '0 12px 28px rgba(255, 77, 90, 0.24)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.24)',
+    ].join(', '),
   },
   confirmButtonLabel: {
     fontFamily: fontFamily.uiSemiBold,

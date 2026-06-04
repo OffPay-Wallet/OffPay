@@ -1,24 +1,98 @@
-import { AppState, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+
+import type {
+  OffpayDisplayTransactionType,
+  OffpayRecentActivityView,
+} from '@/lib/api/offpay-wallet-data';
 
 /**
  * Thin wrapper around `expo-notifications` so the rest of the app can
  * fire a local OS notification without coupling to the Expo module
- * directly. The wrapper also handles the foreground/background dedup
- * the in-app toaster relies on:
- *
- * - When the app is in the foreground, the toaster already paints the
- *   message in-product. We do not also fire a system notification.
- * - When the app is in the background, the toaster cannot reach the
- *   user; we schedule a local notification instead so the OS surfaces
- *   the deposit alert on the lock/home screen.
+ * directly. This is intentionally separate from the in-app toast and
+ * notification-center stores: wallet activity should be allowed to
+ * surface as an OS notification even when no toast is shown.
  */
 
-const ANDROID_INCOMING_TRANSFER_CHANNEL_ID = 'offpay.incoming-transfers';
-const ANDROID_INCOMING_TRANSFER_CHANNEL_NAME = 'Incoming transfers';
+const ANDROID_TRANSACTION_CHANNELS: Record<
+  OffpayDisplayTransactionType | 'default',
+  {
+    id: string;
+    name: string;
+  }
+> = {
+  receive: {
+    id: 'offpay.transactions.received',
+    name: 'Received payments',
+  },
+  send: {
+    id: 'offpay.transactions.sent',
+    name: 'Sent payments',
+  },
+  swap: {
+    id: 'offpay.transactions.swaps',
+    name: 'Swaps',
+  },
+  default: {
+    id: 'offpay.transactions',
+    name: 'Transactions',
+  },
+};
+const PRESENTED_NOTIFICATION_IDS_LIMIT = 200;
 
 let configurePromise: Promise<void> | null = null;
 let permissionPromise: Promise<boolean> | null = null;
+const presentedNotificationIds = new Set<string>();
+
+function stripAmountSign(value: string): string {
+  return value.replace(/^[+-]\s*/, '').trim();
+}
+
+function getTransactionChannelId(type: OffpayDisplayTransactionType | null | undefined): string {
+  return ANDROID_TRANSACTION_CHANNELS[type ?? 'default'].id;
+}
+
+function rememberPresentedNotificationId(identifier: string): boolean {
+  if (presentedNotificationIds.has(identifier)) return false;
+  presentedNotificationIds.add(identifier);
+  while (presentedNotificationIds.size > PRESENTED_NOTIFICATION_IDS_LIMIT) {
+    const oldest = presentedNotificationIds.values().next().value;
+    if (oldest == null) break;
+    presentedNotificationIds.delete(oldest);
+  }
+
+  return true;
+}
+
+export function buildWalletTransactionNotificationContent(
+  activity: Pick<
+    OffpayRecentActivityView,
+    'amountLabel' | 'secondaryAmountLabel' | 'subtitle' | 'type'
+  >,
+): {
+  title: string;
+  body: string | null;
+} {
+  const primaryAmount = activity.amountLabel == null ? null : stripAmountSign(activity.amountLabel);
+  if (activity.type === 'swap') {
+    return {
+      title: primaryAmount == null ? 'Swapped' : `Swapped ${primaryAmount}`,
+      body: null,
+    };
+  }
+
+  if (activity.type === 'receive') {
+    return {
+      title: primaryAmount == null ? 'Received' : `Received ${primaryAmount}`,
+      body: null,
+    };
+  }
+
+  return {
+    title: primaryAmount == null ? 'Sent' : `Sent ${primaryAmount}`,
+    body: null,
+  };
+}
 
 async function configureNotifications(): Promise<void> {
   if (configurePromise != null) return configurePromise;
@@ -26,27 +100,24 @@ async function configureNotifications(): Promise<void> {
   configurePromise = (async () => {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
-        // We never *need* the OS to surface a notification while the
-        // user is actively viewing the app — the toaster already
-        // does. Returning `false` here makes Expo skip the alert /
-        // sound / badge for foreground events.
-        shouldShowBanner: false,
-        shouldShowList: false,
-        shouldPlaySound: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
         shouldSetBadge: false,
       }),
     });
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync(
-        ANDROID_INCOMING_TRANSFER_CHANNEL_ID,
-        {
-          name: ANDROID_INCOMING_TRANSFER_CHANNEL_NAME,
-          importance: Notifications.AndroidImportance.HIGH,
-          showBadge: true,
-          enableVibrate: true,
-          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        },
+      await Promise.all(
+        Object.values(ANDROID_TRANSACTION_CHANNELS).map((channel) =>
+          Notifications.setNotificationChannelAsync(channel.id, {
+            name: channel.name,
+            importance: Notifications.AndroidImportance.HIGH,
+            showBadge: true,
+            enableVibrate: true,
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          }),
+        ),
       );
     }
   })();
@@ -60,10 +131,7 @@ async function ensurePermission(): Promise<boolean> {
   permissionPromise = (async () => {
     const current = await Notifications.getPermissionsAsync();
     if (current.granted) return true;
-    if (
-      current.canAskAgain === false &&
-      current.status === Notifications.PermissionStatus.DENIED
-    ) {
+    if (current.canAskAgain === false && current.status === Notifications.PermissionStatus.DENIED) {
       return false;
     }
     const requested = await Notifications.requestPermissionsAsync({
@@ -83,37 +151,57 @@ export interface IncomingTransferNotificationInput {
   /** Stable identifier so re-fires for the same transfer are de-duped. */
   identifier: string;
   title: string;
-  body: string;
+  body?: string | null;
+}
+
+export interface WalletTransactionNotificationInput {
+  /** Stable identifier so re-fires for the same transaction are de-duped. */
+  identifier: string;
+  title: string;
+  body?: string | null;
+  type?: OffpayDisplayTransactionType;
+  signature?: string | null;
+}
+
+export interface WalletTransactionEventNotificationInput {
+  /** Stable identifier so re-fires for the same transaction are de-duped. */
+  identifier: string;
+  type: OffpayDisplayTransactionType;
+  amountLabel?: string | null;
+  secondaryAmountLabel?: string | null;
+  signature?: string | null;
 }
 
 /**
- * Schedule a local notification for an incoming transfer when the app
- * is currently backgrounded. Foreground events are ignored because the
- * in-app toaster already covers them.
+ * Schedule a local OS notification for wallet transaction activity.
  *
  * Permission is requested lazily on first call. Failures are silent;
  * a missing notification permission is not a hard error for the rest
  * of the app.
  */
-export async function presentIncomingTransferNotification(
-  input: IncomingTransferNotificationInput,
+export async function presentWalletTransactionNotification(
+  input: WalletTransactionNotificationInput,
 ): Promise<void> {
-  if (AppState.currentState === 'active') return;
-
   try {
     await configureNotifications();
     const granted = await ensurePermission();
     if (!granted) return;
+    if (!rememberPresentedNotificationId(input.identifier)) return;
+
+    const data: Record<string, string> = {
+      offpayNotificationType: 'wallet-transaction',
+    };
+    if (input.type != null) data.transactionType = input.type;
+    if (input.signature != null) data.signature = input.signature;
 
     await Notifications.scheduleNotificationAsync({
       identifier: input.identifier,
       content: {
         title: input.title,
-        body: input.body,
+        body: input.body ?? null,
         sound: 'default',
-        ...(Platform.OS === 'android'
-          ? { channelId: ANDROID_INCOMING_TRANSFER_CHANNEL_ID }
-          : {}),
+        data,
+        ...(Platform.OS === 'android' ? { channelId: getTransactionChannelId(input.type) } : {}),
       },
       // Fire immediately. `null` trigger is documented as
       // "deliver as soon as possible" by Expo.
@@ -124,11 +212,40 @@ export async function presentIncomingTransferNotification(
   }
 }
 
+export function presentWalletTransactionEventNotification(
+  input: WalletTransactionEventNotificationInput,
+): Promise<void> {
+  const content = buildWalletTransactionNotificationContent({
+    type: input.type,
+    amountLabel: input.amountLabel ?? null,
+    secondaryAmountLabel: input.secondaryAmountLabel ?? null,
+    subtitle: '',
+  });
+
+  return presentWalletTransactionNotification({
+    identifier: input.identifier,
+    title: content.title,
+    body: content.body,
+    type: input.type,
+    signature: input.signature,
+  });
+}
+
+export function presentIncomingTransferNotification(
+  input: IncomingTransferNotificationInput,
+): Promise<void> {
+  return presentWalletTransactionNotification({ ...input, type: 'receive' });
+}
+
 /**
  * Best-effort permission pre-warm during the splash window so the
- * first incoming-transfer notification doesn't pay for the prompt
+ * first wallet-activity notification doesn't pay for the prompt
  * inline.
  */
-export function prewarmIncomingTransferPermission(): void {
-  void configureNotifications().then(ensurePermission).catch(() => undefined);
+export function prewarmWalletTransactionNotificationPermission(): void {
+  void configureNotifications()
+    .then(ensurePermission)
+    .catch(() => undefined);
 }
+
+export const prewarmIncomingTransferPermission = prewarmWalletTransactionNotificationPermission;

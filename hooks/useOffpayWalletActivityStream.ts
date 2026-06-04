@@ -29,6 +29,7 @@ const FALLBACK_POLL_INTERVAL_MS = 60_000;
 const MIN_WALLET_DATA_INVALIDATION_INTERVAL_MS = 25_000;
 const ACTIVITY_INDEX_REFRESH_DELAYS_MS = [5_000, 30_000, 90_000] as const;
 const SEEN_SIGNATURES_LIMIT = 200;
+const ACTIVITY_EVENTS_LIMIT = 50;
 
 export type OffpayWalletActivityStreamStatus =
   | 'idle'
@@ -221,6 +222,7 @@ export function useOffpayWalletActivityStream(options?: {
   const [status, setStatus] = useState<OffpayWalletActivityStreamStatus>('idle');
   const [failureCount, setFailureCount] = useState(0);
   const [lastActivity, setLastActivity] = useState<WalletActivityEvent | null>(null);
+  const [activityEvents, setActivityEvents] = useState<WalletActivityEvent[]>([]);
   const [lastPingAt, setLastPingAt] = useState<number | null>(null);
   const connectionRef = useRef<WalletActivityStreamConnection | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -271,6 +273,7 @@ export function useOffpayWalletActivityStream(options?: {
     connectionRef.current = null;
     setFailureCount(0);
     setLastActivity(null);
+    setActivityEvents([]);
     setLastPingAt(null);
 
     if (!requested || !canUseNetwork) {
@@ -421,6 +424,9 @@ export function useOffpayWalletActivityStream(options?: {
               });
             }
             setLastActivity(normalizedEvent);
+            setActivityEvents((events) =>
+              [...events, normalizedEvent].slice(-ACTIVITY_EVENTS_LIMIT),
+            );
             invalidateWalletData();
             scheduleIndexedTransactionRefreshes();
           },
@@ -522,6 +528,7 @@ export function useOffpayWalletActivityStream(options?: {
     status,
     failureCount,
     lastActivity,
+    activityEvents,
     lastPingAt,
     walletAddress,
     network,

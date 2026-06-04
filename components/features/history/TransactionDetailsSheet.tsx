@@ -51,7 +51,7 @@ const SHEET_SHADOW = [
 ].join(', ');
 
 const AMOUNT_COLORS: Record<OffpayDisplayTone, string> = {
-  positive: colors.semantic.success,
+  positive: colors.semantic.receive,
   negative: colors.semantic.error,
   neutral: colors.text.primary,
   failed: colors.semantic.error,
@@ -65,6 +65,10 @@ function buildExplorerUrl(signature: string, network: OffpayNetwork): string {
 function getNetworkLabel(network: OffpayNetwork | null): string {
   if (network === 'devnet') return 'Solana Devnet';
   return 'Solana';
+}
+
+function normalizeTokenLogoSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase();
 }
 
 function getStatusMeta(status: OffpayRecentActivityView['status']): {
@@ -234,7 +238,8 @@ export function TransactionDetailsSheet({
         : (tokenLogos?.byMint?.get(visibleTransaction.tokenMint) ?? null)) ??
       (visibleTransaction.tokenSymbol == null
         ? null
-        : (tokenLogos?.bySymbol?.get(visibleTransaction.tokenSymbol) ?? null));
+        : (tokenLogos?.bySymbol?.get(normalizeTokenLogoSymbol(visibleTransaction.tokenSymbol)) ??
+          null));
     const signature = visibleTransaction.detailSignature;
     const network = visibleTransaction.detailNetwork;
     const canOpenExplorer = signature != null && network != null;

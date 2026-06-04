@@ -896,6 +896,10 @@ function isUnenrichedWalletTransaction(
   return normalizeTransactionTypeLabel(transaction.type) === UNENRICHED_TRANSACTION_TYPE;
 }
 
+function isUnenrichedWalletActivityEvent(event: WalletActivityEvent): boolean {
+  return normalizeTransactionTypeLabel(event.type) === UNENRICHED_TRANSACTION_TYPE;
+}
+
 export function mapWalletTransactionForRecentActivity(
   transaction: WalletTransactionsResponse['transactions'][number],
   localReceipt?: OffpayLocalReceiptViewInput | null,
@@ -982,8 +986,39 @@ export function isWalletTransactionIncomingP2pTransfer(
 }
 
 export function isWalletActivityIncomingP2pTransfer(event: WalletActivityEvent): boolean {
+  if (!isDisplayableWalletActivityEvent(event)) return false;
+
   const amounts = parseWalletActivityAmounts(event);
   return normalizeWalletActivityDisplayType(event, amounts) === 'receive';
+}
+
+export function isDisplayableWalletActivityEvent(event: WalletActivityEvent): boolean {
+  const amounts = parseWalletActivityAmounts(event);
+  const rawType = normalizeTransactionTypeLabel(event.type);
+  const hasPaymentSignal = Boolean(
+    amounts.length > 0 ||
+      event.amount?.trim() ||
+      event.rawAmount?.trim() ||
+      event.direction === 'send' ||
+      event.direction === 'receive' ||
+      event.sender?.trim() ||
+      event.recipient?.trim() ||
+      event.tokenMint?.trim() ||
+      event.tokenSymbol?.trim() ||
+      rawType.includes('swap') ||
+      rawType.includes('transfer') ||
+      rawType.includes('receive') ||
+      rawType.includes('send') ||
+      rawType.includes('payment'),
+  );
+
+  if (!hasPaymentSignal) {
+    return !isUnenrichedWalletActivityEvent(event) && !isInternalWalletTransactionType(event.type);
+  }
+  if (isInternalWalletTransactionType(event.type) && amounts.length === 0) return false;
+
+  const type = normalizeWalletActivityDisplayType(event, amounts);
+  return type === 'send' || type === 'receive' || type === 'swap';
 }
 
 export function isDisplayableWalletPaymentTransaction(

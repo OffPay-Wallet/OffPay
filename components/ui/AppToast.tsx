@@ -37,9 +37,12 @@ interface AppToastOptions {
   variant?: AppToastVariant;
   durationMs?: number;
   notificationId?: string;
+  persistToNotificationCenter?: boolean;
 }
 
-interface ToastState extends Required<Omit<AppToastOptions, 'notificationId'>> {
+interface ToastState extends Required<
+  Omit<AppToastOptions, 'notificationId' | 'persistToNotificationCenter'>
+> {
   id: number;
 }
 
@@ -116,12 +119,14 @@ export function AppToastProvider({ children }: { children: React.ReactNode }): R
       variant,
       durationMs: options.durationMs ?? DEFAULT_DURATION_MS,
     });
-    useNotificationStore.getState().addNotification({
-      id: options.notificationId ?? `toast-${nextIdRef.current}`,
-      title,
-      message,
-      variant,
-    });
+    if (options.persistToNotificationCenter !== false) {
+      useNotificationStore.getState().addNotification({
+        id: options.notificationId ?? `toast-${nextIdRef.current}`,
+        title,
+        message,
+        variant,
+      });
+    }
     nextIdRef.current += 1;
   }, []);
 

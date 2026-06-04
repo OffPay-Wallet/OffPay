@@ -19,6 +19,7 @@ import { TransactionDetailsSheet } from '@/components/features/history/Transacti
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
@@ -146,6 +147,7 @@ export function HistoryScreenContent(): React.JSX.Element {
     // competes with navigation and price queries.
     refetchOnMount: true,
   });
+  const tokenLogoMap = useOffpayTokenLogoMap();
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
@@ -297,11 +299,13 @@ export function HistoryScreenContent(): React.JSX.Element {
         <HistoryList
           transactionsQuery={transactionsQuery}
           localReceipts={localReceipts}
+          tokenLogos={tokenLogoMap}
           onTransactionPress={handleTransactionPress}
         />
       </StaggerRevealItem>
       <TransactionDetailsSheet
         transaction={selectedTransaction}
+        tokenLogos={tokenLogoMap}
         onDismiss={handleDismissTransactionDetails}
       />
     </View>

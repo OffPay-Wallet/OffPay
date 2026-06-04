@@ -15,10 +15,12 @@ import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
 const TRACK_HEIGHT = layout.buttonHeightLg;
-const TRACK_PADDING = 4;
-const THUMB_SIZE = TRACK_HEIGHT - TRACK_PADDING * 2;
-const COMPLETE_THRESHOLD = 0.78;
-const SLIDE_TIMING = { duration: 160, easing: Easing.out(Easing.cubic) };
+const TRACK_PADDING = 3;
+const THUMB_SIZE = TRACK_HEIGHT - TRACK_PADDING * 2 - 4;
+const COMPLETE_THRESHOLD = 0.68;
+const FAST_SWIPE_THRESHOLD = 0.46;
+const DRAG_GAIN = 1.08;
+const SLIDE_TIMING = { duration: 120, easing: Easing.out(Easing.cubic) };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
@@ -113,13 +115,15 @@ export function GlassSliderButton({
         },
         onPanResponderMove: (_, gestureState) => {
           if (inactive) return;
-          const nextX = clamp(startXRef.current + gestureState.dx, 0, maxTravel);
+          const nextX = clamp(startXRef.current + gestureState.dx * DRAG_GAIN, 0, maxTravel);
           dragXRef.current = nextX;
           translateX.value = nextX;
         },
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (_, gestureState) => {
           if (inactive) return;
-          if (dragXRef.current >= maxTravel * COMPLETE_THRESHOLD) {
+          const fastEnough =
+            gestureState.vx > 0.85 && dragXRef.current >= maxTravel * FAST_SWIPE_THRESHOLD;
+          if (fastEnough || dragXRef.current >= maxTravel * COMPLETE_THRESHOLD) {
             complete();
             return;
           }
@@ -204,11 +208,15 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.surface.cardElevated,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.brand.actionFill,
     overflow: 'hidden',
     justifyContent: 'center',
-    boxShadow: `0 10px 20px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
+    boxShadow: [
+      '0 14px 28px rgba(0, 0, 0, 0.36)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.16)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.32)',
+    ].join(', '),
   },
   trackDisabled: {
     opacity: 0.58,
@@ -225,7 +233,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.glass.badgeFill,
+    backgroundColor: colors.glass.smokeWash,
   },
   label: {
     textAlign: 'center',
@@ -237,7 +245,7 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
-    left: TRACK_PADDING,
+    left: TRACK_PADDING + 2,
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
@@ -251,7 +259,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    boxShadow: `0 8px 16px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.88)`,
+    boxShadow: [
+      '0 8px 18px rgba(0, 0, 0, 0.32)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.88)',
+      'inset 0 -1px 1px rgba(0, 0, 0, 0.08)',
+    ].join(', '),
   },
   thumbDanger: {
     borderColor: 'rgba(199, 58, 58, 0.28)',

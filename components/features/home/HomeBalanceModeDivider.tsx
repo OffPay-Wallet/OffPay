@@ -2,7 +2,6 @@ import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
-  FadeIn,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -23,10 +22,9 @@ interface HomeBalanceModeDividerProps {
   onChangeMode: (mode: HomeBalanceMode) => void;
   loading?: boolean;
   /**
-   * Fires the moment the user touches down on the Shielded segment,
-   * before the press is committed. Used by `HomeScreen` to kick off
-   * the lazy `import()` of the Umbra vault chunk so the toggle never
-   * waits on a dynamic module fetch.
+   * Fires when the user touches down on the Shielded segment. The
+   * parent uses it to schedule a lazy Umbra chunk warm-up outside the
+   * touch frame, keeping the thumb transition responsive.
    */
   onShieldedPressIn?: () => void;
 }
@@ -116,10 +114,7 @@ export function HomeBalanceModeDivider({
   );
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(180).delay(60)}
-      style={[styles.wrapper, compact && styles.wrapperCompact]}
-    >
+    <View style={[styles.wrapper, compact && styles.wrapperCompact]}>
       <View style={[styles.track, { height: trackHeight }]} onLayout={handleTrackLayout}>
         {!loading ? (
           <Animated.View
@@ -206,7 +201,7 @@ export function HomeBalanceModeDivider({
               })}
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 

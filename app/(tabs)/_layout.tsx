@@ -51,6 +51,7 @@ export default function TabLayout(): React.JSX.Element {
       <Tabs.Screen name="history" />
       <Tabs.Screen name="chat" />
       <Tabs.Screen name="shopping" />
+      <Tabs.Screen name="rwas" />
       <Tabs.Screen name="settings" />
     </Tabs>
   );

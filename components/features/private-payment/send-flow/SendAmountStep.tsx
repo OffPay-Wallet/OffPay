@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
@@ -128,7 +129,12 @@ export function SendAmountStep({
       style={styles.step}
     >
       <View style={styles.toRow}>
-        <Text variant="bodyBold" color={colors.text.secondary} numberOfLines={1}>
+        <Text
+          variant="bodyBold"
+          color={colors.text.secondary}
+          numberOfLines={1}
+          style={styles.recipientText}
+        >
           To: {recipientLabel}
         </Text>
         <Pressable
@@ -143,7 +149,20 @@ export function SendAmountStep({
         </Pressable>
       </View>
 
-      <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.amountHero]}>
+      <View style={styles.amountHero}>
+        <LinearGradient
+          pointerEvents="none"
+          colors={[
+            colors.holdingsCard.gradientTop,
+            colors.holdingsCard.gradientMid,
+            colors.holdingsCard.gradientBottom,
+          ]}
+          locations={[0, 0.48, 1]}
+          start={{ x: 0.1, y: 0 }}
+          end={{ x: 0.9, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View pointerEvents="none" style={styles.amountHeroSheen} />
         <View
           style={styles.amountInputRow}
           onLayout={(event) => {
@@ -286,7 +305,7 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   toRow: {
-    minHeight: 56,
+    minHeight: 54,
     borderRadius: radii.xl,
     borderCurve: 'continuous',
     borderTopWidth: 1,
@@ -294,13 +313,21 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.glass.frostFill,
     paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
-    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: [
+      '0 10px 24px rgba(0, 0, 0, 0.34)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.16)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.28)',
+    ].join(', '),
+  },
+  recipientText: {
+    flex: 1,
+    minWidth: 0,
   },
   editButton: {
     minHeight: 36,
@@ -311,22 +338,39 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.glass.smokeWash,
     paddingHorizontal: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   amountHero: {
-    minHeight: 260,
+    minHeight: 248,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.28)',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
+    boxShadow: [
+      '0 20px 44px rgba(0, 0, 0, 0.46)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.36)',
+    ].join(', '),
+  },
+  amountHeroSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '42%',
+    backgroundColor: colors.glass.smokeWash,
+    opacity: 0.55,
   },
   amountInputRow: {
     width: '100%',
@@ -358,7 +402,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   availableCard: {
-    minHeight: 86,
+    minHeight: 82,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     borderTopWidth: 1,
@@ -366,14 +410,18 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.glass.frostFill,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
-    boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+    boxShadow: [
+      '0 12px 28px rgba(0, 0, 0, 0.36)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.14)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.28)',
+    ].join(', '),
   },
   maxButton: {
     minHeight: 44,
@@ -384,18 +432,27 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.glass.textBacking,
+    backgroundColor: colors.glass.smokeWash,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
   warningBox: {
-    minHeight: 72,
+    minHeight: 68,
     borderRadius: radii.lg,
-    backgroundColor: colors.semantic.warning,
-    padding: spacing.lg,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.frostFill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: ['0 10px 22px rgba(0, 0, 0, 0.3)', 'inset 0 1px 1px rgba(255, 255, 255, 0.1)'].join(
+      ', ',
+    ),
   },
   warningText: {
     lineHeight: 20,

@@ -42,11 +42,42 @@ const ROUTE_POLICY_OPTIONS: { policy: PayrollRoutePolicy; label: string }[] = [
   { policy: 'magicblock_only', label: 'MagicBlock' },
 ];
 
-function Stat({ label, value }: { label: string; value: string }): React.JSX.Element {
+function Stat({
+  label,
+  value,
+  align = 'left',
+}: {
+  label: string;
+  value: string;
+  align?: 'left' | 'center' | 'right';
+}): React.JSX.Element {
+  const alignStyles = [
+    align === 'center' && styles.statCenter,
+    align === 'right' && styles.statRight,
+  ];
+  const textAlignStyles = [
+    align === 'center' && styles.textCenter,
+    align === 'right' && styles.textRight,
+  ];
+
   return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
+    <View style={[styles.stat, alignStyles]}>
+      <Text
+        style={[styles.statLabel, textAlignStyles]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+      >
+        {label}
+      </Text>
+      <Text
+        style={[styles.statValue, textAlignStyles]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.72}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -73,6 +104,9 @@ export function PayrollConfirmationCard({
     blockedAcknowledged: ackBlocked,
     busy,
   });
+  const routePolicyLabel =
+    ROUTE_POLICY_OPTIONS.find((option) => option.policy === summary.routePolicy)?.label ??
+    payrollRoutePolicyCopy(summary.routePolicy);
 
   return (
     <View style={styles.card}>
@@ -82,16 +116,24 @@ export function PayrollConfirmationCard({
         </Text>
         <View style={styles.routeSummaryPill}>
           <Text style={styles.routeSummaryText} numberOfLines={1}>
-            {payrollRoutePolicyCopy(summary.routePolicy)}
+            {routePolicyLabel}
           </Text>
         </View>
       </View>
 
-      <View style={styles.statRow}>
+      <View style={styles.statGrid}>
         <Stat label="Recipients" value={String(summary.recipientCount)} />
-        <Stat label="Total" value={summary.totalLabel} />
-        <Stat label="Network" value={summary.network} />
-        <Stat label="Wallet" value={shortenWalletAddress(summary.walletAddress)} />
+        <View style={styles.statDivider} />
+        <Stat label="Total" value={summary.totalLabel} align="center" />
+        <View style={styles.statDivider} />
+        <Stat label="Network" value={summary.network} align="right" />
+      </View>
+
+      <View style={styles.walletStrip}>
+        <Text style={styles.statLabel}>Wallet</Text>
+        <Text style={styles.walletValue} numberOfLines={1}>
+          {shortenWalletAddress(summary.walletAddress)}
+        </Text>
       </View>
 
       <View style={styles.routePickerBlock}>
@@ -260,7 +302,7 @@ export function PayrollConfirmationCard({
                 accessibilityLabel="Open payroll details"
               >
                 <Ionicons name="list-outline" size={15} color={colors.text.primary} />
-                <Text style={styles.secondaryButtonText}>Rows</Text>
+                <Text style={styles.secondaryButtonText}>Review</Text>
               </Pressable>
             ) : null}
             {onCancel != null ? (

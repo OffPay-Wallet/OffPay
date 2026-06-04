@@ -1,6 +1,8 @@
 import { getAgenticConversationScopeKey, useAgenticChatStore } from '@/store/agenticChatStore';
+import { usePayrollStore } from '@/store/payrollStore';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import type { PayrollRow, PayrollRun } from '@/lib/payroll/payroll-types';
 
 function payrollSummary(): PayrollConfirmationSummary {
   return {
@@ -36,15 +38,62 @@ function payrollSummary(): PayrollConfirmationSummary {
   };
 }
 
+function makePayrollRun(overrides: Partial<PayrollRun> = {}): PayrollRun {
+  return {
+    id: 'run-1',
+    walletAddress: 'wallet-1',
+    network: 'devnet',
+    status: 'cancelled',
+    routePolicy: 'private_auto',
+    tokenMint: 'mint-1',
+    tokenSymbol: 'USDC',
+    tokenDecimals: 6,
+    sourceName: 'payroll.csv',
+    rowIds: ['row-1'],
+    cursor: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+function makePayrollRow(overrides: Partial<PayrollRow> = {}): PayrollRow {
+  return {
+    id: 'row-1',
+    sourceRow: 2,
+    label: 'Alice',
+    recipient: 'recipient-1',
+    tokenMint: 'mint-1',
+    tokenSymbol: 'USDC',
+    tokenDecimals: 6,
+    amountAtomic: '1000000',
+    amountDisplay: '1',
+    route: null,
+    status: 'skipped',
+    requiresRecipientClaim: false,
+    validationError: null,
+    signature: null,
+    txId: null,
+    initSignature: null,
+    idempotencyKey: 'row-1-key',
+    retryCount: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
 describe('agenticChatStore', () => {
   const scope = { walletAddress: 'wallet-1', network: 'devnet' as const };
 
   beforeEach(() => {
     useAgenticChatStore.getState().clearMessages();
+    usePayrollStore.setState({ runs: {}, rowsByRun: {} });
   });
 
   afterEach(() => {
     useAgenticChatStore.getState().clearMessages();
+    usePayrollStore.setState({ runs: {}, rowsByRun: {} });
   });
 
   it('creates active conversations scoped by wallet and network', () => {
@@ -140,6 +189,42 @@ describe('agenticChatStore', () => {
 
     expect(useAgenticChatStore.getState().messages).toEqual([]);
     expect(useAgenticChatStore.getState().actions).toEqual([]);
+  });
+
+  it('deletes linked payroll run data when deleting a payroll chat', () => {
+    const conversationId = useAgenticChatStore.getState().createConversation(scope, 'Payroll');
+    usePayrollStore.getState().createRun(makePayrollRun(), [makePayrollRow()]);
+
+    useAgenticChatStore.getState().addMessage({
+      id: 'message-1',
+      role: 'assistant',
+      text: 'Payroll cancelled.',
+      createdAt: 1,
+      walletAddress: scope.walletAddress,
+      network: scope.network,
+      conversationId,
+      actionId: 'payroll-action-1',
+    });
+    useAgenticChatStore.getState().upsertAction({
+      id: 'payroll-action-1',
+      kind: 'payroll',
+      status: 'cancelled',
+      walletAddress: scope.walletAddress,
+      network: scope.network,
+      runId: 'run-1',
+      summary: payrollSummary(),
+      conversationId,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const deletedPayrollRunIds = useAgenticChatStore.getState().deleteConversation(conversationId);
+
+    expect(deletedPayrollRunIds).toEqual(['run-1']);
+    expect(useAgenticChatStore.getState().messages).toEqual([]);
+    expect(useAgenticChatStore.getState().actions).toEqual([]);
+    expect(usePayrollStore.getState().getRun('run-1')).toBeNull();
+    expect(usePayrollStore.getState().getRows('run-1')).toEqual([]);
   });
 
   it('keeps an action card while a chat message still references it', () => {
