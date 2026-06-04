@@ -23,7 +23,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';

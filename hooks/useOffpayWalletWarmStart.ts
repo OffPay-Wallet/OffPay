@@ -90,10 +90,9 @@ export function useOffpayWalletWarmStart(): void {
       },
       {
         timeoutMs: 3500,
-        // Splash hide is gated on `walletDisplayHydratedAt`, which is
-        // set inside this scheduled task. Keep the fallback short so a
-        // device without `requestIdleCallback` doesn't sit on the
-        // splash for 700ms past first paint.
+        // Keep the fallback short so a device without
+        // `requestIdleCallback` does not delay cache hydration long
+        // after first paint.
         fallbackDelayMs: 150,
       },
     );

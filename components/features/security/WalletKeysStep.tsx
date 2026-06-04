@@ -3,7 +3,7 @@
  */
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { PillButton } from '@/components/ui/PillButton';

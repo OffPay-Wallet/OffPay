@@ -7,7 +7,6 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOfflineBleReceiver } from '@/hooks/useOfflineBleReceiver';
 import { useOfflinePaymentSlotsAutoSync } from '@/hooks/useOfflinePaymentSlots';
 import { useOffpayWalletActivityStream } from '@/hooks/useOffpayWalletActivityStream';
-import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayWalletWarmStart } from '@/hooks/useOffpayWalletWarmStart';
 import { useSettlementEngine } from '@/hooks/useSettlementEngine';
 import { useAppToast } from '@/components/ui/AppToast';
@@ -17,9 +16,7 @@ import {
 } from '@/lib/notifications/local-notifications';
 import { setOffpayNetworkAccessAllowed } from '@/lib/api/offpay-api-client';
 import {
-  isDisplayableWalletPaymentTransaction,
   mapWalletActivityEventForRecentActivity,
-  mapWalletTransactionForRecentActivity,
 } from '@/lib/api/offpay-wallet-data';
 import { getOfflineNonceReadiness } from '@/lib/offline/offline-payments';
 import { usePreferencesStore } from '@/store/preferencesStore';
@@ -48,16 +45,6 @@ function OffpayWalletLiveUpdates(): null {
   });
   const { network } = useOffpayNetwork();
   const walletAddress = useWalletStore((state) => state.publicKey);
-  const transactionsQuery = useOffpayWalletTransactions({
-    walletAddress,
-    // Reuse the default page size so this consumer shares the same
-    // React Query cache key as the History tab. Otherwise both
-    // queries refetch on every WS-driven invalidation, doubling RPC
-    // fan-out for the same data. The toast loop only inspects the
-    // top 5 entries below.
-    deferUntilAfterInteractions: true,
-    refetchOnMount: false,
-  });
   const { showToast } = useAppToast();
   const notifiedSignaturesRef = React.useRef(new Set<string>());
 
@@ -84,12 +71,11 @@ function OffpayWalletLiveUpdates(): null {
     notifiedSignaturesRef.current.clear();
   }, [network, walletAddress]);
 
-  // The WS layer fires for every on-chain event that touches the
-  // wallet (logsSubscribe with `mentions`) plus a per-account diff
-  // for SOL/SPL balance changes. We surface a toast on direction-aware
-  // events (`receive`/`send`) and skip the bare `on_chain_transaction`
-  // entries because the HTTP enrichment effect below converts those
-  // into a richer toast with amounts.
+  // The wallet activity stream already normalizes direction and
+  // amount data before it lands here. Keep this provider narrow:
+  // surface toasts from the stream and let screen-level queries own
+  // full transaction history. Mounting a history query globally just
+  // to enrich toasts adds avoidable startup and invalidation work.
   React.useEffect(() => {
     const activity = walletActivityStream.lastActivity;
     const network = walletActivityStream.network;
@@ -98,11 +84,8 @@ function OffpayWalletLiveUpdates(): null {
 
     const direction = activity.direction;
     if (direction !== 'receive' && direction !== 'send') {
-      // Bare on-chain notification (e.g. logsSubscribe ping that
-      // didn't carry amount data). The transactions effect below
-      // will pick this up after enrichment lands.
       if (__DEV__) {
-        console.log('[wallet-live-updates] WS event without direction; deferring to HTTP', {
+        console.log('[wallet-live-updates] activity without direction; skipping toast', {
           type: activity.type,
           signature: activity.signature,
         });
@@ -133,50 +116,6 @@ function OffpayWalletLiveUpdates(): null {
       body: message,
     });
   }, [showToast, walletActivityStream.lastActivity, walletActivityStream.network]);
-
-  React.useEffect(() => {
-    if (network == null || walletAddress == null) return;
-
-    const recentWindowStartMs = Date.now() - 5 * 60 * 1000;
-    for (const transaction of [...transactionsQuery.transactions.slice(0, 5)].reverse()) {
-      if (notifiedSignaturesRef.current.has(transaction.signature)) continue;
-      notifiedSignaturesRef.current.add(transaction.signature);
-
-      const transactionTimeMs = transaction.timestamp * 1000;
-      if (!Number.isFinite(transactionTimeMs) || transactionTimeMs < recentWindowStartMs) {
-        continue;
-      }
-
-      // Surface a toast for any newly confirmed transaction that
-      // touches the wallet, not just narrow "incoming P2P" matches.
-      // This covers self-sends, swaps, and fee-only transactions —
-      // i.e., anything a block explorer would list — which is what
-      // users mean by "I should be told about new on-chain activity".
-      if (!isDisplayableWalletPaymentTransaction(transaction)) continue;
-
-      const view = mapWalletTransactionForRecentActivity(transaction);
-      const amount = view.amountLabel ?? view.secondaryAmountLabel;
-      const message = amount != null ? `${amount} ${view.subtitle}` : view.subtitle;
-      if (__DEV__) {
-        console.log('[wallet-live-updates] HTTP toast', {
-          signature: transaction.signature,
-          type: transaction.type,
-          direction: transaction.direction,
-        });
-      }
-      showToast({
-        title: view.title,
-        message,
-        variant: view.amountTone === 'negative' ? 'info' : 'success',
-        notificationId: `wallet-incoming-${network}-${transaction.signature}`,
-      });
-      void presentIncomingTransferNotification({
-        identifier: `wallet-incoming-${network}-${transaction.signature}`,
-        title: view.title,
-        body: message,
-      });
-    }
-  }, [network, showToast, transactionsQuery.transactions, walletAddress]);
 
   return null;
 }

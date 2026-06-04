@@ -40,7 +40,7 @@ describe('revealAssistantMessageText', () => {
       pending: true,
     });
 
-    jest.advanceTimersByTime(18);
+    jest.advanceTimersByTime(28);
     await Promise.resolve();
 
     expect(useAgenticChatStore.getState().messages[0].text.length).toBeGreaterThan(0);

@@ -1,7 +1,12 @@
 import { useAgenticChatStore } from '@/store/agenticChatStore';
 
-const CHARS_PER_TICK = 3;
-const TICK_MS = 18;
+const MIN_CHARS_PER_TICK = 5;
+const MAX_REVEAL_TICKS = 34;
+const TICK_MS = 28;
+
+function getCharsPerTick(textLength: number): number {
+  return Math.max(MIN_CHARS_PER_TICK, Math.ceil(textLength / MAX_REVEAL_TICKS));
+}
 
 export type RevealAssistantMessagePatch = {
   actionId?: string;
@@ -39,6 +44,7 @@ export async function revealAssistantMessageText(
 
   await new Promise<void>((resolve) => {
     let index = 0;
+    const charsPerTick = getCharsPerTick(fullText.length);
 
     const finish = (text: string) => {
       store.updateMessage(messageId, {
@@ -55,7 +61,7 @@ export async function revealAssistantMessageText(
         return;
       }
 
-      index = Math.min(fullText.length, index + CHARS_PER_TICK);
+      index = Math.min(fullText.length, index + charsPerTick);
       const partial = fullText.slice(0, index);
       const done = index >= fullText.length;
 

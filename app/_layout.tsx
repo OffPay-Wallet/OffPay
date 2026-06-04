@@ -41,7 +41,6 @@ import {
 } from '@/lib/profile/profile-image';
 import { AppProviders } from '@/providers';
 import { useAppStore } from '@/store/app';
-import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { Theme } from '@react-navigation/native';
@@ -123,10 +122,8 @@ export default function RootLayout(): React.JSX.Element | null {
   const hydrateWallet = useWalletStore((s) => s.hydrate);
   const walletHydrated = useWalletStore((s) => s.isHydrated);
   const walletCount = useWalletStore((s) => s.wallets.length);
-  const walletAddress = useWalletStore((s) => s.publicKey);
   const accountName = useWalletStore((s) => s.accountName);
   const setActiveWalletName = useWalletStore((s) => s.setActiveWalletName);
-  const walletDisplayHydratedAt = useOffpayLaunchStore((s) => s.walletDisplayHydratedAt);
   const router = useRouter();
   const segments = useSegments();
   const rootNavigationState = useRootNavigationState();
@@ -175,12 +172,6 @@ export default function RootLayout(): React.JSX.Element | null {
   const routeReadyForDisplay = effectiveHasOnboarded
     ? segments.length > 0 && !inOnboarding
     : inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup;
-  const walletDataReady =
-    !effectiveHasOnboarded ||
-    !walletHydrated ||
-    walletAddress == null ||
-    walletDisplayHydratedAt != null;
-
   // If MMKV app-state is reset or unreadable during a storage migration,
   // SecureStore is still the source of truth for whether a wallet exists.
   // Repair the onboarding flag instead of routing an existing wallet back
@@ -264,7 +255,6 @@ export default function RootLayout(): React.JSX.Element | null {
     if (rootNavigationState.key.length === 0) return;
     if (!routeReadyForDisplay) return;
     if (effectiveHasOnboarded && !walletHydrated) return;
-    if (!walletDataReady) return;
 
     void SplashScreen.hideAsync().then(() => {
       setHasHiddenSplash(true);
@@ -277,7 +267,6 @@ export default function RootLayout(): React.JSX.Element | null {
     routeReadyForDisplay,
     rootLayoutReady,
     rootNavigationState.key,
-    walletDataReady,
     walletHydrated,
   ]);
 

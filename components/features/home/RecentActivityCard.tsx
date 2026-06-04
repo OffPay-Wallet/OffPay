@@ -10,7 +10,7 @@
  */
 import { memo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { TransactionActivityRow } from '@/components/features/history/TransactionActivityRow';
 import { SkeletonBlock } from '@/components/ui/Skeleton';

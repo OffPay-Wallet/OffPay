@@ -8,7 +8,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';

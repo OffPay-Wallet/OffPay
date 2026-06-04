@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useShallow } from 'zustand/react/shallow';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { ConfirmDialogCard } from '@/components/ui/ConfirmDialogCard';
@@ -36,7 +37,12 @@ import { useAgenticConfirmSend } from '@/hooks/agentic-chat/useAgenticConfirmSen
 import { useAgenticPendingSweep } from '@/hooks/agentic-chat/useAgenticPendingSweep';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { buildAgentWalletBalanceResponse } from '@/lib/agentic-payments/safe-context';
-import { type AgenticConversation, useAgenticChatStore } from '@/store/agenticChatStore';
+import {
+  type AgenticChatAction,
+  type AgenticChatMessage,
+  type AgenticConversation,
+  useAgenticChatStore,
+} from '@/store/agenticChatStore';
 import { useAppStore } from '@/store/app';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -65,6 +71,9 @@ import { createAgenticId } from './helpers';
 
 import type { PayrollStageOutcome } from '@/hooks/payroll/usePayrollChatIntake';
 
+const EMPTY_CHAT_MESSAGES: readonly AgenticChatMessage[] = [];
+const EMPTY_CHAT_ACTIONS: readonly AgenticChatAction[] = [];
+
 export function ChatScreen(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -83,20 +92,15 @@ export function ChatScreen(): React.JSX.Element {
     deferCapabilitiesUntilAfterInteractions: false,
     eagerWithoutCapabilities: true,
   });
+  const { scope, scopeKey } = useAgenticChatScope();
+  useAgenticPendingSweep(scope);
 
-  const messages = useAgenticChatStore((s) => s.messages);
-  const actions = useAgenticChatStore((s) => s.actions);
-  const conversations = useAgenticChatStore((s) => s.conversations);
-  const activeConversationIdByScope = useAgenticChatStore((s) => s.activeConversationIdByScope);
   const setActiveConversation = useAgenticChatStore((s) => s.setActiveConversation);
   const deleteConversation = useAgenticChatStore((s) => s.deleteConversation);
   const updateMessage = useAgenticChatStore((s) => s.updateMessage);
   const updateAction = useAgenticChatStore((s) => s.updateAction);
   const createConversation = useAgenticChatStore((s) => s.createConversation);
   const addMessage = useAgenticChatStore((s) => s.addMessage);
-
-  const { scope, scopeKey } = useAgenticChatScope();
-  useAgenticPendingSweep(scope);
 
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
@@ -131,26 +135,28 @@ export function ChatScreen(): React.JSX.Element {
   // measured dock height so multiline input and voice states never cover replies.
   const bottomPadding = keyboardOffset + promptDockHeight + spacing['2xl'];
 
-  const activeConversationId = activeConversationIdByScope[scopeKey] ?? null;
-  const scopedConversations = useMemo(
-    () =>
-      conversations
+  const activeConversationId = useAgenticChatStore(
+    (s) => s.activeConversationIdByScope[scopeKey] ?? null,
+  );
+  const scopedConversations = useAgenticChatStore(
+    useShallow((s) =>
+      s.conversations
         .filter(
           (conversation) =>
             conversation.walletAddress === scope.walletAddress &&
             conversation.network === scope.network,
         )
         .sort((left, right) => right.updatedAt - left.updatedAt),
-    [conversations, scope.network, scope.walletAddress],
+    ),
   );
   const activeConversation = useMemo(
     () =>
       scopedConversations.find((conversation) => conversation.id === activeConversationId) ?? null,
     [activeConversationId, scopedConversations],
   );
-  const scopedMessages = useMemo(
-    () =>
-      messages
+  const scopedMessages = useAgenticChatStore(
+    useShallow((s) =>
+      s.messages
         .filter(
           (message) =>
             message.walletAddress === scope.walletAddress &&
@@ -158,13 +164,47 @@ export function ChatScreen(): React.JSX.Element {
             message.conversationId === activeConversation?.id,
         )
         .sort((left, right) => left.createdAt - right.createdAt),
-    [activeConversation?.id, messages, scope.network, scope.walletAddress],
+    ),
+  );
+  const scopedActionIds = useMemo(() => {
+    const actionIds = new Set<string>();
+    for (const message of scopedMessages) {
+      if (typeof message.actionId === 'string' && message.actionId.length > 0) {
+        actionIds.add(message.actionId);
+      }
+    }
+    return actionIds;
+  }, [scopedMessages]);
+  const scopedActions = useAgenticChatStore(
+    useShallow((s) => {
+      if (scopedActionIds.size === 0) return EMPTY_CHAT_ACTIONS;
+      return s.actions.filter((action) => scopedActionIds.has(action.id));
+    }),
   );
   const actionsById = useMemo(() => {
-    const byId = new Map<string, (typeof actions)[number]>();
-    for (const action of actions) byId.set(action.id, action);
+    const byId = new Map<string, AgenticChatAction>();
+    for (const action of scopedActions) byId.set(action.id, action);
     return byId;
-  }, [actions]);
+  }, [scopedActions]);
+  const drawerMessages = useAgenticChatStore(
+    useShallow((s) => {
+      if (!chatDrawerOpen) return EMPTY_CHAT_MESSAGES;
+      return s.messages.filter(
+        (message) =>
+          message.walletAddress === scope.walletAddress && message.network === scope.network,
+      );
+    }),
+  );
+  const legacyMessages = useAgenticChatStore(
+    useShallow((s) =>
+      s.messages.filter(
+        (message) =>
+          message.walletAddress === scope.walletAddress &&
+          message.network === scope.network &&
+          message.conversationId == null,
+      ),
+    ),
+  );
 
   const knownWallets = useMemo(
     () =>
@@ -384,26 +424,20 @@ export function ChatScreen(): React.JSX.Element {
 
   // Migrate legacy messages with a missing `conversationId` once.
   useEffect(() => {
-    const legacy = messages.filter(
-      (message) =>
-        message.walletAddress === scope.walletAddress &&
-        message.network === scope.network &&
-        message.conversationId == null,
-    );
-    if (legacy.length === 0) return;
+    if (legacyMessages.length === 0) return;
     const firstUserText =
-      legacy
+      legacyMessages
         .slice()
         .sort((left, right) => left.createdAt - right.createdAt)
         .find((message) => message.role === 'user')?.text ?? 'Previous chat';
     const conversationId = createConversation(scope, firstUserText);
-    for (const message of legacy) {
+    for (const message of legacyMessages) {
       updateMessage(message.id, { conversationId });
       if (message.actionId != null) {
         updateAction(message.actionId, { conversationId });
       }
     }
-  }, [createConversation, messages, scope, updateAction, updateMessage]);
+  }, [createConversation, legacyMessages, scope, updateAction, updateMessage]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = prompt.trim();
@@ -663,7 +697,7 @@ export function ChatScreen(): React.JSX.Element {
       <ChatHistoryDrawer
         visible={chatDrawerOpen}
         conversations={scopedConversations}
-        messages={messages}
+        messages={drawerMessages}
         activeConversationId={activeConversation?.id ?? null}
         width={Math.min(CHAT_DRAWER_MAX_WIDTH, Math.round(windowWidth * 0.88))}
         topInset={insets.top}

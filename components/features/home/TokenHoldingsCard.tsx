@@ -9,7 +9,7 @@
  */
 import { memo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
 import { FiatUnitPriceText } from '@/components/ui/FiatUnitPriceText';

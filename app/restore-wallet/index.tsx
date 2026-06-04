@@ -3,7 +3,7 @@
  */
 import { useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { CreateWalletScreenLayout } from '@/components/features/wallet-setup/CreateWalletScreenLayout';

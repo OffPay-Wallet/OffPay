@@ -10,7 +10,7 @@ import {
   Pressable,
   useWindowDimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRootNavigationState, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -352,7 +352,7 @@ export function SwapScreen(): React.JSX.Element {
     swapInputActions,
   ] = useSwapInputState();
   const [debouncedPayAmount, setDebouncedPayAmount] = useState('');
-  const [quoteClock, setQuoteClock] = useState(Date.now());
+  const [quoteExpiryTick, setQuoteExpiryTick] = useState(0);
   const [sliderResetNonce, setSliderResetNonce] = useState(0);
   const [reviewSwap, setReviewSwap] = useState<SwapReviewState | null>(null);
   const [privateSwapMode, setPrivateSwapMode] = useState(false);
@@ -799,32 +799,33 @@ export function SwapScreen(): React.JSX.Element {
 
   const activeQuoteId = quoteQuery.data?.quoteId ?? null;
   const activeQuoteExpiresAt = quoteQuery.data?.expiresAt ?? null;
+  const reviewQuoteExpiresAt = reviewSwap?.quote.expiresAt ?? null;
 
   useEffect(() => {
-    if (activeQuoteId == null || activeQuoteExpiresAt == null) return undefined;
+    const expiryTimes = [activeQuoteExpiresAt, reviewQuoteExpiresAt].filter(
+      (expiresAt): expiresAt is number => typeof expiresAt === 'number',
+    );
+    if (expiryTimes.length === 0) return undefined;
 
-    setQuoteClock(Date.now());
-    const interval = setInterval(() => setQuoteClock(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [activeQuoteExpiresAt, activeQuoteId]);
+    const now = Date.now();
+    const futureExpiryTimes = expiryTimes.filter((expiresAt) => expiresAt > now);
+    if (futureExpiryTimes.length === 0) return undefined;
 
-  const quoteExpiresInMs = quoteQuery.data == null ? null : quoteQuery.data.expiresAt - quoteClock;
+    const nextExpiry = Math.min(...futureExpiryTimes);
+    const delayMs = nextExpiry - now + 50;
+    const timeout = setTimeout(() => {
+      setQuoteExpiryTick((value) => value + 1);
+    }, delayMs);
+
+    return () => clearTimeout(timeout);
+  }, [activeQuoteExpiresAt, activeQuoteId, quoteExpiryTick, reviewQuoteExpiresAt]);
+
+  const quoteNow = Date.now();
+  const quoteExpiresInMs = quoteQuery.data == null ? null : quoteQuery.data.expiresAt - quoteNow;
   const quoteExpired = quoteExpiresInMs != null && quoteExpiresInMs <= 0;
-  const quoteExpiryLabel =
-    quoteQuery.data == null
-      ? 'No live quote'
-      : quoteExpired
-        ? 'Expired'
-        : `${Math.ceil((quoteExpiresInMs ?? 0) / 1000)}s`;
   const reviewQuoteExpiresInMs =
-    reviewSwap == null ? null : reviewSwap.quote.expiresAt - quoteClock;
+    reviewSwap == null ? null : reviewSwap.quote.expiresAt - quoteNow;
   const reviewQuoteExpired = reviewQuoteExpiresInMs != null && reviewQuoteExpiresInMs <= 0;
-  const reviewQuoteExpiryLabel =
-    reviewSwap == null
-      ? 'No live quote'
-      : reviewQuoteExpired
-        ? 'Expired'
-        : `${Math.ceil((reviewQuoteExpiresInMs ?? 0) / 1000)}s`;
 
   const buildReviewDetailRows = useCallback(
     (extraRows: ProcessResultDetailRow[] = []): ProcessResultDetailRow[] => {
@@ -836,12 +837,12 @@ export function SwapScreen(): React.JSX.Element {
         { label: 'Quote fee', value: reviewSwap.feeLabel },
         {
           label: 'Slippage',
-          value: `${reviewSwap.slippageLabel} · ${reviewQuoteExpiryLabel}`,
+          value: reviewSwap.slippageLabel,
         },
         ...extraRows,
       ];
     },
-    [reviewQuoteExpiryLabel, reviewSwap],
+    [reviewSwap],
   );
 
   const buildSwapProcessResult = useCallback(
@@ -1236,10 +1237,8 @@ export function SwapScreen(): React.JSX.Element {
   const liveDetailsFeeLabel = quoteUpdatingForCurrentInput ? 'Updating…' : quoteFeeLabel;
   const liveDetailsRouteLabel = quoteUpdatingForCurrentInput ? 'Fetching live quote' : routeLabel;
   const currentSlippageLabel = formatQuoteSlippageLabel(quoteQuery.data ?? null);
-  const liveDetailsSlippageLabel =
-    quoteQuery.data != null && !quoteExpired
-      ? `${currentSlippageLabel} · ${quoteExpiryLabel}`
-      : currentSlippageLabel;
+  const liveDetailsSlippageExpiresAt =
+    quoteQuery.data != null && !quoteExpired ? quoteQuery.data.expiresAt : null;
   const quoteRetryAvailable =
     hasLiveSwapAmount &&
     !quoteQuery.isFetching &&
@@ -1450,8 +1449,16 @@ export function SwapScreen(): React.JSX.Element {
   ]);
   const activeSwapButtonFeedback = privateSwapMode ? privateSwapFeedback : swapButtonFeedback;
   const reviewStatusLabel =
-    reviewSwap == null ? 'Review' : reviewQuoteExpired ? 'Expired' : reviewQuoteExpiryLabel;
-  const reviewDetailRows = useMemo(() => buildReviewDetailRows(), [buildReviewDetailRows]);
+    reviewSwap == null ? 'Review' : reviewQuoteExpired ? 'Expired' : 'Review';
+  const reviewDetailRows = useMemo<SwapReviewDetailRow[]>(
+    () =>
+      buildReviewDetailRows().map((row) =>
+        row.label === 'Slippage' && reviewSwap != null
+          ? { ...row, expiresAt: reviewSwap.quote.expiresAt }
+          : row,
+      ),
+    [buildReviewDetailRows, reviewSwap],
+  );
   const privateSwapStatusMessage = privateSwapMutation.isPending
     ? 'Signing and submitting private swap...'
     : !privateSwapAvailable
@@ -1936,7 +1943,8 @@ export function SwapScreen(): React.JSX.Element {
                   priceImpactLabel={liveDetailsPriceImpactLabel}
                   feeLabel={liveDetailsFeeLabel}
                   routeLabel={liveDetailsRouteLabel}
-                  slippageLabel={liveDetailsSlippageLabel}
+                  slippageLabel={currentSlippageLabel}
+                  slippageExpiresAt={liveDetailsSlippageExpiresAt}
                 />
               ) : null}
 
@@ -1987,6 +1995,11 @@ export function SwapScreen(): React.JSX.Element {
           visible={reviewSwap != null || privateReviewSwap != null}
           title={privateReviewSwap != null ? 'Review private swap' : 'Review swap'}
           statusLabel={privateReviewSwap != null ? 'Private' : reviewStatusLabel}
+          statusExpiresAt={
+            privateReviewSwap == null && reviewSwap != null && !reviewQuoteExpired
+              ? reviewSwap.quote.expiresAt
+              : null
+          }
           payLeg={privateReviewSwap?.payLeg ?? reviewSwap?.payLeg ?? null}
           receiveLeg={privateReviewSwap?.receiveLeg ?? reviewSwap?.receiveLeg ?? null}
           detailRows={privateReviewSwap?.detailRows ?? reviewDetailRows}

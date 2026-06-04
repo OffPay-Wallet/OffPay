@@ -15,7 +15,7 @@
  * the shape, and the spring gives the feel.
  */
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { ThreeDPressable } from '@/components/ui/ThreeDPressable';
 import { PuffyTwitterXIcon } from '@/components/ui/icons/PuffyTwitterXIcon';

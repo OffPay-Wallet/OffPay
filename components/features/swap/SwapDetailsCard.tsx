@@ -6,6 +6,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { SWAP_PANEL_SHADOW } from './swapGlass';
+import { useQuoteExpiryDetailLabel } from './quote-expiry-label';
 
 interface SwapDetailsCardProps {
   rateLabel: string;
@@ -13,6 +14,7 @@ interface SwapDetailsCardProps {
   feeLabel: string;
   routeLabel: string;
   slippageLabel: string;
+  slippageExpiresAt?: number | null;
 }
 
 function DetailRow({
@@ -58,10 +60,12 @@ export function SwapDetailsCard({
   feeLabel,
   routeLabel,
   slippageLabel,
+  slippageExpiresAt,
 }: SwapDetailsCardProps): React.JSX.Element {
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const compact = windowWidth < 390 || windowHeight < 820 || fontScale > 1.05;
   const dense = windowWidth < 350 || windowHeight < 720 || fontScale > 1.18;
+  const resolvedSlippageLabel = useQuoteExpiryDetailLabel(slippageLabel, slippageExpiresAt);
 
   return (
     <View
@@ -78,7 +82,7 @@ export function SwapDetailsCard({
       <View style={styles.divider} />
       <DetailRow label="Route" value={routeLabel} dense={dense} />
       <View style={styles.divider} />
-      <DetailRow label="Slippage" value={slippageLabel} dense={dense} />
+      <DetailRow label="Slippage" value={resolvedSlippageLabel} dense={dense} />
     </View>
   );
 }

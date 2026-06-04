@@ -6,7 +6,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { Modal, Pressable, View } from 'react-native';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';

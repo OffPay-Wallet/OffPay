@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -11,10 +11,12 @@ import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useQuoteExpiryCountdown, useQuoteExpiryDetailLabel } from './quote-expiry-label';
 
 export interface SwapReviewDetailRow {
   label: string;
   value: string;
+  expiresAt?: number | null;
 }
 
 export interface SwapReviewTokenLeg {
@@ -29,6 +31,7 @@ interface SwapReviewFlowScreenProps {
   visible: boolean;
   title: string;
   statusLabel: string;
+  statusExpiresAt?: number | null;
   payLeg: SwapReviewTokenLeg | null;
   receiveLeg: SwapReviewTokenLeg | null;
   detailRows: SwapReviewDetailRow[];
@@ -44,6 +47,7 @@ export function SwapReviewFlowScreen({
   visible,
   title,
   statusLabel,
+  statusExpiresAt,
   payLeg,
   receiveLeg,
   detailRows,
@@ -61,6 +65,10 @@ export function SwapReviewFlowScreen({
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
   const topPadding = dense ? spacing.sm : compact ? spacing.md : spacing.lg;
   const footerPaddingBottom = Math.max(insets.bottom, spacing.sm) + spacing.sm;
+  const resolvedStatusLabel = useQuoteExpiryCountdown(statusExpiresAt, {
+    enabled: visible,
+    fallbackLabel: statusLabel,
+  });
 
   if (!visible) return null;
 
@@ -133,7 +141,7 @@ export function SwapReviewFlowScreen({
                   minimumFontScale={0.78}
                   maxFontSizeMultiplier={1}
                 >
-                  {statusLabel}
+                  {resolvedStatusLabel}
                 </Text>
               </View>
             </View>
@@ -190,18 +198,7 @@ export function SwapReviewFlowScreen({
                     >
                       {row.label}
                     </Text>
-                    <Text
-                      variant="small"
-                      color={colors.text.primary}
-                      style={[styles.detailValue, dense && styles.detailTextDense]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.62}
-                      maxFontSizeMultiplier={1}
-                      selectable
-                    >
-                      {row.value}
-                    </Text>
+                    <ReviewDetailValue row={row} dense={dense} visible={visible} />
                   </View>
                   {index < detailRows.length - 1 ? <View style={styles.divider} /> : null}
                 </React.Fragment>
@@ -283,6 +280,33 @@ export function SwapReviewFlowScreen({
         </View>
       </View>
     </Animated.View>
+  );
+}
+
+function ReviewDetailValue({
+  row,
+  dense,
+  visible,
+}: {
+  row: SwapReviewDetailRow;
+  dense: boolean;
+  visible: boolean;
+}): React.JSX.Element {
+  const value = useQuoteExpiryDetailLabel(row.value, row.expiresAt, { enabled: visible });
+
+  return (
+    <Text
+      variant="small"
+      color={colors.text.primary}
+      style={[styles.detailValue, dense && styles.detailTextDense]}
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      minimumFontScale={0.62}
+      maxFontSizeMultiplier={1}
+      selectable
+    >
+      {value}
+    </Text>
   );
 }
 
