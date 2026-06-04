@@ -1,10 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ComponentProps, type ReactNode } from 'react';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { StyleSheet } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
-
-import type { ComponentProps } from 'react';
 
 type TextProps = ComponentProps<typeof Text>;
 

@@ -90,7 +90,7 @@ const TokenRow = memo(function TokenRow({
       ? valuation.unitPriceLabel
       : null;
   const iconSize = dense ? 30 : compact ? 32 : 38;
-  const valueColumnWidth = dense ? 84 : compact ? 100 : 132;
+  const valueColumnWidth = dense ? 90 : compact ? 112 : 136;
 
   return (
     <Pressable
@@ -241,7 +241,7 @@ export function TokenRowSkeleton({
           style={styles.skeletonSubline}
         />
       </View>
-      <View style={[styles.valueCol, { width: dense ? 84 : compact ? 100 : 132 }]}>
+      <View style={[styles.valueCol, { width: dense ? 90 : compact ? 112 : 136 }]}>
         <SkeletonBlock width="78%" height={compact ? 13 : 15} radius={8} />
         <SkeletonBlock
           width="64%"

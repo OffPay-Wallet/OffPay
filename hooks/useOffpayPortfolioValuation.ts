@@ -5,6 +5,7 @@ import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
   fetchUsdToCurrencyRate,
+  formatCompactFiatCurrency,
   formatFiatCurrency,
   isUsdStablePriceSymbol,
   normalizeCurrency,
@@ -60,13 +61,13 @@ interface LastPricingSnapshot {
 
 function buildPortfolioValuationData(params: {
   holdings: TokenHolding[];
-  priceInputs: Array<{
+  priceInputs: {
     mint: string;
     balance: number;
     symbol: string;
     priceSymbol: string;
     usdPrice: number | null;
-  }>;
+  }[];
   currency: string;
   rate: number;
   unitUsdPrices: Record<string, number>;
@@ -103,7 +104,7 @@ function buildPortfolioValuationData(params: {
 
     const unitPrice = usdPrice * params.rate;
     tokenValues[holding.mint] = {
-      fiatValueLabel: formatFiatCurrency(holding.balanceValue * unitPrice, params.currency),
+      fiatValueLabel: formatCompactFiatCurrency(holding.balanceValue * unitPrice, params.currency),
       unitPriceLabel: `${formatFiatCurrency(unitPrice, params.currency)}/${symbol}`,
     };
   }

@@ -1,7 +1,6 @@
 import { Buffer } from 'buffer';
 
 import { sha256 } from '@noble/hashes/sha2.js';
-import bs58 from 'bs58';
 
 import {
   broadcastRawTransaction,
@@ -10,7 +9,6 @@ import {
   OffpayApiError,
 } from '@/lib/api/offpay-api-client';
 import {
-  getTokenTransferDestinationAccounts,
   instructionHasTokenTransferAmount,
   resolveMessageAccountKeys,
   verifyExpectedRecipient,
@@ -21,7 +19,6 @@ import {
   instructionContainsAmount,
   normalizeAtomicAmount,
   parseSerializedTransaction,
-  type ParsedTransactionMessage,
 } from '@/lib/magicblock/tx-parsing';
 import { enqueuePendingPaymentBackup } from '@/lib/payments/pending-backup-queue';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';

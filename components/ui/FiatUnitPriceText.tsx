@@ -9,7 +9,7 @@ import { resolveFiatMoneyMetrics } from '@/lib/fiat-money-layout';
 import type { FiatMoneyTextSize } from '@/lib/fiat-money-layout';
 import type { StyleProp, TextProps, TextStyle, ViewStyle } from 'react-native';
 
-const THIN_SPACE = '\u2009';
+const NARROW_NO_BREAK_SPACE = '\u202F';
 
 type FiatUnitPriceTextProps = Omit<TextProps, 'children' | 'style'> & {
   value: string;
@@ -34,8 +34,7 @@ export function FiatUnitPriceText({
 }: FiatUnitPriceTextProps): React.JSX.Element {
   const parsed = useMemo(() => parseFiatUnitPriceLabel(value), [value]);
   const metrics = resolveFiatMoneyMetrics(size, compact);
-  const frameAlign =
-    align === 'right' ? 'flex-end' : align === 'left' ? 'flex-start' : 'center';
+  const frameAlign = align === 'right' ? 'flex-end' : align === 'left' ? 'flex-start' : 'center';
 
   if (parsed == null) {
     return (
@@ -61,7 +60,7 @@ export function FiatUnitPriceText({
     );
   }
 
-  const fiatLabel = `${parsed.parts.symbol}${THIN_SPACE}${parsed.parts.amount}`;
+  const fiatLabel = `${parsed.parts.symbol}${NARROW_NO_BREAK_SPACE}${parsed.parts.amount}`;
 
   return (
     <View style={[styles.frame, { alignItems: frameAlign }, style]}>

@@ -3,7 +3,6 @@ import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { offpayWalletTransactionsQueryKey } from '@/lib/api/offpay-wallet-query-keys';
 
 import {
-  EMPTY_PARAMS,
   errorCodeFromUnknown,
   isNetworkReady,
   readCappedInteger,

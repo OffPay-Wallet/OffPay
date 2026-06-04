@@ -281,12 +281,6 @@ interface UmbraLegacyProtocolFeeGroup {
   instructions: readonly UmbraLegacyProtocolFeeInstruction[];
 }
 
-interface CurrentProtocolFeeAddressParams {
-  instruction: UmbraCurrentProtocolFeeInstruction;
-  mintAddress: Address;
-  programAddress: Address;
-}
-
 export interface UmbraVaultFeeAccountCheck {
   action: UmbraDirectVaultAction;
   address: string;

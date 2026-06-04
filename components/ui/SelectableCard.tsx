@@ -7,7 +7,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
-import { layout, radii, spacing } from '@/constants/spacing';
+import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
 interface SelectableCardProps {

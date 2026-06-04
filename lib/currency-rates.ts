@@ -14,6 +14,12 @@ export function normalizeCurrency(code: string): string {
 }
 
 const USD_STABLE_PRICE_SYMBOLS = new Set(['USDC', 'USDT', 'DUSDC', 'DUSDT']);
+const COMPACT_FIAT_UNITS = [
+  { value: 1_000_000_000_000, suffix: 'T' },
+  { value: 1_000_000_000, suffix: 'B' },
+  { value: 1_000_000, suffix: 'M' },
+  { value: 1_000, suffix: 'K' },
+] as const;
 
 /** Symbols priced at $1 for portfolio and token row valuations. */
 export function isUsdStablePriceSymbol(symbol: string): boolean {
@@ -30,6 +36,43 @@ export function formatFiatCurrency(value: number, currencyCode: string): string 
   }).format(Object.is(value, -0) ? 0 : value);
 
   return `${currency?.symbol ?? normalized} ${formattedNumber}`;
+}
+
+export function formatCompactFiatCurrency(value: number, currencyCode: string): string {
+  if (!Number.isFinite(value)) return '--';
+  const normalized = normalizeCurrency(currencyCode);
+  const currency = CURRENCIES.find((entry) => entry.code === normalized);
+  const normalizedValue = Object.is(value, -0) ? 0 : value;
+  const absolute = Math.abs(normalizedValue);
+
+  for (let index = 0; index < COMPACT_FIAT_UNITS.length; index += 1) {
+    const unit = COMPACT_FIAT_UNITS[index];
+    if (absolute < unit.value) continue;
+
+    const scaled = absolute / unit.value;
+    const rounded = Number(scaled.toFixed(1));
+    const nextUnit = COMPACT_FIAT_UNITS[index - 1];
+    if (rounded >= 1000 && nextUnit != null) {
+      const promoted = Number((absolute / nextUnit.value).toFixed(1));
+      const promotedNumber = new Intl.NumberFormat('en-US', {
+        maximumFractionDigits: 1,
+        minimumFractionDigits: 0,
+      }).format(promoted);
+      return `${currency?.symbol ?? normalized} ${normalizedValue < 0 ? '-' : ''}${promotedNumber}${
+        nextUnit.suffix
+      }`;
+    }
+
+    const formattedNumber = new Intl.NumberFormat('en-US', {
+      maximumFractionDigits: 1,
+      minimumFractionDigits: 0,
+    }).format(rounded);
+    return `${currency?.symbol ?? normalized} ${normalizedValue < 0 ? '-' : ''}${formattedNumber}${
+      unit.suffix
+    }`;
+  }
+
+  return formatFiatCurrency(normalizedValue, normalized);
 }
 
 export function formatFiatCurrencyParts(

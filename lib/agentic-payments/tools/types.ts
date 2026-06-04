@@ -8,11 +8,7 @@ import type {
   AgenticPrivateSendAction,
   AgenticSwapAction,
 } from '@/store/agenticChatStore';
-import type {
-  CapabilitiesResponse,
-  OffpayNetwork,
-  WalletBalanceResponse,
-} from '@/types/offpay-api';
+import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
 
 export type AgenticToolName =
   | 'get_client_capabilities'

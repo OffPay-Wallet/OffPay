@@ -15,7 +15,7 @@ import {
 
 import type { StyleProp, TextProps, TextStyle, ViewStyle } from 'react-native';
 
-const THIN_SPACE = '\u2009';
+const NARROW_NO_BREAK_SPACE = '\u202F';
 
 export interface FiatMoneyTextProps extends Omit<TextProps, 'children' | 'style'> {
   value: string;
@@ -49,8 +49,7 @@ export function FiatMoneyText({
   );
   const metrics = resolveFiatMoneyMetrics(size, compact, amountFontSize);
   const textAlign = align;
-  const frameAlign =
-    align === 'right' ? 'flex-end' : align === 'left' ? 'flex-start' : 'center';
+  const frameAlign = align === 'right' ? 'flex-end' : align === 'left' ? 'flex-start' : 'center';
 
   const rootTextStyle: StyleProp<TextStyle> = [
     styles.root,
@@ -74,7 +73,7 @@ export function FiatMoneyText({
   }
 
   // Single `Text` node — nested children + `adjustsFontSizeToFit` clip amounts in narrow rows.
-  const displayLabel = `${parsed.symbol}${THIN_SPACE}${parsed.amount}`;
+  const displayLabel = `${parsed.symbol}${NARROW_NO_BREAK_SPACE}${parsed.amount}`;
 
   return (
     <View style={[styles.frame, { alignItems: frameAlign }, style]}>
