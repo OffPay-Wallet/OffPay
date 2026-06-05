@@ -1,11 +1,11 @@
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { UsernameSetupForm } from '@/components/features/onboarding/username-setup-form';
 import { colors } from '@/constants/colors';
-import { spacing } from '@/constants/spacing';
+import { layout, spacing } from '@/constants/spacing';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -17,6 +17,7 @@ function getSource(value: string | string[] | undefined): 'accounts' | 'onboardi
 
 export default function UsernameSetupScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams<{ source?: string | string[] }>();
   const username = useAppStore((state) => state.username);
   const setHasOnboarded = useAppStore((state) => state.setHasOnboarded);
@@ -70,14 +71,19 @@ export default function UsernameSetupScreen(): React.JSX.Element {
     router.replace('/onboarding');
   }, [source, submitting]);
 
+  const compact = width < 390 || height < 740;
+  const veryCompact = width < 360 || height < 680;
+  const horizontalPadding = veryCompact ? spacing.lg : compact ? spacing.xl : spacing['3xl'];
+
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: insets.top + spacing['3xl'],
-          paddingBottom: insets.bottom + spacing.lg,
+          paddingHorizontal: horizontalPadding,
+          paddingTop: insets.top + (compact ? spacing.xl : spacing['3xl']),
+          paddingBottom: insets.bottom + (compact ? spacing.xl : spacing['3xl']),
         },
       ]}
       keyboardShouldPersistTaps="handled"
@@ -97,14 +103,12 @@ export default function UsernameSetupScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   scroll: {
     flex: 1,
-    // Flat frosty surface — matches the rest of the onboarding flow
-    // (welcome → security-setup → create-wallet → username-setup).
-    // No gradient, no shadow.
-    backgroundColor: colors.brand.glassTint,
+    backgroundColor: colors.surface.background,
   },
   content: {
     flexGrow: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing['3xl'],
+    minHeight: layout.minTouchTarget,
   },
 });

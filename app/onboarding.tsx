@@ -2,15 +2,9 @@
  * Welcome / Onboarding screen — first-launch experience.
  *
  * Layout:
- *   Top    — paged feature carousel highlighting OffPay's utility
- *            (privacy, offline payments, self-custody, swap) using
- *            the puffy icons in `assets/onboarding_icons/`. Sits
- *            directly on the gradient background.
- *   Bottom — a distinct rounded "sheet" card that hosts the wallet
- *            setup CTAs, the preview social auth row, and the legal
- *            footer. The card has rounded top corners and rests
- *            flush against the bottom edge so it visually separates
- *            action from content.
+ *   Top    — plain dark glossy breathing space.
+ *   Bottom — rounded dark glossy action card that hosts the wallet
+ *            setup CTAs, social auth row, and legal footer.
  *
  * The CTA pills mirror the geometry of the Settings → Reset button so
  * the action language stays consistent across the app.
@@ -19,23 +13,26 @@
  * Spec: Section 3.3 (legal disclosure at first launch)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
-import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
-import { router } from 'expo-router';
+import { Linking, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { OnboardingActionPanel } from '@/components/features/wallet-setup/OnboardingActionPanel';
-import { OnboardingFeatureCarousel } from '@/components/features/wallet-setup/OnboardingFeatureCarousel';
 import {
-  ProcessResultScreen,
-  type ProcessResultVariant,
-} from '@/components/ui/ProcessResultScreen';
+  OnboardingActionPanel,
+  type OnboardingAuthFeedback,
+} from '@/components/features/wallet-setup/OnboardingActionPanel';
+import { AnimatedOffPayLogo } from '@/components/ui/AnimatedOffPayLogo';
+import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { usePrivyOnboardingActions } from '@/lib/privy';
 
 const TERMS_URL = 'https://offpay.app/terms';
 const PRIVACY_URL = 'https://offpay.app/privacy';
+const APP_ICON_SOURCE = require('../assets/AppIcons/playstore.png') as number;
 
 const AUTH_RESULT_EXIT_DELAY_MS = 220;
 const AUTH_RESULT_FALLBACK_MS = 3200;
@@ -59,8 +56,9 @@ const VERY_NARROW_WIDTH = 340;
 const NARROW_WIDTH = 390;
 
 type AuthFeedbackState = {
-  variant: ProcessResultVariant;
+  variant: OnboardingAuthFeedback['variant'];
   title: string;
+  message: string;
 };
 
 function buildAuthFeedback(params: {
@@ -70,22 +68,26 @@ function buildAuthFeedback(params: {
     return {
       variant: 'success',
       title: 'Success',
+      message: 'Continue setup',
     };
   }
 
   return {
     variant: 'error',
     title: 'Failed',
+    message: 'Try again from the options below',
   };
 }
 
 export default function WelcomeScreen(): React.JSX.Element {
+  const params = useLocalSearchParams<{ authResult?: string }>();
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
   const privy = usePrivyOnboardingActions();
   const [authFeedback, setAuthFeedback] = useState<AuthFeedbackState | null>(null);
   const authFeedbackDoneRef = useRef(false);
   const authFeedbackExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consumedAuthResultRef = useRef<string | null>(null);
 
   const usableHeight = height - insets.top - insets.bottom;
 
@@ -111,26 +113,15 @@ export default function WelcomeScreen(): React.JSX.Element {
 
   const horizontalPadding =
     width < VERY_NARROW_WIDTH ? spacing.lg : isCompact ? spacing.xl : spacing['2xl'];
-  // Carousel hosts a paging FlatList — it must always span the full
-  // viewport width so each slide snaps cleanly. Internal padding keeps
-  // the content centered inside that frame.
-  const carouselWidth = width;
-  // Keep hero art below the old Pixel-tuned size. A bundled APK can
-  // land on narrower logical widths than the emulator, and oversize
-  // art is the first thing that makes the whole screen feel scaled up.
-  const iconFloor = isVeryCompact ? 112 : isCompact ? 128 : 148;
-  const iconCeiling = isVeryCompact ? 160 : isCompact ? 184 : 208;
-  const iconBudget = Math.min(
-    Math.max(width * (isVeryCompact ? 0.34 : isCompact ? 0.38 : 0.42), iconFloor),
-    usableHeight * (isVeryCompact ? 0.17 : isCompact ? 0.19 : 0.22),
-    iconCeiling,
-  );
-  const iconSize = Math.round(iconBudget);
-  const authFeedbackLottieSize = Math.round(Math.min(Math.max(width * 0.54, 210), 280));
 
   const sheetGap = isVeryCompact ? spacing.sm : isCompact ? spacing.md : spacing.lg;
   const sheetTopPadding = isVeryCompact ? spacing.lg : isCompact ? spacing.xl : spacing['2xl'];
-  const heroBottomPadding = isVeryCompact ? spacing.sm : isCompact ? spacing.md : spacing.lg;
+  const logoSize = isVeryCompact ? 116 : isCompact ? 146 : 172;
+  const heroBottomPadding = isVeryCompact
+    ? spacing['2xl']
+    : isCompact
+      ? spacing['4xl']
+      : spacing['4xl'] + spacing.xl;
 
   const handleCreateWallet = useCallback((): void => {
     router.push({ pathname: '/security-setup/passcode', params: { intent: 'create-wallet' } });
@@ -208,6 +199,19 @@ export default function WelcomeScreen(): React.JSX.Element {
   }, [authFeedback]);
 
   useEffect(() => {
+    const authResult = Array.isArray(params.authResult) ? params.authResult[0] : params.authResult;
+
+    if (authResult !== 'success' && authResult !== 'failed') return;
+    if (consumedAuthResultRef.current === authResult) return;
+
+    consumedAuthResultRef.current = authResult;
+    authFeedbackDoneRef.current = false;
+    setAuthFeedback(
+      buildAuthFeedback({ outcome: authResult === 'success' ? 'success' : 'failed' }),
+    );
+  }, [params.authResult]);
+
+  useEffect(() => {
     if (authFeedback == null) return;
 
     authFeedbackDoneRef.current = false;
@@ -244,12 +248,60 @@ export default function WelcomeScreen(): React.JSX.Element {
       bounces={false}
       showsVerticalScrollIndicator={false}
     >
-      <Animated.View
-        entering={FadeInUp.duration(500).delay(120)}
-        style={[styles.heroSection, { paddingBottom: heroBottomPadding }]}
-      >
-        <OnboardingFeatureCarousel width={carouselWidth} iconSize={iconSize} density={density} />
+      <Animated.View style={[styles.heroSection, { paddingBottom: heroBottomPadding }]}>
+        <LinearGradient
+          pointerEvents="none"
+          colors={[
+            'rgba(247, 247, 242, 0.3)',
+            'rgba(247, 247, 242, 0.2)',
+            'rgba(247, 247, 242, 0.05)',
+            'rgba(247, 247, 242, 0.04)',
+            'rgba(247, 247, 242, 0.02)',
+          ]}
+          locations={[0, 0.4, 0.68, 0.86, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={styles.heroGradient}
+        />
+        <View style={styles.heroContent}>
+          <View style={[styles.heroIconCluster, { width: logoSize, height: logoSize }]}>
+            <AnimatedOffPayLogo
+              size={logoSize}
+              bodyColor={colors.brand.whiteStream}
+              eyeColor={colors.brand.deepShadow}
+            />
+          </View>
+          <View
+            style={[styles.heroCopy, { maxWidth: Math.min(width - horizontalPadding * 2, 360) }]}
+          >
+            <Text
+              variant="h2"
+              color={colors.brand.whiteStream}
+              align="center"
+              style={styles.heroTitle}
+            >
+              Pay your way.{'\n'}Private. Offline-ready.
+            </Text>
+          </View>
+        </View>
       </Animated.View>
+
+      <View pointerEvents="none" style={styles.heroDividerStrip}>
+        <View style={styles.heroBrandLockup}>
+          <Image
+            source={APP_ICON_SOURCE}
+            style={styles.heroBrandIcon}
+            contentFit="contain"
+            cachePolicy="memory-disk"
+            transition={0}
+            tintColor={colors.brand.whiteStream}
+            accessible={false}
+          />
+          <Text variant="captionBold" color={colors.brand.whiteStream} style={styles.heroBrandText}>
+            OffPay
+          </Text>
+        </View>
+      </View>
 
       <Animated.View
         entering={FadeInDown.duration(500).delay(220)}
@@ -274,18 +326,11 @@ export default function WelcomeScreen(): React.JSX.Element {
           onTermsPress={() => openExternal(TERMS_URL)}
           onPrivacyPress={() => openExternal(PRIVACY_URL)}
           authBusyProvider={privy.busyProvider}
+          authFeedback={authFeedback}
+          onAuthFeedbackAnimationFinish={completeAuthFeedback}
           density={density}
         />
       </Animated.View>
-
-      <ProcessResultScreen
-        visible={authFeedback != null}
-        variant={authFeedback?.variant ?? 'success'}
-        title={authFeedback?.title ?? ''}
-        animationSize={authFeedbackLottieSize}
-        onAnimationFinish={completeAuthFeedback}
-        minimal
-      />
     </ScrollView>
   );
 }
@@ -293,7 +338,7 @@ export default function WelcomeScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.brand.glassTint,
+    backgroundColor: colors.surface.background,
   },
   content: {
     flexGrow: 1,
@@ -301,14 +346,73 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     flex: 1,
+    minHeight: 220,
+    backgroundColor: colors.brand.deepShadow,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    paddingBottom: 0,
+    borderBottomLeftRadius: radii.xl,
+    borderBottomRightRadius: radii.xl,
+    borderCurve: 'continuous',
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
+    borderColor: colors.glass.rim,
+    overflow: 'hidden',
+  },
+  heroGradient: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.95,
+  },
+  heroBrandLockup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 0,
+  },
+  heroBrandIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+  },
+  heroBrandText: {
+    fontSize: 30,
+    lineHeight: 36,
+    letterSpacing: 0,
+  },
+  heroContent: {
+    zIndex: 2,
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  heroIconCluster: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  heroCopy: {
+    alignItems: 'center',
+  },
+  heroTitle: {
+    lineHeight: 34,
+  },
+  heroDividerStrip: {
+    height: 64,
+    backgroundColor: colors.brand.deepShadow,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sheet: {
-    backgroundColor: colors.brand.whiteStream,
-    borderTopLeftRadius: radii['2xl'],
-    borderTopRightRadius: radii['2xl'],
+    backgroundColor: colors.brand.graphiteDepth,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
     borderCurve: 'continuous',
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: colors.glass.rim,
+    overflow: 'hidden',
+    boxShadow: [
+      '0 -24px 54px rgba(0, 0, 0, 0.48)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.42)',
+    ].join(', '),
   },
 });

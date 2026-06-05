@@ -14,8 +14,8 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import cancelLottie from '@/assets/lotties/Cancel.json';
-import successLottie from '@/assets/lotties/success.json';
 import { GradientBackground } from '@/components/ui/GradientBackground';
+import { whiteSuccessLottie } from '@/components/ui/success-lottie';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
@@ -119,7 +119,7 @@ function getResultLottieColor(variant: ProcessResultVariant): string {
     return colors.semantic.error;
   }
 
-  const source = variant === 'success' ? successLottie : cancelLottie;
+  const source = variant === 'success' ? whiteSuccessLottie : cancelLottie;
   return extractFirstLottieFillColor(source) ?? colors.semantic.success;
 }
 
@@ -132,7 +132,7 @@ function ResultLottieMark({
   size: number;
   onAnimationFinish?: () => void;
 }): React.JSX.Element {
-  const source = (variant === 'success' ? successLottie : cancelLottie) as AnimationObject;
+  const source = (variant === 'success' ? whiteSuccessLottie : cancelLottie) as AnimationObject;
 
   return (
     <View

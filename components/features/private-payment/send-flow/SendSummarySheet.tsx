@@ -34,8 +34,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import successLottie from '@/assets/lotties/success.json';
 import { GlassSliderButton } from '@/components/ui/glass-slider-button';
+import { successLottie, whiteSuccessLottie } from '@/components/ui/success-lottie';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
@@ -99,11 +99,6 @@ const SUCCESS_LOTTIE_DURATION_MS =
     : 1400;
 const SUCCESS_CONFETTI_DELAY_MS = Math.max(520, SUCCESS_LOTTIE_DURATION_MS - 360);
 const SUCCESS_CONFETTI_VISIBLE_MS = 980;
-const SUCCESS_LOTTIE_GREEN_COLOR = '[0,0.788000009574,0.522000002394,1]';
-const SUCCESS_LOTTIE_WHITE_COLOR = '[1,1,1,1]';
-const whiteSuccessLottie = JSON.parse(
-  JSON.stringify(successLottie).replaceAll(SUCCESS_LOTTIE_GREEN_COLOR, SUCCESS_LOTTIE_WHITE_COLOR),
-) as typeof successLottie;
 
 const CONFETTI_PARTICLES = [
   { x: -74, y: -64, rotate: -34, delay: 0, width: 5, height: 13, color: colors.brand.whiteStream },

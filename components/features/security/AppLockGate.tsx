@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
+  ActivityIndicator,
   Pressable,
   StyleSheet,
   useWindowDimensions,
@@ -8,8 +9,12 @@ import {
   type ViewStyle,
 } from 'react-native';
 import Animated, {
+  Easing,
+  interpolate,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
@@ -22,6 +27,7 @@ import { WaterKeypadButton } from '@/components/ui/WaterKeypadButton';
 import { PuffyFingerprintIcon } from '@/components/ui/icons/PuffyFingerprintIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
+import { fontFamily } from '@/constants/typography';
 import { authenticateWithBiometrics } from '@/lib/wallet/biometric-auth';
 import {
   getSecuritySettings,
@@ -41,6 +47,14 @@ interface AppLockGateProps {
 }
 
 const BACKGROUND_LOCK_GRACE_AFTER_UNLOCK_MS = 900;
+const RESET_CONFIRM_SCRIM_DURATION_MS = 360;
+const RESET_CONFIRM_CARD_DURATION_MS = 560;
+const RESET_CONFIRM_CONTENT_DURATION_MS = 460;
+const RESET_CONFIRM_BLUR_DURATION_MS = 300;
+const RESET_CONFIRM_CONTENT_DELAY_MS = 24;
+const RESET_CONFIRM_IOS_EASING = Easing.bezier(0.2, 0.82, 0.2, 1);
+const RESET_CONFIRM_CLOSE_DURATION_MS = 340;
+const RESET_CONFIRM_CLOSE_EASING = Easing.bezier(0.36, 0, 0.66, 1);
 
 type KeyKind = 'digit' | 'fingerprint' | 'clear' | 'delete';
 
@@ -168,6 +182,12 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   }, [compact, height, horizontalPadding, veryCompact, width]);
   const { keypadMaxWidth, keypadGap, contentGap, keyFrameStyle } = keypadLayout;
   const resetDialogMaxWidth = Math.min(360, Math.max(280, width - horizontalPadding * 2));
+  const resetDialogInitialTranslateY = Math.min(220, Math.max(128, height * 0.24));
+  const resetDialogTitleFontSize = veryCompact ? 24 : compact ? 26 : 28;
+  const resetDialogTitleLineHeight = resetDialogTitleFontSize + 7;
+  const resetDialogBodyFontSize = veryCompact ? 14 : 15;
+  const resetDialogBodyLineHeight = resetDialogBodyFontSize + 7;
+  const resetDialogButtonHeight = veryCompact ? 46 : 50;
 
   const hasStoredWallet = useWalletStore((state) => state.wallets.length > 0);
   const walletPublicKey = useWalletStore((state) => state.publicKey);
@@ -188,6 +208,8 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const [unlocking, setUnlocking] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetConfirmVisible, setResetConfirmVisible] = useState(false);
+  const [resetConfirmClosing, setResetConfirmClosing] = useState(false);
+  const resetConfirmClosingRef = useRef(false);
   const loadRequestIdRef = useRef(0);
   const lockMutationIdRef = useRef(0);
   const lockWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -200,6 +222,10 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const autoBiometricPromptedRef = useRef(false);
   const ignoreBackgroundLockUntilRef = useRef(0);
   const backgroundLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resetConfirmScrim = useSharedValue(0);
+  const resetConfirmMotion = useSharedValue(0);
+  const resetConfirmContent = useSharedValue(0);
+  const resetConfirmBlur = useSharedValue(0);
 
   // Shake animation for wrong passcode
   const shakeX = useSharedValue(0);
@@ -219,6 +245,123 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       withTiming(0, { duration: d }),
     );
   }, [shakeX]);
+
+  const resetConfirmScrimStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(resetConfirmScrim.value, [0, 1], [0, 1]),
+  }));
+
+  const resetConfirmCardStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(resetConfirmContent.value, [0, 0.22, 1], [0, 1, 1]),
+    transform: [
+      {
+        translateY: interpolate(
+          resetConfirmMotion.value,
+          [0, 1],
+          [resetDialogInitialTranslateY, 0],
+        ),
+      },
+      { scale: interpolate(resetConfirmMotion.value, [0, 1], [0.9, 1]) },
+    ],
+  }));
+
+  const resetConfirmBlurStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(resetConfirmBlur.value, [0, 1], [1, 0]),
+    filter: [{ blur: interpolate(resetConfirmBlur.value, [0, 1], [3.5, 0]) }],
+  }));
+
+  useEffect(() => {
+    if (!resetConfirmVisible) {
+      resetConfirmScrim.value = 0;
+      resetConfirmMotion.value = 0;
+      resetConfirmContent.value = 0;
+      resetConfirmBlur.value = 0;
+      return;
+    }
+
+    resetConfirmScrim.value = 0;
+    resetConfirmMotion.value = 0;
+    resetConfirmContent.value = 0;
+    resetConfirmBlur.value = 0;
+    resetConfirmClosingRef.current = false;
+    setResetConfirmClosing(false);
+
+    resetConfirmScrim.value = withTiming(1, {
+      duration: RESET_CONFIRM_SCRIM_DURATION_MS,
+      easing: RESET_CONFIRM_IOS_EASING,
+    });
+    resetConfirmContent.value = withDelay(
+      RESET_CONFIRM_CONTENT_DELAY_MS,
+      withTiming(1, {
+        duration: RESET_CONFIRM_CONTENT_DURATION_MS,
+        easing: RESET_CONFIRM_IOS_EASING,
+      }),
+    );
+    resetConfirmMotion.value = withDelay(
+      RESET_CONFIRM_CONTENT_DELAY_MS,
+      withTiming(1, {
+        duration: RESET_CONFIRM_CARD_DURATION_MS,
+        easing: RESET_CONFIRM_IOS_EASING,
+      }),
+    );
+    resetConfirmBlur.value = withDelay(
+      RESET_CONFIRM_CONTENT_DELAY_MS,
+      withTiming(1, {
+        duration: RESET_CONFIRM_BLUR_DURATION_MS,
+        easing: RESET_CONFIRM_IOS_EASING,
+      }),
+    );
+  }, [
+    resetConfirmBlur,
+    resetConfirmContent,
+    resetConfirmMotion,
+    resetConfirmScrim,
+    resetConfirmVisible,
+  ]);
+
+  const finishResetConfirmClose = useCallback((): void => {
+    resetConfirmClosingRef.current = false;
+    setResetConfirmClosing(false);
+    setResetConfirmVisible(false);
+  }, []);
+
+  const closeResetConfirm = useCallback(
+    (force = false): void => {
+      if ((!force && resetting) || resetConfirmClosingRef.current) return;
+
+      resetConfirmClosingRef.current = true;
+      setResetConfirmClosing(true);
+      resetConfirmScrim.value = withTiming(0, {
+        duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+        easing: RESET_CONFIRM_CLOSE_EASING,
+      });
+      resetConfirmContent.value = withTiming(0, {
+        duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+        easing: RESET_CONFIRM_CLOSE_EASING,
+      });
+      resetConfirmBlur.value = withTiming(0, {
+        duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+        easing: RESET_CONFIRM_CLOSE_EASING,
+      });
+      resetConfirmMotion.value = withTiming(
+        0,
+        {
+          duration: RESET_CONFIRM_CLOSE_DURATION_MS,
+          easing: RESET_CONFIRM_CLOSE_EASING,
+        },
+        (finished) => {
+          if (finished) runOnJS(finishResetConfirmClose)();
+        },
+      );
+    },
+    [
+      finishResetConfirmClose,
+      resetConfirmBlur,
+      resetConfirmContent,
+      resetConfirmMotion,
+      resetConfirmScrim,
+      resetting,
+    ],
+  );
 
   const setLockedState = useCallback((nextLocked: boolean): void => {
     lockedRef.current = nextLocked;
@@ -656,7 +799,6 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const handleForgotPasswordReset = useCallback(async (): Promise<void> => {
     if (resetting) return;
 
-    setResetConfirmVisible(false);
     setResetting(true);
     setToast(null);
     cancelScheduledPasscodeUnlock();
@@ -679,12 +821,14 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       const message =
         error instanceof Error ? error.message : 'Could not reset this wallet. Try again.';
       setToast(message);
+      closeResetConfirm(true);
     } finally {
       setResetting(false);
     }
   }, [
     clearPendingBackgroundLock,
     cancelScheduledPasscodeUnlock,
+    closeResetConfirm,
     queryClient,
     resetting,
     router,
@@ -698,14 +842,14 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
 
     cancelScheduledPasscodeUnlock();
     setToast(null);
+    resetConfirmClosingRef.current = false;
+    setResetConfirmClosing(false);
     setResetConfirmVisible(true);
   }, [cancelScheduledPasscodeUnlock, resetting, unlocking]);
 
   const handleCancelResetConfirm = useCallback((): void => {
-    if (resetting) return;
-
-    setResetConfirmVisible(false);
-  }, [resetting]);
+    closeResetConfirm();
+  }, [closeResetConfirm]);
 
   const keypadRows = useMemo(
     () => [
@@ -879,22 +1023,59 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
           accessibilityViewIsModal
           accessibilityLabel="Reset wallet confirmation"
         >
-          <Pressable
-            style={styles.resetDialogScrim}
-            onPress={handleCancelResetConfirm}
-            disabled={resetting}
-            accessibilityRole="button"
-            accessibilityLabel="Cancel wallet reset"
-          />
-          <View style={[styles.resetDialogCard, { maxWidth: resetDialogMaxWidth }]}>
+          <Animated.View style={[styles.resetDialogScrim, resetConfirmScrimStyle]}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={handleCancelResetConfirm}
+              disabled={resetting || resetConfirmClosing}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel wallet reset"
+            />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.resetDialogCard,
+              { maxWidth: resetDialogMaxWidth },
+              resetConfirmCardStyle,
+            ]}
+          >
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.resetDialogCardBlurVeil, resetConfirmBlurStyle]}
+            />
+            <View pointerEvents="none" style={styles.resetDialogCardGloss} />
             <View style={styles.resetDialogCopy}>
-              <Text variant="h3" color={colors.text.primary} style={styles.resetDialogTitle}>
+              <Text
+                variant="h3"
+                color={colors.text.primary}
+                align="center"
+                style={[
+                  styles.resetDialogTitle,
+                  {
+                    fontSize: resetDialogTitleFontSize,
+                    lineHeight: resetDialogTitleLineHeight,
+                  },
+                ]}
+                numberOfLines={1}
+                maxFontSizeMultiplier={1.05}
+              >
                 Reset wallet?
               </Text>
-              <Text variant="caption" color={colors.text.secondary} style={styles.resetDialogBody}>
-                This removes all wallets, the app password, fingerprint unlock, and local payment
-                history from this device. You will need your recovery phrase or private key to
-                restore a wallet.
+              <Text
+                variant="body"
+                color={colors.text.secondary}
+                align="center"
+                style={[
+                  styles.resetDialogBody,
+                  {
+                    fontSize: resetDialogBodyFontSize,
+                    lineHeight: resetDialogBodyLineHeight,
+                  },
+                ]}
+                numberOfLines={3}
+                maxFontSizeMultiplier={1.05}
+              >
+                Erases this device. Restore later with your recovery phrase or private key.
               </Text>
             </View>
             <View style={styles.resetDialogActions}>
@@ -902,14 +1083,22 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
                 style={({ pressed }) => [
                   styles.resetDialogButton,
                   styles.resetDialogSecondaryButton,
+                  { minHeight: resetDialogButtonHeight },
                   pressed ? styles.resetDialogButtonPressed : null,
                 ]}
                 onPress={handleCancelResetConfirm}
-                disabled={resetting}
+                disabled={resetting || resetConfirmClosing}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel wallet reset"
               >
-                <Text variant="buttonSmall" color={colors.text.primary} align="center">
+                <Text
+                  variant="button"
+                  color={colors.text.primary}
+                  align="center"
+                  style={styles.resetDialogButtonLabel}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.05}
+                >
                   Cancel
                 </Text>
               </Pressable>
@@ -917,19 +1106,33 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
                 style={({ pressed }) => [
                   styles.resetDialogButton,
                   styles.resetDialogDangerButton,
-                  pressed ? styles.resetDialogButtonPressed : null,
+                  { minHeight: resetDialogButtonHeight },
+                  pressed && !resetting ? styles.resetDialogButtonPressed : null,
+                  resetting ? styles.resetDialogDangerButtonDisabled : null,
                 ]}
                 onPress={() => void handleForgotPasswordReset()}
-                disabled={resetting}
+                disabled={resetting || resetConfirmClosing}
                 accessibilityRole="button"
                 accessibilityLabel="Reset wallet and return to onboarding"
+                accessibilityState={{ busy: resetting, disabled: resetting || resetConfirmClosing }}
               >
-                <Text variant="buttonSmall" color={colors.text.inverse} align="center">
-                  Reset wallet
-                </Text>
+                {resetting ? (
+                  <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+                ) : (
+                  <Text
+                    variant="button"
+                    color={colors.brand.whiteStream}
+                    align="center"
+                    style={styles.resetDialogButtonLabel}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1.05}
+                  >
+                    Reset
+                  </Text>
+                )}
               </Pressable>
             </View>
-          </View>
+          </Animated.View>
         </View>
       ) : null}
     </View>
@@ -1032,51 +1235,93 @@ const styles = StyleSheet.create({
   },
   resetDialogScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.68)',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
   },
   resetDialogCard: {
     width: '100%',
     borderCurve: 'continuous',
-    borderRadius: radii['2xl'],
+    borderRadius: radii.xl,
     padding: spacing.xl,
-    gap: spacing.xl,
-    backgroundColor: colors.surface.cardElevated,
-    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.brand.graphiteDepth,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    boxShadow: '0 24px 54px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
+    boxShadow: [
+      '0 24px 54px rgba(0, 0, 0, 0.56)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.42)',
+    ].join(', '),
+  },
+  resetDialogCardGloss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '52%',
+    backgroundColor: colors.glass.smokeWash,
+    opacity: 0.86,
+  },
+  resetDialogCardBlurVeil: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.brand.graphiteDepth,
+    zIndex: 2,
   },
   resetDialogCopy: {
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   resetDialogTitle: {
-    maxWidth: 260,
+    fontFamily: fontFamily.moneyBold,
+    letterSpacing: 0,
   },
   resetDialogBody: {
-    lineHeight: 21,
+    maxWidth: 300,
+    alignSelf: 'center',
   },
   resetDialogActions: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    gap: spacing.md,
+    marginTop: spacing.xs,
   },
   resetDialogButton: {
     flex: 1,
+    flexBasis: 0,
     minHeight: layout.minTouchTarget,
     alignItems: 'center',
     justifyContent: 'center',
     borderCurve: 'continuous',
     borderRadius: radii.full,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
   resetDialogSecondaryButton: {
-    backgroundColor: colors.glass.strongFill,
+    backgroundColor: colors.brand.glassTint,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+    boxShadow: [
+      '0 10px 22px rgba(0, 0, 0, 0.28)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.14)',
+    ].join(', '),
   },
   resetDialogDangerButton: {
     backgroundColor: colors.semantic.error,
+    boxShadow: [
+      '0 12px 28px rgba(255, 77, 90, 0.24)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.24)',
+    ].join(', '),
+  },
+  resetDialogDangerButtonDisabled: {
+    opacity: 0.82,
   },
   resetDialogButtonPressed: {
-    opacity: 0.78,
+    opacity: 0.82,
+  },
+  resetDialogButtonLabel: {
+    fontFamily: fontFamily.uiSemiBold,
   },
 });

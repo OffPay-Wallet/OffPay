@@ -37,21 +37,19 @@ export function UsernameSetupForm({
   onBack,
   submitting = false,
 }: UsernameSetupFormProps): React.JSX.Element {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [username, setUsername] = useState(() =>
     sanitizeOffpayUsernameInput(initialUsername ?? ''),
   );
-  const {
-    profileImageUri,
-    pickingProfileImage,
-    pickProfileImage,
-    clearProfileImage,
-  } = useLocalProfileImageManager();
+  const { profileImageUri, pickingProfileImage, pickProfileImage, clearProfileImage } =
+    useLocalProfileImageManager();
   const normalizedUsername = useMemo(() => sanitizeOffpayUsernameInput(username), [username]);
   const usernameError = username.length > 0 ? getOffpayUsernameError(username) : null;
   const canContinue = formatOffpayUsername(username) != null;
-  const titleFontSize = width < 360 ? 28 : width < 390 ? 30 : 32;
-  const avatarSize = width < 360 ? 72 : 80;
+  const compact = width < 390 || height < 740;
+  const veryCompact = width < 360 || height < 680;
+  const titleFontSize = veryCompact ? 28 : compact ? 31 : 34;
+  const avatarSize = veryCompact ? 72 : compact ? 80 : 88;
 
   const handleSubmit = (): void => {
     const formatted = formatOffpayUsername(username);
@@ -62,7 +60,14 @@ export function UsernameSetupForm({
   };
 
   return (
-    <View style={styles.shell}>
+    <View
+      style={[
+        styles.shell,
+        compact ? styles.shellCompact : null,
+        veryCompact ? styles.shellVeryCompact : null,
+      ]}
+    >
+      <View pointerEvents="none" style={styles.shellGloss} />
       <View style={styles.profileBlock}>
         <Pressable
           style={styles.avatarButton}
@@ -73,7 +78,9 @@ export function UsernameSetupForm({
           accessibilityRole="button"
           accessibilityLabel="Change profile photo"
         >
-          <WalletAvatar size={avatarSize} solidFill />
+          <View style={styles.avatarFrame}>
+            <WalletAvatar size={avatarSize} solidFill />
+          </View>
           <View style={styles.avatarBadge}>
             {pickingProfileImage ? (
               <ActivityIndicator size="small" color={colors.text.onAccent} />
@@ -191,8 +198,11 @@ export function UsernameSetupForm({
         </View>
         <Text
           variant="small"
-          color={usernameError != null ? colors.semantic.warning : colors.text.secondary}
+          color={usernameError != null ? colors.semantic.error : colors.text.secondary}
           style={styles.helper}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
         >
           {usernameError ??
             `${normalizedUsername.length}/${OFFPAY_USERNAME_MAX_LENGTH} letters, numbers, or underscores`}
@@ -225,29 +235,76 @@ export function UsernameSetupForm({
 const styles = StyleSheet.create({
   shell: {
     width: '100%',
-    gap: spacing['2xl'],
+    maxWidth: 460,
+    alignSelf: 'center',
+    gap: spacing.xl,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing['2xl'],
+    borderRadius: radii['2xl'],
+    borderCurve: 'continuous',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    backgroundColor: colors.surface.cardElevated,
+    overflow: 'hidden',
+    boxShadow: [
+      '0 28px 70px rgba(0, 0, 0, 0.52)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
+      'inset 0 -1px 3px rgba(0, 0, 0, 0.48)',
+    ].join(', '),
+  },
+  shellCompact: {
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
+  },
+  shellVeryCompact: {
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.lg,
+  },
+  shellGloss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '42%',
+    backgroundColor: colors.glass.smokeWash,
   },
   profileBlock: {
     alignSelf: 'center',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   avatarButton: {
     position: 'relative',
   },
+  avatarFrame: {
+    borderRadius: radii.full,
+    padding: 3,
+    backgroundColor: colors.brand.glassTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    boxShadow: [
+      '0 16px 34px rgba(0, 0, 0, 0.38)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+    ].join(', '),
+  },
   avatarBadge: {
     position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: 28,
-    height: 28,
+    right: -4,
+    bottom: -4,
+    width: 30,
+    height: 30,
     borderRadius: radii.full,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.brand.glossAccent,
     borderWidth: 2,
-    borderColor: colors.brand.glassTint,
+    borderColor: colors.surface.cardElevated,
   },
   profileActions: {
     flexDirection: 'row',
@@ -265,9 +322,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
-    backgroundColor: colors.surface.backgroundTint,
+    backgroundColor: colors.brand.actionFill,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    borderColor: colors.glass.rim,
+    boxShadow: [
+      '0 10px 22px rgba(0, 0, 0, 0.32)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.13)',
+    ].join(', '),
   },
   profileActionPressed: {
     backgroundColor: colors.surface.pressed,
@@ -286,25 +347,30 @@ const styles = StyleSheet.create({
   copyBlock: {},
   title: {
     textAlign: 'center',
-    fontFamily: fontFamily.bold,
+    fontFamily: fontFamily.display,
   },
   inputBlock: {
     gap: spacing.sm,
   },
   inputShell: {
-    minHeight: layout.buttonHeightMd,
+    minHeight: layout.buttonHeightLg,
     borderRadius: radii.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.surface.backgroundTint,
+    backgroundColor: colors.brand.actionFill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     paddingHorizontal: spacing.xl,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    boxShadow: [
+      '0 12px 28px rgba(0, 0, 0, 0.34)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.38)',
+    ].join(', '),
   },
   inputShellError: {
-    borderColor: colors.semantic.warning,
+    borderColor: colors.semantic.error,
     borderWidth: 1,
   },
   atSign: {
@@ -315,13 +381,14 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: colors.text.primary,
-    fontFamily: fontFamily.semiBold,
+    fontFamily: fontFamily.uiSemiBold,
     fontSize: 20,
     lineHeight: 24,
     paddingVertical: 0,
   },
   helper: {
     textAlign: 'center',
+    includeFontPadding: false,
   },
   actions: {
     gap: spacing.md,
