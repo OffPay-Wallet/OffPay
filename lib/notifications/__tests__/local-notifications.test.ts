@@ -29,6 +29,20 @@ describe('buildWalletTransactionNotificationContent', () => {
     });
   });
 
+  it('formats native SOL transaction notifications with unsigned amounts', () => {
+    expect(
+      buildWalletTransactionNotificationContent({
+        type: 'receive',
+        amountLabel: '+1 SOL',
+        secondaryAmountLabel: null,
+        subtitle: 'From dev2...oFBJ',
+      }),
+    ).toEqual({
+      title: 'Received 1 SOL',
+      body: null,
+    });
+  });
+
   it('formats swap transaction notifications with both token legs', () => {
     expect(
       buildWalletTransactionNotificationContent({

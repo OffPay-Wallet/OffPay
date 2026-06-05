@@ -206,6 +206,55 @@ export async function buildOffpayAuthHeadersAsync(params: {
   };
 }
 
+export async function buildOffpayAuthHeadersWithSignature(params: {
+  walletAddress: string;
+  requestSecret: string;
+  deviceId: string;
+  bootstrapVersion: number;
+  appVersion: string;
+  network: string;
+  method: OffpayApiMethod;
+  pathAndQuery: string;
+  body?: unknown;
+  timestamp?: number;
+  signCanonicalMessage: (message: string) => Promise<string>;
+}): Promise<Record<string, string>> {
+  const startedAt = mark();
+  const timestamp = params.timestamp ?? Date.now();
+  const bodyHash = canonicalBodyHash(params.body);
+  const canonicalMessage = buildCanonicalMessage({
+    walletAddress: params.walletAddress,
+    timestamp,
+    method: params.method,
+    pathAndQuery: params.pathAndQuery,
+    bodyHash,
+  });
+  const hmacMessage = buildHmacMessage({
+    timestamp,
+    walletAddress: params.walletAddress,
+    method: params.method,
+    pathAndQuery: params.pathAndQuery,
+  });
+  const signAndHmacStart = mark();
+  const [signature, appHmac] = await Promise.all([
+    params.signCanonicalMessage(canonicalMessage),
+    Promise.resolve(hmacSha256Hex(params.requestSecret, hmacMessage)),
+  ]);
+  measure('apiAuth.externalSignAndHmac', signAndHmacStart, { method: params.method });
+  measure('apiAuth.buildHeadersWithSignature', startedAt, { method: params.method });
+
+  return {
+    'X-Wallet-Address': params.walletAddress,
+    'X-Timestamp': String(timestamp),
+    'X-Signature': signature,
+    'X-App-HMAC': appHmac,
+    'X-App-Version': params.appVersion,
+    'X-Device-Id': params.deviceId,
+    'X-Network': params.network,
+    'X-Bootstrap-Version': String(params.bootstrapVersion),
+  };
+}
+
 export function zeroOutBytes(bytes: Uint8Array): void {
   try {
     bytes.fill(0);

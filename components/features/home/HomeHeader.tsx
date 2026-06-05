@@ -165,8 +165,7 @@ function HomeHeaderComponent({
   const headerFrameWidth = Math.min(430, windowWidth - screenHorizontalPadding * 2);
   const actionGap = denseHeader || ultraCompactHeader ? 2 : spacing.xs;
   const showDevnetFaucet = network === 'devnet';
-  const showFaucetLabel = showDevnetFaucet && !compactHeader && windowWidth >= 400;
-  const faucetWidth = showFaucetLabel ? (denseHeader ? 58 : 70) : actionButtonSize;
+  const faucetWidth = actionButtonSize;
   const faucetIconSize = denseHeader || ultraCompactHeader ? 18 : 20;
   const actionClusterWidth =
     Math.max(layout.minTouchTarget, toggleWidth) +
@@ -547,17 +546,6 @@ function HomeHeaderComponent({
                 ) : (
                   <PuffyFaucetGiftIcon size={faucetIconSize} color={colors.text.primary} />
                 )}
-                {showFaucetLabel ? (
-                  <Text
-                    variant="small"
-                    color={colors.text.primary}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1}
-                    style={styles.faucetLabel}
-                  >
-                    SOL
-                  </Text>
-                ) : null}
               </View>
             </Pressable>
           ) : null}
@@ -775,12 +763,6 @@ const styles = StyleSheet.create({
     right: 0,
     height: '46%',
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  faucetLabel: {
-    fontFamily: fontFamily.uiBold,
-    fontSize: 11,
-    lineHeight: 13,
-    includeFontPadding: false,
   },
   faucetDisabled: {
     opacity: 0.58,

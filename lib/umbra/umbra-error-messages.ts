@@ -96,9 +96,7 @@ export function getUmbraFriendlyError(
   const lowerMessage = message.toLowerCase();
   const customCode = extractCustomCodeFromValue(error) ?? extractCustomCodeFromValue(message);
 
-  if (
-    hasPattern(message, /Umbra requires a local signing wallet|Privy wallets keep the signing key/i)
-  ) {
+  if (hasPattern(message, /Umbra requires a local signing wallet|Privy wallet signing/i)) {
     return {
       title: 'Umbra unavailable',
       message,

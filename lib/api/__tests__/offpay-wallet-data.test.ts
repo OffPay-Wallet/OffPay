@@ -19,6 +19,7 @@ import {
 import type { WalletActivityEvent, WalletBalanceResponse, WalletTransactionsResponse } from '@/types/offpay-api';
 
 const signature = '5r9jzD8fHa9eG4vAMcYQYV5spwG9R4VuYH9zJm7DYd6m8uDj7b4hyY3TwY2Nv4R8ydh7v7FGM5h7EJYvVx3sN4fQ';
+const nativeSolMint = 'So11111111111111111111111111111111111111112';
 
 function buildTransaction(
   overrides: Partial<WalletTransactionsResponse['transactions'][number]> = {},
@@ -271,10 +272,38 @@ describe('offpay-wallet-data', () => {
 
     expect(groups[0]?.data[0]).toMatchObject({
       amountLabel: '-0.1 SOL',
-      tokenMint: 'native-sol',
+      tokenMint: nativeSolMint,
       tokenSymbol: 'SOL',
       tokenName: 'Solana',
       tokenLogo: 'https://example.com/sol.png',
+    });
+  });
+
+  it('maps native SOL history rows from raw lamports when the provider omits symbols', () => {
+    const view = mapWalletTransactionForHistory(
+      buildTransaction({
+        type: 'TRANSFER',
+        description: null,
+        amount: null,
+        rawAmount: '1000000000',
+        direction: 'receive',
+        sender: 'FWz4zbrhzEfBoPdWquP8ypWJVdNmswrLemGEJ2yJ3j6i',
+        recipient: 'CBbAfDh79oEhNn2ZouMi97Ek3y1vQYKuH5VbZqx3okMk',
+        tokenMint: nativeSolMint,
+        tokenSymbol: null,
+        tokenName: null,
+        tokenLogo: null,
+        tokenDecimals: 9,
+      }),
+    );
+
+    expect(view).toMatchObject({
+      title: 'Received',
+      amountLabel: '+1 SOL',
+      amountTone: 'positive',
+      tokenMint: nativeSolMint,
+      tokenSymbol: 'SOL',
+      tokenName: 'Solana',
     });
   });
 
@@ -317,6 +346,31 @@ describe('offpay-wallet-data', () => {
     expect(view).toMatchObject({
       title: 'Received',
       amountLabel: '+0.01 SOL',
+      tokenSymbol: 'SOL',
+      tokenName: 'Solana',
+    });
+  });
+
+  it('maps native SOL stream events from raw lamports when the provider omits symbols', () => {
+    const event = buildActivityEvent({
+      description: null,
+      amount: null,
+      rawAmount: '250000000',
+      tokenMint: nativeSolMint,
+      tokenSymbol: null,
+      tokenName: null,
+      tokenLogo: null,
+      tokenDecimals: 9,
+      direction: 'send',
+    });
+    const view = mapWalletActivityEventForRecentActivity(event);
+
+    expect(isDisplayableWalletActivityEvent(event)).toBe(true);
+    expect(view).toMatchObject({
+      title: 'Sent',
+      amountLabel: '-0.25 SOL',
+      amountTone: 'negative',
+      tokenMint: nativeSolMint,
       tokenSymbol: 'SOL',
       tokenName: 'Solana',
     });
@@ -489,6 +543,36 @@ describe('offpay-wallet-data', () => {
         }),
       ]),
     );
+  });
+
+  it('filters Umbra setup rows from payment history and live notifications', () => {
+    const setupTransaction = buildTransaction({
+      type: 'umbra_setup',
+      description: 'Umbra private account setup',
+      amount: null,
+      rawAmount: '5000',
+      direction: 'send',
+      tokenMint: nativeSolMint,
+      tokenSymbol: null,
+      tokenName: null,
+      tokenDecimals: 9,
+    });
+    const setupEvent = buildActivityEvent({
+      type: 'umbra_setup',
+      description: 'Umbra private account setup',
+      amount: null,
+      rawAmount: '5000',
+      direction: 'send',
+      tokenMint: nativeSolMint,
+      tokenSymbol: null,
+      tokenName: null,
+      tokenDecimals: 9,
+    });
+
+    expect(isDisplayableWalletPaymentTransaction(setupTransaction)).toBe(false);
+    expect(isDisplayableWalletActivityEvent(setupEvent)).toBe(false);
+    expect(buildWalletHistoryGroups({ transactions: [setupTransaction] })).toEqual([]);
+    expect(buildWalletRecentActivityItems({ transactions: [setupTransaction] })).toEqual([]);
   });
 
   it('keeps offline p2p receipt enrichment but ignores online local receipts', () => {

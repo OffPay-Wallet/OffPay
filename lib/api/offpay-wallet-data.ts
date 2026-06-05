@@ -9,6 +9,10 @@ import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
+const HELIUS_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
+const NATIVE_SOL_SENTINEL_MINT = 'native-sol';
+const NATIVE_SOL_NAME = 'Solana';
+const NATIVE_SOL_SYMBOL = 'SOL';
 
 export type OffpayDisplayTransactionType = 'send' | 'receive' | 'swap';
 export type OffpayDisplayTone = 'positive' | 'negative' | 'neutral' | 'failed';
@@ -464,6 +468,44 @@ function normalizeTokenSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
 
+function isNativeSolMint(mint: string | null | undefined): boolean {
+  const normalized = mint?.trim();
+  return (
+    normalized === NATIVE_SOL_MINT ||
+    normalized === HELIUS_NATIVE_SOL_MINT ||
+    normalized === NATIVE_SOL_SENTINEL_MINT
+  );
+}
+
+function normalizeTransactionTokenMint(mint: string | null | undefined): string | null {
+  const trimmed = mint?.trim();
+  if (trimmed == null || trimmed.length === 0) return null;
+  return isNativeSolMint(trimmed) ? NATIVE_SOL_MINT : trimmed;
+}
+
+function resolveTransactionTokenSymbol(
+  symbol: string | null | undefined,
+  mint: string | null | undefined,
+  fallback: string | null = null,
+): string | null {
+  const trimmedSymbol = symbol?.trim();
+  if (trimmedSymbol != null && trimmedSymbol.length > 0) {
+    return normalizeTokenSymbol(trimmedSymbol);
+  }
+  if (isNativeSolMint(mint)) return NATIVE_SOL_SYMBOL;
+  return fallback;
+}
+
+function resolveTransactionTokenName(
+  name: string | null | undefined,
+  symbol: string | null,
+): string | null {
+  const trimmedName = name?.trim();
+  if (trimmedName != null && trimmedName.length > 0) return trimmedName;
+  if (symbol === NATIVE_SOL_SYMBOL) return NATIVE_SOL_NAME;
+  return symbol;
+}
+
 function normalizeTransactionTypeLabel(type: string): string {
   return type
     .trim()
@@ -477,6 +519,18 @@ function isInternalWalletTransactionType(type: string): boolean {
   const compact = normalized.replace(/_/g, '');
 
   return compact.includes('commitstate');
+}
+
+function isUmbraSetupTransactionType(type: string): boolean {
+  const normalized = normalizeTransactionTypeLabel(type);
+  return (
+    normalized === 'umbra_setup' ||
+    normalized === 'umbra_registration' ||
+    normalized === 'umbra_private_account_setup' ||
+    normalized === 'umbra_vault_setup' ||
+    normalized === 'vault_setup' ||
+    (normalized.includes('umbra') && normalized.includes('registration'))
+  );
 }
 
 function parseTokenAmounts(description: string | null): ParsedTokenAmount[] {
@@ -506,7 +560,7 @@ function parseWalletActivityAmounts(event: WalletActivityEvent): ParsedTokenAmou
 
   const rawAmount =
     event.amount?.trim() || formatRawTokenAmount(event.rawAmount, event.tokenDecimals) || null;
-  const symbol = event.tokenSymbol?.trim();
+  const symbol = resolveTransactionTokenSymbol(event.tokenSymbol, event.tokenMint);
   if (rawAmount == null || rawAmount.length === 0 || symbol == null || symbol.length === 0) {
     return [];
   }
@@ -559,7 +613,7 @@ function parseWalletTransactionAmounts(
     transaction.amount?.trim() ||
     formatRawTokenAmount(transaction.rawAmount, transaction.tokenDecimals) ||
     null;
-  const symbol = transaction.tokenSymbol?.trim();
+  const symbol = resolveTransactionTokenSymbol(transaction.tokenSymbol, transaction.tokenMint);
   if (rawAmount == null || rawAmount.length === 0 || symbol == null || symbol.length === 0) {
     return [];
   }
@@ -802,14 +856,20 @@ function getWalletTransactionTokenMetadata(
   amounts: ParsedTokenAmount[],
 ): TransactionTokenMetadata {
   const fallbackSymbol = amounts[0]?.symbol ?? null;
-  const tokenSymbol = transaction.tokenSymbol?.trim() || fallbackSymbol;
-  const tokenName = transaction.tokenName?.trim() || tokenSymbol;
-  const tokenMint = transaction.tokenMint?.trim() || null;
+  const tokenSymbol = resolveTransactionTokenSymbol(
+    transaction.tokenSymbol,
+    transaction.tokenMint,
+    fallbackSymbol,
+  );
+  const tokenName = resolveTransactionTokenName(transaction.tokenName, tokenSymbol);
+  const tokenMint =
+    normalizeTransactionTokenMint(transaction.tokenMint) ??
+    (tokenSymbol === NATIVE_SOL_SYMBOL ? NATIVE_SOL_MINT : null);
   const tokenLogo = transaction.tokenLogo?.trim() || null;
 
   return {
     mint: tokenMint,
-    symbol: tokenSymbol != null ? normalizeTokenSymbol(tokenSymbol) : null,
+    symbol: tokenSymbol,
     name: tokenName ?? null,
     logo: tokenLogo,
   };
@@ -820,14 +880,16 @@ function getWalletActivityTokenMetadata(
   amounts: ParsedTokenAmount[],
 ): TransactionTokenMetadata {
   const fallbackSymbol = amounts[0]?.symbol ?? null;
-  const tokenSymbol = event.tokenSymbol?.trim() || fallbackSymbol;
-  const tokenName = event.tokenName?.trim() || tokenSymbol;
-  const tokenMint = event.tokenMint?.trim() || null;
+  const tokenSymbol = resolveTransactionTokenSymbol(event.tokenSymbol, event.tokenMint, fallbackSymbol);
+  const tokenName = resolveTransactionTokenName(event.tokenName, tokenSymbol);
+  const tokenMint =
+    normalizeTransactionTokenMint(event.tokenMint) ??
+    (tokenSymbol === NATIVE_SOL_SYMBOL ? NATIVE_SOL_MINT : null);
   const tokenLogo = event.tokenLogo?.trim() || null;
 
   return {
     mint: tokenMint,
-    symbol: tokenSymbol != null ? normalizeTokenSymbol(tokenSymbol) : null,
+    symbol: tokenSymbol,
     name: tokenName ?? null,
     logo: tokenLogo,
   };
@@ -993,6 +1055,8 @@ export function isWalletActivityIncomingP2pTransfer(event: WalletActivityEvent):
 }
 
 export function isDisplayableWalletActivityEvent(event: WalletActivityEvent): boolean {
+  if (isUmbraSetupTransactionType(event.type)) return false;
+
   const amounts = parseWalletActivityAmounts(event);
   const rawType = normalizeTransactionTypeLabel(event.type);
   const hasPaymentSignal = Boolean(
@@ -1024,6 +1088,8 @@ export function isDisplayableWalletActivityEvent(event: WalletActivityEvent): bo
 export function isDisplayableWalletPaymentTransaction(
   transaction: WalletTransactionsResponse['transactions'][number],
 ): boolean {
+  if (isUmbraSetupTransactionType(transaction.type)) return false;
+
   const amounts = parseWalletTransactionAmounts(transaction);
   const rawType = normalizeTransactionTypeLabel(transaction.type);
   const hasPaymentSignal = Boolean(

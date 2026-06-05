@@ -49,7 +49,6 @@ import {
 } from '@umbra-privacy/umbra-codama';
 
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
-import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { getUmbraFriendlyErrorMessage } from '@/lib/umbra/umbra-error-messages';
 import {
   assertRecipientAddress,
@@ -65,7 +64,7 @@ import {
   isUmbraInstructionFallbackNotFound,
   sleep,
 } from '@/lib/umbra/umbra-tx-helpers';
-import { createNobleUmbraSigner, deriveSigningSeedForUmbra } from '@/lib/umbra/umbra-signer';
+import { createUmbraSignerForWallet } from '@/lib/umbra/umbra-signer';
 import {
   assertUmbraClaimCompleted,
   createOffpayUmbraBatchMerkleProofFetcher,
@@ -883,8 +882,7 @@ async function queryUmbraVaultEncryptionKeyStatus(
 
 async function createUmbraRuntime(params: UmbraWalletExecutionParams): Promise<UmbraRuntime> {
   const walletAddress = assertWalletAddress(params.walletAddress);
-  const signingSeed = await deriveSigningSeedForUmbra(walletAddress, params.walletId);
-  const { signer, dispose } = createNobleUmbraSigner(walletAddress, signingSeed);
+  const { signer, dispose } = await createUmbraSignerForWallet(walletAddress, params.walletId);
 
   try {
     if (String(signer.address) !== walletAddress) {
@@ -913,8 +911,6 @@ async function createUmbraRuntime(params: UmbraWalletExecutionParams): Promise<U
   } catch (error) {
     dispose();
     throw error;
-  } finally {
-    zeroOutBytes(signingSeed);
   }
 }
 
@@ -922,8 +918,7 @@ async function createLegacyUmbraRuntime(
   params: UmbraWalletExecutionParams,
 ): Promise<LegacyUmbraRuntime> {
   const walletAddress = assertWalletAddress(params.walletAddress);
-  const signingSeed = await deriveSigningSeedForUmbra(walletAddress, params.walletId);
-  const { signer, dispose } = createNobleUmbraSigner(walletAddress, signingSeed);
+  const { signer, dispose } = await createUmbraSignerForWallet(walletAddress, params.walletId);
 
   try {
     if (String(signer.address) !== walletAddress) {
@@ -946,8 +941,6 @@ async function createLegacyUmbraRuntime(
   } catch (error) {
     dispose();
     throw error;
-  } finally {
-    zeroOutBytes(signingSeed);
   }
 }
 

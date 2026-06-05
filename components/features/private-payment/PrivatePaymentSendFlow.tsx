@@ -293,7 +293,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const { network, unsupportedReason } = useOffpayNetwork();
   const { effectiveWalletMode, canUseNetwork } = useWalletModeState();
   const { isNetworkSwitching } = useOffpayNetworkAccess();
-  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
+  const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: false,
@@ -444,7 +444,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const selectedTokenSupportsUmbraPrivateP2P =
     network != null && selectedToken != null && isUmbraPrivateP2PToken(network, selectedToken);
   const canUseUmbraPrivateP2PBase =
-    hasLocalSigningMaterial &&
+    canSignWithApp &&
     canUseUmbraNativeProver &&
     isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p') &&
     isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
@@ -471,8 +471,8 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       : null;
   const canUseUmbraPrivateP2P =
     canUseUmbraPrivateP2PBase && umbraVaultReadinessQuery.readiness?.available === true;
-  const umbraPrivateP2pDisabledReason = localSigningBlocker
-    ? localSigningBlocker
+  const umbraPrivateP2pDisabledReason = signingBlocker
+    ? signingBlocker
     : !canUseUmbraNativeProver
       ? RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE
       : !umbraPrivateP2pCapability.available

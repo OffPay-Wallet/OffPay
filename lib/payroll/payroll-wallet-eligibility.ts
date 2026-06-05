@@ -5,19 +5,18 @@ import {
   getUmbraTokenByMint,
   getUmbraTokenBySymbol,
 } from '@/lib/umbra/umbra-supported-tokens';
-import { walletHasLocalSigningMaterial } from '@/lib/wallet/wallet-capabilities';
+import { walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { PayrollTokenContext } from '@/lib/payroll/payroll-validation';
 import type { OffpayNetwork, WalletBalanceResponse } from '@/types/offpay-api';
 
-/**
- * Whether the active wallet can locally sign payroll transactions. Privy
- * embedded/address-only wallets hold no signing material on-device, so they
- * are blocked before confirmation.
- */
-export function walletCanSignPayroll(importMethod: WalletImportMethod | null | undefined): boolean {
-  return walletHasLocalSigningMaterial(importMethod);
+/** Whether the active wallet can sign payroll transactions through OffPay. */
+export function walletCanSignPayroll(params: {
+  importMethod: WalletImportMethod | null | undefined;
+  walletAddress?: string | null;
+}): boolean {
+  return walletCanSignWithApp(params);
 }
 
 /**

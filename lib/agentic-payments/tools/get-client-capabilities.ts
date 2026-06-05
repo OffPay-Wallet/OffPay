@@ -1,8 +1,5 @@
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
-import {
-  getLocalSigningWalletBlocker,
-  walletHasLocalSigningMaterial,
-} from '@/lib/wallet/wallet-capabilities';
+import { getWalletSigningBlocker, walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 
 import { EMPTY_PARAMS } from './helpers';
 import type { AgenticToolDefinition } from './types';
@@ -30,8 +27,15 @@ export const getClientCapabilitiesTool: AgenticToolDefinition = {
     if (context.scope.network == null) return { error: { code: 'network_not_selected' } };
     if (capabilities == null) return { result: { status: 'loading' } };
     const umbraVaultBalanceAvailable = isOffpayFeatureAvailable(capabilities, 'umbra.execution');
-    const activeWalletCanUseUmbra = walletHasLocalSigningMaterial(context.walletImportMethod);
-    const localSigningBlocker = getLocalSigningWalletBlocker(context.walletImportMethod);
+    const activeWalletCanUseUmbra = walletCanSignWithApp({
+      importMethod: context.walletImportMethod,
+      walletAddress: context.scope.walletAddress,
+    });
+    const signingBlocker = getWalletSigningBlocker(
+      context.walletImportMethod,
+      'Umbra',
+      context.scope.walletAddress,
+    );
 
     return {
       result: {
@@ -60,11 +64,11 @@ export const getClientCapabilitiesTool: AgenticToolDefinition = {
           ),
           privateBalance: capabilityResult(
             activeWalletCanUseUmbra && umbraVaultBalanceAvailable,
-            localSigningBlocker ?? capabilities.umbra?.execution?.reason,
+            signingBlocker ?? capabilities.umbra?.execution?.reason,
           ),
           umbraVaultBalance: capabilityResult(
             activeWalletCanUseUmbra && umbraVaultBalanceAvailable,
-            localSigningBlocker ?? capabilities.umbra?.execution?.reason,
+            signingBlocker ?? capabilities.umbra?.execution?.reason,
           ),
           magicblockPrivatePaymentBalance: capabilityResult(
             isOffpayFeatureAvailable(capabilities, 'payment.privateBalance'),
@@ -75,7 +79,7 @@ export const getClientCapabilitiesTool: AgenticToolDefinition = {
               isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
               isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p') &&
               isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast'),
-            localSigningBlocker ??
+            signingBlocker ??
               capabilities.payment.umbraPrivateP2p?.reason ??
               capabilities.umbra?.execution?.reason,
           ),

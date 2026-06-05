@@ -2,6 +2,7 @@ import { Buffer } from 'buffer';
 
 import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
+import { Transaction, VersionedTransaction } from '@solana/web3.js';
 
 import {
   getStoredWalletInfo,
@@ -15,7 +16,16 @@ import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
-import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
+import { getExternalWalletSigner } from '@/lib/wallet/external-wallet-signing';
+import {
+  getWalletSigningBlocker,
+  walletHasLocalSigningMaterial,
+} from '@/lib/wallet/wallet-capabilities';
+
+import type {
+  ExternalSignableSolanaTransaction,
+  ExternalWalletSigner,
+} from '@/lib/wallet/external-wallet-signing';
 
 interface SignSerializedTransactionParams {
   unsignedTransaction: string;
@@ -170,11 +180,14 @@ async function getSigningSeedForWallet(
     walletAddress,
     derive: async () => {
       const walletInfo = await getStoredWalletInfo(walletId ?? undefined);
-      const localSigningBlocker =
-        walletInfo == null ? null : getLocalSigningWalletBlocker(walletInfo.importMethod);
+      if (walletInfo != null && !walletHasLocalSigningMaterial(walletInfo.importMethod)) {
+        throw new Error(
+          getWalletSigningBlocker(walletInfo.importMethod, 'This action', walletAddress) ??
+            'Wallet signing is not available.',
+        );
+      }
       const material = await getStoredWalletSigningMaterialWithAuth(walletId ?? undefined);
       if (material == null) {
-        if (localSigningBlocker != null) throw new Error(localSigningBlocker);
         throw new Error('Unlock your wallet to sign this swap.');
       }
 
@@ -186,7 +199,6 @@ async function getSigningSeedForWallet(
             : null;
 
       if (seed == null) {
-        if (localSigningBlocker != null) throw new Error(localSigningBlocker);
         throw new Error('No signing material is available for this wallet.');
       }
 
@@ -211,11 +223,99 @@ async function getSigningSeedForWallet(
   return signingSeed;
 }
 
+async function getExternalSignerForStoredWallet(
+  walletAddress: string,
+  walletId?: string | null,
+): Promise<ExternalWalletSigner | null> {
+  const walletInfo = await getStoredWalletInfo(walletId ?? undefined);
+  if (walletInfo == null || walletInfo.importMethod !== 'privy-embedded') return null;
+  if (walletInfo.publicKey !== walletAddress) {
+    throw new Error('The active Privy wallet does not match the requested signer.');
+  }
+
+  const signer = getExternalWalletSigner(walletAddress);
+  if (signer == null) {
+    throw new Error(
+      getWalletSigningBlocker(walletInfo.importMethod, 'Privy wallet signing', walletAddress) ??
+        'Privy wallet signing is not ready.',
+    );
+  }
+
+  return signer;
+}
+
+function deserializeSignableTransaction(
+  transactionBase64: string,
+): ExternalSignableSolanaTransaction {
+  const { transaction, message } = getMessageFromSerializedTransaction(transactionBase64);
+  if ((message[0] & 0x80) !== 0) {
+    return VersionedTransaction.deserialize(transaction);
+  }
+
+  return Transaction.from(Buffer.from(transaction));
+}
+
+function serializeSignableTransaction(transaction: ExternalSignableSolanaTransaction): string {
+  const serialized =
+    transaction instanceof VersionedTransaction
+      ? transaction.serialize()
+      : transaction.serialize({
+          requireAllSignatures: false,
+          verifySignatures: false,
+        });
+
+  return Buffer.from(serialized).toString('base64');
+}
+
+async function signSerializedTransactionWithExternalSigner(params: {
+  unsignedTransaction: string;
+  walletAddress: string;
+  signer: ExternalWalletSigner;
+}): Promise<string> {
+  const { message } = getMessageFromSerializedTransaction(params.unsignedTransaction);
+  findRequiredSignerIndex(message, params.walletAddress);
+
+  const transaction = deserializeSignableTransaction(params.unsignedTransaction);
+  const signedTransaction = await params.signer.signTransaction(transaction);
+  return serializeSignableTransaction(signedTransaction);
+}
+
+function verifyExternalSignature(params: {
+  signature: Uint8Array;
+  message: Uint8Array;
+  walletAddress: string;
+}): void {
+  if (params.signature.length !== 64) {
+    throw new Error('Wallet provider returned an invalid Solana signature.');
+  }
+
+  const publicKey = bs58.decode(params.walletAddress);
+  if (publicKey.length !== 32) {
+    throw new Error('Active wallet address is not a valid Solana public key.');
+  }
+
+  if (!ed25519.verify(params.signature, params.message, publicKey)) {
+    throw new Error('Wallet provider signature does not match the active wallet.');
+  }
+}
+
 export async function signSerializedTransactionForWallet({
   unsignedTransaction,
   walletAddress,
   walletId,
 }: SignSerializedTransactionParams): Promise<string> {
+  const externalSigner = await getExternalSignerForStoredWallet(walletAddress, walletId);
+  if (externalSigner != null) {
+    await yieldToUi();
+    const signedTransaction = await signSerializedTransactionWithExternalSigner({
+      unsignedTransaction,
+      walletAddress,
+      signer: externalSigner,
+    });
+    await yieldToEventLoop();
+    return signedTransaction;
+  }
+
   const signingSeed = await getSigningSeedForWallet(walletAddress, walletId);
   try {
     await yieldToUi();
@@ -236,6 +336,25 @@ export async function signSerializedTransactionsForWallet({
   walletId,
 }: SignSerializedTransactionsParams): Promise<string[]> {
   if (unsignedTransactions.length === 0) return [];
+
+  const externalSigner = await getExternalSignerForStoredWallet(walletAddress, walletId);
+  if (externalSigner != null) {
+    const transactions = unsignedTransactions.map((unsignedTransaction) => {
+      const { message } = getMessageFromSerializedTransaction(unsignedTransaction);
+      findRequiredSignerIndex(message, walletAddress);
+      return deserializeSignableTransaction(unsignedTransaction);
+    });
+
+    await yieldToUi();
+    const signedTransactions =
+      externalSigner.signTransactions != null
+        ? await externalSigner.signTransactions(transactions)
+        : await Promise.all(
+            transactions.map((transaction) => externalSigner.signTransaction(transaction)),
+          );
+    await yieldToEventLoop();
+    return signedTransactions.map(serializeSignableTransaction);
+  }
 
   const signingSeed = await getSigningSeedForWallet(walletAddress, walletId);
   try {
@@ -312,6 +431,24 @@ export async function signMessageForWallet(params: {
   walletId?: string | null;
 }): Promise<string> {
   const startedAt = mark();
+  const externalSigner = await getExternalSignerForStoredWallet(
+    params.walletAddress,
+    params.walletId,
+  );
+  if (externalSigner != null) {
+    await yieldToUi();
+    const messageBytes = Uint8Array.from(Buffer.from(params.message, 'utf8'));
+    const signature = await externalSigner.signMessage(messageBytes);
+    verifyExternalSignature({
+      signature,
+      message: messageBytes,
+      walletAddress: params.walletAddress,
+    });
+    measure('txSign.signMessage.external.total', startedAt);
+    await yieldToEventLoop();
+    return bs58.encode(signature);
+  }
+
   const signingSeed = await getSigningSeedForWallet(params.walletAddress, params.walletId);
   try {
     await yieldToUi();

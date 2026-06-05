@@ -8,6 +8,7 @@ const MAINNET_WALLET_API_BASE_URL = 'https://api.helius.xyz';
 const MAINNET_ENHANCED_API_BASE_URL = 'https://api-mainnet.helius-rpc.com';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const HELIUS_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
+const SOL_DECIMALS = 9;
 const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
@@ -313,6 +314,15 @@ interface TransactionTokenFields {
   direction: 'send' | 'receive' | null;
 }
 
+const NATIVE_SOL_METADATA: TokenMetadata = {
+  name: 'Solana',
+  symbol: 'SOL',
+  logo: null,
+  decimals: SOL_DECIMALS,
+  verified: true,
+  spam: false,
+};
+
 const CANONICAL_STABLECOIN_METADATA: Record<
   Network,
   Record<
@@ -377,6 +387,23 @@ function readFiniteNumber(value: unknown): number | null {
     if (Number.isFinite(parsed)) {
       return parsed;
     }
+  }
+
+  return null;
+}
+
+function readNonNegativeBigInt(value: unknown): bigint | null {
+  if (typeof value === 'bigint') {
+    return value >= 0n ? value : null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return BigInt(Math.trunc(value));
+  }
+
+  const trimmed = readTrimmedString(value);
+  if (trimmed != null && /^\d+$/.test(trimmed)) {
+    return BigInt(trimmed);
   }
 
   return null;
@@ -452,6 +479,10 @@ function isHeliusNativeSolEntry(entry: {
   }
 
   return entry.decimals === 9 && entry.symbol === 'SOL' && entry.name === 'Solana';
+}
+
+function isNativeSolMint(mint: string | null | undefined): boolean {
+  return mint === SOL_MINT || mint === HELIUS_NATIVE_SOL_MINT;
 }
 
 function numberToDecimalString(value: number): string {
@@ -691,6 +722,22 @@ function classifyUmbraTransaction(
     return {
       type: 'umbra_withdraw',
       description: 'Umbra private balance withdrawn',
+    };
+  }
+
+  if (
+    normalizedInstructionNames.some(
+      (name) =>
+        name.includes('register') ||
+        name.includes('registration') ||
+        name.includes('setup'),
+    ) ||
+    combined.includes('registration') ||
+    combined.includes('setup')
+  ) {
+    return {
+      type: 'umbra_setup',
+      description: 'Umbra private account setup',
     };
   }
 
@@ -1315,6 +1362,19 @@ function sanitizeWalletTokenForNetwork(
   network: Network,
   input: Parameters<typeof sanitizeWalletToken>[0],
 ): WalletBalanceToken {
+  if (isNativeSolMint(input.mint)) {
+    return sanitizeWalletToken({
+      ...input,
+      mint: SOL_MINT,
+      name: NATIVE_SOL_METADATA.name,
+      symbol: NATIVE_SOL_METADATA.symbol,
+      logo: NATIVE_SOL_METADATA.logo,
+      decimals: SOL_DECIMALS,
+      verified: true,
+      spam: false,
+    });
+  }
+
   const canonical = CANONICAL_STABLECOIN_METADATA[network][input.mint];
   const normalizedInput: Parameters<typeof sanitizeWalletToken>[0] = {
     ...input,
@@ -2029,6 +2089,10 @@ function readEnhancedTokenTransferRawAmount(
   };
 }
 
+function readEnhancedNativeTransferRawAmount(transfer: Record<string, unknown>): bigint | null {
+  return readNonNegativeBigInt(transfer.amount) ?? readNonNegativeBigInt(transfer.lamports);
+}
+
 function buildEnhancedTransactionTokenFields(
   network: Network,
   payload: Record<string, unknown>,
@@ -2036,6 +2100,7 @@ function buildEnhancedTransactionTokenFields(
   metadataByMint: ReadonlyMap<string, TokenMetadata>,
 ): TransactionTokenFields {
   const tokenTransfers = Array.isArray(payload.tokenTransfers) ? payload.tokenTransfers : [];
+  const nativeTransfers = Array.isArray(payload.nativeTransfers) ? payload.nativeTransfers : [];
   const debits: Array<{ mint: string; rawAmount: bigint; decimals: number }> = [];
   const credits: Array<{ mint: string; rawAmount: bigint; decimals: number }> = [];
 
@@ -2055,6 +2120,29 @@ function buildEnhancedTransactionTokenFields(
     }
     if (readTrimmedString(transfer.toUserAccount) === walletAddress) {
       credits.push({ mint, ...amount });
+    }
+  }
+
+  for (const transfer of nativeTransfers) {
+    if (!isRecord(transfer)) {
+      continue;
+    }
+
+    const rawAmount = readEnhancedNativeTransferRawAmount(transfer);
+    if (rawAmount === null || rawAmount === 0n) {
+      continue;
+    }
+
+    const nativeDelta = {
+      mint: SOL_MINT,
+      rawAmount,
+      decimals: SOL_DECIMALS,
+    };
+    if (readTrimmedString(transfer.fromUserAccount) === walletAddress) {
+      debits.push(nativeDelta);
+    }
+    if (readTrimmedString(transfer.toUserAccount) === walletAddress) {
+      credits.push(nativeDelta);
     }
   }
 
@@ -2093,6 +2181,7 @@ function buildEnhancedTokenDescription(
   metadataByMint: ReadonlyMap<string, TokenMetadata>,
 ): string | null {
   const tokenTransfers = Array.isArray(payload.tokenTransfers) ? payload.tokenTransfers : [];
+  const nativeTransfers = Array.isArray(payload.nativeTransfers) ? payload.nativeTransfers : [];
   const debits: string[] = [];
   const credits: string[] = [];
 
@@ -2108,6 +2197,25 @@ function buildEnhancedTokenDescription(
 
     const symbol = resolveEnhancedTokenSymbol(transfer, metadataByMint);
     const formattedAmount = `${formatTokenAmount(decimalStringToScaledInteger(amount, 9), 9)} ${symbol}`;
+    if (readTrimmedString(transfer.fromUserAccount) === walletAddress) {
+      debits.push(formattedAmount);
+    }
+    if (readTrimmedString(transfer.toUserAccount) === walletAddress) {
+      credits.push(formattedAmount);
+    }
+  }
+
+  for (const transfer of nativeTransfers) {
+    if (!isRecord(transfer)) {
+      continue;
+    }
+
+    const rawAmount = readEnhancedNativeTransferRawAmount(transfer);
+    if (rawAmount === null || rawAmount === 0n) {
+      continue;
+    }
+
+    const formattedAmount = `${formatTokenAmount(rawAmount, SOL_DECIMALS)} SOL`;
     if (readTrimmedString(transfer.fromUserAccount) === walletAddress) {
       debits.push(formattedAmount);
     }
@@ -2329,6 +2437,72 @@ function extractParsedCounterparties(
   return counterparties;
 }
 
+function collectRpcParsedInstructions(
+  instructions: readonly unknown[],
+  meta: Record<string, unknown> | null,
+): unknown[] {
+  const parsedInstructions = [...instructions];
+  const innerInstructionGroups = meta?.innerInstructions;
+  if (!Array.isArray(innerInstructionGroups)) {
+    return parsedInstructions;
+  }
+
+  for (const group of innerInstructionGroups) {
+    if (!isRecord(group) || !Array.isArray(group.instructions)) {
+      continue;
+    }
+
+    parsedInstructions.push(...group.instructions);
+  }
+
+  return parsedInstructions;
+}
+
+function extractWalletNativeSolTransferDeltas(
+  instructions: readonly unknown[],
+  walletAddress: string,
+): TokenBalanceDelta[] {
+  let rawDelta = 0n;
+
+  for (const instruction of instructions) {
+    if (!isRecord(instruction)) {
+      continue;
+    }
+
+    const program = readTrimmedString(instruction.program)?.toLowerCase() ?? '';
+    const parsed = isRecord(instruction.parsed) ? instruction.parsed : null;
+    const parsedType = parsed ? (readTrimmedString(parsed.type)?.toLowerCase() ?? '') : '';
+    const info = parsed && isRecord(parsed.info) ? parsed.info : null;
+    if (program !== 'system' || !parsedType.includes('transfer') || info === null) {
+      continue;
+    }
+
+    const lamports = readNonNegativeBigInt(info.lamports);
+    if (lamports === null || lamports === 0n) {
+      continue;
+    }
+
+    if (readTrimmedString(info.source) === walletAddress) {
+      rawDelta -= lamports;
+    }
+    if (readTrimmedString(info.destination) === walletAddress) {
+      rawDelta += lamports;
+    }
+  }
+
+  if (rawDelta === 0n) {
+    return [];
+  }
+
+  return [
+    {
+      mint: SOL_MINT,
+      decimals: SOL_DECIMALS,
+      rawDelta,
+    },
+  ];
+}
+
 function extractWalletTokenRawBalances(
   balances: unknown,
   walletAddress: string,
@@ -2525,6 +2699,8 @@ function resolveTokenDeltaSymbol(
   delta: TokenBalanceDelta,
   metadataByMint: ReadonlyMap<string, TokenMetadata>,
 ): string {
+  if (isNativeSolMint(delta.mint)) return 'SOL';
+
   const metadataSymbol = metadataByMint.get(delta.mint)?.symbol;
   return sanitizeTokenLabel(metadataSymbol, shortenAddress(delta.mint), 24);
 }
@@ -2652,18 +2828,23 @@ async function fetchRpcTransactionRecord(
   const message = transaction && isRecord(transaction.message) ? transaction.message : null;
   const instructions = message && Array.isArray(message.instructions) ? message.instructions : [];
   const meta = isRecord(result.meta) ? result.meta : null;
+  const parsedInstructions = collectRpcParsedInstructions(instructions, meta);
   const blockTime = readFiniteNumber(result.blockTime);
   const fee = meta ? readFiniteNumber(meta.fee) : null;
   const hasError = meta ? meta.err !== null && meta.err !== undefined : fallbackStatus === 'failed';
 
-  const tokenBalanceDeltas = extractWalletTokenBalanceDeltas(meta, walletAddress);
+  const tokenBalanceDeltas = [
+    ...extractWalletTokenBalanceDeltas(meta, walletAddress),
+    ...extractWalletNativeSolTransferDeltas(parsedInstructions, walletAddress),
+  ];
   const tokenMetadata = await fetchTokenMetadataMap(
     bindings,
     network,
     tokenBalanceDeltas.map((delta) => delta.mint),
   );
   const type =
-    inferTypeFromTokenBalanceDeltas(tokenBalanceDeltas) ?? inferParsedTransactionType(instructions);
+    inferTypeFromTokenBalanceDeltas(tokenBalanceDeltas) ??
+    inferParsedTransactionType(parsedInstructions);
   const baseDescription =
     buildRpcTokenBalanceDescription(type, tokenBalanceDeltas, tokenMetadata) ??
     (type === 'TRANSFER'
@@ -2682,13 +2863,13 @@ async function fetchRpcTransactionRecord(
     ? mergeCounterparties(
       mergeCounterparties(
         extractTokenBalanceCounterparties(meta, walletAddress),
-        extractParsedCounterparties(instructions, walletAddress),
+        extractParsedCounterparties(parsedInstructions, walletAddress),
       ),
       extractUmbraPoolCounterparties(result, network, walletAddress),
     )
     : mergeCounterparties(
       extractTokenBalanceCounterparties(meta, walletAddress),
-      extractParsedCounterparties(instructions, walletAddress),
+      extractParsedCounterparties(parsedInstructions, walletAddress),
     );
   const umbraInstructionNames = touchesUmbra ? extractUmbraInstructionNames(result) : [];
   const umbraClassification = touchesUmbra

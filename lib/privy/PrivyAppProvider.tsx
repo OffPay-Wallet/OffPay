@@ -17,6 +17,7 @@ import { PrivyProvider } from '@privy-io/expo';
 import type { ReactNode } from 'react';
 
 import { getPrivyEnvironment } from './config';
+import { PrivySolanaSigningBridge } from './PrivySolanaSigningBridge';
 
 interface PrivyAppProviderProps {
   children: ReactNode;
@@ -48,6 +49,7 @@ export function PrivyAppProvider({ children }: PrivyAppProviderProps): React.JSX
         },
       }}
     >
+      <PrivySolanaSigningBridge />
       {children}
     </PrivyProvider>
   );

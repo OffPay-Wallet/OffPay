@@ -32,7 +32,7 @@ import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
-import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
+import { getWalletSigningBlocker } from '@/lib/wallet/wallet-capabilities';
 import {
   resolveTransferTokenForRoute,
   routeKind,
@@ -392,8 +392,12 @@ function getUmbraRouteBlocker(params: {
   if (!isUmbraNetworkSupported(params.action.network)) {
     return 'Umbra is not available on this network.';
   }
-  const localSigningBlocker = getLocalSigningWalletBlocker(params.walletImportMethod, 'Umbra');
-  if (localSigningBlocker != null) return localSigningBlocker;
+  const signingBlocker = getWalletSigningBlocker(
+    params.walletImportMethod,
+    'Umbra',
+    params.action.walletAddress,
+  );
+  if (signingBlocker != null) return signingBlocker;
   if (params.walletMode !== 'online' || !params.canUseNetwork) {
     return 'Umbra route needs online mode.';
   }
@@ -427,9 +431,13 @@ async function runSubmitter({
     if (walletId == null) {
       throw new Error('Unlock wallet and try again.');
     }
-    const localSigningBlocker = getLocalSigningWalletBlocker(walletImportMethod, 'Normal send');
-    if (localSigningBlocker != null) {
-      throw new Error(localSigningBlocker);
+    const signingBlocker = getWalletSigningBlocker(
+      walletImportMethod,
+      'Normal send',
+      draft.walletAddress,
+    );
+    if (signingBlocker != null) {
+      throw new Error(signingBlocker);
     }
     const { submitNormalTokenTransfer } = await import('@/lib/payments/normal-token-transfer');
     const normalResult = await submitNormalTokenTransfer({
@@ -453,9 +461,13 @@ async function runSubmitter({
     if (walletId == null) {
       throw new Error('Unlock wallet and try again.');
     }
-    const localSigningBlocker = getLocalSigningWalletBlocker(walletImportMethod, 'Umbra');
-    if (localSigningBlocker != null) {
-      throw new Error(localSigningBlocker);
+    const signingBlocker = getWalletSigningBlocker(
+      walletImportMethod,
+      'Umbra',
+      draft.walletAddress,
+    );
+    if (signingBlocker != null) {
+      throw new Error(signingBlocker);
     }
     const { sendUmbraPrivateP2PFromPublicBalance } = await import('@/lib/umbra/umbra-execution');
     const umbraResult = await sendUmbraPrivateP2PFromPublicBalance({
@@ -476,9 +488,13 @@ async function runSubmitter({
   }
 
   const { submitPrivatePayment } = await import('@/lib/magicblock/private-payment');
-  const localSigningBlocker = getLocalSigningWalletBlocker(walletImportMethod, 'MagicBlock');
-  if (localSigningBlocker != null) {
-    throw new Error(localSigningBlocker);
+  const signingBlocker = getWalletSigningBlocker(
+    walletImportMethod,
+    'MagicBlock',
+    draft.walletAddress,
+  );
+  if (signingBlocker != null) {
+    throw new Error(signingBlocker);
   }
   const privateResult = await submitPrivatePayment({
     walletAddress: draft.walletAddress,

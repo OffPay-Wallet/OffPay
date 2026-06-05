@@ -7,8 +7,7 @@ import type {
 
 /** Human copy for route block reasons. Pure — shared by chat card + review. */
 const BLOCK_REASON_COPY: Record<PayrollRouteBlockReason, string> = {
-  wallet_cannot_sign:
-    'Payroll needs a local signing wallet. Import a recovery phrase or private key.',
+  wallet_cannot_sign: 'Payroll signing is not ready. Unlock or reconnect the active wallet.',
   network_offline: 'You are offline. Reconnect to run payroll.',
   rpc_unavailable: 'The network RPC is unavailable right now.',
   token_unsupported: 'This token is not supported for private payroll.',

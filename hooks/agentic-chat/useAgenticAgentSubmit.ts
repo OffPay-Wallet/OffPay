@@ -16,7 +16,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { toOffpayNetwork } from '@/constants/networks';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
-import { walletHasLocalSigningMaterial } from '@/lib/wallet/wallet-capabilities';
+import { walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 import {
   isAgenticPaymentsProxyConfigured,
   sendAgentTurn,
@@ -277,7 +277,10 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     params.capabilities ?? null,
     'umbra.execution',
   );
-  const activeWalletCanUseUmbra = walletHasLocalSigningMaterial(params.walletImportMethod);
+  const activeWalletCanUseUmbra = walletCanSignWithApp({
+    importMethod: params.walletImportMethod,
+    walletAddress: params.scope.walletAddress,
+  });
 
   for (let turnIndex = 0; turnIndex < MAX_TOOL_TURNS; turnIndex += 1) {
     const turn = await sendAgentTurn(

@@ -43,15 +43,15 @@ function token(
 
 describe('walletCanSignPayroll', () => {
   it('allows local signing wallets', () => {
-    expect(walletCanSignPayroll('generated')).toBe(true);
-    expect(walletCanSignPayroll('mnemonic-import')).toBe(true);
-    expect(walletCanSignPayroll('private-key-import')).toBe(true);
+    expect(walletCanSignPayroll({ importMethod: 'generated' })).toBe(true);
+    expect(walletCanSignPayroll({ importMethod: 'mnemonic-import' })).toBe(true);
+    expect(walletCanSignPayroll({ importMethod: 'private-key-import' })).toBe(true);
   });
 
-  it('blocks Privy embedded/address-only and unknown wallets', () => {
-    expect(walletCanSignPayroll('privy-embedded')).toBe(false);
-    expect(walletCanSignPayroll(null)).toBe(false);
-    expect(walletCanSignPayroll(undefined)).toBe(false);
+  it('allows Privy embedded wallets and blocks unknown wallets', () => {
+    expect(walletCanSignPayroll({ importMethod: 'privy-embedded' })).toBe(true);
+    expect(walletCanSignPayroll({ importMethod: null })).toBe(false);
+    expect(walletCanSignPayroll({ importMethod: undefined })).toBe(false);
   });
 });
 

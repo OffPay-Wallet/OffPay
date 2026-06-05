@@ -183,7 +183,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const username = useAppStore((state) => state.username);
   const { network, unsupportedReason } = useOffpayNetwork();
   const getScreenSignal = useScreenAbortSignal();
-  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
+  const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const { mixerRegisterMutation } = useUmbraExecution();
   const offlineReceipts = useOfflinePaymentStore((state) => state.receipts);
@@ -277,13 +277,13 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const umbraExecutionCapability = getOffpayFeatureCapability(capabilities, 'umbra.execution');
   const canUseUmbraReceiveRoute =
     canShowUmbraReceiveRoute &&
-    hasLocalSigningMaterial &&
+    canSignWithApp &&
     canUseUmbraNativeProver &&
     isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p') &&
     isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
     isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast');
-  const umbraReceiveDisabledReason = localSigningBlocker
-    ? localSigningBlocker
+  const umbraReceiveDisabledReason = signingBlocker
+    ? signingBlocker
     : !canUseUmbraNativeProver
       ? RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE
       : !umbraPrivateP2pCapability.available
@@ -291,8 +291,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         : !umbraExecutionCapability.available
           ? umbraExecutionCapability.message
           : null;
-  const canScanUmbraClaims =
-    canShowUmbraReceiveRoute && hasLocalSigningMaterial && canUseUmbraReceiveRoute;
+  const canScanUmbraClaims = canShowUmbraReceiveRoute && canSignWithApp && canUseUmbraReceiveRoute;
   const canUseUmbraClaim = canScanUmbraClaims;
   const umbraVaultRegistrationStatus = umbraVaultRegistrationQuery.data ?? null;
   const onChainMixerRegistered = umbraVaultRegistrationStatus?.mixerRegistered === true;

@@ -243,7 +243,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   );
   const markUmbraUtxosClaimed = useUmbraPrivacyStore((state) => state.markUtxosClaimed);
   const { network } = useOffpayNetwork();
-  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
+  const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const umbraCacheInvalidator = useUmbraCacheInvalidator();
 
   const claimedIndexSet = useMemo<ReadonlySet<number>>(
@@ -260,13 +260,13 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
     walletAddress != null &&
     walletId != null &&
     network != null &&
-    hasLocalSigningMaterial &&
+    canSignWithApp &&
     isUmbraNetworkSupported(network) &&
     isRnZkProverNativeModuleAvailable();
   const unavailableMessage =
     walletAddress == null || walletId == null || network == null
       ? 'Unlock wallet to scan private payments.'
-      : (localSigningBlocker ??
+      : (signingBlocker ??
         (!isUmbraNetworkSupported(network)
           ? 'Umbra is not available on this network.'
           : !isRnZkProverNativeModuleAvailable()

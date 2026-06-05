@@ -1,5 +1,5 @@
 import type { PayrollRowSubmitContext, PayrollSubmitOutcome } from '@/lib/payroll/payroll-executor';
-import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
+import { getWalletSigningBlocker } from '@/lib/wallet/wallet-capabilities';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { OffpayNetwork } from '@/types/offpay-api';
@@ -27,7 +27,11 @@ export function createPayrollRowSubmitter(
   context: PayrollSubmitterContext,
 ): (submit: PayrollRowSubmitContext) => Promise<PayrollSubmitOutcome> {
   return async ({ row, route }) => {
-    const signingBlocker = getLocalSigningWalletBlocker(context.walletImportMethod, 'Payroll');
+    const signingBlocker = getWalletSigningBlocker(
+      context.walletImportMethod,
+      'Payroll',
+      context.walletAddress,
+    );
     if (signingBlocker != null) {
       throw new Error(signingBlocker);
     }

@@ -270,7 +270,10 @@ export function usePayrollChatIntake(
       // Umbra can't be used at all (no prover, capability off, unsupported
       // mint/network), skip the sender/recipient Umbra probes entirely.
       const umbraProverAvailable = Platform.OS !== 'web' && isRnZkProverNativeModuleAvailable();
-      const activeWalletCanSign = walletCanSignPayroll(params.importMethod);
+      const activeWalletCanSign = walletCanSignPayroll({
+        importMethod: params.importMethod,
+        walletAddress: params.walletAddress,
+      });
       const umbraCapabilityAvailable =
         isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution') &&
         isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p') &&

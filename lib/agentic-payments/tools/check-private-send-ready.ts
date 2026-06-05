@@ -4,7 +4,7 @@ import {
   getUmbraSupportedTokens,
   isUmbraNetworkSupported,
 } from '@/lib/umbra/umbra-supported-tokens';
-import { walletHasLocalSigningMaterial } from '@/lib/wallet/wallet-capabilities';
+import { walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 
 import { EMPTY_PARAMS } from './helpers';
 import type { AgenticToolDefinition } from './types';
@@ -23,7 +23,10 @@ export const checkPrivateSendReadyTool: AgenticToolDefinition = {
       isOffpayFeatureAvailable(capabilities, 'payment.privateInitMint') &&
       isOffpayFeatureAvailable(capabilities, 'payment.privateSend') &&
       isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast');
-    const activeWalletCanUseUmbra = walletHasLocalSigningMaterial(context.walletImportMethod);
+    const activeWalletCanUseUmbra = walletCanSignWithApp({
+      importMethod: context.walletImportMethod,
+      walletAddress: context.scope.walletAddress,
+    });
     const umbra =
       activeWalletCanUseUmbra &&
       isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&

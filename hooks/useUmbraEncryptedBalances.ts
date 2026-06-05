@@ -29,7 +29,7 @@ export function useUmbraEncryptedBalances(
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
-  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
+  const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const { capabilities, isCapabilitiesPending } = useOffpayCapabilities({
     enabled: enabledByCaller,
   });
@@ -42,7 +42,7 @@ export function useUmbraEncryptedBalances(
     network != null &&
     enabledByCaller &&
     canUseNetwork &&
-    hasLocalSigningMaterial &&
+    canSignWithApp &&
     isUmbraNetworkSupported(network) &&
     tokenSymbols.length > 0 &&
     capabilityAvailable;
@@ -86,7 +86,7 @@ export function useUmbraEncryptedBalances(
     },
     retry: false,
     meta: {
-      capabilityMessage: localSigningBlocker ?? capability.message,
+      capabilityMessage: signingBlocker ?? capability.message,
     },
   });
 
@@ -96,9 +96,9 @@ export function useUmbraEncryptedBalances(
     network,
     capability,
     isCapabilitiesPending:
-      enabledByCaller && canUseNetwork && hasLocalSigningMaterial && isCapabilitiesPending,
+      enabledByCaller && canUseNetwork && canSignWithApp && isCapabilitiesPending,
     isCapabilityEnabled: capabilityAvailable || enabled,
-    hasLocalSigningMaterial,
-    localSigningBlocker,
+    canSignWithApp,
+    signingBlocker,
   };
 }

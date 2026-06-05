@@ -35,6 +35,7 @@ import { useUmbraVaultRegistrationStatus } from '@/hooks/useUmbraVaultRegistrati
 import { useWalletModeState } from '@/hooks/useWalletModeState';
 import { getOffpayFeatureCapability } from '@/lib/api/offpay-capabilities';
 import { formatLamportsAsExactSol } from '@/lib/crypto/solana-amounts';
+import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
 import {
   decimalInputToAtomicAmount,
   formatAtomicAmount,
@@ -144,7 +145,7 @@ function getVaultDisabledMessage(params: {
   walletAddress: string | null;
   network: string | null;
   canUseNetwork: boolean;
-  localSigningBlocker: string | null;
+  signingBlocker: string | null;
   capabilityAvailable: boolean;
   capabilityMessage: string;
   umbraNetworkSupported: boolean;
@@ -158,8 +159,8 @@ function getVaultDisabledMessage(params: {
   if (!params.canUseNetwork) {
     return 'Go online to use Umbra vault actions.';
   }
-  if (params.localSigningBlocker != null) {
-    return params.localSigningBlocker;
+  if (params.signingBlocker != null) {
+    return params.signingBlocker;
   }
   if (!params.capabilityAvailable) {
     return params.capabilityMessage;
@@ -412,7 +413,7 @@ function UmbraVaultContentBody({
   const { network } = useOffpayNetwork();
   const capabilitiesQuery = useOffpayCapabilities();
   const walletBalanceQuery = useOffpayWalletBalance();
-  const { localSigningBlocker } = useActiveWalletSigningCapability();
+  const { signingBlocker } = useActiveWalletSigningCapability();
   const umbraExecutionCapability = getOffpayFeatureCapability(
     capabilitiesQuery.capabilities,
     'umbra.execution',
@@ -440,7 +441,7 @@ function UmbraVaultContentBody({
     walletAddress,
     network,
     canUseNetwork,
-    localSigningBlocker,
+    signingBlocker,
     capabilityAvailable: umbraExecutionCapability.available,
     capabilityMessage: umbraExecutionCapability.message,
     umbraNetworkSupported: network != null && isUmbraNetworkSupported(network),
@@ -799,6 +800,15 @@ function UmbraVaultContentBody({
           message: result.subtitle,
           variant: setupConfirmed ? 'success' : 'warning',
         });
+        const setupSignature = result.primarySignature ?? result.signatures[0] ?? null;
+        if (setupSignature != null) {
+          void presentWalletTransactionNotification({
+            identifier: `umbra-setup-${network}-${setupSignature}`,
+            title: setupConfirmed ? 'Umbra vault ready' : 'Umbra setup submitted',
+            body: null,
+            signature: setupSignature,
+          });
+        }
         void walletBalanceQuery.refetch();
         void vaultRegistrationQuery.refetch();
         refreshBalances(true);

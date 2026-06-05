@@ -31,7 +31,7 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
-  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
+  const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const { capabilities, isCapabilitiesPending } = useOffpayCapabilities({
     enabled: enabledByCaller,
   });
@@ -43,7 +43,7 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
     network != null &&
     enabledByCaller &&
     canUseNetwork &&
-    hasLocalSigningMaterial &&
+    canSignWithApp &&
     isUmbraNetworkSupported(network) &&
     capabilityAvailable;
 
@@ -80,7 +80,7 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
     },
     retry: false,
     meta: {
-      capabilityMessage: localSigningBlocker ?? capability.message,
+      capabilityMessage: signingBlocker ?? capability.message,
     },
   });
 
@@ -90,9 +90,9 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
     network,
     capability,
     isCapabilitiesPending:
-      enabledByCaller && canUseNetwork && hasLocalSigningMaterial && isCapabilitiesPending,
+      enabledByCaller && canUseNetwork && canSignWithApp && isCapabilitiesPending,
     isCapabilityEnabled: capabilityAvailable || enabled,
-    hasLocalSigningMaterial,
-    localSigningBlocker,
+    canSignWithApp,
+    signingBlocker,
   };
 }

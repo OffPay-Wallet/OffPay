@@ -27,7 +27,7 @@ export type PayrollRouteBlockReason =
  */
 export interface PayrollRouteFacts {
   network: OffpayNetwork;
-  /** Active wallet has local signing material (not address-only Privy). */
+  /** Active wallet can sign through OffPay. */
   walletCanSign: boolean;
   online: boolean;
   rpcReady: boolean;

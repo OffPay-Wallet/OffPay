@@ -1,7 +1,7 @@
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { scanUmbraPrivateP2PClaims } from '@/lib/umbra/umbra-execution';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
-import { walletHasLocalSigningMaterial } from '@/lib/wallet/wallet-capabilities';
+import { walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 
 import {
   errorCodeFromUnknown,
@@ -44,7 +44,12 @@ export const scanUmbraClaimsTool: AgenticToolDefinition = {
     }
     if (!isNetworkReady(context)) return { error: { code: 'network_unavailable' } };
     if (context.walletId == null) return { error: { code: 'wallet_locked' } };
-    if (!walletHasLocalSigningMaterial(context.walletImportMethod)) {
+    if (
+      !walletCanSignWithApp({
+        importMethod: context.walletImportMethod,
+        walletAddress: scope.walletAddress,
+      })
+    ) {
       return { error: { code: 'wallet_cannot_sign' } };
     }
     if (!isUmbraNetworkSupported(scope.network)) return { error: { code: 'feature_unavailable' } };

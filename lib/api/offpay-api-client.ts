@@ -3,9 +3,11 @@ import bs58 from 'bs58';
 
 import {
   buildOffpayAuthHeadersAsync,
+  buildOffpayAuthHeadersWithSignature,
   signBootstrapNonce,
   zeroOutBytes,
 } from '@/lib/crypto/offpay-api-auth';
+import { signMessageForWallet } from '@/lib/crypto/solana-transaction-signing';
 import Constants from 'expo-constants';
 import {
   clearOffpayBootstrapCredentials,
@@ -23,7 +25,10 @@ import {
   deriveSigningSeedFromMnemonic,
 } from '@/lib/wallet/wallet';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
-import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
+import {
+  getWalletSigningBlocker,
+  walletHasLocalSigningMaterial,
+} from '@/lib/wallet/wallet-capabilities';
 import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
@@ -204,8 +209,9 @@ interface PublicRequestOptions {
 }
 
 interface StoredAuthContext {
+  walletInfo: SigningWalletInfo;
   walletAddress: string;
-  signingSeed: Uint8Array;
+  signingSeed: Uint8Array | null;
   requestSecret: string;
   deviceId: string;
   bootstrapVersion: number;
@@ -479,9 +485,10 @@ async function deriveSigningSeedWithAuth(params: {
   const signingSeed = await getOrDeriveSigningSeed({
     walletAddress: params.walletAddress,
     derive: async () => {
-      const localSigningBlocker = getLocalSigningWalletBlocker(
+      const localSigningBlocker = getWalletSigningBlocker(
         params.importMethod,
         'Authenticated OffPay requests',
+        params.walletAddress,
       );
       if (localSigningBlocker != null) {
         throw new Error(localSigningBlocker);
@@ -609,9 +616,12 @@ async function getStoredAuthContext(walletId?: string): Promise<StoredAuthContex
     throw new Error('OffPay API bootstrap is required before this request.');
   }
 
-  const signingSeed = await getSigningSeed(walletInfo);
+  const signingSeed = walletHasLocalSigningMaterial(walletInfo.importMethod)
+    ? await getSigningSeed(walletInfo)
+    : null;
 
   return {
+    walletInfo,
     walletAddress: walletInfo.publicKey,
     signingSeed,
     requestSecret,
@@ -651,20 +661,41 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
   }
 
   try {
+    const authHeaders =
+      authContext.signingSeed != null
+        ? await buildOffpayAuthHeadersAsync({
+            walletAddress: authContext.walletAddress,
+            requestSecret: authContext.requestSecret,
+            deviceId: authContext.deviceId,
+            bootstrapVersion: authContext.bootstrapVersion,
+            appVersion: OFFPAY_APP_VERSION,
+            network: options.network,
+            method,
+            pathAndQuery,
+            body: options.body,
+            signingSeed: authContext.signingSeed,
+          })
+        : await buildOffpayAuthHeadersWithSignature({
+            walletAddress: authContext.walletAddress,
+            requestSecret: authContext.requestSecret,
+            deviceId: authContext.deviceId,
+            bootstrapVersion: authContext.bootstrapVersion,
+            appVersion: OFFPAY_APP_VERSION,
+            network: options.network,
+            method,
+            pathAndQuery,
+            body: options.body,
+            signCanonicalMessage: (message) =>
+              signMessageForWallet({
+                message,
+                walletAddress: authContext.walletAddress,
+                walletId: authContext.walletInfo.id,
+              }),
+          });
+
     const headers: Record<string, string> = {
       Accept: options.accept ?? 'application/json',
-      ...(await buildOffpayAuthHeadersAsync({
-        walletAddress: authContext.walletAddress,
-        requestSecret: authContext.requestSecret,
-        deviceId: authContext.deviceId,
-        bootstrapVersion: authContext.bootstrapVersion,
-        appVersion: OFFPAY_APP_VERSION,
-        network: options.network,
-        method,
-        pathAndQuery,
-        body: options.body,
-        signingSeed: authContext.signingSeed,
-      })),
+      ...authHeaders,
       ...options.headers,
     };
 
@@ -716,7 +747,9 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
 
     throw error;
   } finally {
-    zeroOutBytes(authContext.signingSeed);
+    if (authContext.signingSeed != null) {
+      zeroOutBytes(authContext.signingSeed);
+    }
   }
 }
 
@@ -749,13 +782,20 @@ export async function provisionBootstrap(
   }
 
   const [signingSeed, deviceId] = await Promise.all([
-    getSigningSeed(walletInfo),
+    walletHasLocalSigningMaterial(walletInfo.importMethod) ? getSigningSeed(walletInfo) : null,
     getOrCreateOffpayDeviceId(),
   ]);
 
   try {
     await yieldToUi();
-    const walletSignature = signBootstrapNonce(body.nonce, signingSeed);
+    const walletSignature =
+      signingSeed != null
+        ? signBootstrapNonce(body.nonce, signingSeed)
+        : await signMessageForWallet({
+            message: body.nonce,
+            walletAddress: walletInfo.publicKey,
+            walletId: walletInfo.id,
+          });
     let provisionBody: BootstrapProvisionBody;
 
     if (body.attestationToken != null) {
@@ -805,7 +845,9 @@ export async function provisionBootstrap(
 
     return response;
   } finally {
-    zeroOutBytes(signingSeed);
+    if (signingSeed != null) {
+      zeroOutBytes(signingSeed);
+    }
   }
 }
 
