@@ -244,6 +244,10 @@ export function ChatScreen(): React.JSX.Element {
   // payroll run resolves. Silent-fail and privacy-gated inside the hook.
   const speech = useAgenticSpeech();
   const activeWalletId = useWalletStore((s) => s.activeWalletId);
+  const activeImportMethod = useMemo(() => {
+    const active = wallets.find((wallet) => wallet.publicKey === scope.walletAddress);
+    return active?.importMethod ?? null;
+  }, [wallets, scope.walletAddress]);
 
   const { submit, busy: agentBusy } = useAgenticAgentSubmit({
     scope,
@@ -256,6 +260,7 @@ export function ChatScreen(): React.JSX.Element {
     capabilities: capabilitiesQuery.capabilities,
     knownWallets,
     walletId: activeWalletId,
+    walletImportMethod: activeImportMethod,
     onPayrollIntent: (source) => {
       if (source === 'upload') {
         const intake = payrollIntakeRef.current;
@@ -280,15 +285,11 @@ export function ChatScreen(): React.JSX.Element {
     balance: agentBalance,
     capabilities: capabilitiesQuery.capabilities,
     knownWallets,
+    walletImportMethod: activeImportMethod,
     onSpeakOutcome: (phrase) => {
       void speech.speak(phrase);
     },
   });
-
-  const activeImportMethod = useMemo(() => {
-    const active = wallets.find((wallet) => wallet.publicKey === scope.walletAddress);
-    return active?.importMethod ?? null;
-  }, [wallets, scope.walletAddress]);
 
   const payrollIntake = usePayrollChatIntake({
     walletAddress: scope.walletAddress,

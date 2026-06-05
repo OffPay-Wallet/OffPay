@@ -46,13 +46,13 @@ const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['POST /api/bootstrap/provision', { limit: 30, windowSec: 60, scope: 'device' }],
   ['GET /api/capabilities', { limit: 60, windowSec: 5 * 60, scope: 'ip' }],
   ['GET /api/market/fx-rate', { limit: 120, windowSec: 60, scope: 'ip' }],
-  ['POST /api/market/token-price', { limit: 60, windowSec: 60, scope: 'wallet' }],
-  ['POST /api/market/token-price-history', { limit: 30, windowSec: 60, scope: 'wallet' }],
-  ['GET /api/wallet/balance', { limit: 60, windowSec: 60, scope: 'wallet' }],
-  ['GET /api/wallet/transactions', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/market/token-price', { limit: 60, windowSec: 60, scope: 'device' }],
+  ['POST /api/market/token-price-history', { limit: 30, windowSec: 60, scope: 'device' }],
+  ['GET /api/wallet/balance', { limit: 60, windowSec: 60, scope: 'device' }],
+  ['GET /api/wallet/transactions', { limit: 20, windowSec: 60, scope: 'device' }],
   ['GET /api/risk/score', { limit: 30, windowSec: 60, scope: 'wallet' }],
-  ['GET /api/swap/tokens', { limit: 10, windowSec: 5 * 60, scope: 'wallet' }],
-  ['GET /api/swap/price', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  ['GET /api/swap/tokens', { limit: 10, windowSec: 5 * 60, scope: 'device' }],
+  ['GET /api/swap/price', { limit: 30, windowSec: 60, scope: 'device' }],
   ['POST /api/swap/quote', { limit: 20, windowSec: 60, scope: 'wallet' }],
   ['POST /api/swap/execute', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['POST /api/swap/trigger', { limit: 12, windowSec: 60, scope: 'wallet' }],
@@ -71,7 +71,10 @@ const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['GET /api/offline/token-context', { limit: 30, windowSec: 60, scope: 'wallet' }],
   ['GET /api/privacy/shielded-balance', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['GET /api/privacy/scan-announcements', { limit: 10, windowSec: 60, scope: 'wallet' }],
-  ['POST /api/privacy/register-viewing-key', { limit: 3, windowSec: 24 * 60 * 60, scope: 'wallet' }],
+  [
+    'POST /api/privacy/register-viewing-key',
+    { limit: 3, windowSec: 24 * 60 * 60, scope: 'wallet' },
+  ],
   ['GET /api/stream/capabilities', { limit: 10, windowSec: 5 * 60, scope: 'wallet' }],
   ['GET /api/stream/wallet-activity', { limit: 20, windowSec: 60, scope: 'wallet' }],
   ['POST /api/pending/backup', { limit: 50, windowSec: 60, scope: 'wallet' }],
@@ -89,7 +92,10 @@ const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['GET /api/umbra/utxos', { limit: 120, windowSec: 60, scope: 'wallet' }],
   ['GET /api/umbra/indexer-health', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['GET /api/umbra/trees', { limit: 20, windowSec: 60, scope: 'wallet' }],
-  ['GET /api/umbra/trees/:treeIndex/proof/:insertionIndex', { limit: 20, windowSec: 60, scope: 'wallet' }],
+  [
+    'GET /api/umbra/trees/:treeIndex/proof/:insertionIndex',
+    { limit: 20, windowSec: 60, scope: 'wallet' },
+  ],
   ['POST /api/umbra/trees/:treeIndex/proofs', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['GET /api/umbra/relayer-info', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['POST /api/umbra/claim', { limit: 5, windowSec: 60, scope: 'wallet' }],
@@ -121,7 +127,9 @@ function normalizePolicyPath(method: string, path: string): string {
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join(
+    '',
+  );
 }
 
 function buildRateLimitKey(
@@ -134,7 +142,10 @@ function buildRateLimitKey(
 }
 
 function getRateLimitPolicy(method: string, path: string): RateLimitPolicy {
-  return RATE_LIMIT_POLICIES.get(normalizeRouteKey(method, normalizePolicyPath(method, path))) ?? DEFAULT_AUTHENTICATED_POLICY;
+  return (
+    RATE_LIMIT_POLICIES.get(normalizeRouteKey(method, normalizePolicyPath(method, path))) ??
+    DEFAULT_AUTHENTICATED_POLICY
+  );
 }
 
 function createUpstashKvClient(bindings: Bindings): KvClient {
@@ -207,12 +218,7 @@ async function checkRateLimit(
   try {
     const client = kvClientFactory(bindings);
     const hashedIdentifier = await sha256Hex(descriptor.identifier);
-    const key = buildRateLimitKey(
-      policy.scope,
-      descriptor.method,
-      policyPath,
-      hashedIdentifier,
-    );
+    const key = buildRateLimitKey(policy.scope, descriptor.method, policyPath, hashedIdentifier);
 
     let currentCount: number;
     let ttl: number;

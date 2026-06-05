@@ -33,12 +33,24 @@ const PROTECTED_ROUTE_PREFIXES = [
 ] as const;
 const PUBLIC_AUTH_EXEMPT_ROUTES = new Set([
   'GET /api/market/fx-rate',
+  'POST /api/market/token-price',
+  'POST /api/market/token-price-history',
+  'GET /api/swap/tokens',
+  'GET /api/swap/price',
+  'GET /api/wallet/balance',
+  'GET /api/wallet/transactions',
 ]);
 const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/bootstrap/provision',
   'POST /api/bootstrap/provision',
   'GET /api/capabilities',
   'GET /api/market/fx-rate',
+  'POST /api/market/token-price',
+  'POST /api/market/token-price-history',
+  'GET /api/swap/tokens',
+  'GET /api/swap/price',
+  'GET /api/wallet/balance',
+  'GET /api/wallet/transactions',
 ]);
 
 interface AuthHeaders {
@@ -466,10 +478,7 @@ async function authenticateRequest(
 const authenticationMiddleware: MiddlewareHandler<AppEnv> = async (context, next) => {
   if (!requiresAuthentication(context.req.method, context.req.path)) {
     if (shouldRateLimitPublicRoute(context.req.method, context.req.path)) {
-      const rateLimit = await checkRequestRateLimit(
-        context,
-        getPublicRateLimitIdentifier(context),
-      );
+      const rateLimit = await checkRequestRateLimit(context, getPublicRateLimitIdentifier(context));
       if (rateLimit instanceof Response) return rateLimit;
 
       await next();

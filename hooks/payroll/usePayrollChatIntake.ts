@@ -204,7 +204,11 @@ async function resolvePayrollTokenForInput(params: {
 
   const preferredToken =
     resolvePayrollTokenContext(params.balance, params.preferredSymbol) ??
-    resolvePayrollTokenContextByIdentifier(params.balance, params.preferredSymbol, params.network) ??
+    resolvePayrollTokenContextByIdentifier(
+      params.balance,
+      params.preferredSymbol,
+      params.network,
+    ) ??
     resolveKnownPayrollTokenContext(params.preferredSymbol, params.network);
   if (preferredToken != null) return preferredToken;
 
@@ -266,6 +270,7 @@ export function usePayrollChatIntake(
       // Umbra can't be used at all (no prover, capability off, unsupported
       // mint/network), skip the sender/recipient Umbra probes entirely.
       const umbraProverAvailable = Platform.OS !== 'web' && isRnZkProverNativeModuleAvailable();
+      const activeWalletCanSign = walletCanSignPayroll(params.importMethod);
       const umbraCapabilityAvailable =
         isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution') &&
         isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p') &&
@@ -281,6 +286,7 @@ export function usePayrollChatIntake(
         const token = tokenContextsByMint.get(row.tokenMint) ?? fallbackTokenContextFromRow(row);
         return (
           run.routePolicy !== 'magicblock_only' &&
+          activeWalletCanSign &&
           umbraProverAvailable &&
           umbraCapabilityAvailable &&
           getUmbraTokenByMint(run.network, token.mint) != null
@@ -330,6 +336,7 @@ export function usePayrollChatIntake(
         const token = tokenContextsByMint.get(mint) ?? fallbackTokenContextFromRow(firstRow);
         const umbraEligible =
           run.routePolicy !== 'magicblock_only' &&
+          activeWalletCanSign &&
           umbraProverAvailable &&
           umbraCapabilityAvailable &&
           getUmbraTokenByMint(run.network, token.mint) != null;
@@ -349,7 +356,7 @@ export function usePayrollChatIntake(
           network: run.network,
           mint: token.mint,
           capabilities: params.capabilities ?? null,
-          walletCanSign: walletCanSignPayroll(params.importMethod),
+          walletCanSign: activeWalletCanSign,
           online: params.canUseNetwork,
           rpcReady: params.canUseNetwork,
           hasTokenBalanceForRun: readyRowsFitBalance(tokenRows, token),

@@ -75,6 +75,12 @@ export function errorCodeFromUnknown(error: unknown, fallback = 'tool_failed'): 
 
   if (error instanceof Error) {
     const lower = error.message.toLowerCase();
+    if (
+      lower.includes('local signing wallet') ||
+      lower.includes('privy wallets keep the signing key')
+    ) {
+      return 'wallet_cannot_sign';
+    }
     if (lower.includes('timed out')) return 'request_timeout';
     if (lower.includes('offline mode')) return 'network_unavailable';
     if (lower.includes('wallet')) return 'wallet_unavailable';

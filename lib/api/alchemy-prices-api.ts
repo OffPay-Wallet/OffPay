@@ -1,4 +1,4 @@
-import { offpayApiRequest } from '@/lib/api/offpay-api-client';
+import { buildOffpayPublicReadHeaders, offpayPublicRequest } from '@/lib/api/offpay-api-client';
 
 export type AlchemyTokenPriceIdentifier =
   | {
@@ -40,15 +40,15 @@ export async function fetchAlchemyTokenUsdPrice(
   identifier: AlchemyTokenPriceIdentifier,
   options?: { signal?: AbortSignal },
 ): Promise<AlchemyUsdPricePoint | null> {
-  const response = await offpayApiRequest<{ price: AlchemyUsdPricePoint | null }>({
+  const response = await offpayPublicRequest<{ price: AlchemyUsdPricePoint | null }>({
     path: '/api/market/token-price',
     method: 'POST',
     body: {
       identifier,
       network: 'mainnet',
     },
-    network: 'mainnet',
     signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
   });
 
   return response.price;
@@ -64,7 +64,7 @@ export async function fetchAlchemyHistoricalTokenUsdPrices(
   },
   options?: { signal?: AbortSignal },
 ): Promise<AlchemyHistoricalUsdPricePoint[]> {
-  const response = await offpayApiRequest<{ prices: AlchemyHistoricalUsdPricePoint[] }>({
+  const response = await offpayPublicRequest<{ prices: AlchemyHistoricalUsdPricePoint[] }>({
     path: '/api/market/token-price-history',
     method: 'POST',
     body: {
@@ -75,8 +75,8 @@ export async function fetchAlchemyHistoricalTokenUsdPrices(
       withMarketData: params.withMarketData,
       network: 'mainnet',
     },
-    network: 'mainnet',
     signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
   });
 
   return response.prices;

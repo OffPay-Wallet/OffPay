@@ -332,10 +332,7 @@ async function readUnionJsonBody(
 const swapRoutes = new Hono<AppEnv>();
 
 swapRoutes.get('/tokens', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const query = readSearchParams(context.req.url, swapTokensQuerySchema);
-
-  assertRequestedNetwork(query.network, authenticatedContext.network);
 
   const response = context.json(await getSwapTokens(context.env, query.network));
   response.headers.set('Cache-Control', 'no-store');
@@ -343,11 +340,9 @@ swapRoutes.get('/tokens', async (context) => {
 });
 
 swapRoutes.get('/price', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const query = readSearchParams(context.req.url, swapPriceQuerySchema);
 
   assertSolanaAddress(query.mint, 'Mint address is invalid.');
-  assertRequestedNetwork(query.network, authenticatedContext.network);
 
   const response = context.json(
     await getSwapPrice(context.env, {
@@ -514,9 +509,7 @@ swapRoutes.post('/trigger', async (context) => {
       ...(createBody.triggerPriceUsd === undefined
         ? {}
         : { triggerPriceUsd: createBody.triggerPriceUsd }),
-      ...(createBody.slippageBps === undefined
-        ? {}
-        : { slippageBps: createBody.slippageBps }),
+      ...(createBody.slippageBps === undefined ? {} : { slippageBps: createBody.slippageBps }),
       ...(createBody.tpPriceUsd === undefined ? {} : { tpPriceUsd: createBody.tpPriceUsd }),
       ...(createBody.slPriceUsd === undefined ? {} : { slPriceUsd: createBody.slPriceUsd }),
       ...(createBody.tpSlippageBps === undefined

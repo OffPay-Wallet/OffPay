@@ -5,6 +5,7 @@ import {
   getUmbraTokenByMint,
   getUmbraTokenBySymbol,
 } from '@/lib/umbra/umbra-supported-tokens';
+import { walletHasLocalSigningMaterial } from '@/lib/wallet/wallet-capabilities';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { PayrollTokenContext } from '@/lib/payroll/payroll-validation';
@@ -16,11 +17,7 @@ import type { OffpayNetwork, WalletBalanceResponse } from '@/types/offpay-api';
  * are blocked before confirmation.
  */
 export function walletCanSignPayroll(importMethod: WalletImportMethod | null | undefined): boolean {
-  return (
-    importMethod === 'generated' ||
-    importMethod === 'mnemonic-import' ||
-    importMethod === 'private-key-import'
-  );
+  return walletHasLocalSigningMaterial(importMethod);
 }
 
 /**

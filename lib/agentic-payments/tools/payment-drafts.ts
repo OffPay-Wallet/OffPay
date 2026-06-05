@@ -10,6 +10,7 @@ import {
   isUmbraNetworkSupported,
   resolveUmbraSupportedToken,
 } from '@/lib/umbra/umbra-supported-tokens';
+import { walletHasLocalSigningMaterial } from '@/lib/wallet/wallet-capabilities';
 
 import { hydrateStringArg, readTransferRouteArg, stringField, validatorErrorCode } from './helpers';
 import { resolveRecipientForDraft } from './resolve-recipient';
@@ -191,6 +192,9 @@ function isUmbraRouteReady(
     return { ok: false, code: 'feature_unavailable' };
   if (context.walletMode !== 'online' || !context.canUseNetwork) {
     return { ok: false, code: 'requires_online_mode' };
+  }
+  if (!walletHasLocalSigningMaterial(context.walletImportMethod)) {
+    return { ok: false, code: 'wallet_cannot_sign' };
   }
   if (Platform.OS === 'web' || !isRnZkProverNativeModuleAvailable()) {
     return { ok: false, code: 'umbra_prover_unavailable' };

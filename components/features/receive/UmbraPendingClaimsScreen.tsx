@@ -21,6 +21,7 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
+import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
 import { mark, measure } from '@/lib/perf/perf-marks';
@@ -242,6 +243,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   );
   const markUmbraUtxosClaimed = useUmbraPrivacyStore((state) => state.markUtxosClaimed);
   const { network } = useOffpayNetwork();
+  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
   const umbraCacheInvalidator = useUmbraCacheInvalidator();
 
   const claimedIndexSet = useMemo<ReadonlySet<number>>(
@@ -258,8 +260,18 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
     walletAddress != null &&
     walletId != null &&
     network != null &&
+    hasLocalSigningMaterial &&
     isUmbraNetworkSupported(network) &&
     isRnZkProverNativeModuleAvailable();
+  const unavailableMessage =
+    walletAddress == null || walletId == null || network == null
+      ? 'Unlock wallet to scan private payments.'
+      : (localSigningBlocker ??
+        (!isUmbraNetworkSupported(network)
+          ? 'Umbra is not available on this network.'
+          : !isRnZkProverNativeModuleAvailable()
+            ? 'Umbra claims require the native app.'
+            : null));
 
   const [scanning, setScanning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -368,7 +380,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
       if (walletAddress == null || walletId == null || network == null || !canScan) {
         showToast({
           title: 'Umbra unavailable',
-          message: 'Unlock wallet to claim private payments.',
+          message: unavailableMessage ?? 'Umbra claims are unavailable.',
           variant: 'warning',
         });
         return;
@@ -475,6 +487,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
       runScan,
       showToast,
       umbraCacheInvalidator,
+      unavailableMessage,
       pendingInsertionIndices,
       walletAddress,
       walletId,
@@ -609,6 +622,28 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                 Loading pending Umbra claims…
               </Text>
             </View>
+          ) : unavailableMessage != null ? (
+            <View style={styles.emptyState}>
+              <Text
+                variant="bodyBold"
+                color={colors.text.primary}
+                align="center"
+                numberOfLines={2}
+                maxFontSizeMultiplier={1}
+              >
+                Umbra unavailable
+              </Text>
+              <Text
+                variant="small"
+                color={colors.text.secondary}
+                align="center"
+                numberOfLines={4}
+                maxFontSizeMultiplier={1}
+                style={styles.statusText}
+              >
+                {unavailableMessage}
+              </Text>
+            </View>
           ) : error != null ? (
             <View style={styles.emptyState}>
               <Text
@@ -661,11 +696,12 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Deep scan for older private payments"
-                disabled={deepScanning || scanning || refreshing}
+                disabled={!canScan || deepScanning || scanning || refreshing}
                 onPress={() => void runScan('deep')}
                 style={({ pressed }) => [
                   styles.deepScanButton,
-                  !deepScanning && (scanning || refreshing) && styles.deepScanButtonDisabled,
+                  (!canScan || (!deepScanning && (scanning || refreshing))) &&
+                    styles.deepScanButtonDisabled,
                   pressed && styles.pressed,
                 ]}
               >

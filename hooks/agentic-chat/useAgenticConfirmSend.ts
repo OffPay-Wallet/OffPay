@@ -32,6 +32,7 @@ import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
+import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
 import {
   resolveTransferTokenForRoute,
   routeKind,
@@ -46,6 +47,7 @@ import {
 } from '@/store/agenticChatStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useWalletStore } from '@/store/walletStore';
+import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
 
 interface UseAgenticConfirmSendParams {
@@ -55,6 +57,7 @@ interface UseAgenticConfirmSendParams {
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: ReadonlyArray<{ name: string; address: string; active: boolean }>;
+  walletImportMethod: WalletImportMethod | null;
   /** Optional outcome read-aloud. Receives a pre-sanitized, outcome-only phrase. */
   onSpeakOutcome?: (phrase: string) => void;
 }
@@ -82,6 +85,7 @@ export function useAgenticConfirmSend({
   balance,
   capabilities,
   knownWallets,
+  walletImportMethod,
   onSpeakOutcome,
 }: UseAgenticConfirmSendParams): UseAgenticConfirmSendResult {
   const queryClient = useQueryClient();
@@ -118,6 +122,7 @@ export function useAgenticConfirmSend({
         balance,
         capabilities,
         knownWallets,
+        walletImportMethod,
       });
 
       if (!validation.ok) {
@@ -144,6 +149,7 @@ export function useAgenticConfirmSend({
       scope,
       showToast,
       updateAction,
+      walletImportMethod,
       walletMode,
     ],
   );
@@ -181,6 +187,7 @@ export function useAgenticConfirmSend({
         balance,
         capabilities,
         knownWallets,
+        walletImportMethod,
       });
       if (!validation.ok) {
         updateAction(action.id, { status: 'failed', errorMessage: validation.message });
@@ -203,6 +210,7 @@ export function useAgenticConfirmSend({
           action,
           draft: validation.draft,
           walletId,
+          walletImportMethod,
         });
 
         const id = result.status === 'submitted' ? result.signature : result.txId;
@@ -290,6 +298,7 @@ export function useAgenticConfirmSend({
       scope.walletAddress,
       showToast,
       updateAction,
+      walletImportMethod,
       walletId,
       walletMode,
     ],
@@ -320,6 +329,7 @@ function validateTransferActionForRoute(params: {
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: ReadonlyArray<{ name: string; address: string; active: boolean }>;
+  walletImportMethod: WalletImportMethod | null;
 }): TransferRouteValidation {
   const tokenInput = resolveTokenInputForRoute(params);
   if (!tokenInput.ok) return tokenInput;
@@ -362,6 +372,7 @@ function resolveTokenInputForRoute(params: {
   canUseNetwork: boolean;
   balance: WalletBalanceResponse | null | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
+  walletImportMethod: WalletImportMethod | null;
 }): { ok: true; token: string } | { ok: false; message: string } {
   if (params.route === 'umbra') {
     const blocker = getUmbraRouteBlocker(params);
@@ -376,10 +387,13 @@ function getUmbraRouteBlocker(params: {
   walletMode: 'online' | 'offline';
   canUseNetwork: boolean;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
+  walletImportMethod: WalletImportMethod | null;
 }): string | null {
   if (!isUmbraNetworkSupported(params.action.network)) {
     return 'Umbra is not available on this network.';
   }
+  const localSigningBlocker = getLocalSigningWalletBlocker(params.walletImportMethod, 'Umbra');
+  if (localSigningBlocker != null) return localSigningBlocker;
   if (params.walletMode !== 'online' || !params.canUseNetwork) {
     return 'Umbra route needs online mode.';
   }
@@ -400,16 +414,22 @@ interface RunSubmitterParams {
   action: AgenticPrivateSendAction;
   draft: SubmittableDraft;
   walletId: string | null;
+  walletImportMethod: WalletImportMethod | null;
 }
 
 async function runSubmitter({
   action,
   draft,
   walletId,
+  walletImportMethod,
 }: RunSubmitterParams): Promise<SubmitResult> {
   if (action.route === 'normal') {
     if (walletId == null) {
       throw new Error('Unlock wallet and try again.');
+    }
+    const localSigningBlocker = getLocalSigningWalletBlocker(walletImportMethod, 'Normal send');
+    if (localSigningBlocker != null) {
+      throw new Error(localSigningBlocker);
     }
     const { submitNormalTokenTransfer } = await import('@/lib/payments/normal-token-transfer');
     const normalResult = await submitNormalTokenTransfer({
@@ -433,6 +453,10 @@ async function runSubmitter({
     if (walletId == null) {
       throw new Error('Unlock wallet and try again.');
     }
+    const localSigningBlocker = getLocalSigningWalletBlocker(walletImportMethod, 'Umbra');
+    if (localSigningBlocker != null) {
+      throw new Error(localSigningBlocker);
+    }
     const { sendUmbraPrivateP2PFromPublicBalance } = await import('@/lib/umbra/umbra-execution');
     const umbraResult = await sendUmbraPrivateP2PFromPublicBalance({
       walletAddress: draft.walletAddress,
@@ -452,6 +476,10 @@ async function runSubmitter({
   }
 
   const { submitPrivatePayment } = await import('@/lib/magicblock/private-payment');
+  const localSigningBlocker = getLocalSigningWalletBlocker(walletImportMethod, 'MagicBlock');
+  if (localSigningBlocker != null) {
+    throw new Error(localSigningBlocker);
+  }
   const privateResult = await submitPrivatePayment({
     walletAddress: draft.walletAddress,
     walletId,

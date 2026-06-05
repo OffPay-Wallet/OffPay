@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
+import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import { fetchUmbraEncryptedBalances } from '@/lib/umbra/umbra-execution';
 import {
   getOffpayFeatureCapability,
@@ -28,6 +29,7 @@ export function useUmbraEncryptedBalances(
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
+  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
   const { capabilities, isCapabilitiesPending } = useOffpayCapabilities({
     enabled: enabledByCaller,
   });
@@ -40,6 +42,7 @@ export function useUmbraEncryptedBalances(
     network != null &&
     enabledByCaller &&
     canUseNetwork &&
+    hasLocalSigningMaterial &&
     isUmbraNetworkSupported(network) &&
     tokenSymbols.length > 0 &&
     capabilityAvailable;
@@ -83,7 +86,7 @@ export function useUmbraEncryptedBalances(
     },
     retry: false,
     meta: {
-      capabilityMessage: capability.message,
+      capabilityMessage: localSigningBlocker ?? capability.message,
     },
   });
 
@@ -92,7 +95,10 @@ export function useUmbraEncryptedBalances(
     walletAddress,
     network,
     capability,
-    isCapabilitiesPending: enabledByCaller && canUseNetwork && isCapabilitiesPending,
+    isCapabilitiesPending:
+      enabledByCaller && canUseNetwork && hasLocalSigningMaterial && isCapabilitiesPending,
     isCapabilityEnabled: capabilityAvailable || enabled,
+    hasLocalSigningMaterial,
+    localSigningBlocker,
   };
 }

@@ -22,9 +22,11 @@ import {
   resolveInterruptedRunStatus,
 } from '@/lib/payroll/payroll-run-status';
 import { usePayrollStore } from '@/store/payrollStore';
+import { useWalletStore } from '@/store/walletStore';
 
 import type { OffpayNetwork } from '@/types/offpay-api';
 import type { PayrollRun } from '@/lib/payroll/payroll-types';
+import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 
 export interface UsePayrollRunParams {
   runId: string | null;
@@ -44,9 +46,22 @@ function nextRunStatus(rows: ReturnType<typeof usePayrollStore.getState>['rowsBy
   return resolveCompletedRunStatus(rows);
 }
 
+function resolveWalletImportMethodForRun(params: {
+  walletAddress: string;
+  walletId: string | null;
+}): WalletImportMethod | null {
+  const wallets = useWalletStore.getState().wallets;
+  if (params.walletId != null) {
+    const byId = wallets.find((wallet) => wallet.id === params.walletId);
+    if (byId != null) return byId.importMethod;
+  }
+
+  return wallets.find((wallet) => wallet.publicKey === params.walletAddress)?.importMethod ?? null;
+}
+
 export function usePayrollRun(params: UsePayrollRunParams): UsePayrollRunResult {
   const { runId, walletId } = params;
-  const run = usePayrollStore((state) => (runId != null ? state.runs[runId] ?? null : null));
+  const run = usePayrollStore((state) => (runId != null ? (state.runs[runId] ?? null) : null));
   const setRunStatus = usePayrollStore((state) => state.setRunStatus);
   const setRunCursor = usePayrollStore((state) => state.setRunCursor);
   const updateRow = usePayrollStore((state) => state.updateRow);
@@ -86,6 +101,10 @@ export function usePayrollRun(params: UsePayrollRunParams): UsePayrollRunResult 
         walletId: current.walletId ?? walletId,
         network: current.network as OffpayNetwork,
         tokenSymbol: current.tokenSymbol ?? '',
+        walletImportMethod: resolveWalletImportMethodForRun({
+          walletAddress: current.walletAddress,
+          walletId: current.walletId ?? walletId,
+        }),
       });
 
       try {

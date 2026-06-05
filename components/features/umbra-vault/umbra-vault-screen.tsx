@@ -26,6 +26,7 @@ import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
+import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import { useFirstPaintReady } from '@/hooks/useFirstPaintReady';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { useUmbraEncryptedBalances } from '@/hooks/useUmbraEncryptedBalances';
@@ -143,6 +144,7 @@ function getVaultDisabledMessage(params: {
   walletAddress: string | null;
   network: string | null;
   canUseNetwork: boolean;
+  localSigningBlocker: string | null;
   capabilityAvailable: boolean;
   capabilityMessage: string;
   umbraNetworkSupported: boolean;
@@ -155,6 +157,9 @@ function getVaultDisabledMessage(params: {
   }
   if (!params.canUseNetwork) {
     return 'Go online to use Umbra vault actions.';
+  }
+  if (params.localSigningBlocker != null) {
+    return params.localSigningBlocker;
   }
   if (!params.capabilityAvailable) {
     return params.capabilityMessage;
@@ -407,6 +412,7 @@ function UmbraVaultContentBody({
   const { network } = useOffpayNetwork();
   const capabilitiesQuery = useOffpayCapabilities();
   const walletBalanceQuery = useOffpayWalletBalance();
+  const { localSigningBlocker } = useActiveWalletSigningCapability();
   const umbraExecutionCapability = getOffpayFeatureCapability(
     capabilitiesQuery.capabilities,
     'umbra.execution',
@@ -434,6 +440,7 @@ function UmbraVaultContentBody({
     walletAddress,
     network,
     canUseNetwork,
+    localSigningBlocker,
     capabilityAvailable: umbraExecutionCapability.available,
     capabilityMessage: umbraExecutionCapability.message,
     umbraNetworkSupported: network != null && isUmbraNetworkSupported(network),

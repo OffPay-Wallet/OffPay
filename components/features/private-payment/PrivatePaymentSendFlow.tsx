@@ -49,6 +49,7 @@ import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { useOffpayPortfolioValuation } from '@/hooks/useOffpayPortfolioValuation';
+import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import { useUmbraVaultFeeAccountReadiness } from '@/hooks/useUmbraVaultFeeAccountReadiness';
 import {
   offlinePaymentSlotsQueryKey,
@@ -292,6 +293,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const { network, unsupportedReason } = useOffpayNetwork();
   const { effectiveWalletMode, canUseNetwork } = useWalletModeState();
   const { isNetworkSwitching } = useOffpayNetworkAccess();
+  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: false,
@@ -442,6 +444,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const selectedTokenSupportsUmbraPrivateP2P =
     network != null && selectedToken != null && isUmbraPrivateP2PToken(network, selectedToken);
   const canUseUmbraPrivateP2PBase =
+    hasLocalSigningMaterial &&
     canUseUmbraNativeProver &&
     isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p') &&
     isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
@@ -468,15 +471,17 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       : null;
   const canUseUmbraPrivateP2P =
     canUseUmbraPrivateP2PBase && umbraVaultReadinessQuery.readiness?.available === true;
-  const umbraPrivateP2pDisabledReason = !canUseUmbraNativeProver
-    ? RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE
-    : !umbraPrivateP2pCapability.available
-      ? umbraPrivateP2pCapability.message
-      : !umbraExecutionCapability.available
-        ? umbraExecutionCapability.message
-        : !rpcBroadcastCapability.available
-          ? rpcBroadcastCapability.message
-          : umbraVaultDisabledReason;
+  const umbraPrivateP2pDisabledReason = localSigningBlocker
+    ? localSigningBlocker
+    : !canUseUmbraNativeProver
+      ? RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE
+      : !umbraPrivateP2pCapability.available
+        ? umbraPrivateP2pCapability.message
+        : !umbraExecutionCapability.available
+          ? umbraExecutionCapability.message
+          : !rpcBroadcastCapability.available
+            ? rpcBroadcastCapability.message
+            : umbraVaultDisabledReason;
   const offlineReadySlots = offlinePaymentSlots.snapshot?.counts.ready ?? 0;
 
   const amountRaw = useMemo(

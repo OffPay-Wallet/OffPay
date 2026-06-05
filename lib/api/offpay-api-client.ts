@@ -23,8 +23,10 @@ import {
   deriveSigningSeedFromMnemonic,
 } from '@/lib/wallet/wallet';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
+import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
 import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 
+import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type {
   BackendErrorCode,
   BackendErrorEnvelope,
@@ -215,6 +217,12 @@ interface SigningSession {
   signingSeed: Uint8Array;
 }
 
+interface SigningWalletInfo {
+  id: string;
+  publicKey: string;
+  importMethod: WalletImportMethod;
+}
+
 let signingSession: SigningSession | null = null;
 let signingSessionPromise: Promise<SigningSession> | null = null;
 let signingSessionEpoch = 0;
@@ -397,7 +405,7 @@ function withTimeout(
   };
 }
 
-async function offpayPublicRequest<T>(options: PublicRequestOptions): Promise<T> {
+export async function offpayPublicRequest<T>(options: PublicRequestOptions): Promise<T> {
   assertOffpayNetworkAccessAllowed();
 
   const method = options.method ?? 'GET';
@@ -466,10 +474,19 @@ async function recoverOffpayAuth(
 async function deriveSigningSeedWithAuth(params: {
   walletId: string;
   walletAddress: string;
+  importMethod: WalletImportMethod;
 }): Promise<Uint8Array> {
   const signingSeed = await getOrDeriveSigningSeed({
     walletAddress: params.walletAddress,
     derive: async () => {
+      const localSigningBlocker = getLocalSigningWalletBlocker(
+        params.importMethod,
+        'Authenticated OffPay requests',
+      );
+      if (localSigningBlocker != null) {
+        throw new Error(localSigningBlocker);
+      }
+
       const signingMaterial = await getStoredWalletSigningMaterialWithAuth(params.walletId);
       const mnemonic = signingMaterial?.mnemonic ?? null;
       const privateKey = signingMaterial?.privateKey ?? null;
@@ -509,7 +526,7 @@ async function deriveSigningSeedWithAuth(params: {
 
 function isSigningSessionForWallet(
   session: SigningSession | null,
-  walletInfo: { id: string; publicKey: string },
+  walletInfo: Pick<SigningWalletInfo, 'id' | 'publicKey'>,
 ): session is SigningSession {
   return (
     session != null &&
@@ -518,16 +535,14 @@ function isSigningSessionForWallet(
   );
 }
 
-function createSigningSession(walletInfo: {
-  id: string;
-  publicKey: string;
-}): Promise<SigningSession> {
+function createSigningSession(walletInfo: SigningWalletInfo): Promise<SigningSession> {
   const sessionEpoch = signingSessionEpoch;
 
   const promise = (async () => {
     const signingSeed = await deriveSigningSeedWithAuth({
       walletId: walletInfo.id,
       walletAddress: walletInfo.publicKey,
+      importMethod: walletInfo.importMethod,
     });
 
     if (sessionEpoch !== signingSessionEpoch) {
@@ -553,7 +568,7 @@ function createSigningSession(walletInfo: {
   return promise;
 }
 
-async function getSigningSeed(walletInfo: { id: string; publicKey: string }): Promise<Uint8Array> {
+async function getSigningSeed(walletInfo: SigningWalletInfo): Promise<Uint8Array> {
   if (isSigningSessionForWallet(signingSession, walletInfo)) {
     return Uint8Array.from(signingSession.signingSeed);
   }
@@ -806,25 +821,34 @@ export function getCapabilities(
   });
 }
 
-export function getWalletBalance(
+export async function buildOffpayPublicReadHeaders(): Promise<Record<string, string>> {
+  const deviceId = await getOrCreateOffpayDeviceId();
+
+  return {
+    'X-App-Version': OFFPAY_APP_VERSION,
+    'X-Device-Id': deviceId,
+  };
+}
+
+export async function getWalletBalance(
   walletAddress: string,
   network: OffpayNetwork,
   options?: { useCache?: boolean; signal?: AbortSignal },
 ): Promise<WalletBalanceResponse> {
-  return offpayApiRequest<WalletBalanceResponse>({
+  return offpayPublicRequest<WalletBalanceResponse>({
     path: '/api/wallet/balance',
     query: { address: walletAddress, network, useCache: options?.useCache },
-    network,
     signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
   });
 }
 
-export function getWalletTransactions(
+export async function getWalletTransactions(
   walletAddress: string,
   network: OffpayNetwork,
   options?: { cursor?: string; limit?: number; signal?: AbortSignal },
 ): Promise<WalletTransactionsResponse> {
-  return offpayApiRequest<WalletTransactionsResponse>({
+  return offpayPublicRequest<WalletTransactionsResponse>({
     path: '/api/wallet/transactions',
     query: {
       address: walletAddress,
@@ -832,8 +856,8 @@ export function getWalletTransactions(
       cursor: options?.cursor,
       limit: options?.limit,
     },
-    network,
     signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
   });
 }
 
@@ -918,28 +942,28 @@ export function deletePendingBackup(
   );
 }
 
-export function getSwapTokens(
+export async function getSwapTokens(
   network: OffpayNetwork,
   options?: { signal?: AbortSignal },
 ): Promise<SwapTokensResponse> {
-  return offpayApiRequest<SwapTokensResponse>({
+  return offpayPublicRequest<SwapTokensResponse>({
     path: '/api/swap/tokens',
     query: { network },
-    network,
     signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
   });
 }
 
-export function getSwapPrice(
+export async function getSwapPrice(
   mint: string,
   network: OffpayNetwork,
   options?: { signal?: AbortSignal },
 ): Promise<SwapPriceResponse> {
-  return offpayApiRequest<SwapPriceResponse>({
+  return offpayPublicRequest<SwapPriceResponse>({
     path: '/api/swap/price',
     query: { mint, network },
-    network,
     signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
   });
 }
 

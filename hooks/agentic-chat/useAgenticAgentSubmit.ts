@@ -16,6 +16,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { toOffpayNetwork } from '@/constants/networks';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import { walletHasLocalSigningMaterial } from '@/lib/wallet/wallet-capabilities';
 import {
   isAgenticPaymentsProxyConfigured,
   sendAgentTurn,
@@ -41,6 +42,7 @@ import {
   type AgenticChatAction,
 } from '@/store/agenticChatStore';
 import type { WalletAccount } from '@/store/walletStore';
+import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import { useWalletStore } from '@/store/walletStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
@@ -66,6 +68,7 @@ interface UseAgenticAgentSubmitParams {
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
   walletId?: string | null;
+  walletImportMethod?: WalletImportMethod | null;
   /** Fired when the model asks to open payroll intake (upload/paste). */
   onPayrollIntent?: (source: 'upload' | 'paste') => void;
 }
@@ -86,6 +89,7 @@ export function useAgenticAgentSubmit({
   capabilities,
   knownWallets,
   walletId,
+  walletImportMethod,
   onPayrollIntent,
 }: UseAgenticAgentSubmitParams): UseAgenticAgentSubmitResult {
   const [busy, setBusy] = useState(false);
@@ -202,6 +206,7 @@ export function useAgenticAgentSubmit({
         knownWallets,
         queryClient,
         walletId,
+        walletImportMethod,
         onPayrollIntent,
       })
         .catch((error: unknown) => {
@@ -234,6 +239,7 @@ export function useAgenticAgentSubmit({
       scopeKey,
       scopedMessages,
       walletId,
+      walletImportMethod,
       walletMode,
     ],
   );
@@ -257,6 +263,7 @@ interface RunAgentLoopParams {
   knownWallets: readonly AgenticKnownWallet[];
   queryClient: ReturnType<typeof useQueryClient>;
   walletId?: string | null;
+  walletImportMethod?: WalletImportMethod | null;
   onPayrollIntent?: (source: 'upload' | 'paste') => void;
 }
 
@@ -270,6 +277,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     params.capabilities ?? null,
     'umbra.execution',
   );
+  const activeWalletCanUseUmbra = walletHasLocalSigningMaterial(params.walletImportMethod);
 
   for (let turnIndex = 0; turnIndex < MAX_TOOL_TURNS; turnIndex += 1) {
     const turn = await sendAgentTurn(
@@ -292,10 +300,11 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.rpcBroadcast'),
             swap: isOffpayFeatureAvailable(params.capabilities ?? null, 'swap.normalSwap'),
             umbra:
+              activeWalletCanUseUmbra &&
               canReadUmbraVaultBalance &&
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p'),
-            umbraVaultBalance: canReadUmbraVaultBalance,
-            privateBalance: canReadUmbraVaultBalance,
+            umbraVaultBalance: activeWalletCanUseUmbra && canReadUmbraVaultBalance,
+            privateBalance: activeWalletCanUseUmbra && canReadUmbraVaultBalance,
             magicblockPrivateBalance: isOffpayFeatureAvailable(
               params.capabilities ?? null,
               'payment.privateBalance',
@@ -340,6 +349,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       queryClient: params.queryClient,
       signal: params.controller.signal,
       walletId: params.walletId,
+      walletImportMethod: params.walletImportMethod ?? null,
     };
     const run = await runAgenticTools(turn.toolCalls, toolContext);
 

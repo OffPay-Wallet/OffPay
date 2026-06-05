@@ -218,6 +218,11 @@ jest.mock('react-native-mmkv', () => ({
 
 jest.mock('@/lib/wallet/secure-wallet-store', () => ({
   __esModule: true,
+  getStoredWalletInfo: jest.fn(async () => ({
+    id: 'wallet-1',
+    publicKey: 'Gk5aN5YdJrc56xG7yA2WzjU2xofBZJq9UY62sG2rR3Fz',
+    importMethod: 'generated',
+  })),
   getStoredWalletSigningMaterialWithAuth: jest.fn(async () => ({
     mnemonic: null,
     privateKey: 'mock-seed',

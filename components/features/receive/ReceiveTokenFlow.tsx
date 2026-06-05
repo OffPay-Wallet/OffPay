@@ -30,6 +30,7 @@ import { fontFamily } from '@/constants/typography';
 import { useOfflineBleReceiver } from '@/hooks/useOfflineBleReceiver';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
+import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { useUmbraVaultRegistrationStatus } from '@/hooks/useUmbraVaultRegistrationStatus';
@@ -182,6 +183,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const username = useAppStore((state) => state.username);
   const { network, unsupportedReason } = useOffpayNetwork();
   const getScreenSignal = useScreenAbortSignal();
+  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const { mixerRegisterMutation } = useUmbraExecution();
   const offlineReceipts = useOfflinePaymentStore((state) => state.receipts);
@@ -275,18 +277,22 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const umbraExecutionCapability = getOffpayFeatureCapability(capabilities, 'umbra.execution');
   const canUseUmbraReceiveRoute =
     canShowUmbraReceiveRoute &&
+    hasLocalSigningMaterial &&
     canUseUmbraNativeProver &&
     isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p') &&
     isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
     isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast');
-  const umbraReceiveDisabledReason = !canUseUmbraNativeProver
-    ? RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE
-    : !umbraPrivateP2pCapability.available
-      ? umbraPrivateP2pCapability.message
-      : !umbraExecutionCapability.available
-        ? umbraExecutionCapability.message
-        : null;
-  const canScanUmbraClaims = canShowUmbraReceiveRoute && canUseUmbraReceiveRoute;
+  const umbraReceiveDisabledReason = localSigningBlocker
+    ? localSigningBlocker
+    : !canUseUmbraNativeProver
+      ? RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE
+      : !umbraPrivateP2pCapability.available
+        ? umbraPrivateP2pCapability.message
+        : !umbraExecutionCapability.available
+          ? umbraExecutionCapability.message
+          : null;
+  const canScanUmbraClaims =
+    canShowUmbraReceiveRoute && hasLocalSigningMaterial && canUseUmbraReceiveRoute;
   const canUseUmbraClaim = canScanUmbraClaims;
   const umbraVaultRegistrationStatus = umbraVaultRegistrationQuery.data ?? null;
   const onChainMixerRegistered = umbraVaultRegistrationStatus?.mixerRegistered === true;

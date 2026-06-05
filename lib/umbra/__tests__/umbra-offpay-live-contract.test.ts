@@ -61,6 +61,7 @@ jest.mock('@/lib/wallet/secure-wallet-store', () => ({
   getStoredWalletInfo: jest.fn(async () => ({
     id: 'offpay-live-wallet',
     publicKey: mockLiveEnv.walletAddress,
+    importMethod: 'generated',
   })),
   getStoredWalletSigningMaterialWithAuth: jest.fn(async () => ({
     mnemonic: null,

@@ -5,7 +5,11 @@ import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { runCryptoTask } from '@/lib/crypto/crypto-scheduler';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
-import { getStoredWalletSigningMaterialWithAuth } from '@/lib/wallet/secure-wallet-store';
+import {
+  getStoredWalletInfo,
+  getStoredWalletSigningMaterialWithAuth,
+} from '@/lib/wallet/secure-wallet-store';
+import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
 import {
   decodeSigningSeedFromPrivateKey,
   deriveSigningSeedFromMnemonic,
@@ -42,9 +46,10 @@ export async function deriveSigningSeedForUmbra(
   const signingSeed = await getOrDeriveSigningSeed({
     walletAddress,
     derive: async () => {
-      const signingMaterial = await getStoredWalletSigningMaterialWithAuth(
-        walletId ?? undefined,
-      );
+      const walletInfo = await getStoredWalletInfo(walletId ?? undefined);
+      const localSigningBlocker =
+        walletInfo == null ? null : getLocalSigningWalletBlocker(walletInfo.importMethod, 'Umbra');
+      const signingMaterial = await getStoredWalletSigningMaterialWithAuth(walletId ?? undefined);
       const seed =
         signingMaterial?.mnemonic != null
           ? await deriveSigningSeedFromMnemonic(signingMaterial.mnemonic)
@@ -53,7 +58,8 @@ export async function deriveSigningSeedForUmbra(
             : null;
 
       if (seed == null) {
-        throw new Error('Unlock your wallet to run Umbra private payments.');
+        if (localSigningBlocker != null) throw new Error(localSigningBlocker);
+        throw new Error('No signing material is available for this wallet.');
       }
 
       // Verify before caching to keep a corrupt/mismatched private

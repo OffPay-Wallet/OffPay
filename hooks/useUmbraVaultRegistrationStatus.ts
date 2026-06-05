@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
+import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
@@ -30,6 +31,7 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
+  const { hasLocalSigningMaterial, localSigningBlocker } = useActiveWalletSigningCapability();
   const { capabilities, isCapabilitiesPending } = useOffpayCapabilities({
     enabled: enabledByCaller,
   });
@@ -41,6 +43,7 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
     network != null &&
     enabledByCaller &&
     canUseNetwork &&
+    hasLocalSigningMaterial &&
     isUmbraNetworkSupported(network) &&
     capabilityAvailable;
 
@@ -77,7 +80,7 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
     },
     retry: false,
     meta: {
-      capabilityMessage: capability.message,
+      capabilityMessage: localSigningBlocker ?? capability.message,
     },
   });
 
@@ -86,7 +89,10 @@ export function useUmbraVaultRegistrationStatus(options: { enabled?: boolean } =
     walletAddress,
     network,
     capability,
-    isCapabilitiesPending: enabledByCaller && canUseNetwork && isCapabilitiesPending,
+    isCapabilitiesPending:
+      enabledByCaller && canUseNetwork && hasLocalSigningMaterial && isCapabilitiesPending,
     isCapabilityEnabled: capabilityAvailable || enabled,
+    hasLocalSigningMaterial,
+    localSigningBlocker,
   };
 }

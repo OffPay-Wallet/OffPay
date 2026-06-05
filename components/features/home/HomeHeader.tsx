@@ -2,8 +2,16 @@
  * HomeHeader — wallet identity, connectivity toggle, and notifications.
  */
 import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  InteractionManager,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { Image } from 'expo-image';
+import { useQueryClient } from '@tanstack/react-query';
 import Animated, {
   Easing,
   interpolate,
@@ -13,11 +21,19 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
+import { useAppToast } from '@/components/ui/AppToast';
 import { PuffyBellIcon } from '@/components/ui/icons/PuffyBellIcon';
+import { PuffyFaucetGiftIcon } from '@/components/ui/icons/PuffyFaucetGiftIcon';
 import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
+import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
+import {
+  offpayWalletBalanceQueryKey,
+  offpayWalletTransactionsBaseQueryKey,
+} from '@/lib/api/offpay-wallet-query-keys';
+import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import {
@@ -105,6 +121,9 @@ function HomeHeaderComponent({
   loading = false,
 }: HomeHeaderProps = {}): React.JSX.Element {
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
+  const queryClient = useQueryClient();
+  const { showToast } = useAppToast();
+  const { network } = useOffpayNetwork();
   // Internal state (uncontrolled) — falls back when no props provided
   const [internalOffline, setInternalOffline] = useState(false);
   const isOffline = controlledOffline ?? internalOffline;
@@ -116,6 +135,7 @@ function HomeHeaderComponent({
   const unreadNotifications = useNotificationStore((s) => s.unreadCount);
   const markAllNotificationsRead = useNotificationStore((s) => s.markAllRead);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [faucetBusy, setFaucetBusy] = useState(false);
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Animation values
@@ -144,8 +164,13 @@ function HomeHeaderComponent({
       : spacing['2xl'];
   const headerFrameWidth = Math.min(430, windowWidth - screenHorizontalPadding * 2);
   const actionGap = denseHeader || ultraCompactHeader ? 2 : spacing.xs;
+  const showDevnetFaucet = network === 'devnet';
+  const showFaucetLabel = showDevnetFaucet && !compactHeader && windowWidth >= 400;
+  const faucetWidth = showFaucetLabel ? (denseHeader ? 58 : 70) : actionButtonSize;
+  const faucetIconSize = denseHeader || ultraCompactHeader ? 18 : 20;
   const actionClusterWidth =
     Math.max(layout.minTouchTarget, toggleWidth) +
+    (showDevnetFaucet ? Math.max(layout.minTouchTarget, faucetWidth) + actionGap : 0) +
     Math.max(layout.minTouchTarget, actionButtonSize) +
     actionGap;
   const walletTextTargetWidth = denseHeader
@@ -199,6 +224,65 @@ function HomeHeaderComponent({
       setInternalOffline(next);
     }
   }, [isOffline, onToggleOffline, toggleProgress]);
+
+  const handleRequestDevnetAirdrop = useCallback(async (): Promise<void> => {
+    if (faucetBusy) return;
+
+    if (network !== 'devnet') {
+      showToast({
+        title: 'Devnet only',
+        message: 'Switch to Devnet to request test SOL.',
+        variant: 'warning',
+        persistToNotificationCenter: false,
+      });
+      return;
+    }
+
+    if (publicKey == null) {
+      showToast({
+        title: 'Wallet unavailable',
+        message: 'Unlock or create a wallet before using the faucet.',
+        variant: 'warning',
+        persistToNotificationCenter: false,
+      });
+      return;
+    }
+
+    setFaucetBusy(true);
+    showToast({
+      title: 'Airdrop requested',
+      message: 'Requesting 1 Devnet SOL.',
+      variant: 'info',
+      persistToNotificationCenter: false,
+    });
+
+    try {
+      const result = await requestDevnetSolAirdrop(publicKey);
+
+      showToast({
+        title: 'Devnet SOL added',
+        message: `${result.sol} SOL sent to your wallet.`,
+        variant: 'success',
+        persistToNotificationCenter: false,
+      });
+
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletBalanceQueryKey(publicKey, 'devnet'),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletTransactionsBaseQueryKey(publicKey, 'devnet'),
+      });
+    } catch (error) {
+      showToast({
+        title: 'Faucet unavailable',
+        message: getDevnetAirdropErrorMessage(error),
+        variant: 'error',
+        persistToNotificationCenter: false,
+      });
+    } finally {
+      setFaucetBusy(false);
+    }
+  }, [faucetBusy, network, publicKey, queryClient, showToast]);
 
   const handlePrefetchNotifications = useCallback((): void => {
     prefetchNotificationModal();
@@ -301,6 +385,9 @@ function HomeHeaderComponent({
               <SkeletonBlock width={toggleWidth} height={toggleHeight} radius={toggleHeight / 2} />
             </View>
           </View>
+          {showDevnetFaucet ? (
+            <SkeletonBlock width={faucetWidth} height={actionButtonSize} radius={radii.full} />
+          ) : null}
           <SkeletonBlock width={actionButtonSize} height={actionButtonSize} radius={radii.full} />
         </View>
       </View>
@@ -425,6 +512,55 @@ function HomeHeaderComponent({
               </Animated.View>
             </Pressable>
           </View>
+
+          {showDevnetFaucet ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.faucetTouch,
+                {
+                  width: Math.max(layout.minTouchTarget, faucetWidth),
+                  height: Math.max(layout.minTouchTarget, actionButtonSize),
+                },
+                pressed && !faucetBusy ? styles.actionControlPressed : null,
+                faucetBusy || publicKey == null ? styles.faucetDisabled : null,
+              ]}
+              onPress={handleRequestDevnetAirdrop}
+              disabled={faucetBusy || publicKey == null}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Airdrop 1 Devnet SOL"
+              accessibilityState={{ busy: faucetBusy, disabled: faucetBusy || publicKey == null }}
+            >
+              <View
+                style={[
+                  styles.faucetGlass,
+                  {
+                    width: faucetWidth,
+                    height: actionButtonSize,
+                    borderRadius: actionButtonSize / 2,
+                  },
+                ]}
+              >
+                <View pointerEvents="none" style={styles.faucetGloss} />
+                {faucetBusy ? (
+                  <ActivityIndicator size="small" color={colors.text.primary} />
+                ) : (
+                  <PuffyFaucetGiftIcon size={faucetIconSize} color={colors.text.primary} />
+                )}
+                {showFaucetLabel ? (
+                  <Text
+                    variant="small"
+                    color={colors.text.primary}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                    style={styles.faucetLabel}
+                  >
+                    SOL
+                  </Text>
+                ) : null}
+              </View>
+            </Pressable>
+          ) : null}
 
           <Pressable
             style={({ pressed }) => [
@@ -606,6 +742,48 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  faucetTouch: {
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  faucetGlass: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: colors.surface.cardElevated,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    overflow: 'hidden',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
+      'inset 0 0 10px rgba(255, 255, 255, 0.05)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.32)',
+      '0 6px 14px rgba(0, 0, 0, 0.32)',
+    ].join(', '),
+  },
+  faucetGloss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '46%',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  faucetLabel: {
+    fontFamily: fontFamily.uiBold,
+    fontSize: 11,
+    lineHeight: 13,
+    includeFontPadding: false,
+  },
+  faucetDisabled: {
+    opacity: 0.58,
   },
   notificationGlass: {
     borderRadius: radii.full,

@@ -8,6 +8,7 @@ import type {
   AgenticPrivateSendAction,
   AgenticSwapAction,
 } from '@/store/agenticChatStore';
+import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
 
 export type AgenticToolName =
@@ -46,6 +47,7 @@ export interface AgenticToolRunnerContext {
   queryClient?: QueryClient;
   signal?: AbortSignal;
   walletId?: string | null;
+  walletImportMethod?: WalletImportMethod | null;
 }
 
 export type AgenticToolDraft =

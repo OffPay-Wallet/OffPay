@@ -1,13 +1,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { getAuthenticatedContext } from '../lib/auth.js';
 import {
   fetchAlchemyHistoricalTokenUsdPrices,
   fetchAlchemyTokenUsdPrice,
 } from '../lib/alchemy-prices.js';
-import { AppError } from '../lib/errors.js';
 import { fetchUsdToCurrencyRate } from '../lib/fx-rates.js';
-import type { AppEnv, Network } from '../lib/types.js';
+import type { AppEnv } from '../lib/types.js';
 import { networkSchema, readJsonBody, readSearchParams } from '../lib/validation.js';
 
 const priceIdentifierSchema = z.union([
@@ -40,16 +38,6 @@ const fxRateQuerySchema = z.object({
   currency: z.string().trim().min(3).max(3),
 });
 
-function assertRequestedNetwork(requestedNetwork: Network, authenticatedNetwork: Network): void {
-  if (requestedNetwork !== authenticatedNetwork) {
-    throw new AppError({
-      status: 400,
-      code: 'INVALID_NETWORK',
-      message: 'Requested network must match the authenticated network.',
-    });
-  }
-}
-
 const marketRoutes = new Hono<AppEnv>();
 
 marketRoutes.get('/fx-rate', async (context) => {
@@ -60,15 +48,12 @@ marketRoutes.get('/fx-rate', async (context) => {
 });
 
 marketRoutes.post('/token-price', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const body = await readJsonBody(
     context.req.raw,
     tokenPriceBodySchema,
     'Request body is required.',
     'Malformed token-price request body.',
   );
-
-  assertRequestedNetwork(body.network, authenticatedContext.network);
 
   const response = context.json({
     price: await fetchAlchemyTokenUsdPrice(context.env, body.identifier),
@@ -78,15 +63,12 @@ marketRoutes.post('/token-price', async (context) => {
 });
 
 marketRoutes.post('/token-price-history', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const body = await readJsonBody(
     context.req.raw,
     historicalTokenPriceBodySchema,
     'Request body is required.',
     'Malformed token-price-history request body.',
   );
-
-  assertRequestedNetwork(body.network, authenticatedContext.network);
 
   const response = context.json({
     prices: await fetchAlchemyHistoricalTokenUsdPrices(context.env, body.identifier, {

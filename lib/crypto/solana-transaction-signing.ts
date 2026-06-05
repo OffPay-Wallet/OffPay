@@ -3,12 +3,19 @@ import { Buffer } from 'buffer';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
 
-import { getStoredWalletSigningMaterialWithAuth } from '@/lib/wallet/secure-wallet-store';
-import { decodeSigningSeedFromPrivateKey, deriveSigningSeedFromMnemonic } from '@/lib/wallet/wallet';
+import {
+  getStoredWalletInfo,
+  getStoredWalletSigningMaterialWithAuth,
+} from '@/lib/wallet/secure-wallet-store';
+import {
+  decodeSigningSeedFromPrivateKey,
+  deriveSigningSeedFromMnemonic,
+} from '@/lib/wallet/wallet';
 import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
 
 interface SignSerializedTransactionParams {
   unsignedTransaction: string;
@@ -162,8 +169,12 @@ async function getSigningSeedForWallet(
   const signingSeed = await getOrDeriveSigningSeed({
     walletAddress,
     derive: async () => {
+      const walletInfo = await getStoredWalletInfo(walletId ?? undefined);
+      const localSigningBlocker =
+        walletInfo == null ? null : getLocalSigningWalletBlocker(walletInfo.importMethod);
       const material = await getStoredWalletSigningMaterialWithAuth(walletId ?? undefined);
       if (material == null) {
+        if (localSigningBlocker != null) throw new Error(localSigningBlocker);
         throw new Error('Unlock your wallet to sign this swap.');
       }
 
@@ -175,6 +186,7 @@ async function getSigningSeedForWallet(
             : null;
 
       if (seed == null) {
+        if (localSigningBlocker != null) throw new Error(localSigningBlocker);
         throw new Error('No signing material is available for this wallet.');
       }
 

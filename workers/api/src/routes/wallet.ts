@@ -1,14 +1,9 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { getAuthenticatedContext } from '../lib/auth.js';
 import { AppError } from '../lib/errors.js';
 import { getWalletBalance, getWalletTransactions } from '../lib/helius.js';
-import type { AppEnv, Network } from '../lib/types.js';
-import {
-  isValidSolanaAddress,
-  networkSchema,
-  readSearchParams,
-} from '../lib/validation.js';
+import type { AppEnv } from '../lib/types.js';
+import { isValidSolanaAddress, networkSchema, readSearchParams } from '../lib/validation.js';
 
 const booleanQuerySchema = z
   .enum(['true', 'false', '1', '0'])
@@ -38,24 +33,12 @@ function assertWalletAddress(value: string, message: string): void {
   }
 }
 
-function assertRequestedNetwork(requestedNetwork: Network, authenticatedNetwork: Network): void {
-  if (requestedNetwork !== authenticatedNetwork) {
-    throw new AppError({
-      status: 400,
-      code: 'INVALID_NETWORK',
-      message: 'Requested network must match the authenticated network.',
-    });
-  }
-}
-
 const walletRoutes = new Hono<AppEnv>();
 
 walletRoutes.get('/balance', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const query = readSearchParams(context.req.url, walletBalanceQuerySchema);
 
   assertWalletAddress(query.address, 'Wallet address is invalid.');
-  assertRequestedNetwork(query.network, authenticatedContext.network);
 
   const response = context.json(
     await getWalletBalance(context.env, {
@@ -69,11 +52,9 @@ walletRoutes.get('/balance', async (context) => {
 });
 
 walletRoutes.get('/transactions', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const query = readSearchParams(context.req.url, walletTransactionsQuerySchema);
 
   assertWalletAddress(query.address, 'Wallet address is invalid.');
-  assertRequestedNetwork(query.network, authenticatedContext.network);
 
   const response = context.json(
     await getWalletTransactions(context.env, {

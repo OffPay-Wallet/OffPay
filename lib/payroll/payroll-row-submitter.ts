@@ -1,4 +1,7 @@
 import type { PayrollRowSubmitContext, PayrollSubmitOutcome } from '@/lib/payroll/payroll-executor';
+import { getLocalSigningWalletBlocker } from '@/lib/wallet/wallet-capabilities';
+
+import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 export interface PayrollSubmitterContext {
@@ -7,6 +10,8 @@ export interface PayrollSubmitterContext {
   network: OffpayNetwork;
   /** Token symbol for the run (Umbra resolves token by symbol/mint). */
   tokenSymbol: string;
+  /** Import method for the wallet that will sign this run. */
+  walletImportMethod: WalletImportMethod | null;
 }
 
 /**
@@ -22,10 +27,21 @@ export function createPayrollRowSubmitter(
   context: PayrollSubmitterContext,
 ): (submit: PayrollRowSubmitContext) => Promise<PayrollSubmitOutcome> {
   return async ({ row, route }) => {
+    const signingBlocker = getLocalSigningWalletBlocker(context.walletImportMethod, 'Payroll');
+    if (signingBlocker != null) {
+      throw new Error(signingBlocker);
+    }
+
     if (route === 'magicblock') {
       return submitViaMagicBlock(context, row.recipient, row.amountAtomic, row.tokenMint);
     }
-    return submitViaUmbra(context, row.recipient, row.amountDisplay, row.tokenMint, row.tokenSymbol);
+    return submitViaUmbra(
+      context,
+      row.recipient,
+      row.amountDisplay,
+      row.tokenMint,
+      row.tokenSymbol,
+    );
   };
 }
 

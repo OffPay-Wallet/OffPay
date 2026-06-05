@@ -8,6 +8,7 @@ const mockGetOrCreateOffpayDeviceId = jest.fn(async () => 'device-1');
 const mockGetStoredWalletInfo = jest.fn(async () => ({
   id: 'wallet-1',
   publicKey: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+  importMethod: 'generated',
 }));
 const mockGetStoredWalletSigningMaterialWithAuth = jest.fn(async () => ({
   mnemonic: null,
@@ -61,7 +62,9 @@ const {
   OFFPAY_APP_VERSION,
   OffpayApiError,
   clearOffpaySigningSession,
+  getSwapTokens,
   getWalletBalance,
+  getWalletTransactions,
   offpayApiRequest,
   setOffpayNetworkAccessAllowed,
   setOffpayAuthRecoveryHandler,
@@ -161,10 +164,105 @@ describe('offpay-api-client', () => {
         method: 'GET',
       }),
     );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'X-App-Version': OFFPAY_APP_VERSION,
+          'X-Device-Id': 'device-1',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          'X-Signature': expect.any(String),
+        }),
+      }),
+    );
     expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
     expect(fetchMock.mock.calls[0]?.[0]).toEqual(
       expect.stringContaining('address=Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw'),
     );
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
+  });
+
+  it('routes wallet transactions without requiring local signing material', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(
+      buildResponse({
+        address: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+        network: 'mainnet',
+        transactions: [],
+        cursor: null,
+        fetchedAt: 123,
+      }),
+    );
+
+    await expect(
+      getWalletTransactions('Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw', 'mainnet', {
+        limit: 20,
+      }),
+    ).resolves.toMatchObject({
+      address: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+      network: 'mainnet',
+      transactions: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/wallet/transactions?'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'X-App-Version': OFFPAY_APP_VERSION,
+          'X-Device-Id': 'device-1',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          'X-Signature': expect.any(String),
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=mainnet'));
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('limit=20'));
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
+  });
+
+  it('routes read-only swap token metadata without requiring local signing material', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(
+      buildResponse({
+        network: 'devnet',
+        tokens: [],
+      }),
+    );
+
+    await expect(getSwapTokens('devnet')).resolves.toMatchObject({
+      network: 'devnet',
+      tokens: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/swap/tokens?'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'X-App-Version': OFFPAY_APP_VERSION,
+          'X-Device-Id': 'device-1',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          'X-Signature': expect.any(String),
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
   });
 
   it('reprovisions once when bootstrap credentials are missing locally', async () => {
