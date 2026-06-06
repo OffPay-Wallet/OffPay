@@ -100,7 +100,7 @@ export function OnboardingActionPanel({
       >
         <Pressable
           accessibilityLabel="Create a new wallet"
-          accessibilityState={{ busy }}
+          accessibilityState={{ busy, disabled: busy }}
           onPress={onCreateWallet}
           disabled={busy}
           style={({ pressed }) => [
@@ -142,6 +142,7 @@ export function OnboardingActionPanel({
 
         <Pressable
           accessibilityLabel="I already have a wallet"
+          accessibilityState={{ disabled: false }}
           onPress={onImportWallet}
           style={({ pressed }) => [
             styles.actionButton,
@@ -188,7 +189,7 @@ export function OnboardingActionPanel({
           actions, not a tertiary social option. */}
         <Pressable
           accessibilityLabel="Continue with passkey"
-          accessibilityState={{ busy: passkeyBusy }}
+          accessibilityState={{ busy: passkeyBusy, disabled: anyAuthBusy }}
           onPress={onPasskeyPress}
           disabled={anyAuthBusy}
           style={({ pressed }) => [
@@ -241,7 +242,7 @@ export function OnboardingActionPanel({
         <View style={styles.socialRow}>
           <Pressable
             accessibilityLabel="Continue with X"
-            accessibilityState={{ busy: xBusy }}
+            accessibilityState={{ busy: xBusy, disabled: anyAuthBusy }}
             onPress={() => onSocialPress('x')}
             disabled={anyAuthBusy}
             style={({ pressed }) => [
@@ -260,7 +261,7 @@ export function OnboardingActionPanel({
           </Pressable>
           <Pressable
             accessibilityLabel="Continue with Google"
-            accessibilityState={{ busy: googleBusy }}
+            accessibilityState={{ busy: googleBusy, disabled: anyAuthBusy }}
             onPress={() => onSocialPress('google')}
             disabled={anyAuthBusy}
             style={({ pressed }) => [

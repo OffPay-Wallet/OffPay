@@ -114,6 +114,7 @@ export const unstable_settings = {
 
 export default function RootLayout(): React.JSX.Element | null {
   const hasOnboarded = useAppStore((s) => s.hasOnboarded);
+  const inviteAccessVerified = useAppStore((s) => s.inviteAccessVerified);
   const username = useAppStore((s) => s.username);
   const profileImageUri = useAppStore((s) => s.profileImageUri);
   const setHasOnboarded = useAppStore((s) => s.setHasOnboarded);
@@ -151,6 +152,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const [cirkaFontsLoaded, cirkaFontError] = useFonts(cirkaFontMap);
   const appReady = cirkaFontsLoaded || cirkaFontError != null;
   const firstSegment = segments[0];
+  const inInviteCode = firstSegment === 'invite-code';
   const inOnboarding = firstSegment === 'onboarding';
   const inUsernameSetup = firstSegment === 'username-setup';
   const inCreateWallet = firstSegment === 'create-wallet';
@@ -159,19 +161,21 @@ export default function RootLayout(): React.JSX.Element | null {
   const inOAuthCallback = firstSegment === 'oauth';
   const inSecuritySetup = firstSegment === 'security-setup';
   const inWalletFlow = inCreateWallet || inRestoreWallet || inPrivyWallet;
-  const inAuthFlow = inOnboarding || inOAuthCallback;
+  const inAuthFlow = inInviteCode || inOnboarding || inOAuthCallback;
   // The wallet-setup flow (onboarding + security setup + create/
   // restore wallet + privy wallet) paints a flat neutral surface
   // inside `CreateWalletScreenLayout`. We opt those routes out of
   // the screen-wide gradient so the design stays one calm tint
   // across the full flow — no gradients, no shadows, no rims.
-  const inFlatFlow = inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
+  const inFlatFlow = inInviteCode || inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
   const showGradient = inAuthFlow && !inFlatFlow;
   const hasStoredWallet = walletHydrated && walletCount > 0;
   const effectiveHasOnboarded = hasOnboarded || hasStoredWallet;
   const routeReadyForDisplay = effectiveHasOnboarded
-    ? segments.length > 0 && !inOnboarding
-    : inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup;
+    ? segments.length > 0 && !inInviteCode && !inOnboarding
+    : inviteAccessVerified
+      ? inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup
+      : inInviteCode;
   // If MMKV app-state is reset or unreadable during a storage migration,
   // SecureStore is still the source of truth for whether a wallet exists.
   // Repair the onboarding flag instead of routing an existing wallet back
@@ -224,25 +228,32 @@ export default function RootLayout(): React.JSX.Element | null {
     if (!rootLayoutReady) return;
     if (rootNavigationState.key.length === 0) return;
 
-    if (
+    if (!effectiveHasOnboarded && !inviteAccessVerified && !inInviteCode) {
+      router.replace('/invite-code');
+    } else if (!effectiveHasOnboarded && inviteAccessVerified && inInviteCode) {
+      router.replace('/onboarding');
+    } else if (
       !effectiveHasOnboarded &&
+      inviteAccessVerified &&
       !inAuthFlow &&
       !inUsernameSetup &&
       !inWalletFlow &&
       !inSecuritySetup
     ) {
       router.replace('/onboarding');
-    } else if (effectiveHasOnboarded && inOnboarding) {
+    } else if (effectiveHasOnboarded && (inInviteCode || inOnboarding)) {
       router.replace('/(tabs)');
     }
   }, [
     appReady,
     effectiveHasOnboarded,
     inAuthFlow,
+    inInviteCode,
     inOnboarding,
     inSecuritySetup,
     inUsernameSetup,
     inWalletFlow,
+    inviteAccessVerified,
     rootLayoutReady,
     rootNavigationState.key,
     router,
@@ -279,6 +290,7 @@ export default function RootLayout(): React.JSX.Element | null {
           {showGradient ? <GradientBackground /> : null}
           <AppLockGate enabled={effectiveHasOnboarded && walletHydrated} />
           <Stack screenOptions={globalScreenOptions}>
+            <Stack.Screen name="invite-code" />
             <Stack.Screen name="onboarding" />
             <Stack.Screen name="oauth/callback" options={createWalletScreenOptions} />
             <Stack.Screen name="security-setup" options={createWalletScreenOptions} />

@@ -13,6 +13,7 @@ import {
 } from '../lib/bootstrap.js';
 import { isAllowedOrigin } from '../lib/cors.js';
 import { AppError, errorResponse } from '../lib/errors.js';
+import { ensureInviteAccessForBootstrap } from '../lib/invite-access.js';
 import { applyRateLimitHeaders, checkRateLimit } from '../lib/ratelimit.js';
 import type { AppEnv } from '../lib/types.js';
 import {
@@ -31,6 +32,7 @@ const MAX_APP_VERSION_LENGTH = 32;
 const MAX_DEVICE_ID_LENGTH = 128;
 const MAX_ATTESTATION_TOKEN_LENGTH = 32_000;
 const MAX_ATTESTATION_KEY_ID_LENGTH = 256;
+const MAX_INVITE_CODE_LENGTH = 64;
 
 const bootstrapGetQuerySchema = z.object({
   wallet: z.string().min(1).max(MAX_WALLET_ADDRESS_LENGTH),
@@ -45,6 +47,7 @@ const bootstrapPostBodySchema = z.object({
   appVersion: z.string().min(1).max(MAX_APP_VERSION_LENGTH),
   deviceId: z.string().min(1).max(MAX_DEVICE_ID_LENGTH),
   attestationKeyId: z.string().min(1).max(MAX_ATTESTATION_KEY_ID_LENGTH).optional(),
+  inviteCode: z.string().max(MAX_INVITE_CODE_LENGTH).optional(),
 });
 
 interface BootstrapPublicHeaders {
@@ -388,6 +391,12 @@ bootstrapRoutes.post('/provision', async (context) => {
     attestationToken: body.attestationToken ?? '',
     challengeNonce: body.nonce,
     ...(body.attestationKeyId ? { attestationKeyId: body.attestationKeyId } : {}),
+  });
+
+  await ensureInviteAccessForBootstrap(context.env, {
+    walletAddress: body.walletAddress,
+    deviceId: body.deviceId,
+    inviteCode: body.inviteCode,
   });
 
   const bootstrapVersion = getBootstrapSecretVersion(context.env);

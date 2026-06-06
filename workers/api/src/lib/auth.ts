@@ -44,6 +44,7 @@ const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/bootstrap/provision',
   'POST /api/bootstrap/provision',
   'GET /api/capabilities',
+  'POST /api/invite/verify',
   'GET /api/market/fx-rate',
   'POST /api/market/token-price',
   'POST /api/market/token-price-history',

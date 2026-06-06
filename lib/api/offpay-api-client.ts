@@ -43,6 +43,7 @@ import type {
   BootstrapProvisionResponse,
   CapabilitiesResponse,
   FxRateResponse,
+  InviteVerifyResponse,
   OffpayApiMethod,
   OffpayNetwork,
   PaymentSettleRequest,
@@ -806,6 +807,7 @@ export async function provisionBootstrap(
         nonce: body.nonce,
         platform: body.platform,
         attestationToken: body.attestationToken,
+        ...(body.inviteCode != null ? { inviteCode: body.inviteCode } : {}),
         ...(body.attestationKeyId != null ? { attestationKeyId: body.attestationKeyId } : {}),
         walletSignature,
         appVersion: OFFPAY_APP_VERSION,
@@ -820,6 +822,7 @@ export async function provisionBootstrap(
         walletAddress: body.walletAddress,
         nonce: body.nonce,
         platform: 'android',
+        ...(body.inviteCode != null ? { inviteCode: body.inviteCode } : {}),
         walletSignature,
         appVersion: OFFPAY_APP_VERSION,
         deviceId,
@@ -872,6 +875,15 @@ export async function buildOffpayPublicReadHeaders(): Promise<Record<string, str
     'X-App-Version': OFFPAY_APP_VERSION,
     'X-Device-Id': deviceId,
   };
+}
+
+export async function verifyInviteCode(inviteCode: string): Promise<InviteVerifyResponse> {
+  return offpayPublicRequest<InviteVerifyResponse>({
+    path: '/api/invite/verify',
+    method: 'POST',
+    body: { inviteCode },
+    headers: await buildOffpayPublicReadHeaders(),
+  });
 }
 
 export async function getWalletBalance(

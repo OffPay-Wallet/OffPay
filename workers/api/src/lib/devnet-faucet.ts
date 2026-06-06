@@ -26,6 +26,7 @@ const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const TOKEN_DECIMALS = 6;
 const CREATE_ASSOCIATED_TOKEN_ACCOUNT_IDEMPOTENT_INSTRUCTION = 1;
 const TRANSFER_CHECKED_INSTRUCTION = 12;
+const U64_MAX = (1n << 64n) - 1n;
 
 interface FaucetTokenConfig {
   symbol: 'dUSDC' | 'dUSDT' | 'USDC';
@@ -176,13 +177,35 @@ function associatedTokenAddress(owner: string, mint: string): string {
   return tokenAccount.toBase58();
 }
 
-function readTokenAccountRawAmount(account: Awaited<ReturnType<typeof getRpcAccounts>>['accounts'][number]): bigint | null {
+function readUint64Le(data: Uint8Array, offset: number): bigint {
+  let value = 0n;
+  for (let index = 0; index < 8; index += 1) {
+    value |= BigInt(data[offset + index] ?? 0) << BigInt(index * 8);
+  }
+  return value;
+}
+
+function writeUint64Le(data: Uint8Array, value: bigint, offset: number): void {
+  if (value < 0n || value > U64_MAX) {
+    throw new Error('u64 value is out of range.');
+  }
+
+  let remaining = value;
+  for (let index = 0; index < 8; index += 1) {
+    data[offset + index] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
+}
+
+function readTokenAccountRawAmount(
+  account: Awaited<ReturnType<typeof getRpcAccounts>>['accounts'][number],
+): bigint | null {
   if (!account || account.owner !== TOKEN_PROGRAM_ID || !account.dataBase64) return null;
 
   try {
     const data = Buffer.from(account.dataBase64, 'base64');
     if (data.length < 72) return null;
-    return data.readBigUInt64LE(64);
+    return readUint64Le(data, 64);
   } catch {
     return null;
   }
@@ -219,7 +242,7 @@ function createTransferCheckedInstruction(params: {
 }): TransactionInstruction {
   const data = Buffer.alloc(10);
   data.writeUInt8(TRANSFER_CHECKED_INSTRUCTION, 0);
-  data.writeBigUInt64LE(params.rawAmount, 1);
+  writeUint64Le(data, params.rawAmount, 1);
   data.writeUInt8(params.decimals, 9);
 
   return new TransactionInstruction({

@@ -40,6 +40,13 @@ ALCHEMY_DEVNET_FALLBACK_RPC_URL=https://solana-devnet.g.alchemy.com/v2/YOUR_SECO
 ALCHEMY_MAINNET_FALLBACK_RPC_URL=https://solana-mainnet.g.alchemy.com/v2/YOUR_SECOND_KEY
 ALCHEMY_PRICE_API_KEY=YOUR_ALCHEMY_PRICE_API_KEY
 
+# Invite-code access gate (MongoDB Atlas).
+# Ensure Atlas Network Access allows Worker egress (0.0.0.0/0 for prototype).
+OFFPAY_INVITE_GATE_MODE=required
+MONGODB_URI=mongodb+srv://offpay-worker:PASSWORD@YOUR_CLUSTER.mongodb.net/?retryWrites=true&w=majority
+MONGODB_DATABASE=offpay
+OFFPAY_INVITE_CODE_PEPPER=REPLACE_WITH_64_HEX_CHARS_FOR_INVITE_PEPPER
+
 # Optional only when using a gated/private Umbra indexer or relayer.
 # UMBRA_API_KEY=YOUR_UMBRA_API_KEY
 UMBRA_INDEXER_URL_MAINNET=https://utxo-indexer.api.umbraprivacy.com

@@ -14,6 +14,7 @@ interface WorkerConfigStatus {
   features: {
     androidAttestation: FeatureConfigStatus;
     iosAttestation: FeatureConfigStatus;
+    inviteGate: FeatureConfigStatus;
     marketPrices: FeatureConfigStatus;
     offline: FeatureConfigStatus;
     pendingBackup: FeatureConfigStatus;
@@ -55,6 +56,13 @@ const PENDING_BACKUP_BINDINGS: BindingKey[] = ['OFFPAY_BACKUP_HMAC_SECRET'];
 const SWAP_BINDINGS: BindingKey[] = ['JUPITER_API_KEY'];
 const MARKET_PRICE_BINDINGS: BindingKey[] = ['ALCHEMY_PRICE_API_KEY'];
 const HELIUS_API_KEY_BINDINGS: BindingKey[] = ['HELIUS_DEVNET_API_KEY', 'HELIUS_MAINNET_API_KEY'];
+const INVITE_GATE_BINDINGS: BindingKey[] = [
+  'MONGODB_URI',
+  'MONGODB_DATABASE',
+  'OFFPAY_INVITE_CODE_PEPPER',
+];
+const MIN_INVITE_CODE_PEPPER_LENGTH = 32;
+
 function hasStringBinding(bindings: Bindings, key: BindingKey): boolean {
   const value = bindings[key];
   return typeof value === 'string' && value.trim().length > 0;
@@ -157,6 +165,25 @@ function isPrototypeMode(bindings: Bindings): boolean {
   return hasTruthyStringBinding(bindings.OFFPAY_PROTOTYPE_MODE);
 }
 
+function isInviteGateEnabled(bindings: Bindings): boolean {
+  const mode = bindings.OFFPAY_INVITE_GATE_MODE?.trim().toLowerCase();
+  if (mode === 'disabled' || mode === 'off') return false;
+  if (mode === 'required' || mode === 'enabled' || mode === 'on') return true;
+  return isPrototypeMode(bindings);
+}
+
+function missingInviteGateBindings(bindings: Bindings): string[] {
+  if (!isInviteGateEnabled(bindings)) return [];
+
+  const missing = missingStringBindings(bindings, INVITE_GATE_BINDINGS);
+  const pepper = bindings.OFFPAY_INVITE_CODE_PEPPER?.trim() ?? '';
+  if (pepper.length > 0 && pepper.length < MIN_INVITE_CODE_PEPPER_LENGTH) {
+    return mergeMissing(missing, ['OFFPAY_INVITE_CODE_PEPPER_MIN_32']);
+  }
+
+  return missing;
+}
+
 function isAndroidPrototypeBypassEnabled(bindings: Bindings): boolean {
   return (
     bindings.OFFPAY_ANDROID_ATTESTATION_MODE?.trim().toLowerCase() === 'prototype_bypass' &&
@@ -179,6 +206,7 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
   const protectedAuth = withConfiguredState(
     missingStringBindings(bindings, PROTECTED_AUTH_BINDINGS),
   );
+  const inviteGate = withConfiguredState(missingInviteGateBindings(bindings));
   const androidAttestation = getAndroidAttestationStatus(bindings);
   const iosAttestation = withConfiguredState(
     missingStringBindings(bindings, IOS_APP_ATTEST_BINDINGS),
@@ -217,6 +245,7 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
     protectedAuth.configured &&
     platformAttestationReady &&
     pendingBackup.configured &&
+    inviteGate.configured &&
     swap.configured &&
     wallet.configured &&
     rpc.configured;
@@ -234,6 +263,7 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
     features: {
       androidAttestation,
       iosAttestation,
+      inviteGate,
       marketPrices,
       offline,
       pendingBackup,

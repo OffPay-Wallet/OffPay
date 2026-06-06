@@ -13,6 +13,7 @@ import {
 import { getWorkerConfigStatus, toPublicWorkerConfigStatus } from './lib/config';
 import bootstrapRoutes from './routes/bootstrap';
 import capabilitiesRoutes from './routes/capabilities';
+import inviteRoutes from './routes/invite';
 import marketRoutes from './routes/market';
 import offlineRoutes from './routes/offline';
 import pendingRoutes from './routes/pending';
@@ -62,6 +63,7 @@ app.get('/health', (context) => {
 
 app.route('/capabilities', capabilitiesRoutes);
 app.route('/bootstrap', bootstrapRoutes);
+app.route('/invite', inviteRoutes);
 app.route('/market', marketRoutes);
 app.route('/offline', offlineRoutes);
 app.route('/pending', pendingRoutes);

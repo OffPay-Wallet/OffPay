@@ -34,6 +34,10 @@ enabled = true
 # npx wrangler secret put OFFPAY_BOOTSTRAP_SECRET
 # npx wrangler secret put OFFPAY_BACKUP_HMAC_SECRET
 # npx wrangler secret put OFFPAY_DEVNET_FAUCET_SECRET_KEY
+# Required for invite-code access gate:
+# npx wrangler secret put MONGODB_URI
+# npx wrangler secret put MONGODB_DATABASE
+# npx wrangler secret put OFFPAY_INVITE_CODE_PEPPER
 # Required only when OFFPAY_ANDROID_ATTESTATION_MODE = "play_integrity":
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY
@@ -43,6 +47,7 @@ enabled = true
 [vars]
 NODE_ENV = "production"
 OFFPAY_PROTOTYPE_MODE = "true"
+OFFPAY_INVITE_GATE_MODE = "required"
 OFFPAY_ALLOWED_ORIGINS = "capacitor://localhost,https://offpay.app"
 MIN_APP_VERSION = "1.0.0"
 BOOTSTRAP_SECRET_VERSION = "1"

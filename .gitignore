@@ -38,6 +38,7 @@ expo-env.d.ts
 .env
 .env.*
 !.env.example
+invite-codes/
 workers/ai-proxy/.dev.vars
 workers/ai-proxy/.dev.vars.*
 !workers/ai-proxy/.dev.vars.example
@@ -67,6 +68,10 @@ coverage/
 scripts/*
 !scripts/verify-client-hardening.js
 !scripts/run-all-tests.js
+!scripts/generate-invite-codes.js
+!scripts/push-invite-worker-secrets.sh
+!scripts/push-all-worker-secrets.sh
+!scripts/setup-invite-gate.js
 
 # ---------------------------------------------------------------------------
 # TypeScript

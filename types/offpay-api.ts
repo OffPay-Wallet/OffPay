@@ -73,6 +73,7 @@ interface BootstrapProvisionCore {
   walletAddress: string;
   nonce: string;
   platform: 'ios' | 'android';
+  inviteCode?: string;
 }
 
 interface BootstrapProvisionAuthFields {
@@ -110,6 +111,12 @@ export interface BootstrapProvisionResponse {
   secret: string;
   issuedAt: number;
   bootstrapVersion: number;
+}
+
+export interface InviteVerifyResponse {
+  verified: true;
+  segment: string | null;
+  gate: 'disabled' | 'required';
 }
 
 export interface WalletBalanceResponse {
@@ -791,6 +798,11 @@ export type BackendErrorCode =
   | 'NOT_FOUND'
   | 'NOT_IMPLEMENTED'
   | 'INTERNAL_ERROR'
+  | 'INVITE_ALREADY_USED'
+  | 'INVITE_EXPIRED'
+  | 'INVITE_REQUIRED'
+  | 'INVITE_REVOKED'
+  | 'INVALID_INVITE_CODE'
   | 'INVALID_NETWORK'
   | 'INVALID_REQUEST'
   | 'INVALID_NONCE'

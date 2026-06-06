@@ -12,6 +12,7 @@ import {
   getBootstrapPlatform,
   unsupportedOffpayAttestationAdapter,
 } from '@/lib/bootstrap/attestation';
+import { getStoredInviteCode } from '@/lib/invite/invite-access';
 
 import type {
   OffpayAttestationAdapter,
@@ -35,6 +36,7 @@ export interface OffpayBootstrapParams {
   walletAddress: string;
   walletId?: string;
   force?: boolean;
+  inviteCode?: string | null;
   attestationAdapter?: OffpayAttestationAdapter;
 }
 
@@ -48,12 +50,15 @@ function buildProvisionBody(
   walletAddress: string,
   nonce: string,
   attestation: OffpayBootstrapAttestation,
+  inviteCode?: string | null,
 ): BootstrapProvisionInput {
+  const invite = inviteCode == null ? {} : { inviteCode };
   if ('prototypeBypass' in attestation) {
     return {
       walletAddress,
       nonce,
       platform: attestation.platform,
+      ...invite,
     };
   }
 
@@ -62,6 +67,7 @@ function buildProvisionBody(
     nonce,
     platform: attestation.platform,
     attestationToken: attestation.attestationToken,
+    ...invite,
     ...('attestationKeyId' in attestation
       ? { attestationKeyId: attestation.attestationKeyId }
       : {}),
@@ -136,9 +142,10 @@ async function bootstrapOffpayRequestSecretOnce(
     nonceHashBase64Url: buildAndroidIntegrityNonceHash(nonceResponse.nonce),
     platform,
   });
+  const inviteCode = params.inviteCode ?? (await getStoredInviteCode());
 
   const response = await provisionBootstrap(
-    buildProvisionBody(params.walletAddress, nonceResponse.nonce, attestation),
+    buildProvisionBody(params.walletAddress, nonceResponse.nonce, attestation, inviteCode),
     params.walletId,
   );
 
