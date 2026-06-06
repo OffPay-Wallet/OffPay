@@ -1527,8 +1527,14 @@ async function ensureUmbraPrivateP2PSenderReady(
   options: { autoSetup: boolean },
 ): Promise<UmbraVaultRegistrationStatus> {
   let registrationStatus = await queryUmbraVaultRegistrationStatus(runtime, walletAddress);
-  if (params.network === 'devnet') return registrationStatus;
   if (registrationStatus.mixerRegistered) return registrationStatus;
+  if (
+    params.network === 'devnet' &&
+    !options.autoSetup &&
+    registrationStatus.vaultCanShield
+  ) {
+    return registrationStatus;
+  }
 
   if (!options.autoSetup) {
     throw new Error(

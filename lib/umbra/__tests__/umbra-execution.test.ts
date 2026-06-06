@@ -220,7 +220,7 @@ jest.mock('@/lib/wallet/secure-wallet-store', () => ({
   __esModule: true,
   getStoredWalletInfo: jest.fn(async () => ({
     id: 'wallet-1',
-    publicKey: 'Gk5aN5YdJrc56xG7yA2WzjU2xofBZJq9UY62sG2rR3Fz',
+    publicKey: mockWalletAddress,
     importMethod: 'generated',
   })),
   getStoredWalletSigningMaterialWithAuth: jest.fn(async () => ({
@@ -1376,7 +1376,7 @@ describe('umbra-execution', () => {
     });
   });
 
-  it('does not auto-register a devnet sender before public-balance private P2P', async () => {
+  it('does not auto-register a devnet sender before public-balance private P2P when setup is not requested', async () => {
     mockQueryUser
       .mockResolvedValueOnce({
         state: 'exists',
@@ -1407,7 +1407,6 @@ describe('umbra-execution', () => {
       token: 'dUSDC',
       amount: '1',
       recipient: mockRecipientAddress,
-      autoSetupSender: true,
     });
 
     expect(mockRegister).not.toHaveBeenCalled();
@@ -1416,6 +1415,72 @@ describe('umbra-execution', () => {
     expect(getLegacyUserRegistrationFunction).not.toHaveBeenCalled();
     expect(mockCreatePublicReceiverUtxo).toHaveBeenCalled();
     expect(mockLegacyCreatePublicReceiverUtxo).not.toHaveBeenCalled();
+  });
+
+  it('auto-registers a devnet sender for public-balance private P2P when setup is requested', async () => {
+    mockQueryUser
+      .mockResolvedValueOnce({
+        state: 'exists',
+        data: {
+          isInitialised: true,
+          isUserAccountX25519KeyRegistered: true,
+          isUserCommitmentRegistered: true,
+          isActiveForAnonymousUsage: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        state: 'exists',
+        data: {
+          isInitialised: true,
+          isUserAccountX25519KeyRegistered: true,
+          isUserCommitmentRegistered: true,
+          isActiveForAnonymousUsage: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        state: 'exists',
+        data: {
+          isInitialised: true,
+          isUserAccountX25519KeyRegistered: true,
+          isUserCommitmentRegistered: true,
+          isActiveForAnonymousUsage: true,
+        },
+      });
+    mockRegister.mockResolvedValueOnce(['register-anonymous-sig']);
+    mockCreatePublicReceiverUtxo.mockResolvedValueOnce({
+      createProofAccountSignature: 'create-proof-sig',
+      createUtxoSignature: 'create-utxo-sig',
+    });
+
+    const result = await sendUmbraPrivateP2PFromPublicBalance({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      token: 'dUSDC',
+      amount: '1',
+      recipient: mockWalletAddress,
+      autoSetupSender: true,
+    });
+
+    expect(mockRegister).toHaveBeenCalledWith({ confidential: false, anonymous: true });
+    expect(mockLegacyRegister).not.toHaveBeenCalled();
+    expect(mockCreatePublicReceiverUtxo).toHaveBeenCalledWith(
+      {
+        amount: 1000000n,
+        destinationAddress: mockWalletAddress,
+        mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+      },
+      {
+        optionalData: expect.any(Uint8Array),
+      },
+    );
+    expect(result).toMatchObject({
+      action: 'private-p2p',
+      mixerRegistered: true,
+      p2pSource: 'public-balance',
+      primarySignature: 'create-utxo-sig',
+      signatures: ['create-proof-sig', 'create-utxo-sig'],
+    });
   });
 
   it('requires explicit private P2P setup instead of auto-registering during send by default', async () => {

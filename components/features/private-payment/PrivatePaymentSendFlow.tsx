@@ -1650,6 +1650,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
                   token: selectedToken.symbol,
                   tokenMint: selectedToken.mint,
                   network,
+                  autoSetupSender: true,
                 });
                 const signature = umbraResult.primarySignature ?? umbraResult.signatures[0];
                 if (signature == null) {
