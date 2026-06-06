@@ -41,6 +41,10 @@ import {
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+import {
+  buildUmbraTransactionNotificationIdentifier,
+  presentUmbraTransactionNotification,
+} from '@/lib/notifications/local-notifications';
 import { offpayWalletBalanceQueryKey } from '@/lib/api/offpay-wallet-query-keys';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
@@ -927,6 +931,20 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         message: result.claimedUtxoCount === 0 ? undefined : result.subtitle,
         variant: result.claimedUtxoCount === 0 ? 'info' : 'success',
       });
+      if ((result.claimedUtxoCount ?? 0) > 0) {
+        const claimSignature = result.primarySignature ?? result.signatures[0] ?? null;
+        void presentUmbraTransactionNotification({
+          identifier: buildUmbraTransactionNotificationIdentifier({
+            network,
+            action: 'claim',
+            signature: claimSignature,
+            fallbackId: claimedIndices.join('-') || result.claimedUtxoCount,
+          }),
+          action: 'claim',
+          claimedCount: result.claimedUtxoCount,
+          signature: claimSignature,
+        });
+      }
       // Refresh the pending list so any UTXOs we just persisted in the
       // claimed-index filter disappear from the card immediately. The
       // encrypted balance lags behind by an Arcium decryption cycle,

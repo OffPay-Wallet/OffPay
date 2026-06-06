@@ -16,6 +16,13 @@ const NATIVE_SOL_SYMBOL = 'SOL';
 
 export type OffpayDisplayTransactionType = 'send' | 'receive' | 'swap';
 export type OffpayDisplayTone = 'positive' | 'negative' | 'neutral' | 'failed';
+export type OffpayUmbraWalletActivityType =
+  | 'setup'
+  | 'shield'
+  | 'withdraw'
+  | 'claim'
+  | 'private-p2p'
+  | 'repair';
 
 export interface OffpayTokenHoldingView {
   mint: string;
@@ -540,6 +547,128 @@ function isUmbraSetupTransactionType(type: string): boolean {
     normalized === 'vault_setup' ||
     (normalized.includes('umbra') && normalized.includes('registration'))
   );
+}
+
+function normalizedTextHasSegment(text: string, segments: readonly string[]): boolean {
+  const parts = text.split('_').filter(Boolean);
+  return segments.some((segment) => parts.includes(segment));
+}
+
+function normalizedTextHasAny(text: string, needles: readonly string[]): boolean {
+  return needles.some((needle) => text.includes(needle));
+}
+
+export function getUmbraWalletActivityType(
+  activity: Pick<WalletActivityEvent, 'type' | 'description'>,
+): OffpayUmbraWalletActivityType | null {
+  const normalizedType = normalizeTransactionTypeLabel(activity.type);
+  const normalizedDescription = normalizeTransactionTypeLabel(activity.description ?? '');
+  const normalizedText = [normalizedType, normalizedDescription].filter(Boolean).join('_');
+  const compactText = normalizedText.replace(/_/g, '');
+  const hasUmbraSignal =
+    normalizedTextHasAny(normalizedText, [
+      'umbra',
+      'arcium',
+      'shield',
+      'vault',
+      'encrypted_balance',
+      'stealth',
+      'utxo',
+      'nullifier',
+      'claimable',
+    ]) ||
+    (normalizedText.includes('private') &&
+      normalizedTextHasSegment(normalizedText, ['claim', 'claimed', 'claims']));
+
+  if (!hasUmbraSignal) return null;
+
+  if (
+    isUmbraSetupTransactionType(activity.type) ||
+    (normalizedTextHasAny(normalizedText, ['account_setup', 'vault_setup', 'registration']) &&
+      normalizedTextHasAny(normalizedText, ['umbra', 'vault']))
+  ) {
+    return 'setup';
+  }
+
+  if (
+    normalizedTextHasAny(normalizedText, [
+      'key_repair',
+      'key_rotation',
+      'mint_encryption_key',
+      'rotate_key',
+    ]) ||
+    normalizedTextHasSegment(normalizedText, ['repair', 'repaired'])
+  ) {
+    return 'repair';
+  }
+
+  if (
+    normalizedTextHasAny(normalizedText, [
+      'receiver_claimable_utxo_creator',
+      'claimable_utxo_creator',
+      'create_receiver_claimable',
+      'create_claimable',
+      'private_p2p',
+      'p2p_send',
+    ]) ||
+    (normalizedTextHasSegment(normalizedText, ['creator', 'create', 'created']) &&
+      normalizedText.includes('claimable'))
+  ) {
+    return 'private-p2p';
+  }
+
+  if (
+    normalizedTextHasAny(normalizedText, [
+      'to_encrypted_balance_claimer',
+      'claimable_utxo_to_encrypted',
+      'claim_private_payment',
+      'pending_claim',
+    ]) ||
+    normalizedTextHasSegment(normalizedText, [
+      'claim',
+      'claimed',
+      'claims',
+      'claimer',
+      'burner',
+      'nullifier',
+    ])
+  ) {
+    return 'claim';
+  }
+
+  if (
+    normalizedTextHasAny(normalizedText, [
+      'encrypted_balance_to_public',
+      'private_to_public',
+      'eta_into_ata',
+    ]) ||
+    compactText.includes('encryptedbalancetopublic') ||
+    compactText.includes('etaintoata') ||
+    normalizedTextHasSegment(normalizedText, ['withdraw', 'withdrew', 'withdrawal', 'unshield'])
+  ) {
+    return 'withdraw';
+  }
+
+  if (
+    normalizedTextHasAny(normalizedText, [
+      'public_balance_to_encrypted',
+      'public_to_private',
+      'ata_into_eta',
+    ]) ||
+    compactText.includes('publicbalancetoencrypted') ||
+    compactText.includes('ataintoeta') ||
+    normalizedTextHasSegment(normalizedText, [
+      'shield',
+      'shielded',
+      'deposit',
+      'deposited',
+      'depositor',
+    ])
+  ) {
+    return 'shield';
+  }
+
+  return null;
 }
 
 function parseTokenAmounts(description: string | null): ParsedTokenAmount[] {

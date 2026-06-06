@@ -3,6 +3,7 @@ import * as Notifications from 'expo-notifications';
 
 import type {
   OffpayDisplayTransactionType,
+  OffpayUmbraWalletActivityType,
   OffpayRecentActivityView,
 } from '@/lib/api/offpay-wallet-data';
 
@@ -14,8 +15,10 @@ import type {
  * surface as an OS notification even when no toast is shown.
  */
 
+type OffpayNotificationChannelType = OffpayDisplayTransactionType | 'privacy';
+
 const ANDROID_TRANSACTION_CHANNELS: Record<
-  OffpayDisplayTransactionType | 'default',
+  OffpayNotificationChannelType | 'default',
   {
     id: string;
     name: string;
@@ -33,6 +36,10 @@ const ANDROID_TRANSACTION_CHANNELS: Record<
     id: 'offpay.transactions.swaps',
     name: 'Swaps',
   },
+  privacy: {
+    id: 'offpay.transactions.privacy',
+    name: 'Private payments',
+  },
   default: {
     id: 'offpay.transactions',
     name: 'Transactions',
@@ -48,7 +55,7 @@ function stripAmountSign(value: string): string {
   return value.replace(/^[+-]\s*/, '').trim();
 }
 
-function getTransactionChannelId(type: OffpayDisplayTransactionType | null | undefined): string {
+function getTransactionChannelId(type: OffpayNotificationChannelType | null | undefined): string {
   return ANDROID_TRANSACTION_CHANNELS[type ?? 'default'].id;
 }
 
@@ -92,6 +99,60 @@ export function buildWalletTransactionNotificationContent(
     title: primaryAmount == null ? 'Sent' : `Sent ${primaryAmount}`,
     body: null,
   };
+}
+
+function formatPrivatePaymentCount(count: number | null | undefined): string {
+  if (typeof count !== 'number' || !Number.isFinite(count) || count <= 0) {
+    return 'private payment';
+  }
+
+  const normalized = Math.trunc(count);
+  return normalized === 1 ? '1 private payment' : `${normalized} private payments`;
+}
+
+export function buildUmbraTransactionNotificationContent(input: {
+  action: OffpayUmbraWalletActivityType;
+  amountLabel?: string | null;
+  claimedCount?: number | null;
+  setupStatus?: 'ready' | 'submitted' | null;
+}): {
+  title: string;
+  body: string | null;
+} {
+  const amount = input.amountLabel == null ? null : stripAmountSign(input.amountLabel);
+
+  switch (input.action) {
+    case 'setup':
+      return {
+        title: input.setupStatus === 'submitted' ? 'Umbra setup submitted' : 'Umbra vault ready',
+        body: null,
+      };
+    case 'shield':
+      return { title: amount == null ? 'Shielded funds' : `Shielded ${amount}`, body: null };
+    case 'withdraw':
+      return { title: amount == null ? 'Withdrew funds' : `Withdrew ${amount}`, body: null };
+    case 'claim':
+      return { title: `Claimed ${formatPrivatePaymentCount(input.claimedCount)}`, body: null };
+    case 'private-p2p':
+      return {
+        title: amount == null ? 'Sent private payment' : `Sent private payment ${amount}`,
+        body: null,
+      };
+    case 'repair':
+      return { title: 'Umbra key repaired', body: null };
+    default:
+      return { title: 'Umbra updated', body: null };
+  }
+}
+
+export function buildUmbraTransactionNotificationIdentifier(input: {
+  network: string;
+  action: OffpayUmbraWalletActivityType;
+  signature?: string | null;
+  fallbackId?: string | number | null;
+}): string {
+  const action = input.action === 'setup' ? 'setup' : input.action;
+  return `umbra-${action}-${input.network}-${input.signature ?? input.fallbackId ?? 'unknown'}`;
 }
 
 async function configureNotifications(): Promise<void> {
@@ -159,7 +220,7 @@ export interface WalletTransactionNotificationInput {
   identifier: string;
   title: string;
   body?: string | null;
-  type?: OffpayDisplayTransactionType;
+  type?: OffpayNotificationChannelType;
   signature?: string | null;
 }
 
@@ -169,6 +230,16 @@ export interface WalletTransactionEventNotificationInput {
   type: OffpayDisplayTransactionType;
   amountLabel?: string | null;
   secondaryAmountLabel?: string | null;
+  signature?: string | null;
+}
+
+export interface UmbraTransactionNotificationInput {
+  /** Stable identifier so re-fires for the same transaction are de-duped. */
+  identifier: string;
+  action: OffpayUmbraWalletActivityType;
+  amountLabel?: string | null;
+  claimedCount?: number | null;
+  setupStatus?: 'ready' | 'submitted' | null;
   signature?: string | null;
 }
 
@@ -227,6 +298,25 @@ export function presentWalletTransactionEventNotification(
     title: content.title,
     body: content.body,
     type: input.type,
+    signature: input.signature,
+  });
+}
+
+export function presentUmbraTransactionNotification(
+  input: UmbraTransactionNotificationInput,
+): Promise<void> {
+  const content = buildUmbraTransactionNotificationContent({
+    action: input.action,
+    amountLabel: input.amountLabel ?? null,
+    claimedCount: input.claimedCount ?? null,
+    setupStatus: input.setupStatus ?? null,
+  });
+
+  return presentWalletTransactionNotification({
+    identifier: input.identifier,
+    title: content.title,
+    body: content.body,
+    type: 'privacy',
     signature: input.signature,
   });
 }

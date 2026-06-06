@@ -1,4 +1,7 @@
-import { buildWalletTransactionNotificationContent } from '@/lib/notifications/local-notifications';
+import {
+  buildUmbraTransactionNotificationContent,
+  buildWalletTransactionNotificationContent,
+} from '@/lib/notifications/local-notifications';
 
 describe('buildWalletTransactionNotificationContent', () => {
   it('formats received transaction notifications with unsigned amounts', () => {
@@ -95,6 +98,65 @@ describe('buildWalletTransactionNotificationContent', () => {
       }),
     ).toEqual({
       title: 'Swapped 12 USDC',
+      body: null,
+    });
+  });
+});
+
+describe('buildUmbraTransactionNotificationContent', () => {
+  it('formats shield notifications with amounts', () => {
+    expect(
+      buildUmbraTransactionNotificationContent({
+        action: 'shield',
+        amountLabel: '-4 dUSDC',
+      }),
+    ).toEqual({
+      title: 'Shielded 4 dUSDC',
+      body: null,
+    });
+  });
+
+  it('formats withdraw notifications with amounts', () => {
+    expect(
+      buildUmbraTransactionNotificationContent({
+        action: 'withdraw',
+        amountLabel: '+4 dUSDC',
+      }),
+    ).toEqual({
+      title: 'Withdrew 4 dUSDC',
+      body: null,
+    });
+  });
+
+  it('formats claim notifications by private payment count', () => {
+    expect(
+      buildUmbraTransactionNotificationContent({
+        action: 'claim',
+        claimedCount: 2,
+      }),
+    ).toEqual({
+      title: 'Claimed 2 private payments',
+      body: null,
+    });
+  });
+
+  it('keeps pending setup notifications separate from ready setup notifications', () => {
+    expect(
+      buildUmbraTransactionNotificationContent({
+        action: 'setup',
+        setupStatus: 'submitted',
+      }),
+    ).toEqual({
+      title: 'Umbra setup submitted',
+      body: null,
+    });
+    expect(
+      buildUmbraTransactionNotificationContent({
+        action: 'setup',
+        setupStatus: 'ready',
+      }),
+    ).toEqual({
+      title: 'Umbra vault ready',
       body: null,
     });
   });

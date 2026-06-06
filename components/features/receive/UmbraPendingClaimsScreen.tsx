@@ -24,6 +24,10 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
+import {
+  buildUmbraTransactionNotificationIdentifier,
+  presentUmbraTransactionNotification,
+} from '@/lib/notifications/local-notifications';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
@@ -444,6 +448,20 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               message: result.subtitle,
               variant: claimed > 0 ? 'success' : 'info',
             });
+            if (claimed > 0) {
+              const claimSignature = result.primarySignature ?? result.signatures[0] ?? null;
+              void presentUmbraTransactionNotification({
+                identifier: buildUmbraTransactionNotificationIdentifier({
+                  network,
+                  action: 'claim',
+                  signature: claimSignature,
+                  fallbackId: claimedIndices.join('-') || utxo.id,
+                }),
+                action: 'claim',
+                claimedCount: claimed,
+                signature: claimSignature,
+              });
+            }
             umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
             void runScan('background');
           } catch (claimError) {

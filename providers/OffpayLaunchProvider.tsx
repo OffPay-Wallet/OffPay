@@ -11,11 +11,14 @@ import { useOffpayWalletWarmStart } from '@/hooks/useOffpayWalletWarmStart';
 import { useSettlementEngine } from '@/hooks/useSettlementEngine';
 import { useAppToast } from '@/components/ui/AppToast';
 import {
+  buildUmbraTransactionNotificationIdentifier,
   prewarmWalletTransactionNotificationPermission,
+  presentUmbraTransactionNotification,
   presentWalletTransactionEventNotification,
 } from '@/lib/notifications/local-notifications';
 import { setOffpayNetworkAccessAllowed } from '@/lib/api/offpay-api-client';
 import {
+  getUmbraWalletActivityType,
   isDisplayableWalletActivityEvent,
   mapWalletActivityEventForRecentActivity,
 } from '@/lib/api/offpay-wallet-data';
@@ -83,6 +86,35 @@ function OffpayWalletLiveUpdates(): null {
     if (network == null) return;
 
     for (const activity of walletActivityStream.activityEvents) {
+      const umbraActivityType = getUmbraWalletActivityType(activity);
+      if (umbraActivityType != null) {
+        if (handledSignaturesRef.current.has(activity.signature)) continue;
+
+        handledSignaturesRef.current.add(activity.signature);
+        const view = isDisplayableWalletActivityEvent(activity)
+          ? mapWalletActivityEventForRecentActivity(activity)
+          : null;
+        void presentUmbraTransactionNotification({
+          identifier: buildUmbraTransactionNotificationIdentifier({
+            network,
+            action: umbraActivityType,
+            signature: activity.signature,
+          }),
+          action: umbraActivityType,
+          amountLabel: view?.amountLabel ?? view?.secondaryAmountLabel ?? null,
+          signature: activity.signature,
+        });
+
+        if (__DEV__) {
+          console.log('[wallet-live-updates] umbra notification', {
+            type: activity.type,
+            umbraActivityType,
+            signature: activity.signature,
+          });
+        }
+        continue;
+      }
+
       if (!isDisplayableWalletActivityEvent(activity)) continue;
       if (handledSignaturesRef.current.has(activity.signature)) continue;
 

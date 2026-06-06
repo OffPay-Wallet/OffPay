@@ -8,6 +8,10 @@ import {
   shieldTokenWithUmbra,
   withdrawTokenFromUmbra,
 } from '@/lib/umbra/umbra-execution';
+import {
+  buildUmbraTransactionNotificationIdentifier,
+  presentUmbraTransactionNotification,
+} from '@/lib/notifications/local-notifications';
 import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
 
 import type {
@@ -37,6 +41,40 @@ export function useUmbraExecution() {
         signature: result.primarySignature ?? result.signatures[0] ?? null,
         network: result.network,
         createdAt: Date.now(),
+      });
+    }
+
+    if (
+      result.action === 'register' ||
+      result.action === 'shield' ||
+      result.action === 'unshield'
+    ) {
+      const signature = result.primarySignature ?? result.signatures[0] ?? null;
+      const action =
+        result.action === 'register'
+          ? 'setup'
+          : result.action === 'shield'
+            ? 'shield'
+            : 'withdraw';
+      void presentUmbraTransactionNotification({
+        identifier: buildUmbraTransactionNotificationIdentifier({
+          network: result.network,
+          action,
+          signature,
+          fallbackId: `${result.walletAddress}-${result.mint ?? 'token'}-${result.amountAtomic ?? 'amount'}`,
+        }),
+        action,
+        amountLabel:
+          result.amountDisplay != null && result.tokenSymbol != null
+            ? `${result.amountDisplay} ${result.tokenSymbol}`
+            : null,
+        setupStatus:
+          result.action === 'register'
+            ? result.vaultCanShield === true || result.mixerRegistered === true
+              ? 'ready'
+              : 'submitted'
+            : null,
+        signature,
       });
     }
 

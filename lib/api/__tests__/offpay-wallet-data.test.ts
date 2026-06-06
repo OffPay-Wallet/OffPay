@@ -3,6 +3,7 @@ import {
   buildWalletHistoryGroups,
   buildWalletRecentActivityItems,
   buildVisibleTokenHoldings,
+  getUmbraWalletActivityType,
   groupLocalReceiptsByDate,
   groupWalletTransactionsByDate,
   isDisplayableWalletActivityEvent,
@@ -594,6 +595,55 @@ describe('offpay-wallet-data', () => {
     expect(isDisplayableWalletActivityEvent(setupEvent)).toBe(false);
     expect(buildWalletHistoryGroups({ transactions: [setupTransaction] })).toEqual([]);
     expect(buildWalletRecentActivityItems({ transactions: [setupTransaction] })).toEqual([]);
+  });
+
+  it('classifies Umbra stream events before the generic sent fallback', () => {
+    expect(
+      getUmbraWalletActivityType(
+        buildActivityEvent({
+          type: 'UMBRA_CLAIM',
+          description: 'Claimed private payment into encrypted balance',
+          amount: null,
+          rawAmount: null,
+        }),
+      ),
+    ).toBe('claim');
+
+    expect(
+      getUmbraWalletActivityType(
+        buildActivityEvent({
+          type: 'PUBLIC_BALANCE_TO_ENCRYPTED_BALANCE',
+          description: 'Umbra shield 4 dUSDC',
+          amount: '4',
+          tokenSymbol: 'dUSDC',
+        }),
+      ),
+    ).toBe('shield');
+
+    expect(
+      getUmbraWalletActivityType(
+        buildActivityEvent({
+          type: 'ENCRYPTED_BALANCE_TO_PUBLIC_BALANCE',
+          description: 'Umbra withdraw 4 dUSDC',
+          amount: '4',
+          tokenSymbol: 'dUSDC',
+        }),
+      ),
+    ).toBe('withdraw');
+  });
+
+  it('does not classify regular transfers as Umbra activity', () => {
+    expect(
+      getUmbraWalletActivityType(
+        buildActivityEvent({
+          type: 'TOKEN_TRANSFER',
+          description: 'Sent 4 USDC to recipient',
+          amount: '4',
+          tokenSymbol: 'USDC',
+          direction: 'send',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('keeps offline p2p receipt enrichment but ignores online local receipts', () => {

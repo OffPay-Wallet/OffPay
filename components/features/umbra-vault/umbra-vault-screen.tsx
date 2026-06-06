@@ -35,7 +35,10 @@ import { useUmbraVaultRegistrationStatus } from '@/hooks/useUmbraVaultRegistrati
 import { useWalletModeState } from '@/hooks/useWalletModeState';
 import { getOffpayFeatureCapability } from '@/lib/api/offpay-capabilities';
 import { formatLamportsAsExactSol } from '@/lib/crypto/solana-amounts';
-import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
+import {
+  buildUmbraTransactionNotificationIdentifier,
+  presentUmbraTransactionNotification,
+} from '@/lib/notifications/local-notifications';
 import {
   decimalInputToAtomicAmount,
   formatAtomicAmount,
@@ -802,10 +805,14 @@ function UmbraVaultContentBody({
         });
         const setupSignature = result.primarySignature ?? result.signatures[0] ?? null;
         if (setupSignature != null) {
-          void presentWalletTransactionNotification({
-            identifier: `umbra-setup-${network}-${setupSignature}`,
-            title: setupConfirmed ? 'Umbra vault ready' : 'Umbra setup submitted',
-            body: null,
+          void presentUmbraTransactionNotification({
+            identifier: buildUmbraTransactionNotificationIdentifier({
+              network,
+              action: 'setup',
+              signature: setupSignature,
+            }),
+            action: 'setup',
+            setupStatus: setupConfirmed ? 'ready' : 'submitted',
             signature: setupSignature,
           });
         }
