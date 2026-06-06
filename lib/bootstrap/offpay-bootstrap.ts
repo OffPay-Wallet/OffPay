@@ -12,7 +12,7 @@ import {
   getBootstrapPlatform,
   unsupportedOffpayAttestationAdapter,
 } from '@/lib/bootstrap/attestation';
-import { getStoredInviteCode } from '@/lib/invite/invite-access';
+import { getStoredInviteCode, getStoredInviteEmail } from '@/lib/invite/invite-access';
 
 import type {
   OffpayAttestationAdapter,
@@ -51,14 +51,17 @@ function buildProvisionBody(
   nonce: string,
   attestation: OffpayBootstrapAttestation,
   inviteCode?: string | null,
+  email?: string | null,
 ): BootstrapProvisionInput {
   const invite = inviteCode == null ? {} : { inviteCode };
+  const emailField = email == null ? {} : { email };
   if ('prototypeBypass' in attestation) {
     return {
       walletAddress,
       nonce,
       platform: attestation.platform,
       ...invite,
+      ...emailField,
     };
   }
 
@@ -68,6 +71,7 @@ function buildProvisionBody(
     platform: attestation.platform,
     attestationToken: attestation.attestationToken,
     ...invite,
+    ...emailField,
     ...('attestationKeyId' in attestation
       ? { attestationKeyId: attestation.attestationKeyId }
       : {}),
@@ -143,9 +147,10 @@ async function bootstrapOffpayRequestSecretOnce(
     platform,
   });
   const inviteCode = params.inviteCode ?? (await getStoredInviteCode());
+  const email = await getStoredInviteEmail();
 
   const response = await provisionBootstrap(
-    buildProvisionBody(params.walletAddress, nonceResponse.nonce, attestation, inviteCode),
+    buildProvisionBody(params.walletAddress, nonceResponse.nonce, attestation, inviteCode, email),
     params.walletId,
   );
 

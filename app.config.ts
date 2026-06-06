@@ -18,7 +18,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
   return {
     name: APP_NAME,
     slug: APP_SLUG,
-    owner: 'offpay_wallet',
+    owner: 'offpay',
     version: APP_VERSION,
     orientation: 'portrait',
     icon: APP_ICON_PATH,
@@ -186,7 +186,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     ],
     extra: {
       eas: {
-        projectId: '91779995-1a31-4ae3-b840-52dcd24c1a30',
+        projectId: '27e2bc20-d53b-4237-8123-fdc22176e56b',
       },
     },
     experiments: {

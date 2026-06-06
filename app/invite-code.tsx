@@ -8,17 +8,23 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSharedValue, withTiming, Easing } from 'react-native-reanimated';
 
+import { AnimatedOffPayLogo } from '@/components/ui/AnimatedOffPayLogo';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { OffpayApiError, verifyInviteCode } from '@/lib/api/offpay-api-client';
-import { getStoredInviteCode, storeInviteCode } from '@/lib/invite/invite-access';
+import {
+  getStoredInviteCode,
+  getStoredInviteEmail,
+  storeInviteCode,
+  storeInviteEmail,
+} from '@/lib/invite/invite-access';
 import {
   getInviteCodeValidationMessage,
   normalizeInviteCodeInput,
@@ -26,7 +32,13 @@ import {
 } from '@/shared/invite-codes';
 import { useAppStore } from '@/store/app';
 
-const APP_ICON_SOURCE = require('../assets/AppIcons/playstore.png') as number;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LOOK_DOWN_AMOUNT = 4.5;
+const LOOK_DOWN_DURATION_MS = 350;
+
+function isValidEmail(value: string): boolean {
+  return EMAIL_PATTERN.test(value.trim());
+}
 
 function getInviteApiErrorMessage(error: unknown): string {
   if (!(error instanceof OffpayApiError)) {
@@ -48,6 +60,8 @@ function getInviteApiErrorMessage(error: unknown): string {
       return 'Please update OffPay before using this invite.';
     case 'UPSTREAM_UNAVAILABLE':
       return 'Invite verification is temporarily unavailable.';
+    case 'INVALID_REQUEST':
+      return error.message || 'Please check your details and try again.';
     default:
       return error.message || 'Could not verify this invite. Try again.';
   }
@@ -58,22 +72,57 @@ export default function InviteCodeScreen(): React.JSX.Element {
   const { width, height } = useWindowDimensions();
   const inviteAccessVerified = useAppStore((state) => state.inviteAccessVerified);
   const setInviteAccessVerified = useAppStore((state) => state.setInviteAccessVerified);
+  const setInviteEmail = useAppStore((state) => state.setInviteEmail);
+  const [email, setEmail] = useState('');
   const [inviteCode, setInviteCode] = useState('');
-  const [touched, setTouched] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [codeTouched, setCodeTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
+  const lookDownOffset = useSharedValue(0);
+  const focusCount = useSharedValue(0);
+
   const compact = width < 390 || height < 740;
   const horizontalPadding = width < 340 ? spacing.lg : compact ? spacing.xl : spacing['3xl'];
+  const logoSize = compact ? 100 : 120;
   const validation = useMemo(() => parseInviteCode(inviteCode), [inviteCode]);
-  const canSubmit = validation.valid && !submitting;
-  const helperText =
+  const emailValid = isValidEmail(email);
+  const canSubmit = validation.valid && emailValid && !submitting;
+
+  const emailError =
+    emailTouched && !emailValid && email.trim().length > 0
+      ? 'Enter a valid email address.'
+      : null;
+
+  const codeError =
     serverError ??
-    (validation.valid
-      ? 'Invite ready.'
-      : touched
-        ? getInviteCodeValidationMessage(validation.reason)
-        : 'Use the private beta invite shared with you.');
+    (codeTouched && !validation.valid
+      ? getInviteCodeValidationMessage(validation.reason)
+      : null);
+
+  const animateLookDown = useCallback(
+    (focused: boolean) => {
+      if (focused) {
+        focusCount.value += 1;
+        lookDownOffset.value = withTiming(LOOK_DOWN_AMOUNT, {
+          duration: LOOK_DOWN_DURATION_MS,
+          easing: Easing.out(Easing.cubic),
+        });
+      } else {
+        focusCount.value -= 1;
+        // Only look back up if all inputs lost focus
+        if (focusCount.value <= 0) {
+          focusCount.value = 0;
+          lookDownOffset.value = withTiming(0, {
+            duration: LOOK_DOWN_DURATION_MS,
+            easing: Easing.out(Easing.cubic),
+          });
+        }
+      }
+    },
+    [focusCount, lookDownOffset],
+  );
 
   useEffect(() => {
     if (inviteAccessVerified) {
@@ -82,19 +131,27 @@ export default function InviteCodeScreen(): React.JSX.Element {
     }
 
     let cancelled = false;
-    void getStoredInviteCode().then((storedCode) => {
-      if (!cancelled && storedCode != null) {
-        setInviteCode(storedCode);
-      }
-    });
+    void Promise.all([getStoredInviteCode(), getStoredInviteEmail()]).then(
+      ([storedCode, storedEmail]) => {
+        if (cancelled) return;
+        if (storedCode != null) setInviteCode(storedCode);
+        if (storedEmail != null) setEmail(storedEmail);
+      },
+    );
 
     return () => {
       cancelled = true;
     };
   }, [inviteAccessVerified]);
 
+  const handleEmailChange = useCallback((value: string): void => {
+    setEmailTouched(true);
+    setServerError(null);
+    setEmail(value.trim());
+  }, []);
+
   const handleInviteChange = useCallback((value: string): void => {
-    setTouched(true);
+    setCodeTouched(true);
     setServerError(null);
     setInviteCode(normalizeInviteCodeInput(value));
   }, []);
@@ -102,16 +159,21 @@ export default function InviteCodeScreen(): React.JSX.Element {
   const handleVerify = useCallback(async (): Promise<void> => {
     if (submitting) return;
 
-    setTouched(true);
+    setEmailTouched(true);
+    setCodeTouched(true);
     setServerError(null);
+
+    if (!isValidEmail(email)) return;
 
     const parsed = parseInviteCode(inviteCode);
     if (!parsed.valid) return;
 
     setSubmitting(true);
     try {
-      await verifyInviteCode(parsed.normalizedCode);
+      await verifyInviteCode(parsed.normalizedCode, email.trim().toLowerCase());
       await storeInviteCode(parsed.normalizedCode);
+      await storeInviteEmail(email);
+      setInviteEmail(email.trim().toLowerCase());
       setInviteAccessVerified(true);
       router.replace('/onboarding');
     } catch (error) {
@@ -119,7 +181,7 @@ export default function InviteCodeScreen(): React.JSX.Element {
     } finally {
       setSubmitting(false);
     }
-  }, [inviteCode, setInviteAccessVerified, submitting]);
+  }, [email, inviteCode, setInviteAccessVerified, setInviteEmail, submitting]);
 
   return (
     <KeyboardAvoidingView
@@ -140,18 +202,14 @@ export default function InviteCodeScreen(): React.JSX.Element {
         contentInsetAdjustmentBehavior="never"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.brandLockup}>
-          <Image
-            source={APP_ICON_SOURCE}
-            style={styles.brandIcon}
-            contentFit="contain"
-            tintColor={colors.brand.whiteStream}
-            transition={0}
-            accessible={false}
+        {/* Animated logo — eyes look down when user is typing */}
+        <View style={styles.logoContainer}>
+          <AnimatedOffPayLogo
+            size={logoSize}
+            bodyColor={colors.brand.whiteStream}
+            eyeColor={colors.brand.deepShadow}
+            lookDownOffset={lookDownOffset}
           />
-          <Text variant="h2" color={colors.text.primary} style={styles.brandText}>
-            OffPay
-          </Text>
         </View>
 
         <View style={styles.card}>
@@ -169,10 +227,54 @@ export default function InviteCodeScreen(): React.JSX.Element {
               Invite access
             </Text>
             <Text variant="body" color={colors.text.secondary} align="center" style={styles.subtitle}>
-              Verify your private beta code to continue.
+              Enter your email and private beta code to continue.
             </Text>
           </View>
 
+          {/* Email input */}
+          <View style={styles.inputGroup}>
+            <Text variant="captionBold" color={colors.text.secondary} style={styles.inputLabel}>
+              Email
+            </Text>
+            <View
+              style={[
+                styles.inputFrame,
+                emailValid && emailTouched ? styles.inputFrameReady : null,
+              ]}
+            >
+              <TextInput
+                value={email}
+                onChangeText={handleEmailChange}
+                onFocus={() => animateLookDown(true)}
+                onBlur={() => animateLookDown(false)}
+                placeholder="you@example.com"
+                placeholderTextColor={colors.text.placeholder}
+                autoCapitalize="none"
+                autoCorrect={false}
+                spellCheck={false}
+                keyboardType="email-address"
+                textContentType="emailAddress"
+                autoComplete="email"
+                returnKeyType="next"
+                maxLength={320}
+                numberOfLines={1}
+                style={styles.emailInput}
+              />
+            </View>
+            <View style={styles.errorSlot}>
+              {emailError != null ? (
+                <Text
+                  variant="small"
+                  color={colors.semantic.error}
+                  numberOfLines={1}
+                >
+                  {emailError}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+
+          {/* Invite code input */}
           <View style={styles.inputGroup}>
             <Text variant="captionBold" color={colors.text.secondary} style={styles.inputLabel}>
               Invite code
@@ -181,6 +283,8 @@ export default function InviteCodeScreen(): React.JSX.Element {
               <TextInput
                 value={inviteCode}
                 onChangeText={handleInviteChange}
+                onFocus={() => animateLookDown(true)}
+                onBlur={() => animateLookDown(false)}
                 onSubmitEditing={() => {
                   void handleVerify();
                 }}
@@ -197,14 +301,17 @@ export default function InviteCodeScreen(): React.JSX.Element {
                 style={styles.input}
               />
             </View>
-            <Text
-              variant="small"
-              color={serverError != null || (!validation.valid && touched) ? colors.semantic.error : colors.text.secondary}
-              style={styles.helperText}
-              numberOfLines={2}
-            >
-              {helperText}
-            </Text>
+            <View style={styles.errorSlot}>
+              {codeError != null ? (
+                <Text
+                  variant="small"
+                  color={colors.semantic.error}
+                  numberOfLines={1}
+                >
+                  {codeError}
+                </Text>
+              ) : null}
+            </View>
           </View>
 
           <GlassActionButton
@@ -233,27 +340,17 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     justifyContent: 'center',
-    gap: spacing['3xl'],
+    gap: spacing.xl,
   },
-  brandLockup: {
-    flexDirection: 'row',
+  logoContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  brandIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-  },
-  brandText: {
-    fontFamily: fontFamily.uiSemiBold,
   },
   card: {
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
-    gap: spacing['2xl'],
+    gap: spacing.xl,
     padding: spacing['2xl'],
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
@@ -309,6 +406,14 @@ const styles = StyleSheet.create({
   inputFrameReady: {
     borderColor: colors.border.strong,
   },
+  emailInput: {
+    minHeight: 48,
+    padding: 0,
+    color: colors.text.primary,
+    fontFamily: fontFamily.uiMedium,
+    fontSize: 15,
+    letterSpacing: 0.1,
+  },
   input: {
     minHeight: 48,
     padding: 0,
@@ -317,8 +422,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.2,
   },
-  helperText: {
-    minHeight: 32,
-    fontFamily: fontFamily.uiMedium,
+  errorSlot: {
+    height: 18,
+    justifyContent: 'center',
   },
 });

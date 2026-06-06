@@ -48,6 +48,7 @@ const bootstrapPostBodySchema = z.object({
   deviceId: z.string().min(1).max(MAX_DEVICE_ID_LENGTH),
   attestationKeyId: z.string().min(1).max(MAX_ATTESTATION_KEY_ID_LENGTH).optional(),
   inviteCode: z.string().max(MAX_INVITE_CODE_LENGTH).optional(),
+  email: z.string().max(320).optional(),
 });
 
 interface BootstrapPublicHeaders {
@@ -397,6 +398,7 @@ bootstrapRoutes.post('/provision', async (context) => {
     walletAddress: body.walletAddress,
     deviceId: body.deviceId,
     inviteCode: body.inviteCode,
+    email: body.email,
   });
 
   const bootstrapVersion = getBootstrapSecretVersion(context.env);

@@ -9,6 +9,7 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
@@ -69,6 +70,8 @@ export interface AnimatedOffPayLogoProps {
   size?: number;
   bodyColor?: string;
   eyeColor?: string;
+  /** Shared value that shifts the eyes down when positive. Additive to the keyframe animation. */
+  lookDownOffset?: SharedValue<number>;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -76,6 +79,7 @@ export function AnimatedOffPayLogo({
   size = 132,
   bodyColor = colors.brand.whiteStream,
   eyeColor = colors.brand.deepShadow,
+  lookDownOffset,
   style,
 }: AnimatedOffPayLogoProps): React.JSX.Element {
   const progress = useSharedValue(0);
@@ -94,7 +98,9 @@ export function AnimatedOffPayLogo({
 
   const leftEyeProps = useAnimatedProps(() => {
     const offsetX = interpolate(progress.value, KEYFRAME_POINTS, EYE_X, Extrapolation.CLAMP);
-    const offsetY = interpolate(progress.value, KEYFRAME_POINTS, EYE_Y, Extrapolation.CLAMP);
+    const keyframeY = interpolate(progress.value, KEYFRAME_POINTS, EYE_Y, Extrapolation.CLAMP);
+    const externalY = lookDownOffset != null ? lookDownOffset.value : 0;
+    const offsetY = keyframeY + externalY;
     const scaleY = interpolate(progress.value, KEYFRAME_POINTS, EYE_SCALE_Y, Extrapolation.CLAMP);
     const height = Math.max(EYE_MIN_HEIGHT, EYE_HEIGHT * scaleY);
     const bottom = EYE_TOP + EYE_HEIGHT;
@@ -106,7 +112,9 @@ export function AnimatedOffPayLogo({
 
   const rightEyeProps = useAnimatedProps(() => {
     const offsetX = interpolate(progress.value, KEYFRAME_POINTS, EYE_X, Extrapolation.CLAMP);
-    const offsetY = interpolate(progress.value, KEYFRAME_POINTS, EYE_Y, Extrapolation.CLAMP);
+    const keyframeY = interpolate(progress.value, KEYFRAME_POINTS, EYE_Y, Extrapolation.CLAMP);
+    const externalY = lookDownOffset != null ? lookDownOffset.value : 0;
+    const offsetY = keyframeY + externalY;
     const scaleY = interpolate(progress.value, KEYFRAME_POINTS, EYE_SCALE_Y, Extrapolation.CLAMP);
     const height = Math.max(EYE_MIN_HEIGHT, EYE_HEIGHT * scaleY);
     const bottom = EYE_TOP + EYE_HEIGHT;

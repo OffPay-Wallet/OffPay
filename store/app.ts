@@ -18,6 +18,9 @@ interface AppState {
   /** Whether this install has passed invite-code verification before onboarding */
   inviteAccessVerified: boolean;
 
+  /** Email address submitted during invite-code verification */
+  inviteEmail: string | null;
+
   /** User's preferred color scheme override (null = system default) */
   colorScheme: 'light' | 'dark' | null;
 
@@ -30,6 +33,7 @@ interface AppState {
   /** Actions */
   setHasOnboarded: (value: boolean) => void;
   setInviteAccessVerified: (value: boolean) => void;
+  setInviteEmail: (email: string | null) => void;
   setColorScheme: (scheme: 'light' | 'dark' | null) => void;
   setUsername: (username: string | null) => void;
   setProfileImageUri: (uri: string | null) => void;
@@ -40,12 +44,14 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       hasOnboarded: false,
       inviteAccessVerified: false,
+      inviteEmail: null,
       colorScheme: null,
       username: null,
       profileImageUri: null,
 
       setHasOnboarded: (value) => set({ hasOnboarded: value }),
       setInviteAccessVerified: (value) => set({ inviteAccessVerified: value }),
+      setInviteEmail: (email) => set({ inviteEmail: email ? email.trim().toLowerCase() : null }),
       setColorScheme: (scheme) => set({ colorScheme: scheme }),
       setUsername: (username) => set({ username: formatOffpayUsername(username) }),
       setProfileImageUri: (uri) => set({ profileImageUri: uri }),

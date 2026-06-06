@@ -111,10 +111,10 @@ export function getInviteCodeValidationMessage(reason: InviteCodeValidationReaso
     case 'too_long':
       return 'Invite code is too long.';
     case 'invalid_format':
-      return 'Use the invite format OFFPAY-B1-XXXXXXXXXXXX-00.';
+      return 'Invalid invite code format.';
     case 'invalid_checksum':
-      return 'Invite code has a typo. Check the last two digits.';
+      return 'Typo detected — check the last two digits.';
     default:
-      return 'Invite code looks ready.';
+      return '';
   }
 }

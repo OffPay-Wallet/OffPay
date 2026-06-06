@@ -10,11 +10,13 @@ interface InviteAccessParams {
   walletAddress: string;
   deviceId: string;
   inviteCode?: string | null;
+  email?: string | null;
 }
 
 interface InviteVerificationResult {
   segment: string | null;
   gate: 'disabled' | 'required';
+  email: string | null;
 }
 
 interface InviteCodeDocument {
@@ -162,6 +164,32 @@ async function findExistingInviteAccess(
   return document?.status === 'active';
 }
 
+/**
+ * Look up an existing invite_access record by the code hash and email.
+ * This allows returning users (cache wipe, device change) to re-verify
+ * a used code as long as they supply the same email they originally used.
+ */
+async function findInviteAccessByCodeAndEmail(
+  config: InviteGateConfig,
+  inviteCodeHash: string,
+  email: string,
+): Promise<boolean> {
+  const document = await withMongoDatabase(config, (db) =>
+    inviteAccessCollection(db).findOne(
+      {
+        invite_code_hash: inviteCodeHash,
+        email,
+        status: 'active',
+      },
+      {
+        projection: { _id: 1 },
+      },
+    ),
+  );
+
+  return document != null;
+}
+
 async function upsertInviteAccess(params: {
   config: InviteGateConfig;
   walletAddress: string;
@@ -169,6 +197,7 @@ async function upsertInviteAccess(params: {
   inviteCodeHash: string;
   segment: string;
   nowIso: string;
+  email?: string | null;
 }): Promise<void> {
   await withMongoDatabase(params.config, async (db) => {
     await inviteAccessCollection(db).updateOne(
@@ -180,12 +209,14 @@ async function upsertInviteAccess(params: {
         $set: {
           status: 'active',
           updated_at: params.nowIso,
+          ...(params.email != null ? { email: params.email } : {}),
         },
         $setOnInsert: {
           wallet_address: params.walletAddress,
           device_id_hash: params.deviceIdHash,
           invite_code_hash: params.inviteCodeHash,
           invite_code_segment: params.segment,
+          ...(params.email != null ? { email: params.email } : {}),
           created_at: params.nowIso,
         },
       },
@@ -306,14 +337,17 @@ export async function verifyInviteCodeForAccess(
   bindings: Bindings,
   inviteCode: string | null | undefined,
   deviceId?: string | null,
+  email?: string | null,
 ): Promise<InviteVerificationResult> {
   const parsedInvite = parseRequiredInviteCode(inviteCode);
   const config = getInviteGateConfig(bindings);
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : null;
 
   if (!config.enabled) {
     return {
       segment: parsedInvite.segment,
       gate: 'disabled',
+      email: normalizedEmail,
     };
   }
 
@@ -333,6 +367,7 @@ export async function verifyInviteCodeForAccess(
     return {
       segment: document.segment ?? parsedInvite.segment,
       gate: 'required',
+      email: normalizedEmail,
     };
   }
 
@@ -344,7 +379,29 @@ export async function verifyInviteCodeForAccess(
     return {
       segment: document.segment ?? parsedInvite.segment,
       gate: 'required',
+      email: normalizedEmail,
     };
+  }
+
+  // Case 3: Code is used + different device, but same email as original verification.
+  // This handles cache wipes, device switches, and reinstalls.
+  if (
+    document?.status === 'used' &&
+    normalizedEmail != null &&
+    normalizedEmail.length > 0
+  ) {
+    const emailMatches = await findInviteAccessByCodeAndEmail(
+      config,
+      codeHash,
+      normalizedEmail,
+    );
+    if (emailMatches) {
+      return {
+        segment: document.segment ?? parsedInvite.segment,
+        gate: 'required',
+        email: normalizedEmail,
+      };
+    }
   }
 
   throwInviteCodeStateError(document, nowIso);
@@ -358,6 +415,7 @@ export async function ensureInviteAccessForBootstrap(
   if (!config.enabled) return;
 
   const deviceIdHash = await sha256Hex(`${config.pepper}:${params.deviceId}`);
+  const normalizedEmail = typeof params.email === 'string' ? params.email.trim().toLowerCase() : null;
   if (await findExistingInviteAccess(config, params.walletAddress, deviceIdHash)) {
     return;
   }
@@ -382,6 +440,7 @@ export async function ensureInviteAccessForBootstrap(
       inviteCodeHash: codeHash,
       segment: parsedInvite.segment,
       nowIso,
+      email: normalizedEmail,
     });
     return;
   }
@@ -400,8 +459,36 @@ export async function ensureInviteAccessForBootstrap(
       inviteCodeHash: codeHash,
       segment: document.segment ?? parsedInvite.segment,
       nowIso,
+      email: normalizedEmail,
     });
     return;
+  }
+
+  // Case 4: Code is used by a different wallet+device, but same email
+  // as the original invite_access record. This handles cache wipes and
+  // device switches where the user is re-onboarding with the same email.
+  if (
+    document?.status === 'used' &&
+    normalizedEmail != null &&
+    normalizedEmail.length > 0
+  ) {
+    const emailMatches = await findInviteAccessByCodeAndEmail(
+      config,
+      codeHash,
+      normalizedEmail,
+    );
+    if (emailMatches) {
+      await upsertInviteAccess({
+        config,
+        walletAddress: params.walletAddress,
+        deviceIdHash,
+        inviteCodeHash: codeHash,
+        segment: document.segment ?? parsedInvite.segment,
+        nowIso,
+        email: normalizedEmail,
+      });
+      return;
+    }
   }
 
   throwInviteCodeStateError(document, nowIso);

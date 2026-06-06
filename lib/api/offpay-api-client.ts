@@ -877,11 +877,14 @@ export async function buildOffpayPublicReadHeaders(): Promise<Record<string, str
   };
 }
 
-export async function verifyInviteCode(inviteCode: string): Promise<InviteVerifyResponse> {
+export async function verifyInviteCode(
+  inviteCode: string,
+  email: string,
+): Promise<InviteVerifyResponse> {
   return offpayPublicRequest<InviteVerifyResponse>({
     path: '/api/invite/verify',
     method: 'POST',
-    body: { inviteCode },
+    body: { inviteCode, email },
     headers: await buildOffpayPublicReadHeaders(),
   });
 }

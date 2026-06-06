@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { parseInviteCode } from '@/shared/invite-codes';
 
 const INVITE_ACCESS_KEY = 'offpay_invite_code';
+const INVITE_EMAIL_KEY = 'offpay_invite_email';
 
 const INVITE_ACCESS_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -32,4 +33,24 @@ export async function getStoredInviteCode(): Promise<string | null> {
 
 export async function clearStoredInviteCode(): Promise<void> {
   await SecureStore.deleteItemAsync(INVITE_ACCESS_KEY, INVITE_ACCESS_OPTIONS);
+}
+
+export async function storeInviteEmail(email: string): Promise<void> {
+  const trimmed = email.trim().toLowerCase();
+  if (trimmed.length === 0) {
+    throw new Error('Email is required.');
+  }
+
+  await SecureStore.setItemAsync(INVITE_EMAIL_KEY, trimmed, INVITE_ACCESS_OPTIONS);
+}
+
+export async function getStoredInviteEmail(): Promise<string | null> {
+  const stored = await SecureStore.getItemAsync(INVITE_EMAIL_KEY, INVITE_ACCESS_OPTIONS);
+  if (stored == null || stored.trim().length === 0) return null;
+
+  return stored.trim().toLowerCase();
+}
+
+export async function clearStoredInviteEmail(): Promise<void> {
+  await SecureStore.deleteItemAsync(INVITE_EMAIL_KEY, INVITE_ACCESS_OPTIONS);
 }

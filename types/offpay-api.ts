@@ -74,6 +74,7 @@ interface BootstrapProvisionCore {
   nonce: string;
   platform: 'ios' | 'android';
   inviteCode?: string;
+  email?: string;
 }
 
 interface BootstrapProvisionAuthFields {
@@ -117,6 +118,7 @@ export interface InviteVerifyResponse {
   verified: true;
   segment: string | null;
   gate: 'disabled' | 'required';
+  email: string;
 }
 
 export interface WalletBalanceResponse {

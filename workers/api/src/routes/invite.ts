@@ -11,9 +11,16 @@ import { ensureSupportedVersionFormat, readJsonBody } from '../lib/validation.js
 const MAX_APP_VERSION_LENGTH = 32;
 const MAX_DEVICE_ID_LENGTH = 128;
 const MAX_INVITE_CODE_LENGTH = 64;
+const MAX_EMAIL_LENGTH = 320;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const inviteVerifyBodySchema = z.object({
   inviteCode: z.string().min(1).max(MAX_INVITE_CODE_LENGTH),
+  email: z
+    .string()
+    .min(1, 'Email is required.')
+    .max(MAX_EMAIL_LENGTH)
+    .regex(EMAIL_PATTERN, 'Invalid email address.'),
 });
 
 function getMinimumAppVersion(env: AppEnv['Bindings']): string {
@@ -90,13 +97,19 @@ inviteRoutes.post('/verify', async (context) => {
     'Request body is required.',
     'Malformed invite verification request body.',
   );
-  const verification = await verifyInviteCodeForAccess(context.env, body.inviteCode, deviceId);
+  const verification = await verifyInviteCodeForAccess(
+    context.env,
+    body.inviteCode,
+    deviceId,
+    body.email,
+  );
 
   return context.json(
     {
       verified: true,
       segment: verification.segment,
       gate: verification.gate,
+      email: body.email,
     },
     200,
   );
