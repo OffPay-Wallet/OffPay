@@ -67,6 +67,7 @@ npx wrangler secret put KV_REST_API_URL
 npx wrangler secret put KV_REST_API_TOKEN
 npx wrangler secret put OFFPAY_BOOTSTRAP_SECRET
 npx wrangler secret put OFFPAY_BACKUP_HMAC_SECRET
+npx wrangler secret put OFFPAY_DEVNET_FAUCET_SECRET_KEY
 ```
 
 Prototype Android bootstrap does not require Google Play Integrity or a Google service account.
@@ -87,6 +88,23 @@ openssl rand -hex 32
 
 Do not reuse the same value for `OFFPAY_BOOTSTRAP_SECRET` and `OFFPAY_BACKUP_HMAC_SECRET`.
 If `OFFPAY_BOOTSTRAP_SECRET` is rotated, increment `BOOTSTRAP_SECRET_VERSION` so clients reprovision.
+
+`OFFPAY_DEVNET_FAUCET_SECRET_KEY` funds the in-app Devnet faucet by signing normal Devnet
+transactions from a dedicated treasury wallet. Store a base58-encoded 64-byte Solana secret key, or
+a 32-byte seed, and fund that wallet on Devnet. This avoids calling Solana's public
+`requestAirdrop` faucet from the mobile app.
+
+The Devnet faucet is backend-gated to one claim per authenticated wallet every 4 hours. It sends
+0.25 Devnet SOL and tops token balances up to these per-wallet caps:
+
+- `dUSDC`: 100 tokens on mint `4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7`
+- `dUSDT`: 100 tokens on mint `DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6`
+- `USDC`: 5 tokens on `OFFPAY_DEVNET_USDC_MINT`, defaulting to
+  `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+Fund the treasury wallet's associated token accounts for those three mints. The treasury also pays
+the 0.25 SOL transfer, transaction fees, and recipient associated-token-account rent when a wallet
+does not already have those token accounts.
 
 `workers/api/.dev.vars` is ignored by git. Use `workers/api/.dev.vars.example` as the local template.
 

@@ -17,6 +17,7 @@ import { useOffpayAuthStore } from '@/store/offpayAuthStore';
 import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
 import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransitionStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
+import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useSettlementEngineStore } from '@/store/settlementEngineStore';
 import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
@@ -74,6 +75,7 @@ function resetWalletScopedStores(): void {
     recipientHistoryClearedAtByWallet: {},
   });
   usePrivatePaymentStore.setState({ receipts: [] });
+  useAdvancedSwapStore.setState({ receipts: [] });
   useUmbraPrivacyStore.setState({
     receipts: [],
     registeredVaultKeys: [],

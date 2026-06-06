@@ -56,6 +56,7 @@ export type Bindings = {
   OFFPAY_DEVNET_USDT_MINT?: string;
   OFFPAY_MAINNET_USDC_MINT?: string;
   OFFPAY_MAINNET_USDT_MINT?: string;
+  OFFPAY_DEVNET_FAUCET_SECRET_KEY?: string;
   OFFPAY_IOS_TEAM_ID?: string;
   OFFPAY_IOS_BUNDLE_ID?: string;
   OFFPAY_ANDROID_PACKAGE_NAME?: string;

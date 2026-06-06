@@ -12,6 +12,7 @@ import {
   getRpcSlot,
   getRpcTokenLargestAccounts,
 } from '../lib/helius.js';
+import { requestDevnetTreasuryAirdrop } from '../lib/devnet-faucet.js';
 import { AppError } from '../lib/errors.js';
 import type { AppEnv, Network } from '../lib/types.js';
 import {
@@ -61,6 +62,11 @@ const signaturesForAddressBodySchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   before: z.string().trim().min(1).optional(),
   network: networkSchema,
+});
+
+const devnetAirdropBodySchema = z.object({
+  walletAddress: z.string().trim().min(1),
+  network: z.literal('devnet'),
 });
 
 function assertRequestedNetwork(requestedNetwork: Network, authenticatedNetwork: Network): void {
@@ -264,6 +270,35 @@ rpcRoutes.post('/broadcast', async (context) => {
     await broadcastRawTransaction(context.env, {
       rawTransaction: body.rawTransaction,
       network: body.network,
+    }),
+  );
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+});
+
+rpcRoutes.post('/devnet-airdrop', async (context) => {
+  const authenticatedContext = getAuthenticatedContext(context);
+  const body = await readJsonBody(
+    context.req.raw,
+    devnetAirdropBodySchema,
+    'Request body is required.',
+    'Malformed devnet airdrop request body.',
+  );
+
+  assertRequestedNetwork(body.network, authenticatedContext.network);
+  assertWalletAddress(body.walletAddress, 'Wallet address is invalid.');
+
+  if (body.walletAddress !== authenticatedContext.wallet) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Airdrop wallet must match the authenticated wallet.',
+    });
+  }
+
+  const response = context.json(
+    await requestDevnetTreasuryAirdrop(context.env, {
+      walletAddress: body.walletAddress,
     }),
   );
   response.headers.set('Cache-Control', 'no-store');

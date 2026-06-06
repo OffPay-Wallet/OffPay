@@ -397,6 +397,27 @@ describe('offpay-wallet-data', () => {
     expect(isWalletActivityIncomingP2pTransfer(event)).toBe(false);
   });
 
+  it('filters direction-only backend rows until amount metadata or a local receipt is available', () => {
+    const transaction = buildTransaction({
+      type: 'unknown',
+      description: null,
+      amount: null,
+      rawAmount: null,
+      direction: 'send',
+      sender: null,
+      recipient: null,
+      tokenMint: null,
+      tokenSymbol: null,
+      tokenName: null,
+      tokenLogo: null,
+      tokenDecimals: null,
+      counterparties: [],
+    });
+
+    expect(isDisplayableWalletPaymentTransaction(transaction)).toBe(false);
+    expect(buildWalletRecentActivityItems({ transactions: [transaction] })).toEqual([]);
+  });
+
   it('enriches backend history rows with matching local offline receipt data', () => {
     const view = mapWalletTransactionForHistory(
       buildTransaction({

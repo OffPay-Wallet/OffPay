@@ -79,11 +79,13 @@ export interface OffpayHistoryTransactionGroup {
 
 export interface OffpayLocalReceiptViewInput {
   id: string;
+  type?: OffpayDisplayTransactionType;
   direction?: 'send' | 'receive';
   status?: 'queued' | 'received' | 'settling' | 'settled' | 'failed';
   title: string;
   subtitle: string;
   amountLabel?: string | null;
+  secondaryAmountLabel?: string | null;
   rawAmount?: string | null;
   tokenMint?: string | null;
   tokenSymbol?: string | null;
@@ -112,7 +114,14 @@ export function isOffpayLocalHistoryReceipt(
   receipt: Pick<OffpayLocalReceiptViewInput, 'id' | 'routeLabel'>,
 ): boolean {
   const id = receipt.id.trim().toLowerCase();
-  return isOffpayOfflineP2pReceipt(receipt) || id.startsWith('agentic-private-send-');
+  return (
+    isOffpayOfflineP2pReceipt(receipt) ||
+    id.startsWith('online-send-') ||
+    id.startsWith('online-receive-') ||
+    id.startsWith('private-send-') ||
+    id.startsWith('agentic-private-send-') ||
+    id.startsWith('swap-')
+  );
 }
 
 export function shortenWalletAddress(address: string, visibleChars = 4): string {
@@ -731,6 +740,64 @@ function getReceiptDetailAccountAddress(
   return address?.trim() || null;
 }
 
+function getLocalReceiptDisplayType(receipt: OffpayLocalReceiptViewInput): OffpayDisplayTransactionType {
+  if (receipt.type === 'send' || receipt.type === 'receive' || receipt.type === 'swap') {
+    return receipt.type;
+  }
+
+  return receipt.direction === 'send' ? 'send' : 'receive';
+}
+
+function getLocalReceiptDisplayDirection(
+  receipt: OffpayLocalReceiptViewInput,
+  type: OffpayDisplayTransactionType,
+): 'send' | 'receive' {
+  if (receipt.direction === 'send' || receipt.direction === 'receive') {
+    return receipt.direction;
+  }
+
+  return type === 'receive' ? 'receive' : 'send';
+}
+
+function getLocalReceiptTokenMetadata(
+  receipt: OffpayLocalReceiptViewInput,
+): TransactionTokenMetadata {
+  const mint = normalizeTransactionTokenMint(receipt.tokenMint);
+  const symbol = resolveTransactionTokenSymbol(receipt.tokenSymbol, mint);
+  const name = resolveTransactionTokenName(receipt.tokenName, symbol);
+  const logo = receipt.tokenLogo?.trim() || null;
+
+  return {
+    mint,
+    symbol,
+    name,
+    logo,
+  };
+}
+
+function formatLocalReceiptAmountLabel(
+  receipt: OffpayLocalReceiptViewInput,
+  type: OffpayDisplayTransactionType,
+): string | null {
+  const explicitLabel = receipt.amountLabel?.trim();
+  if (explicitLabel) return explicitLabel;
+
+  const token = getLocalReceiptTokenMetadata(receipt);
+  if (token.symbol == null) return null;
+
+  const amount = formatRawTokenAmount(receipt.rawAmount, receipt.tokenDecimals);
+  if (amount == null) return null;
+
+  const parsed = Number(amount.replace(/,/g, ''));
+  const absoluteAmount = Number.isFinite(parsed)
+    ? formatTokenAmount(String(Math.abs(parsed)))
+    : amount.replace(/^[+-]/, '');
+  const direction = getLocalReceiptDisplayDirection(receipt, type);
+  const sign = type === 'swap' ? '+' : direction === 'receive' ? '+' : '-';
+
+  return `${sign}${absoluteAmount} ${token.symbol}`;
+}
+
 function getTransactionDetailAccountAddress(
   type: OffpayDisplayTransactionType,
   counterparties: WalletTransactionsResponse['transactions'][number]['counterparties'],
@@ -915,12 +982,12 @@ function mergeLocalReceiptData<T extends OffpayRecentActivityView | OffpayHistor
 ): T {
   if (receipt == null) return view;
 
-  const receiptAmountLabel = receipt.amountLabel?.trim() || null;
-  const receiptTokenSymbol = receipt.tokenSymbol?.trim() || null;
-  const receiptTokenName = receipt.tokenName?.trim() || receiptTokenSymbol;
-  const receiptTokenMint = receipt.tokenMint?.trim() || null;
-  const receiptTokenLogo = receipt.tokenLogo?.trim() || null;
-  const shouldUseReceiptTone = view.amountLabel == null && receipt.direction != null;
+  const receiptAmountLabel = formatLocalReceiptAmountLabel(receipt, view.type);
+  const receiptToken = getLocalReceiptTokenMetadata(receipt);
+  const receiptDisplayType = getLocalReceiptDisplayType(receipt);
+  const receiptDirection = getLocalReceiptDisplayDirection(receipt, receiptDisplayType);
+  const receiptSecondaryAmountLabel = receipt.secondaryAmountLabel?.trim() || null;
+  const shouldUseReceiptTone = view.amountLabel == null && (receipt.direction != null || receipt.type != null);
   const privateRouteReceipt = receipt.privacyLabel?.trim().toLowerCase() === 'private route';
   const receiptAccountAddress = getReceiptDetailAccountAddress(receipt, view.type);
   const shouldUseReceiptSubtitle =
@@ -933,15 +1000,18 @@ function mergeLocalReceiptData<T extends OffpayRecentActivityView | OffpayHistor
     subtitle: shouldUseReceiptSubtitle ? receipt.subtitle : view.subtitle,
     sourceLabel: view.sourceLabel ?? receiptSourceLabel,
     amountLabel: view.amountLabel ?? receiptAmountLabel,
+    secondaryAmountLabel: view.secondaryAmountLabel ?? receiptSecondaryAmountLabel,
     amountTone: shouldUseReceiptTone
-      ? receipt.direction === 'receive'
+      ? receiptDisplayType === 'swap'
         ? 'positive'
-        : 'negative'
+        : receiptDirection === 'receive'
+          ? 'positive'
+          : 'negative'
       : view.amountTone,
-    tokenMint: view.tokenMint ?? receiptTokenMint,
-    tokenSymbol: view.tokenSymbol ?? receiptTokenSymbol,
-    tokenName: view.tokenName ?? receiptTokenName,
-    tokenLogo: view.tokenLogo ?? receiptTokenLogo,
+    tokenMint: view.tokenMint ?? receiptToken.mint,
+    tokenSymbol: view.tokenSymbol ?? receiptToken.symbol,
+    tokenName: view.tokenName ?? receiptToken.name,
+    tokenLogo: view.tokenLogo ?? receiptToken.logo,
     detailTimestampMs: view.detailTimestampMs ?? receipt.createdAt,
     detailNetwork: view.detailNetwork ?? receipt.network ?? null,
     detailSignature: view.detailSignature ?? receipt.signature?.trim() ?? null,
@@ -1059,16 +1129,11 @@ export function isDisplayableWalletActivityEvent(event: WalletActivityEvent): bo
 
   const amounts = parseWalletActivityAmounts(event);
   const rawType = normalizeTransactionTypeLabel(event.type);
+  const hasAmountSignal = Boolean(
+    amounts.length > 0 || event.amount?.trim() || event.rawAmount?.trim(),
+  );
   const hasPaymentSignal = Boolean(
-    amounts.length > 0 ||
-      event.amount?.trim() ||
-      event.rawAmount?.trim() ||
-      event.direction === 'send' ||
-      event.direction === 'receive' ||
-      event.sender?.trim() ||
-      event.recipient?.trim() ||
-      event.tokenMint?.trim() ||
-      event.tokenSymbol?.trim() ||
+    hasAmountSignal ||
       rawType.includes('swap') ||
       rawType.includes('transfer') ||
       rawType.includes('receive') ||
@@ -1079,6 +1144,7 @@ export function isDisplayableWalletActivityEvent(event: WalletActivityEvent): bo
   if (!hasPaymentSignal) {
     return !isUnenrichedWalletActivityEvent(event) && !isInternalWalletTransactionType(event.type);
   }
+  if (!hasAmountSignal) return false;
   if (isInternalWalletTransactionType(event.type) && amounts.length === 0) return false;
 
   const type = normalizeWalletActivityDisplayType(event, amounts);
@@ -1092,19 +1158,14 @@ export function isDisplayableWalletPaymentTransaction(
 
   const amounts = parseWalletTransactionAmounts(transaction);
   const rawType = normalizeTransactionTypeLabel(transaction.type);
+  const hasAmountSignal = Boolean(
+    amounts.length > 0 || transaction.amount?.trim() || transaction.rawAmount?.trim(),
+  );
   const hasPaymentSignal = Boolean(
-    amounts.length > 0 ||
-    transaction.amount?.trim() ||
-    transaction.rawAmount?.trim() ||
-    transaction.direction === 'send' ||
-    transaction.direction === 'receive' ||
-    transaction.sender?.trim() ||
-    transaction.recipient?.trim() ||
-    transaction.tokenMint?.trim() ||
-    transaction.tokenSymbol?.trim() ||
-    rawType.includes('swap') ||
-    rawType.includes('transfer') ||
-    rawType.includes('receive') ||
+    hasAmountSignal ||
+      rawType.includes('swap') ||
+      rawType.includes('transfer') ||
+      rawType.includes('receive') ||
     rawType.includes('send') ||
     rawType.includes('payment'),
   );
@@ -1115,6 +1176,7 @@ export function isDisplayableWalletPaymentTransaction(
       !isInternalWalletTransactionType(transaction.type)
     );
   }
+  if (!hasAmountSignal) return false;
   if (isInternalWalletTransactionType(transaction.type) && amounts.length === 0) return false;
 
   const type = normalizeWalletTransactionDisplayType(
@@ -1131,12 +1193,14 @@ export function isDisplayableWalletPaymentTransaction(
 export function mapLocalReceiptForRecentActivity(
   receipt: OffpayLocalReceiptViewInput,
 ): OffpayRecentActivityView {
-  const direction = receipt.direction ?? 'receive';
+  const type = getLocalReceiptDisplayType(receipt);
+  const direction = getLocalReceiptDisplayDirection(receipt, type);
   const status = receipt.status ?? 'received';
   const failed = status === 'failed';
   const settled = status === 'settled';
-  const type: OffpayDisplayTransactionType = direction === 'send' ? 'send' : 'receive';
   const detailAccountAddress = getReceiptDetailAccountAddress(receipt, type);
+  const token = getLocalReceiptTokenMetadata(receipt);
+  const amountLabel = formatLocalReceiptAmountLabel(receipt, type);
   const pendingLabel =
     status === 'queued'
       ? 'Queued offline'
@@ -1153,17 +1217,18 @@ export function mapLocalReceiptForRecentActivity(
   return {
     id: receipt.id,
     type,
-    title: failed ? 'Failed' : type === 'send' ? 'Sent' : 'Received',
+    title: failed ? 'Failed' : type === 'swap' ? 'Swapped' : type === 'send' ? 'Sent' : 'Received',
     subtitle: receipt.subtitle,
     sourceLabel:
       receipt.routeLabel?.trim() || (isOffpayOfflineP2pReceipt(receipt) ? 'Offline P2P' : null),
-    amountLabel: receipt.amountLabel ?? null,
-    secondaryAmountLabel: settled ? null : pendingLabel,
-    amountTone: failed ? 'failed' : direction === 'send' ? 'negative' : 'positive',
-    tokenMint: receipt.tokenMint ?? null,
-    tokenSymbol: receipt.tokenSymbol ?? null,
-    tokenName: receipt.tokenName ?? receipt.tokenSymbol ?? null,
-    tokenLogo: receipt.tokenLogo ?? null,
+    amountLabel,
+    secondaryAmountLabel: receipt.secondaryAmountLabel?.trim() || (settled ? null : pendingLabel),
+    amountTone:
+      failed ? 'failed' : type === 'swap' ? 'positive' : direction === 'send' ? 'negative' : 'positive',
+    tokenMint: token.mint,
+    tokenSymbol: token.symbol,
+    tokenName: token.name,
+    tokenLogo: token.logo,
     status: failed ? 'failed' : settled ? 'confirmed' : 'pending',
     detailTimestampMs: receipt.createdAt,
     detailNetwork: receipt.network ?? null,
@@ -1280,6 +1345,7 @@ export function selectOffpayLocalReceiptForWalletTransaction<
   );
 
   return (
+    receipts.find((receipt) => getLocalReceiptDisplayType(receipt) === type) ??
     receipts.find((receipt) => receipt.direction === type) ??
     receipts.find((receipt) => receipt.direction == null) ??
     receipts[0] ??
@@ -1289,8 +1355,14 @@ export function selectOffpayLocalReceiptForWalletTransaction<
 
 function getDisplayableWalletTransactions(
   transactions: WalletTransactionsResponse['transactions'],
+  receiptsBySignature?: ReadonlyMap<string, unknown>,
 ): WalletTransactionsResponse['transactions'] {
-  return sortTransactionsMostRecent(transactions).filter(isDisplayableWalletPaymentTransaction);
+  return sortTransactionsMostRecent(transactions).filter(
+    (transaction) =>
+      isDisplayableWalletPaymentTransaction(transaction) ||
+      (!isInternalWalletTransactionType(transaction.type) &&
+        receiptsBySignature?.has(transaction.signature) === true),
+  );
 }
 
 function getVisibleLocalReceipts(
@@ -1318,7 +1390,10 @@ export function buildWalletRecentActivityItems(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
-  const displayableTransactions = getDisplayableWalletTransactions(params.transactions);
+  const displayableTransactions = getDisplayableWalletTransactions(
+    params.transactions,
+    receiptsBySignature,
+  );
   const visibleLocalReceipts = getVisibleLocalReceipts(localReceipts, displayableTransactions);
   const mappedReceipts = includeUnmatchedLocalReceipts
     ? visibleLocalReceipts.map((receipt) => ({
@@ -1363,7 +1438,10 @@ export function buildWalletHistoryGroups(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
-  const displayableTransactions = getDisplayableWalletTransactions(params.transactions);
+  const displayableTransactions = getDisplayableWalletTransactions(
+    params.transactions,
+    receiptsBySignature,
+  );
   const visibleLocalReceipts = getVisibleLocalReceipts(localReceipts, displayableTransactions);
   const entries = [
     ...(includeUnmatchedLocalReceipts
@@ -1415,7 +1493,7 @@ export function groupWalletTransactionsByDate(
 ): OffpayHistoryTransactionGroup[] {
   const groups = new Map<string, OffpayHistoryTransactionView[]>();
 
-  for (const transaction of getDisplayableWalletTransactions(transactions)) {
+  for (const transaction of getDisplayableWalletTransactions(transactions, localReceiptsBySignature)) {
     const title = formatDateTitle(transaction.timestamp);
     const group = groups.get(title) ?? [];
     const matchingReceipts = localReceiptsBySignature?.get(transaction.signature);

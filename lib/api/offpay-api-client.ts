@@ -61,6 +61,8 @@ import type {
   PrivateInitMintResponse,
   PrivateSendRequest,
   PrivateSendResponse,
+  DevnetAirdropRequest,
+  DevnetAirdropResponse,
   QueryParams,
   RpcAccountsRequest,
   RpcAccountsResponse,
@@ -1178,6 +1180,17 @@ export function broadcastRawTransaction(
 ): Promise<RpcBroadcastResponse> {
   return offpayApiRequest<RpcBroadcastResponse>({
     path: '/api/rpc/broadcast',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+export function requestDevnetSolAirdrop(
+  request: DevnetAirdropRequest,
+): Promise<DevnetAirdropResponse> {
+  return offpayApiRequest<DevnetAirdropResponse>({
+    path: '/api/rpc/devnet-airdrop',
     method: 'POST',
     body: request,
     network: request.network,

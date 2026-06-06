@@ -675,6 +675,11 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     },
     onSuccess: (result) => {
       if (network == null) return;
+      const inputDecimals = inputToken?.decimals ?? inputTokenOption?.decimals ?? null;
+      const inputAmount =
+        rawAmount != null && inputDecimals != null
+          ? formatAtomicAmount(rawAmount, inputDecimals, 6)
+          : null;
       addReceipt({
         id: result.triggerId,
         mode: 'trigger',
@@ -682,7 +687,27 @@ export function AdvancedSwapScreen(): React.JSX.Element {
         subtitle: `Order ${shorten(result.triggerId)} · deposit ${shorten(result.depositSignature)}`,
         signature: result.depositSignature,
         network,
+        walletAddress,
         createdAt: Date.now(),
+        input: {
+          mint: inputToken?.mint ?? inputTokenOption?.mint ?? null,
+          symbol: inputTokenOption?.symbol ?? inputToken?.symbol ?? null,
+          name: inputTokenOption?.name ?? inputToken?.symbol ?? null,
+          logo: inputTokenOption?.logo ?? null,
+          decimals: inputDecimals,
+          rawAmount,
+          amountLabel:
+            inputAmount != null && (inputTokenOption?.symbol ?? inputToken?.symbol) != null
+              ? `-${inputAmount} ${inputTokenOption?.symbol ?? inputToken?.symbol}`
+              : null,
+        },
+        output: {
+          mint: outputToken?.mint ?? outputTokenOption?.mint ?? null,
+          symbol: outputTokenOption?.symbol ?? outputToken?.symbol ?? null,
+          name: outputTokenOption?.name ?? outputToken?.symbol ?? null,
+          logo: outputTokenOption?.logo ?? null,
+          decimals: outputToken?.decimals ?? outputTokenOption?.decimals ?? null,
+        },
       });
       void invalidateWalletData().catch(() => undefined);
     },
@@ -712,6 +737,11 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     },
     onSuccess: (result) => {
       if (network == null) return;
+      const inputDecimals = inputToken?.decimals ?? inputTokenOption?.decimals ?? null;
+      const inputAmount =
+        rawAmount != null && inputDecimals != null
+          ? formatAtomicAmount(rawAmount, inputDecimals, 6)
+          : null;
       addReceipt({
         id: result.recurringId,
         mode: 'recurring',
@@ -719,7 +749,27 @@ export function AdvancedSwapScreen(): React.JSX.Element {
         subtitle: `Plan ${shorten(result.recurringId)}`,
         signature: result.signature,
         network,
+        walletAddress,
         createdAt: Date.now(),
+        input: {
+          mint: inputToken?.mint ?? inputTokenOption?.mint ?? null,
+          symbol: inputTokenOption?.symbol ?? inputToken?.symbol ?? null,
+          name: inputTokenOption?.name ?? inputToken?.symbol ?? null,
+          logo: inputTokenOption?.logo ?? null,
+          decimals: inputDecimals,
+          rawAmount,
+          amountLabel:
+            inputAmount != null && (inputTokenOption?.symbol ?? inputToken?.symbol) != null
+              ? `-${inputAmount} ${inputTokenOption?.symbol ?? inputToken?.symbol}`
+              : null,
+        },
+        output: {
+          mint: outputToken?.mint ?? outputTokenOption?.mint ?? null,
+          symbol: outputTokenOption?.symbol ?? outputToken?.symbol ?? null,
+          name: outputTokenOption?.name ?? outputToken?.symbol ?? null,
+          logo: outputTokenOption?.logo ?? null,
+          decimals: outputToken?.decimals ?? outputTokenOption?.decimals ?? null,
+        },
       });
       void invalidateWalletData().catch(() => undefined);
     },

@@ -23,89 +23,22 @@ import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
-import { isOffpayOfflineP2pReceipt, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
-import { formatAtomicAmount } from '@/lib/policy/token-amounts';
+import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
+import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
-import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
+import { useWalletStore } from '@/store/walletStore';
 
 import type {
   OffpayHistoryTransactionView,
   OffpayLocalReceiptViewInput,
 } from '@/lib/api/offpay-wallet-data';
-import type { PrivatePaymentReceipt } from '@/store/privatePaymentStore';
-import type { UmbraPrivacyReceipt } from '@/store/umbraPrivacyStore';
 
 function runAfterTapFrame(task: () => void): void {
   requestAnimationFrame(() => {
     InteractionManager.runAfterInteractions(task);
   });
-}
-
-/**
- * Map an Umbra-side receipt (shield / unshield / register /
- * mixer-register) into the `OffpayLocalReceiptViewInput` shape that
- * `buildWalletHistoryGroups` already understands. Claim receipts stay
- * out of wallet history; claimed UTXO tracking lives in the privacy
- * store's insertion-index set instead.
- */
-function mapUmbraReceiptToHistoryInput(receipt: UmbraPrivacyReceipt): OffpayLocalReceiptViewInput {
-  // 'unshield' moves value back to the public balance; everything
-  // else either deposits into the encrypted balance or is a registry
-  // operation. Direction is best-effort and only used for the row
-  // amount tone in the history list.
-  const direction: 'send' | 'receive' = receipt.action === 'unshield' ? 'receive' : 'send';
-  return {
-    id: `umbra-${receipt.action}-${receipt.id}`,
-    direction,
-    status: 'settled',
-    title: receipt.title,
-    subtitle: receipt.subtitle,
-    createdAt: receipt.createdAt,
-    signature: receipt.signature ?? null,
-    network: receipt.network,
-    privacyLabel: 'Private',
-  };
-}
-
-function mapAgenticPrivateReceiptToHistoryInput(
-  receipt: PrivatePaymentReceipt,
-): OffpayLocalReceiptViewInput {
-  const decimals =
-    typeof receipt.tokenDecimals === 'number' && Number.isFinite(receipt.tokenDecimals)
-      ? receipt.tokenDecimals
-      : 6;
-  const symbol = receipt.tokenSymbol?.trim() || 'USDC';
-  const amountLabel = `-${formatAtomicAmount(receipt.amount, decimals)} ${symbol}`;
-  const reference = receipt.signature ?? receipt.txId ?? receipt.id;
-
-  return {
-    id: `agentic-private-send-${receipt.network}-${reference}`,
-    direction: 'send',
-    status: receipt.status === 'queued' ? 'queued' : 'settled',
-    title: 'Yuga transfer',
-    subtitle: `To ${shortenWalletAddress(receipt.recipient)}`,
-    amountLabel,
-    rawAmount: receipt.amount,
-    tokenMint: receipt.mint,
-    tokenSymbol: receipt.tokenSymbol ?? symbol,
-    tokenName: receipt.tokenName ?? receipt.tokenSymbol ?? symbol,
-    tokenLogo: receipt.tokenLogo ?? null,
-    tokenDecimals: decimals,
-    createdAt: receipt.createdAt,
-    signature: receipt.signature,
-    recipient: receipt.recipient,
-    network: receipt.network,
-    routeLabel: 'Yuga Transfer',
-    privacyLabel: receipt.route === 'normal' ? 'Public route' : 'Private route',
-    programLabel:
-      receipt.route === 'normal'
-        ? 'Normal transfer'
-        : receipt.route === 'umbra'
-          ? 'Umbra'
-          : 'MagicBlock',
-  };
 }
 
 const HEADER_CONTAINER_SHADOW =
@@ -117,27 +50,19 @@ export function HistoryScreenContent(): React.JSX.Element {
   const router = useRouter();
   const previousRoute = useTabHistoryStore((s) => s.previousRoute);
   const { network } = useOffpayNetwork();
+  const walletAddress = useWalletStore((s) => s.publicKey);
   const offlineReceipts = useOfflinePaymentStore((s) => s.receipts);
   const privatePaymentReceipts = usePrivatePaymentStore((s) => s.receipts);
-  const umbraReceipts = useUmbraPrivacyStore((s) => s.receipts);
+  const swapReceipts = useAdvancedSwapStore((s) => s.receipts);
   const localReceipts = useMemo<OffpayLocalReceiptViewInput[]>(() => {
-    const offline: OffpayLocalReceiptViewInput[] = offlineReceipts.filter(
-      (receipt) =>
-        (network == null || receipt.network === network) && isOffpayOfflineP2pReceipt(receipt),
-    );
-    const umbraInputs: OffpayLocalReceiptViewInput[] = umbraReceipts
-      .filter(
-        (receipt) => receipt.action !== 'claim' && (network == null || receipt.network === network),
-      )
-      .map(mapUmbraReceiptToHistoryInput);
-    const agenticPrivateInputs = privatePaymentReceipts
-      .filter(
-        (receipt) =>
-          receipt.source === 'agentic' && (network == null || receipt.network === network),
-      )
-      .map(mapAgenticPrivateReceiptToHistoryInput);
-    return [...offline, ...umbraInputs, ...agenticPrivateInputs];
-  }, [network, offlineReceipts, privatePaymentReceipts, umbraReceipts]);
+    return buildLocalHistoryReceiptInputs({
+      network,
+      walletAddress,
+      offlineReceipts,
+      privatePaymentReceipts,
+      swapReceipts,
+    });
+  }, [network, offlineReceipts, privatePaymentReceipts, swapReceipts, walletAddress]);
   const transactionsQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
     deferUntilAfterInteractions: true,

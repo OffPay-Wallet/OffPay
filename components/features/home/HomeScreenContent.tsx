@@ -59,8 +59,8 @@ import {
   buildWalletRecentActivityItems,
   buildVisibleTokenHoldings,
   countSpamTokens,
-  isOffpayOfflineP2pReceipt,
 } from '@/lib/api/offpay-wallet-data';
+import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
 import {
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
@@ -70,6 +70,8 @@ import { useSettlementEngineStore } from '@/store/settlementEngineStore';
 import { useWalletStore } from '@/store/walletStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
+import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
+import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
 import type { OffpayRecentActivityView } from '@/lib/api/offpay-wallet-data';
@@ -225,6 +227,8 @@ export function HomeScreenContent(): React.JSX.Element {
   const setOfflinePaymentsEnabled = usePreferencesStore((s) => s.setOfflinePaymentsEnabled);
   const setOfflinePaymentPoolSize = usePreferencesStore((s) => s.setOfflinePaymentPoolSize);
   const offlineReceipts = useOfflinePaymentStore((s) => s.receipts);
+  const privatePaymentReceipts = usePrivatePaymentStore((s) => s.receipts);
+  const swapReceipts = useAdvancedSwapStore((s) => s.receipts);
   const { network } = useOffpayNetwork();
   const getScreenSignal = useScreenAbortSignal();
   const [privacyHidden, setPrivacyHidden] = useState(false);
@@ -308,17 +312,27 @@ export function HomeScreenContent(): React.JSX.Element {
     enabled: backgroundStatsReady,
   });
   const recentActivity = useMemo(() => {
-    const localReceiptsForNetwork = offlineReceipts.filter(
-      (receipt) =>
-        (network == null || receipt.network === network) && isOffpayOfflineP2pReceipt(receipt),
-    );
+    const localReceiptsForNetwork = buildLocalHistoryReceiptInputs({
+      network,
+      walletAddress: publicKey,
+      offlineReceipts,
+      privatePaymentReceipts,
+      swapReceipts,
+    });
 
     return buildWalletRecentActivityItems({
       transactions: transactionsQuery.transactions,
       localReceipts: localReceiptsForNetwork,
       network,
     }).slice(0, MAX_HOME_ACTIVITY_ITEMS);
-  }, [network, offlineReceipts, transactionsQuery.transactions]);
+  }, [
+    network,
+    offlineReceipts,
+    privatePaymentReceipts,
+    publicKey,
+    swapReceipts,
+    transactionsQuery.transactions,
+  ]);
   const portfolioValueLabel =
     portfolioValuationQuery.data != null
       ? formatFiatCurrency(

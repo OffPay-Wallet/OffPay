@@ -499,6 +499,32 @@ export interface RpcBroadcastResponse {
   signature: string;
 }
 
+export interface DevnetAirdropRequest {
+  walletAddress: string;
+  network: 'devnet';
+}
+
+export interface DevnetAirdropResponse {
+  network: 'devnet';
+  walletAddress: string;
+  treasuryAddress: string;
+  signature: string;
+  lamports: string;
+  sol: number;
+  tokens: Array<{
+    symbol: 'dUSDC' | 'dUSDT' | 'USDC';
+    name: string;
+    mint: string;
+    decimals: number;
+    rawAmount: string;
+    amount: number;
+    capRawAmount: string;
+    capAmount: number;
+    recipientTokenAccount: string;
+  }>;
+  nextEligibleAt: number;
+}
+
 export interface RpcLatestBlockhashResponse {
   blockhash: string;
   lastValidBlockHeight: number;

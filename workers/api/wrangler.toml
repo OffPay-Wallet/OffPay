@@ -33,6 +33,7 @@ enabled = true
 # npx wrangler secret put KV_REST_API_TOKEN
 # npx wrangler secret put OFFPAY_BOOTSTRAP_SECRET
 # npx wrangler secret put OFFPAY_BACKUP_HMAC_SECRET
+# npx wrangler secret put OFFPAY_DEVNET_FAUCET_SECRET_KEY
 # Required only when OFFPAY_ANDROID_ATTESTATION_MODE = "play_integrity":
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY

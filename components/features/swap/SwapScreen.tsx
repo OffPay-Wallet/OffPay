@@ -122,6 +122,7 @@ import {
   sanitizeDecimalInput,
 } from '@/lib/policy/token-amounts';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
+import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { SwapQuoteResponse } from '@/types/offpay-api';
@@ -297,6 +298,7 @@ export function SwapScreen(): React.JSX.Element {
   const appliedRouteParamsRef = useRef('');
   const activeWalletId = useWalletStore((state) => state.activeWalletId);
   const walletAddress = useWalletStore((state) => state.publicKey);
+  const addSwapReceipt = useAdvancedSwapStore((state) => state.addReceipt);
   const { network } = useOffpayNetwork();
   const { isNetworkSwitching } = useOffpayNetworkAccess();
   const { effectiveWalletMode } = useWalletModeState();
@@ -1008,6 +1010,34 @@ export function SwapScreen(): React.JSX.Element {
           secondaryAmountLabel: `-${sentAmount} ${payToken.symbol}`,
           signature: result.signature,
         });
+        addSwapReceipt({
+          id: result.signature,
+          mode: 'normal',
+          title: 'Swap complete',
+          subtitle: `${sentAmount} ${payToken.symbol} to ${receivedAmount} ${receiveToken.symbol}`,
+          signature: result.signature,
+          network,
+          walletAddress,
+          createdAt: Date.now(),
+          input: {
+            mint: quote.inputMint,
+            symbol: payToken.symbol,
+            name: payToken.name,
+            logo: payToken.logo,
+            decimals: payToken.decimals,
+            rawAmount: quote.inAmount,
+            amountLabel: `-${sentAmount} ${payToken.symbol}`,
+          },
+          output: {
+            mint: quote.outputMint,
+            symbol: receiveToken.symbol,
+            name: receiveToken.name,
+            logo: receiveToken.logo,
+            decimals: receiveToken.decimals,
+            rawAmount: quote.outAmount,
+            amountLabel: `+${receivedAmount} ${receiveToken.symbol}`,
+          },
+        });
       }
       const resultScreen = buildSwapProcessResult({
         variant: 'success',
@@ -1112,6 +1142,33 @@ export function SwapScreen(): React.JSX.Element {
           amountLabel: `+${receivedAmount} ${review.receiveLeg.symbol}`,
           secondaryAmountLabel: `-${review.payLeg.amount} ${review.payLeg.symbol}`,
           signature: result.settlementSignature,
+        });
+        addSwapReceipt({
+          id: result.settlementSignature,
+          mode: 'privacy',
+          title: 'Private swap complete',
+          subtitle: `${review.payLeg.amount} ${review.payLeg.symbol} to ${receivedAmount} ${review.receiveLeg.symbol}`,
+          signature: result.settlementSignature,
+          network,
+          walletAddress,
+          createdAt: Date.now(),
+          input: {
+            mint: review.inputMint,
+            symbol: review.payLeg.symbol,
+            name: review.payLeg.name,
+            logo: review.payLeg.logo,
+            rawAmount: review.amountAtomic,
+            amountLabel: `-${review.payLeg.amount} ${review.payLeg.symbol}`,
+          },
+          output: {
+            mint: review.outputMint,
+            symbol: review.receiveLeg.symbol,
+            name: review.receiveLeg.name,
+            logo: review.receiveLeg.logo,
+            decimals: review.receiveDecimals,
+            rawAmount: result.settledAmount,
+            amountLabel: `+${receivedAmount} ${review.receiveLeg.symbol}`,
+          },
         });
       }
       const resultScreen = buildPrivateSwapProcessResult({

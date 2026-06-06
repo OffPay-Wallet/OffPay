@@ -1582,6 +1582,26 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             amountLabel: `-${displayAmount} ${selectedToken.symbol}`,
             signature: result.signature,
           });
+          addPrivateReceipt({
+            id: result.signature,
+            status: 'submitted',
+            route: 'normal',
+            source: 'manual',
+            walletAddress,
+            recipient: effectiveRecipientAddress,
+            mint: selectedToken.mint,
+            amount: amountRaw,
+            tokenSymbol: selectedToken.symbol,
+            tokenName: selectedToken.name,
+            tokenLogo: selectedToken.logo,
+            tokenDecimals: selectedToken.decimals,
+            network,
+            createdAt: Date.now(),
+            signature: result.signature,
+            txId: null,
+            initSignature: null,
+            message: 'Normal transfer submitted',
+          });
           setSendResult(nextResult);
           setResultTransitionDirection('forward');
           setSendProcessResult(
@@ -1683,6 +1703,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           recipient: effectiveRecipientAddress,
           mint: selectedToken.mint,
           amount: amountRaw,
+          tokenSymbol: selectedToken.symbol,
+          tokenName: selectedToken.name,
+          tokenLogo: selectedToken.logo,
+          tokenDecimals: selectedToken.decimals,
           network,
           createdAt: Date.now(),
           signature: result.status === 'submitted' ? result.signature : null,

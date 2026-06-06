@@ -250,7 +250,7 @@ function HomeHeaderComponent({
     setFaucetBusy(true);
     showToast({
       title: 'Airdrop requested',
-      message: 'Requesting 1 Devnet SOL.',
+      message: 'Requesting 0.25 Devnet SOL and test tokens.',
       variant: 'info',
       persistToNotificationCenter: false,
     });
@@ -260,7 +260,7 @@ function HomeHeaderComponent({
 
       showToast({
         title: 'Devnet SOL added',
-        message: `${result.sol} SOL sent to your wallet.`,
+        message: `${result.sol} SOL plus test tokens sent to your wallet.`,
         variant: 'success',
         persistToNotificationCenter: false,
       });

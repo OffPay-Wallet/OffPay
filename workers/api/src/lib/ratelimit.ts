@@ -89,6 +89,7 @@ const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['POST /api/rpc/signature-statuses', { limit: 30, windowSec: 60, scope: 'wallet' }],
   ['POST /api/rpc/signatures-for-address', { limit: 20, windowSec: 60, scope: 'wallet' }],
   ['POST /api/rpc/broadcast', { limit: 5, windowSec: 60, scope: 'wallet' }],
+  ['POST /api/rpc/devnet-airdrop', { limit: 1, windowSec: 4 * 60 * 60, scope: 'wallet' }],
   ['GET /api/umbra/utxos', { limit: 120, windowSec: 60, scope: 'wallet' }],
   ['GET /api/umbra/indexer-health', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['GET /api/umbra/trees', { limit: 20, windowSec: 60, scope: 'wallet' }],
