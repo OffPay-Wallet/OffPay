@@ -1959,6 +1959,7 @@ export function SwapScreen(): React.JSX.Element {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentInsetAdjustmentBehavior="automatic"
+            removeClippedSubviews={Platform.OS === 'android'}
           >
             <Animated.View
               entering={FadeIn.duration(400).delay(100)}

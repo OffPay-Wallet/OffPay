@@ -127,6 +127,13 @@ backend-docs/
 client-docs/
 applications/superteam-agentic-engineering-grant.md
 
+# Development documentation (temporary)
+INVITE_EMAIL_FIX.md
+PASSCODE_PERFORMANCE_FIX.md
+FAB_ANIMATION_FIX.md
+AI_VOICE_SYNC_FIX.md
+PERFORMANCE_FIXES_SUMMARY.md
+
 # ---------------------------------------------------------------------------
 # Third-party reference code (cloned for comparison, not part of app source)
 # ---------------------------------------------------------------------------

@@ -53,10 +53,9 @@ interface RecentActivityCardProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-// Flat card treatment — see BalanceCard. Soft ambient lift + 1px top
-// highlight only, with neutral dark depth instead of coloured glow.
-const HOME_CONTAINER_SHADOW =
-  '0 12px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14)';
+// Flat card treatment — single ambient shadow for lift on dark surfaces.
+// Inset shadows are invisible on Android and cause extra GPU blur passes.
+const HOME_CONTAINER_SHADOW = '0 10px 22px rgba(0, 0, 0, 0.4)';
 
 // ---------------------------------------------------------------------------
 // Sub-components

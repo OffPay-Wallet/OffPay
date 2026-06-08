@@ -10,7 +10,7 @@
  * Uses OffPay backend wallet and activity surfaces.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -1097,6 +1097,7 @@ export function HomeScreenContent(): React.JSX.Element {
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={Platform.OS === 'android'}
       >
         <Animated.View style={[styles.homeContentFrame, headerStyle]}>
           <HomeHeader

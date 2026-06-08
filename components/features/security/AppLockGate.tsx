@@ -751,12 +751,11 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
   const schedulePasscodeUnlock = useCallback(
     (candidate: string): void => {
       cancelScheduledPasscodeUnlock();
+      // Single frame delay for immediate responsiveness
       passcodeUnlockFrameRef.current = requestAppAnimationFrame(() => {
-        passcodeUnlockFrameRef.current = requestAppAnimationFrame(() => {
-          passcodeUnlockFrameRef.current = null;
-          if (passcodeRef.current !== candidate || unlockingRef.current) return;
-          void handlePasscodeUnlock(candidate);
-        });
+        passcodeUnlockFrameRef.current = null;
+        if (passcodeRef.current !== candidate || unlockingRef.current) return;
+        void handlePasscodeUnlock(candidate);
       });
     },
     [cancelScheduledPasscodeUnlock, handlePasscodeUnlock],
@@ -769,12 +768,16 @@ export function AppLockGate({ enabled }: AppLockGateProps): React.JSX.Element | 
       if (currentPasscode.length >= 6) return;
 
       const nextPasscode = `${currentPasscode}${digit}`;
-      setPasscodeValue(nextPasscode);
+      passcodeRef.current = nextPasscode;
+      
+      // Immediate state update without scheduling
+      setPasscodeLength(nextPasscode.length);
+      
       if (nextPasscode.length === 6) {
         schedulePasscodeUnlock(nextPasscode);
       }
     },
-    [inputDisabled, schedulePasscodeUnlock, setPasscodeValue],
+    [inputDisabled, schedulePasscodeUnlock],
   );
 
   const handleDelete = useCallback((): void => {

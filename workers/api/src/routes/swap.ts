@@ -335,7 +335,11 @@ swapRoutes.get('/tokens', async (context) => {
   const query = readSearchParams(context.req.url, swapTokensQuerySchema);
 
   const response = context.json(await getSwapTokens(context.env, query.network));
-  response.headers.set('Cache-Control', 'no-store');
+  // The response is identical for every caller and only depends on the
+  // requested network, so we let Cloudflare's edge cache it for as long as
+  // the in-process `SWAP_TOKENS_CACHE_TTL_MS` (5 min) holds. SWR keeps the
+  // user experience instant while a single PoP refreshes upstream.
+  response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
   return response;
 });
 
@@ -350,7 +354,10 @@ swapRoutes.get('/price', async (context) => {
       network: query.network,
     }),
   );
-  response.headers.set('Cache-Control', 'no-store');
+  // Matches the in-process `SWAP_PRICE_CACHE_TTL_MS` (10 sec). Prices are
+  // time-sensitive, so the TTL is short; SWR is also short to bound stale
+  // exposure if the upstream is briefly unreachable.
+  response.headers.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
   return response;
 });
 

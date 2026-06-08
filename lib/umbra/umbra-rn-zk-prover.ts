@@ -668,34 +668,76 @@ async function generateAndVerifyNativeCircomProof(
 
   for (const candidate of candidates) {
     const proofStartedAt = mark();
+    const proofStartTime = Date.now();
     try {
+      if (__DEV__) {
+        console.log(
+          `[umbra-prover] Starting ${candidate.name} proof generation for ${assetLabel}...`,
+        );
+      }
+
       const result: NativeCircomProofResult = await mopro.generateCircomProof(
         zkeyPath,
         serializedInputs,
         candidate.value,
       );
+
+      const proofDuration = Date.now() - proofStartTime;
+      if (__DEV__) {
+        console.log(
+          `[umbra-prover] ${candidate.name} proof generated in ${(proofDuration / 1000).toFixed(2)}s, verifying...`,
+        );
+      }
+
+      const verifyStartTime = Date.now();
       const locallyVerified = mopro.verifyCircomProof(zkeyPath, result, candidate.value);
+      const verifyDuration = Date.now() - verifyStartTime;
+
       measure('umbra.zkProver.generateProof', proofStartedAt, {
         asset: assetLabel,
         proofLib: candidate.name,
         ok: locallyVerified,
         localVerified: locallyVerified,
+        proofDurationMs: proofDuration,
+        verifyDurationMs: verifyDuration,
       });
+
+      if (__DEV__) {
+        console.log(
+          `[umbra-prover] ${candidate.name} proof verified in ${(verifyDuration / 1000).toFixed(2)}s, result: ${locallyVerified}`,
+        );
+      }
 
       if (!locallyVerified) {
         failures.push(`${candidate.name}: native proof did not verify locally`);
         continue;
       }
 
+      if (__DEV__) {
+        console.log(
+          `[umbra-prover] Total proof generation time: ${((proofDuration + verifyDuration) / 1000).toFixed(2)}s`,
+        );
+      }
+
       return convertNativeCircomProofToUmbraProofBytes(result.proof);
     } catch (proofError) {
+      const proofDuration = Date.now() - proofStartTime;
       const message = proofError instanceof Error ? proofError.message : String(proofError);
+
+      if (__DEV__) {
+        console.error(
+          `[umbra-prover] ${candidate.name} proof failed after ${(proofDuration / 1000).toFixed(2)}s:`,
+          message,
+        );
+      }
+
       measure('umbra.zkProver.generateProof', proofStartedAt, {
         asset: assetLabel,
         proofLib: candidate.name,
         ok: false,
         localVerified: false,
         error: message,
+        proofDurationMs: proofDuration,
       });
       failures.push(`${candidate.name}: ${message}`);
     }

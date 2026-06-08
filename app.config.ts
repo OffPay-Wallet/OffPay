@@ -31,6 +31,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
       icon: APP_ICON_PATH,
       bundleIdentifier: IOS_BUNDLE_IDENTIFIER,
       infoPlist: {
+        // ProMotion: allow UIKit/Reanimated to render above 60 Hz on supported iPhones.
+        CADisableMinimumFrameDurationOnPhone: true,
         NSBluetoothAlwaysUsageDescription:
           'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',
         NSBluetoothPeripheralUsageDescription:
@@ -67,6 +69,10 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     },
     androidStatusBar: {
       backgroundColor: BRAND_BACKGROUND_COLOR,
+      // Light icons (time, battery, signal) on the dark chrome — matches
+      // `StatusBar style="light"` in the root layout and edge-to-edge.
+      barStyle: 'light-content',
+      translucent: true,
     },
     web: {
       output: 'static',
@@ -160,6 +166,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
         },
       ],
       './plugins/with-ble-scan-location-permission',
+      './plugins/with-adaptive-display-refresh-rate',
       // Required by `@privy-io/expo` so the SDK can open the OAuth
       // flow in a Custom Tab on Android. The plugin wires up the
       // intent filter on the Android manifest side.
@@ -186,7 +193,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     ],
     extra: {
       eas: {
-        projectId: '27e2bc20-d53b-4237-8123-fdc22176e56b',
+        projectId: '6196cfd1-17a1-4cf3-9a01-cb70bc136da7',
       },
     },
     experiments: {

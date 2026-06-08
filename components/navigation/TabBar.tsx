@@ -83,28 +83,18 @@ const HAIRLINE = StyleSheet.hairlineWidth;
 const SCRIM_COLOR = colors.brand.glassTint;
 const SCRIM_OPACITY = 0.82;
 
-// Shadows — neutral lift only, no coloured glow.
-const BAR_SHADOW = [
-  '0 12px 28px rgba(0, 0, 0, 0.52)',
-  'inset 0 1px 1px rgba(255, 255, 255, 0.22)',
-  'inset 0 0 16px rgba(255, 255, 255, 0.05)',
-  'inset 0 -1px 3px rgba(0, 0, 0, 0.42)',
-].join(', ');
-const PILL_SHADOW = [
-  'inset 0 1px 1px rgba(255, 255, 255, 0.85)',
-  'inset 0 -1px 3px rgba(0, 0, 0, 0.12)',
-  '0 2px 6px rgba(0, 0, 0, 0.1)',
-].join(', ');
-const FAB_PUCK_SHADOW = [
-  '0 8px 20px rgba(0, 0, 0, 0.45)',
-  'inset 0 2px 2px rgba(255, 255, 255, 0.32)',
-  'inset 0 0 14px rgba(255, 255, 255, 0.06)',
-  'inset 0 -2px 4px rgba(0, 0, 0, 0.5)',
-].join(', ');
-const QUICK_ACTION_SHADOW = '0 12px 24px rgba(16, 16, 16, 0.18), 0 4px 10px rgba(16, 16, 16, 0.12)';
+// Shadows — kept to a single layer per element on Android to avoid
+// multiple off-screen bitmap allocations per frame. The visual
+// difference on dark UI is negligible; Android doesn't natively
+// support inset shadows so multi-layer strings cause Skia to
+// rasterize each shadow independently.
+const BAR_SHADOW = '0 8px 24px rgba(0, 0, 0, 0.5)';
+const PILL_SHADOW = '0 2px 6px rgba(0, 0, 0, 0.1)';
+const FAB_PUCK_SHADOW = '0 6px 16px rgba(0, 0, 0, 0.4)';
+const QUICK_ACTION_SHADOW = '0 8px 20px rgba(16, 16, 16, 0.16)';
 
-// Animations — snappy, symmetric, single curve for open + close so the
-// scrim, menu items, and "+" rotation all feel like one motion.
+// Animations — fast, snappy, single curve for open + close so the
+// scrim, menu items, and "+" rotation all feel immediate and responsive.
 // Spring for the bar hide/show so it pops in/out with the same tactile
 // feel as the button presses. Runs on the UI thread.
 const TAB_VISIBILITY_SPRING: WithSpringConfig = {
@@ -117,8 +107,8 @@ const TAB_SLIDER_ANIMATION = {
   easing: Easing.out(Easing.cubic),
 } as const;
 const FAB_FADE_ANIMATION = {
-  duration: 300,
-  easing: Easing.inOut(Easing.cubic),
+  duration: 180,
+  easing: Easing.bezier(0.25, 0.1, 0.25, 1),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -390,19 +380,15 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const handleQuickActionPress = useCallback(
     (action: QuickAction) => {
       setFabExpanded(false);
-      // Allow the collapse animation a frame so navigation doesn't
-      // step on the closing transition.
-      requestAnimationFrame(() => {
-        const currentRoute = state.routes[state.index];
-        if (
-          currentRoute != null &&
-          currentRoute.name !== action.routeName &&
-          isTabRouteName(currentRoute.name)
-        ) {
-          recordTabSwitch(state.index, currentRoute.name);
-        }
-        navigation.navigate(action.routeName);
-      });
+      const currentRoute = state.routes[state.index];
+      if (
+        currentRoute != null &&
+        currentRoute.name !== action.routeName &&
+        isTabRouteName(currentRoute.name)
+      ) {
+        recordTabSwitch(state.index, currentRoute.name);
+      }
+      navigation.navigate(action.routeName);
     },
     [navigation, recordTabSwitch, state.index, state.routes],
   );
@@ -780,11 +766,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.whiteStream,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.9)',
-    boxShadow: [
-      '0 0 6px rgba(255, 255, 255, 0.5)',
-      '0 0 14px rgba(255, 255, 255, 0.15)',
-      '0 1px 3px rgba(0, 0, 0, 0.2)',
-    ].join(', '),
+    boxShadow: '0 0 6px rgba(255, 255, 255, 0.4)',
   },
   fabPressed: {
     backgroundColor: FAB_PRESSED_OVERLAY,

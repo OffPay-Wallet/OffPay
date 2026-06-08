@@ -28,6 +28,13 @@ const DEFAULT_UMBRA_MIN_SDK_VERSION = '3.0.0';
 const OFFPAY_UMBRA_USER_AGENT = 'OffPay-API-Worker/1.0';
 const UMBRA_BALANCE_CACHE_TTL_MS = 30_000;
 const UMBRA_INDEXER_HEALTH_CACHE_TTL_MS = 30_000;
+/**
+ * Tree summaries rarely change (the Umbra indexer only adds new trees, and
+ * those additions are infrequent). 60s of staleness is safe for the
+ * shielded-balance / claims / P2P flows that read this data, and avoids a
+ * 500-800ms upstream fetch on every Umbra send.
+ */
+const UMBRA_TREE_SUMMARIES_CACHE_TTL_MS = 60_000;
 const UMBRA_INDEXER_SLOT_STALE_THRESHOLD: Readonly<Record<Network, number>> = {
   mainnet: 20_000,
   devnet: 20_000,
@@ -1256,30 +1263,33 @@ async function getUmbraTreeSummaries(
     };
   }
 
-  try {
-    const response = await createUmbraIndexerFetch(bindings)(
-      buildUmbraUrl('/v1/trees', undefined, getUmbraIndexerUrl(bindings, request.network)),
-      {
-        method: 'GET',
-        headers: {
-          Accept: 'application/protobuf',
+  const cacheKey = createNetworkCacheKey(request.network, 'umbra:tree-summaries', []);
+  return memoryCache.getOrSet(cacheKey, UMBRA_TREE_SUMMARIES_CACHE_TTL_MS, async () => {
+    try {
+      const response = await createUmbraIndexerFetch(bindings)(
+        buildUmbraUrl('/v1/trees', undefined, getUmbraIndexerUrl(bindings, request.network)),
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'application/protobuf',
+          },
         },
-      },
-    );
+      );
 
-    if (!response.ok) {
-      throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+      if (!response.ok) {
+        throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.');
+      }
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return {
+        network: request.network,
+        trees: readUmbraTreeSummariesProtobuf(bytes),
+        fetchedAt: createFetchedAt(),
+      };
+    } catch (error) {
+      throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.', error);
     }
-
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    return {
-      network: request.network,
-      trees: readUmbraTreeSummariesProtobuf(bytes),
-      fetchedAt: createFetchedAt(),
-    };
-  } catch (error) {
-    throw toUmbraIndexerUnavailable('Umbra tree summary is temporarily unavailable.', error);
-  }
+  });
 }
 
 async function getUmbraRelayerInfo(

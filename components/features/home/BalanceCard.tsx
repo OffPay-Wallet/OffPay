@@ -4,7 +4,7 @@
  * Top section: frosted balance panel with wallet address, balance, and label.
  * Bottom section: quick action buttons on the same solid glass surface.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -65,20 +65,32 @@ const QUICK_ACTIONS: QuickAction[] = [
   { id: 'receive', label: 'Receive' },
   { id: 'swap', label: 'Swap' },
 ];
-// Single hero container: solid graphite shell with gloss from borders
-// and inset shadows. No gradients; controls use distinct dark variants
-// so they do not blend into the page background.
-// Flat card treatment — the reference dashboard uses clean glass cards
-// that sit on the gradient with only a faint ambient lift, not the
-// heavy puffy drop shadow + coloured inner bloom we had before. Keep a
-// single soft shadow for separation and a 1px top highlight so the
-// glass edge still catches light.
-const HEADER_CONTAINER_SHADOW = [
-  '0 12px 28px rgba(0, 0, 0, 0.48)',
-  'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
-  'inset 0 0 16px rgba(255, 255, 255, 0.03)',
-  'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
-].join(', ');
+// Single hero container: solid graphite shell with a single ambient shadow
+// for separation. Multi-layer inset shadows are visually invisible on most
+// Android devices but each layer triggers a separate GPU blur pass during
+// animated transitions, causing frame drops on mid-range hardware.
+const HEADER_CONTAINER_SHADOW = '0 10px 24px rgba(0, 0, 0, 0.45)';
+
+// Static gradient overlay — all props are constants so this never
+// needs to re-render. Memoising prevents the native LinearGradient
+// view from being recreated on every BalanceCard render cycle.
+const GRADIENT_COLORS = ['rgba(58, 58, 58, 0.95)', 'rgba(34, 34, 34, 0.94)', 'rgba(14, 14, 14, 0.98)'] as const;
+const GRADIENT_LOCATIONS = [0, 0.45, 1] as const;
+const GRADIENT_START = { x: 0.5, y: 0 } as const;
+const GRADIENT_END = { x: 0.5, y: 1 } as const;
+
+const BalanceCardGradient = memo(function BalanceCardGradient(): React.JSX.Element {
+  return (
+    <LinearGradient
+      colors={GRADIENT_COLORS}
+      locations={GRADIENT_LOCATIONS}
+      start={GRADIENT_START}
+      end={GRADIENT_END}
+      style={StyleSheet.absoluteFill}
+      pointerEvents="none"
+    />
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Helpers & Components
@@ -137,11 +149,7 @@ function ActionButton({
       borderWidth={1}
       pressSpring={SNAPPY_PRESS_SPRING}
       capStyle={compact ? styles.actionCapCompact : styles.actionCap}
-      capShadow={[
-        'inset 0 1px 2px rgba(255, 255, 255, 0.22)',
-        'inset 0 0 12px rgba(255, 255, 255, 0.04)',
-        'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
-      ].join(', ')}
+      capShadow={undefined}
     >
       <View style={[styles.actionIconSlot, { width: iconSize, height: iconSize }]}>
         <ActionIcon actionId={action.id} disabled={disabled} size={iconSize} />
@@ -349,15 +357,9 @@ export function BalanceCard({
       <View style={[styles.heroContainer, compact && styles.heroContainerCompact]}>
         {/* Flat dark balance panel sitting on the gradient. */}
         <View style={[styles.imageWrap, { minHeight: portfolioCardMinHeight }]}>
-          {/* Grainy gradient overlay */}
-          <LinearGradient
-            colors={['rgba(58, 58, 58, 0.95)', 'rgba(34, 34, 34, 0.94)', 'rgba(14, 14, 14, 0.98)']}
-            locations={[0, 0.45, 1]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
+          {/* Static gradient overlay — memoized to avoid re-compositing
+              on every parent render (balance updates, animations). */}
+          <BalanceCardGradient />
           <View style={styles.nativeGlossWash} pointerEvents="none" />
           <View
             style={[

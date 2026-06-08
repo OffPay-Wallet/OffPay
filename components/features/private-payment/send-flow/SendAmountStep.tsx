@@ -438,7 +438,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   warningBox: {
-    minHeight: 68,
     borderRadius: radii.lg,
     borderTopWidth: 1,
     borderLeftWidth: 1,
@@ -446,11 +445,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.glass.frostFill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: ['0 10px 22px rgba(0, 0, 0, 0.3)', 'inset 0 1px 1px rgba(255, 255, 255, 0.1)'].join(
+    boxShadow: ['0 8px 16px rgba(0, 0, 0, 0.2)', 'inset 0 1px 1px rgba(255, 255, 255, 0.1)'].join(
       ', ',
     ),
   },

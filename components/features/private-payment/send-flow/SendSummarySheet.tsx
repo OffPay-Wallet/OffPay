@@ -322,6 +322,16 @@ export function SendSummarySheet({
             >
               {isProcessing ? 'Sending…' : queued ? 'Payment queued' : 'Sent!'}
             </Text>
+            {isProcessing && modeLabel.includes('Umbra') ? (
+              <Text
+                variant="caption"
+                color={colors.text.secondary}
+                align="center"
+                style={styles.statusHint}
+              >
+                Generating privacy proof{'\n'}(may take 1-2 minutes)
+              </Text>
+            ) : null}
           </Animated.View>
         ) : null}
 
@@ -664,6 +674,12 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     fontSize: 18,
     lineHeight: 24,
+  },
+  statusHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    opacity: 0.75,
+    maxWidth: 240,
   },
   amount: {
     fontFamily: fontFamily.semiBold,

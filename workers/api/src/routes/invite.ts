@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { meetsMinVersion } from '../lib/auth.js';
 import { isAllowedOrigin } from '../lib/cors.js';
 import { AppError } from '../lib/errors.js';
-import { verifyInviteCodeForAccess } from '../lib/invite-access.js';
+import { checkInviteEmailForAccess, verifyInviteCodeForAccess } from '../lib/invite-access.js';
 import type { AppEnv } from '../lib/types.js';
 import { ensureSupportedVersionFormat, readJsonBody } from '../lib/validation.js';
 
@@ -16,6 +16,14 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const inviteVerifyBodySchema = z.object({
   inviteCode: z.string().min(1).max(MAX_INVITE_CODE_LENGTH),
+  email: z
+    .string()
+    .min(1, 'Email is required.')
+    .max(MAX_EMAIL_LENGTH)
+    .regex(EMAIL_PATTERN, 'Invalid email address.'),
+});
+
+const inviteCheckEmailBodySchema = z.object({
   email: z
     .string()
     .min(1, 'Email is required.')
@@ -113,6 +121,21 @@ inviteRoutes.post('/verify', async (context) => {
     },
     200,
   );
+});
+
+inviteRoutes.post('/check-email', async (context) => {
+  ensureAllowedOrigin(context.req.header('Origin'), context.env);
+
+  const body = await readJsonBody(
+    context.req.raw,
+    inviteCheckEmailBodySchema,
+    'Request body is required.',
+    'Malformed check-email request body.',
+  );
+
+  const result = await checkInviteEmailForAccess(context.env, body.email);
+
+  return context.json(result, 200);
 });
 
 export default inviteRoutes;

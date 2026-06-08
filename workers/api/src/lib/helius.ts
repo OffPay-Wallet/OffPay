@@ -983,23 +983,59 @@ async function getRpcAccounts(
   bindings: Bindings,
   request: RpcAccountsRequest,
 ): Promise<RpcAccountsResponse> {
-  const result = await heliusRpcRequest(bindings, request.network, 'getMultipleAccounts', [
-    request.addresses,
-    {
-      commitment: 'confirmed',
-      encoding: 'base64',
-    },
-  ]);
+  // Short-TTL per-address cache. The same handful of vault / fee /
+  // encrypted-balance accounts are re-fetched many times during a single
+  // send flow and across closely-spaced screen transitions (home → send,
+  // send → back → send). Helius' confirmed commitment refreshes every
+  // ~1-2s, and 5s is well below the ~12-30s it takes for a freshly
+  // created account to finalize after tx submission — so a 5s cache
+  // cannot mask an account the SDK is actively waiting to appear.
+  const RPC_ACCOUNTS_CACHE_TTL_MS = 5_000;
+  const now = Date.now();
+  const accounts = new Array<RpcAccountInfo>(request.addresses.length);
+  const uncachedAddresses: string[] = [];
+  const uncachedIndices: number[] = [];
 
-  const values = isRecord(result) && Array.isArray(result.value) ? result.value : null;
-  if (!values) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  request.addresses.forEach((address, index) => {
+    const cacheKey = createNetworkCacheKey(request.network, 'rpc-accounts', [address]);
+    const cached = memoryCache.get<RpcAccountInfo>(cacheKey);
+    if (cached != null) {
+      accounts[index] = cached;
+      return;
+    }
+    uncachedAddresses.push(address);
+    uncachedIndices.push(index);
+  });
+
+  if (uncachedAddresses.length > 0) {
+    const result = await heliusRpcRequest(bindings, request.network, 'getMultipleAccounts', [
+      uncachedAddresses,
+      {
+        commitment: 'confirmed',
+        encoding: 'base64',
+      },
+    ]);
+
+    const values = isRecord(result) && Array.isArray(result.value) ? result.value : null;
+    if (!values) {
+      throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+    }
+
+    uncachedAddresses.forEach((address, sliceIndex) => {
+      const parsed = parseRpcAccount(address, values[sliceIndex]);
+      accounts[uncachedIndices[sliceIndex]] = parsed;
+      memoryCache.set(
+        createNetworkCacheKey(request.network, 'rpc-accounts', [address]),
+        parsed,
+        RPC_ACCOUNTS_CACHE_TTL_MS,
+      );
+    });
   }
 
   return {
     network: request.network,
-    accounts: request.addresses.map((address, index) => parseRpcAccount(address, values[index])),
-    fetchedAt: Date.now(),
+    accounts,
+    fetchedAt: now,
   };
 }
 

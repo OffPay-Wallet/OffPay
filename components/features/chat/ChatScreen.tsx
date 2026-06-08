@@ -136,6 +136,8 @@ export function ChatScreen(): React.JSX.Element {
   const payrollReplyControllersRef = useRef<Set<AbortController>>(new Set());
   const inputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
+  /** True when the last submitted message originated from voice input. */
+  const voiceInputRef = useRef(false);
   const keyboardOffset = useMemo(() => {
     if (keyboardFrame == null) return 0;
     return Math.max(0, windowHeight - keyboardFrame.screenY);
@@ -243,6 +245,7 @@ export function ChatScreen(): React.JSX.Element {
   // Outcome read-aloud. Speaks short, sanitized status lines after a send or
   // payroll run resolves. Silent-fail and privacy-gated inside the hook.
   const speech = useAgenticSpeech();
+  const voiceLanguageRef = useRef<string | null>(null);
   const activeWalletId = useWalletStore((s) => s.activeWalletId);
   const activeImportMethod = useMemo(() => {
     const active = wallets.find((wallet) => wallet.publicKey === scope.walletAddress);
@@ -271,6 +274,15 @@ export function ChatScreen(): React.JSX.Element {
       } else {
         setPayrollPasteOpen(true);
       }
+    },
+    onReplyText: (text) => {
+      if (!voiceInputRef.current) {
+        console.log('[VoiceReply] skipped — not a voice submission');
+        return;
+      }
+      const language = voiceLanguageRef.current ?? undefined;
+      console.log('[VoiceReply] auto-speaking reply:', text.slice(0, 60), language ? `[lang: ${language}]` : '');
+      void speech.speak(text, { languageHint: language });
     },
   });
 
@@ -517,18 +529,20 @@ export function ChatScreen(): React.JSX.Element {
   const handleSubmit = useCallback(() => {
     const trimmed = prompt.trim();
     if (trimmed.length === 0 || agentBusy) return;
+    voiceInputRef.current = false;
     setPrompt('');
     submit(trimmed);
   }, [agentBusy, prompt, submit]);
 
   const voice = useAgenticVoice({
-    onTranscript: (transcript) => {
+    onTranscript: (transcript, detectedLanguage) => {
       if (agentBusy) {
         // Don't trample an in-flight turn; seed the input for the user.
         setPrompt(transcript);
         inputRef.current?.focus();
         return;
       }
+      voiceInputRef.current = true;
       submit(transcript);
     },
     onError: (message) => {
@@ -756,9 +770,9 @@ export function ChatScreen(): React.JSX.Element {
         </ScrollView>
 
         {scopedMessages.length === 0 &&
-        activePayrollRunId == null &&
-        payrollIntake.error == null &&
-        payrollIntake.mappingRequest == null ? (
+          activePayrollRunId == null &&
+          payrollIntake.error == null &&
+          payrollIntake.mappingRequest == null ? (
           <ChatPrivacyNote horizontalPadding={horizontalPadding} />
         ) : null}
       </View>

@@ -51,10 +51,9 @@ function hasNumericLabel(value: string | null | undefined): value is string {
   return typeof value === 'string' && /\d/.test(value);
 }
 
-// Flat card treatment - see BalanceCard. Single soft ambient lift plus
-// a 1px top highlight, no heavy drop shadow or coloured inner bloom.
-const HEADER_CONTAINER_SHADOW =
-  '0 12px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14)';
+// Flat card treatment — single ambient shadow for lift on dark surfaces.
+// Inset shadows are invisible on Android and cause extra GPU blur passes.
+const HEADER_CONTAINER_SHADOW = '0 10px 22px rgba(0, 0, 0, 0.4)';
 
 // ---------------------------------------------------------------------------
 // Sub-components

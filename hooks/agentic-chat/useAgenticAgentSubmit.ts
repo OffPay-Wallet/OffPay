@@ -71,10 +71,12 @@ interface UseAgenticAgentSubmitParams {
   walletImportMethod?: WalletImportMethod | null;
   /** Fired when the model asks to open payroll intake (upload/paste). */
   onPayrollIntent?: (source: 'upload' | 'paste') => void;
+  /** Fired with the final assistant text reply. Use to auto-speak voice replies. */
+  onReplyText?: (text: string) => void;
 }
 
 export interface UseAgenticAgentSubmitResult {
-  submit: (prompt: string) => void;
+  submit: (prompt: string, replyLanguage?: string) => void;
   busy: boolean;
 }
 
@@ -91,6 +93,7 @@ export function useAgenticAgentSubmit({
   walletId,
   walletImportMethod,
   onPayrollIntent,
+  onReplyText,
 }: UseAgenticAgentSubmitParams): UseAgenticAgentSubmitResult {
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -104,7 +107,7 @@ export function useAgenticAgentSubmit({
   );
 
   const submit = useCallback(
-    (rawPrompt: string) => {
+    (rawPrompt: string, replyLanguage?: string) => {
       const prompt = rawPrompt.trim();
       if (prompt.length === 0) return;
       Keyboard.dismiss();
@@ -207,7 +210,9 @@ export function useAgenticAgentSubmit({
         queryClient,
         walletId,
         walletImportMethod,
+        replyLanguage,
         onPayrollIntent,
+        onReplyText,
       })
         .catch((error: unknown) => {
           if (controller.signal.aborted) {
@@ -234,6 +239,7 @@ export function useAgenticAgentSubmit({
       capabilities,
       knownWallets,
       onPayrollIntent,
+      onReplyText,
       queryClient,
       scope,
       scopeKey,
@@ -264,7 +270,9 @@ interface RunAgentLoopParams {
   queryClient: ReturnType<typeof useQueryClient>;
   walletId?: string | null;
   walletImportMethod?: WalletImportMethod | null;
+  replyLanguage?: string;
   onPayrollIntent?: (source: 'upload' | 'paste') => void;
+  onReplyText?: (text: string) => void;
 }
 
 async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
@@ -291,6 +299,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
         toolResults: pendingToolResults.length > 0 ? pendingToolResults : undefined,
         assistantToolCalls: pendingToolCalls.length > 0 ? pendingToolCalls : undefined,
         context: {
+          locale: params.replyLanguage,
           network: params.scope.network ?? undefined,
           walletMode: params.walletMode,
           capabilities: {
@@ -332,10 +341,17 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     if (turn.kind === 'agent_text') {
       const cleaned =
         sanitizeAssistantText(turn.text, attachedActionId != null) || turn.text.trim();
+      
+      // Start voice synthesis immediately in parallel with text reveal
+      if (cleaned.length > 0) {
+        params.onReplyText?.(cleaned);
+      }
+      
       await revealAssistantMessageText(params.assistantMessageId, cleaned, {
         signal: params.controller.signal,
         patch: attachedActionId != null ? { actionId: attachedActionId } : undefined,
       });
+      
       return;
     }
 

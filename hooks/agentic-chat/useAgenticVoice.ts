@@ -12,6 +12,10 @@
  * recorded file is deleted after upload so audio never lingers on disk.
  *
  * `metering` (0..1) is surfaced for the live waveform while recording.
+ *
+ * App-lock suppression: recording suppresses the `AppLockGate` so the
+ * permission dialog or any brief app-backgrounding doesn't trigger the
+ * lock screen / password prompt during a voice session.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,12 +31,13 @@ import { File } from 'expo-file-system';
 
 import { transcribeAgentVoice } from '@/lib/agentic-payments/ai-proxy-client';
 import { isAbortError } from '@/lib/perf/abort';
+import { beginAppLockSuppression } from '@/lib/wallet/app-lock-suppression';
 
 export type AgenticVoiceState = 'idle' | 'recording' | 'transcribing' | 'review';
 
 export interface UseAgenticVoiceParams {
-  /** Called with the confirmed transcript when the user taps send (accept). */
-  onTranscript: (transcript: string) => void;
+  /** Called with the confirmed transcript and detected language when the user taps send (accept). */
+  onTranscript: (transcript: string, detectedLanguage?: string) => void;
   /** Called with a user-facing message when recording/transcription fails. */
   onError?: (message: string) => void;
   languageHint?: string;
@@ -52,7 +57,7 @@ export interface UseAgenticVoiceResult {
   cancel: () => void;
 }
 
-const TRANSCRIBE_TIMEOUT_MS = 30_000;
+const TRANSCRIBE_TIMEOUT_MS = 15_000;
 // expo-audio reports metering in dBFS (roughly -60 silent .. 0 loud).
 const METERING_FLOOR_DB = -60;
 
@@ -65,6 +70,60 @@ function normalizeMetering(metering: number | undefined): number {
   if (metering == null || Number.isNaN(metering)) return 0;
   const clamped = Math.max(METERING_FLOOR_DB, Math.min(0, metering));
   return (clamped - METERING_FLOOR_DB) / -METERING_FLOOR_DB;
+}
+
+// ---- Transcript post-processing --------------------------------------------
+
+/**
+ * Known abbreviations that STT engines commonly spell out letter-by-letter.
+ * Keys are the spaced-out form (case-insensitive), values are the canonical
+ * replacement. Order matters — longer matches first to avoid partial hits.
+ */
+const SPELLED_OUT_FIXES: [RegExp, string][] = [
+  // Crypto tokens / currencies
+  [/\bU\s+S\s+D\s+C\b/gi, 'USDC'],
+  [/\bU\s+S\s+D\s+T\b/gi, 'USDT'],
+  [/\bS\s+O\s+L\b/gi, 'SOL'],
+  [/\bU\s+S\s+D\b/gi, 'USD'],
+  [/\bE\s+T\s+H\b/gi, 'ETH'],
+  [/\bB\s+T\s+C\b/gi, 'BTC'],
+  [/\bN\s+F\s+T\b/gi, 'NFT'],
+  // General
+  [/\bO\s+T\s+P\b/gi, 'OTP'],
+  [/\bU\s+P\s+I\b/gi, 'UPI'],
+  [/\bU\s+R\s+L\b/gi, 'URL'],
+  [/\bQ\s+R\b/gi, 'QR'],
+];
+
+/**
+ * Common STT mis-hearings for crypto terms.
+ */
+const WORD_FIXES: [RegExp, string][] = [
+  // "soul" / "sole" → SOL (when preceded by a number or "send")
+  [/\b(\d+)\s+(?:soul|sole|saul)\b/gi, '$1 SOL'],
+  [/\b(send|transfer)\s+(\d+)\s+(?:soul|sole|saul)\b/gi, '$1 $2 SOL'],
+  // "you ess dee see" → USDC
+  [/\byou\s+ess\s+dee\s+see\b/gi, 'USDC'],
+  // "solana" is fine as-is, just ensure consistent casing
+  [/\bsolana\b/gi, 'Solana'],
+];
+
+/**
+ * Post-process a transcript to fix common STT issues:
+ * 1. Collapse spelled-out abbreviations (S O L → SOL)
+ * 2. Fix common crypto mis-hearings
+ * 3. Normalize whitespace
+ */
+function normalizeVoiceTranscript(raw: string): string {
+  let text = raw;
+  for (const [pattern, replacement] of SPELLED_OUT_FIXES) {
+    text = text.replace(pattern, replacement);
+  }
+  for (const [pattern, replacement] of WORD_FIXES) {
+    text = text.replace(pattern, replacement);
+  }
+  // Collapse multiple spaces into one.
+  return text.replace(/\s{2,}/g, ' ').trim();
 }
 
 async function restorePlaybackAudioMode(): Promise<void> {
@@ -97,10 +156,25 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
   const cancelledRef = useRef(false);
   const stateRef = useRef<AgenticVoiceState>('idle');
   const lastRecordingUriRef = useRef<string | null>(null);
+  /** Language code returned by the STT provider (e.g. 'hi-IN', 'en'). */
+  const detectedLanguageRef = useRef<string | null>(null);
   stateRef.current = state;
+
+  // Ref to avoid stale closures for params in async callbacks.
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+
+  // App-lock suppression — released when recording stops or the hook unmounts.
+  const releaseAppLockRef = useRef<(() => void) | null>(null);
+
+  const releaseAppLock = useCallback(() => {
+    releaseAppLockRef.current?.();
+    releaseAppLockRef.current = null;
+  }, []);
 
   useEffect(() => {
     return () => {
+      releaseAppLock();
       abortRef.current?.abort();
       void (async () => {
         let uri = lastRecordingUriRef.current;
@@ -125,21 +199,31 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
     (message: string) => {
       setState('idle');
       setTranscript('');
+      releaseAppLock();
       params.onError?.(message);
     },
-    [params],
+    [params, releaseAppLock],
   );
 
   const startRecording = useCallback(async () => {
     cancelledRef.current = false;
     setTranscript('');
+
     try {
+      // Suppress the app lock BEFORE requesting permissions so the
+      // permission dialog doesn't trigger the lock screen.
+      releaseAppLockRef.current = beginAppLockSuppression();
+
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
         fail('Microphone access is needed for voice. Enable it in Settings.');
         return;
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       await recorder.prepareToRecordAsync();
       recorder.record();
       setState('recording');
@@ -151,15 +235,21 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
 
   const stopAndTranscribe = useCallback(async () => {
     setState('transcribing');
+
     let uri: string | null = null;
     try {
       await recorder.stop();
       uri = recorder.uri;
       lastRecordingUriRef.current = uri;
+
+      // Release the app lock now — we have the file and no longer need the mic.
+      releaseAppLock();
+
       if (cancelledRef.current) {
         setState('idle');
         return;
       }
+
       if (uri == null) {
         fail('No audio was captured. Hold the mic and speak, then tap again.');
         return;
@@ -170,14 +260,14 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
       form.append('file', {
         uri,
         name: fileNameForUri(uri),
-        type: 'audio/m4a',
+        type: 'audio/mp4',
       } as unknown as Blob);
 
-      const controller = new AbortController();
-      abortRef.current = controller;
+      console.log('[Voice] transcribing file:', uri);
+
       const result = await transcribeAgentVoice(form, {
-        languageHint: params.languageHint,
-        signal: controller.signal,
+        languageHint: paramsRef.current.languageHint,
+        signal: abortRef.current?.signal,
         timeoutMs: TRANSCRIBE_TIMEOUT_MS,
       });
 
@@ -186,28 +276,34 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
         return;
       }
 
-      const recognized = result.transcript?.trim() ?? '';
+      const recognized = normalizeVoiceTranscript(result.transcript?.trim() ?? '');
+      console.log('[Voice] transcript result:', recognized.slice(0, 80));
+
       if (recognized.length === 0) {
         fail("Didn't catch that. Try speaking again.");
         return;
       }
+
       // Hold the transcript for review instead of auto-submitting.
       setTranscript(recognized);
+      detectedLanguageRef.current = result.language ?? null;
       setState('review');
     } catch (error) {
       if (isAbortError(error)) {
         setState('idle');
         return;
       }
+
+      console.warn('[Voice] transcription failed:', error);
       fail('Could not transcribe the audio. Try again.');
     } finally {
       abortRef.current = null;
       // Delete the recorded file so audio never lingers on disk.
       deleteRecordingFile(uri);
-      if (lastRecordingUriRef.current === uri) lastRecordingUriRef.current = null;
+      lastRecordingUriRef.current = null;
       void restorePlaybackAudioMode();
     }
-  }, [fail, params, recorder]);
+  }, [fail, recorder, releaseAppLock]);
 
   const toggle = useCallback(() => {
     if (stateRef.current === 'idle') {
@@ -221,13 +317,16 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
   const accept = useCallback(() => {
     if (stateRef.current !== 'review') return;
     const confirmed = transcript.trim();
+    const language = detectedLanguageRef.current ?? undefined;
     setState('idle');
     setTranscript('');
-    if (confirmed.length > 0) params.onTranscript(confirmed);
+    detectedLanguageRef.current = null;
+    if (confirmed.length > 0) params.onTranscript(confirmed, language);
   }, [params, transcript]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
+    releaseAppLock();
     abortRef.current?.abort();
     if (stateRef.current === 'recording') {
       void (async () => {
@@ -247,7 +346,7 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
     }
     setState('idle');
     setTranscript('');
-  }, [recorder]);
+  }, [recorder, releaseAppLock]);
 
   const level = state === 'recording' ? normalizeMetering(recorderState.metering) : 0;
 

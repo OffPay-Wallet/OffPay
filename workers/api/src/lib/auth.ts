@@ -337,12 +337,67 @@ async function hmacSha256Hex(key: string, value: string): Promise<string> {
   return bytesToHex(new Uint8Array(signature));
 }
 
-async function deriveDeviceSecretHex(
+async function deriveDeviceSecretHexUncached(
   bootstrapSecret: string,
   walletAddress: string,
   deviceId: string,
 ): Promise<string> {
   return hmacSha256Hex(bootstrapSecret, `${walletAddress}:${deviceId}`);
+}
+
+/**
+ * Per-isolate memoization of the per-wallet derived device secret.
+ *
+ * `OFFPAY_BOOTSTRAP_SECRET` is a binding that is constant for the lifetime
+ * of a deployed isolate (it only changes on a new deploy, which spins up a
+ * fresh isolate). The derived secret is purely a function of
+ * `(bootstrapSecret, walletAddress, deviceId)`, so caching it on the isolate
+ * is safe and saves one `crypto.subtle.importKey` + `crypto.subtle.sign`
+ * round-trip (~0.5-1ms) per protected request.
+ *
+ * The cache is implicitly invalidated whenever Cloudflare evicts the
+ * isolate, which is the only condition that can change the bootstrap
+ * secret under our feet. We cap the entry count to keep memory bounded
+ * under a runaway client making many unique `(wallet, device)` pairs.
+ */
+const MAX_DERIVED_SECRET_CACHE_ENTRIES = 2048;
+const derivedDeviceSecretCache = new Map<string, string>();
+
+function buildDerivedSecretCacheKey(
+  bootstrapSecret: string,
+  walletAddress: string,
+  deviceId: string,
+): string {
+  return `${bootstrapSecret}:${walletAddress}:${deviceId}`;
+}
+
+function pruneDerivedSecretCache(): void {
+  if (derivedDeviceSecretCache.size <= MAX_DERIVED_SECRET_CACHE_ENTRIES) return;
+  // Map preserves insertion order. Drop the oldest entries first; the
+  // hottest wallet+device pairs accumulate at the end of the map and stay
+  // warm.
+  const overflow = derivedDeviceSecretCache.size - MAX_DERIVED_SECRET_CACHE_ENTRIES;
+  const iterator = derivedDeviceSecretCache.keys();
+  for (let index = 0; index < overflow; index += 1) {
+    const next = iterator.next();
+    if (next.done === true) break;
+    derivedDeviceSecretCache.delete(next.value);
+  }
+}
+
+async function deriveDeviceSecretHex(
+  bootstrapSecret: string,
+  walletAddress: string,
+  deviceId: string,
+): Promise<string> {
+  const key = buildDerivedSecretCacheKey(bootstrapSecret, walletAddress, deviceId);
+  const cached = derivedDeviceSecretCache.get(key);
+  if (cached != null) return cached;
+
+  const derived = await deriveDeviceSecretHexUncached(bootstrapSecret, walletAddress, deviceId);
+  derivedDeviceSecretCache.set(key, derived);
+  pruneDerivedSecretCache();
+  return derived;
 }
 
 async function canonicalBodyHash(request: Request): Promise<string> {
@@ -539,3 +594,8 @@ export {
   verifyAppHmac,
   verifyWalletSignature,
 };
+
+/** Test-only: clear the per-isolate derived secret cache. */
+export function __resetDerivedDeviceSecretCacheForTests(): void {
+  derivedDeviceSecretCache.clear();
+}

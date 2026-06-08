@@ -145,6 +145,23 @@ const inFlightRpcReadinessCache = new Map<
   OffpayNetwork,
   Promise<{ blockhash: string; slot: bigint }>
 >();
+/**
+ * Short-TTL per-address cache for the Umbra SDK accountInfoProvider. The
+ * SDK asks for the same handful of addresses (vault state, fee accounts,
+ * encrypted balance accounts) many times during a single send flow and
+ * again on subsequent screens. Caching for 5s catches:
+ *   - claim scans that re-fetch the same nullifier-set / UTXO tree accounts
+ *   - re-opens of the send screen within the same 5s window
+ *   - "open send, go back, pick a different token, return" navigation
+ * 5s is safely under the typical Solana slot time for finalized state
+ * changes (especially for new accounts the SDK is waiting on after tx
+ * submission, which only finalize after ~12-30s).
+ */
+const ACCOUNT_INFO_PROVIDER_CACHE_TTL_MS = 5_000;
+const accountInfoProviderCache = new Map<
+  `${OffpayNetwork}:${string}`,
+  { expiresAt: number; record: RpcAccountRecord | null }
+>();
 
 const LEGACY_FEE_SCHEDULE_SEED = Uint8Array.from([
   219, 103, 184, 147, 198, 147, 112, 38, 55, 38, 235, 215, 80, 203, 76, 46, 100, 134, 54, 137, 90,
@@ -1132,25 +1149,55 @@ export function createOffpayUmbraAccountInfoProvider(
     if (addresses.length === 0) return new Map();
 
     const startedAt = mark();
+    const now = Date.now();
+    const result = new Map<AccountAddress, MaybeEncodedAccount>();
+    const uncachedRpcAddresses: string[] = [];
+    const uncachedOriginalAddresses: AccountAddress[] = [];
+
+    // Split the request into cached vs. fresh. Cached entries are returned
+    // immediately; only the fresh slice pays the network round-trip.
+    addresses.forEach((requestedAddress) => {
+      const key = `${network}:${requestedAddress}` as const;
+      const cached = accountInfoProviderCache.get(key);
+      if (cached != null && cached.expiresAt > now) {
+        result.set(requestedAddress, toMaybeEncodedAccount(requestedAddress, cached.record));
+        return;
+      }
+      uncachedRpcAddresses.push(toRpcString(requestedAddress));
+      uncachedOriginalAddresses.push(requestedAddress);
+    });
+
+    if (uncachedRpcAddresses.length === 0) {
+      measure('umbra.rpc.accountInfoProvider', startedAt, {
+        accountCount: addresses.length,
+        network,
+        cacheHits: addresses.length,
+      });
+      return result;
+    }
+
     try {
       const response = await getRpcAccounts({
-        addresses: addresses.map(toRpcString),
+        addresses: uncachedRpcAddresses,
         network,
       });
-      const result = new Map<AccountAddress, MaybeEncodedAccount>();
+      const cacheExpiresAt = now + ACCOUNT_INFO_PROVIDER_CACHE_TTL_MS;
 
-      addresses.forEach((requestedAddress, index) => {
-        result.set(
-          requestedAddress,
-          toMaybeEncodedAccount(requestedAddress, response.accounts[index]),
-        );
+      uncachedOriginalAddresses.forEach((requestedAddress, index) => {
+        const record = response.accounts[index] ?? null;
+        result.set(requestedAddress, toMaybeEncodedAccount(requestedAddress, record));
+        accountInfoProviderCache.set(`${network}:${requestedAddress}`, {
+          expiresAt: cacheExpiresAt,
+          record,
+        });
       });
 
       return result;
     } finally {
       measure('umbra.rpc.accountInfoProvider', startedAt, {
-        accountCount: addresses.length,
+        accountCount: uncachedRpcAddresses.length,
         network,
+        cacheHits: addresses.length - uncachedRpcAddresses.length,
       });
     }
   };

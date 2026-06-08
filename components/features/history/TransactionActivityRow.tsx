@@ -38,13 +38,11 @@ const AMOUNT_COLORS: Record<OffpayDisplayTone, string> = {
   neutral: colors.text.secondary,
   failed: colors.semantic.error,
 };
-// Recent-activity card material: glossy graphite glass with a neutral
-// rim so each row separates from the dark app background without
-// pulling in coloured tints.
-const HOME_CONTAINER_SHADOW =
-  '0 12px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14)';
-const ACTION_BADGE_SHADOW =
-  '0 6px 14px rgba(0, 0, 0, 0.36), inset 0 1px 1px rgba(255, 255, 255, 0.22)';
+// Single-layer shadows — inset shadows are invisible on Android and
+// each row renders its own shadow, so keeping them single-layer
+// prevents GPU pressure from accumulating on scroll.
+const HOME_CONTAINER_SHADOW = '0 10px 22px rgba(0, 0, 0, 0.4)';
+const ACTION_BADGE_SHADOW = '0 4px 10px rgba(0, 0, 0, 0.3)';
 
 const TOKEN_SYMBOL_PATTERN = /(?:^|[\s+-])(?:\d[\d,.]*\s+)?([A-Za-z][A-Za-z0-9]{1,15})$/;
 

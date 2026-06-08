@@ -30,6 +30,7 @@ export interface UseAgenticSpeechParams {
 export interface SpeakOutcomeOptions {
   /** Suppress plain token/currency amounts too (use for all payroll outcomes). */
   payrollMode?: boolean;
+  languageHint?: string;
 }
 
 export interface UseAgenticSpeechResult {
@@ -115,10 +116,11 @@ export function useAgenticSpeech(params: UseAgenticSpeechParams = {}): UseAgenti
       const controller = new AbortController();
       abortRef.current = controller;
       setState('loading');
+      console.log('[TTS] speak requested:', phrase.slice(0, 60));
 
       try {
         const result = await speakAgentText(
-          { text: phrase },
+          { text: phrase, languageHint: options.languageHint },
           {
             signal: controller.signal,
             timeoutMs: SPEECH_TIMEOUT_MS,
@@ -138,14 +140,16 @@ export function useAgenticSpeech(params: UseAgenticSpeechParams = {}): UseAgenti
         playerRef.current = player;
         player.play();
         setState('speaking');
+        console.log('[TTS] playing audio');
         clearResetTimer();
         resetTimerRef.current = setTimeout(() => {
           teardownPlayer();
           setState('idle');
           resetTimerRef.current = null;
         }, SPEECH_ACTIVE_RESET_MS);
-      } catch {
+      } catch (error) {
         // Silent-fail: TTS is additive; never surface an error.
+        console.warn('[TTS] speak failed:', error);
         setState('idle');
       } finally {
         if (abortRef.current === controller) abortRef.current = null;

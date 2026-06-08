@@ -222,12 +222,14 @@ export async function submitNormalTokenTransfer(
     return submitNativeSolTransfer(params);
   }
 
-  const { tokenAccount, tokenProgramId } = await resolveSenderTokenAccount({
-    walletAddress: params.walletAddress,
-    mint: params.mint,
-    network: params.network,
-  });
-  const latestBlockhash = await getRpcLatestBlockhash(params.network);
+  const [{ tokenAccount, tokenProgramId }, latestBlockhash] = await Promise.all([
+    resolveSenderTokenAccount({
+      walletAddress: params.walletAddress,
+      mint: params.mint,
+      network: params.network,
+    }),
+    getRpcLatestBlockhash(params.network),
+  ]);
   const payer = new PublicKey(params.walletAddress);
   const recipient = new PublicKey(params.recipient);
   const mint = new PublicKey(params.mint);

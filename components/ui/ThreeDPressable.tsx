@@ -136,13 +136,9 @@ export function ThreeDPressable({
     offset.value = withSpring(0, pressSpring);
   };
 
-  // Delay onPress so the press-down animation is visible before
-  // navigation or other heavy side-effects unmount the component.
   const handlePress = useCallback(
     (event: GestureResponderEvent) => {
-      setTimeout(() => {
-        onPressRef.current?.(event);
-      }, 100);
+      onPressRef.current?.(event);
     },
     [],
   );

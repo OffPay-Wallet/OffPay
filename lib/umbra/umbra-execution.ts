@@ -1684,12 +1684,19 @@ export async function shieldTokenWithUmbra(
     ? assertRecipientAddress(params.recipient)
     : walletAddress;
   const token = await resolveUmbraToken(params);
-  await verifyOffpayUmbraRpcReadiness(params.network);
-  const readiness = await assertOffpayUmbraVaultFeeAccountsReady({
-    action: 'shield',
-    mint: token.metadata.mint,
-    network: params.network,
-  });
+  // RPC readiness and vault fee account checks are independent — the latter
+  // only needs (mint, network) which are already available, so we can fan
+  // them out concurrently. On a cold cache this saves up to ~1s (each leg
+  // pays its own upstream round-trip); on a warm cache the second leg is a
+  // free `Promise.all` join.
+  const [, readiness] = await Promise.all([
+    verifyOffpayUmbraRpcReadiness(params.network),
+    assertOffpayUmbraVaultFeeAccountsReady({
+      action: 'shield',
+      mint: token.metadata.mint,
+      network: params.network,
+    }),
+  ]);
   const runLegacyShield = (): Promise<UmbraExecutionResult> =>
     withLegacyUmbraRuntime(params, async (runtime) => {
       const deposit = getLegacyPublicBalanceToEncryptedBalanceDirectDepositorFunction(
@@ -1811,24 +1818,51 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
   params: UmbraPrivateP2PParams,
 ): Promise<UmbraExecutionResult> {
   const totalStartedAt = mark();
+  const totalStartTime = Date.now();
   let ok = false;
   let signatureCount = 0;
   let tokenMint: string | null = null;
   assertUmbraNetworkSupported(params.network);
+
+  if (__DEV__) {
+    console.log('[umbra-p2p] Starting Umbra private P2P send from public balance');
+  }
 
   try {
     const walletAddress = assertWalletAddress(params.walletAddress);
     const recipient = assertRecipientAddress(params.recipient);
     const token = await resolveUmbraToken({ ...params, requireMixer: true });
     tokenMint = token.metadata.mint;
+
+    if (__DEV__) {
+      console.log(
+        `[umbra-p2p] Sending ${token.amountDisplay} ${token.metadata.symbol} to ${recipient.slice(0, 8)}...`,
+      );
+    }
+
     const readinessStartedAt = mark();
+    const readinessStartTime = Date.now();
     try {
-      await verifyOffpayUmbraRpcReadiness(params.network);
-      await assertOffpayUmbraVaultFeeAccountsReady({
-        action: 'privateP2pFromPublic',
-        mint: token.metadata.mint,
-        network: params.network,
-      });
+      if (__DEV__) {
+        console.log('[umbra-p2p] Checking RPC readiness and vault fee accounts...');
+      }
+
+      // RPC readiness and vault fee account checks are independent — both
+      // need only (mint, network) which are already known, so we can fan
+      // them out concurrently. On a cold cache this saves up to ~1s.
+      await Promise.all([
+        verifyOffpayUmbraRpcReadiness(params.network),
+        assertOffpayUmbraVaultFeeAccountsReady({
+          action: 'privateP2pFromPublic',
+          mint: token.metadata.mint,
+          network: params.network,
+        }),
+      ]);
+
+      if (__DEV__) {
+        const readinessDuration = Date.now() - readinessStartTime;
+        console.log(`[umbra-p2p] Readiness check completed in ${(readinessDuration / 1000).toFixed(2)}s`);
+      }
     } finally {
       measure('umbra.p2p.public.readiness', readinessStartedAt, {
         mint: token.metadata.mint,
@@ -1939,6 +1973,14 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
           } as never,
         );
         const createUtxoStartedAt = mark();
+        const createUtxoStartTime = Date.now();
+
+        if (__DEV__) {
+          console.log(
+            '[umbra-p2p] Starting UTXO creation (this includes ZK proof generation, may take 1-2 minutes on device)...',
+          );
+        }
+
         const result = await createUtxo(
           {
             amount: BigInt(token.amountAtomic) as never,
@@ -1949,10 +1991,17 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
             optionalData: new Uint8Array(32) as never,
           } as never,
         ).finally(() => {
+          const createUtxoDuration = Date.now() - createUtxoStartTime;
+          if (__DEV__) {
+            console.log(
+              `[umbra-p2p] UTXO creation completed in ${(createUtxoDuration / 1000).toFixed(2)}s`,
+            );
+          }
           measure('umbra.p2p.public.createUtxo', createUtxoStartedAt, {
             mint: token.metadata.mint,
             network: params.network,
             protocol: 'legacy',
+            durationMs: createUtxoDuration,
           });
         });
 
@@ -2027,6 +2076,14 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
           } as never,
         );
         const createUtxoStartedAt = mark();
+        const createUtxoStartTime = Date.now();
+
+        if (__DEV__) {
+          console.log(
+            '[umbra-p2p] Starting UTXO creation (this includes ZK proof generation, may take 1-2 minutes on device)...',
+          );
+        }
+
         const result = await createUtxo(
           {
             amount: BigInt(token.amountAtomic) as never,
@@ -2037,10 +2094,17 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
             optionalData: new Uint8Array(32) as never,
           } as never,
         ).finally(() => {
+          const createUtxoDuration = Date.now() - createUtxoStartTime;
+          if (__DEV__) {
+            console.log(
+              `[umbra-p2p] UTXO creation completed in ${(createUtxoDuration / 1000).toFixed(2)}s`,
+            );
+          }
           measure('umbra.p2p.public.createUtxo', createUtxoStartedAt, {
             mint: token.metadata.mint,
             network: params.network,
             protocol: 'current',
+            durationMs: createUtxoDuration,
           });
         });
 
@@ -2064,6 +2128,14 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
 
     ok = true;
     signatureCount = result.signatures.length;
+
+    if (__DEV__) {
+      const totalDuration = Date.now() - totalStartTime;
+      console.log(
+        `[umbra-p2p] Private P2P send completed successfully in ${(totalDuration / 1000).toFixed(2)}s`,
+      );
+    }
+
     return result;
   } finally {
     measure('umbra.p2p.public.total', totalStartedAt, {
@@ -2082,12 +2154,17 @@ export async function sendUmbraPrivateP2PFromEncryptedBalance(
   const walletAddress = assertWalletAddress(params.walletAddress);
   const recipient = assertRecipientAddress(params.recipient);
   const token = await resolveUmbraToken({ ...params, requireMixer: true });
-  await verifyOffpayUmbraRpcReadiness(params.network);
-  const readiness = await assertOffpayUmbraVaultFeeAccountsReady({
-    action: 'privateP2pFromEncrypted',
-    mint: token.metadata.mint,
-    network: params.network,
-  });
+  // RPC readiness and vault fee account checks are independent — both
+  // need only (mint, network) which are already known, so we can fan
+  // them out concurrently. On a cold cache this saves up to ~1s.
+  const [, readiness] = await Promise.all([
+    verifyOffpayUmbraRpcReadiness(params.network),
+    assertOffpayUmbraVaultFeeAccountsReady({
+      action: 'privateP2pFromEncrypted',
+      mint: token.metadata.mint,
+      network: params.network,
+    }),
+  ]);
 
   const buildResult = async (
     result: unknown,
@@ -2251,7 +2328,9 @@ async function scanUmbraPrivateP2PUtxos(
   const fetchUtxoData = createOffpayUmbraUtxoDataFetcher(network, {
     maxLimit: pageLimit,
     signal: params.signal,
-    yieldAfterPage: true,
+    // Yielding between indexer pages keeps deep scans responsive; fast
+    // recent/range scans skip the ~16ms frame tax per page.
+    yieldAfterPage: window.mode === 'deep',
   });
   // Deep scans intentionally try every registered master-seed scheme so older
   // notes created under a legacy scheme are still discovered. Recent/range
@@ -2275,7 +2354,6 @@ async function scanUmbraPrivateP2PUtxos(
     aesDecryptor: createYieldingUmbraAesDecryptor(window.mode === 'deep' ? 8 : 4, params.signal),
   } as never);
   const startedAt = mark();
-  await yieldToUi();
   const scanResult = (await scanner()) as {
     etaToStealthPoolReceiverBurnable?: readonly unknown[];
     ataToStealthPoolReceiverBurnable?: readonly unknown[];
@@ -2648,8 +2726,10 @@ export async function scanUmbraPrivateP2PClaims(
 
   try {
     return await withUmbraRuntime(params, async (runtime) => {
-      const registrationStatus = await queryUmbraVaultRegistrationStatus(runtime, walletAddress);
-      const scanResult = await scanUmbraPrivateP2PUtxos(runtime, params.network, params);
+      const [registrationStatus, scanResult] = await Promise.all([
+        queryUmbraVaultRegistrationStatus(runtime, walletAddress),
+        scanUmbraPrivateP2PUtxos(runtime, params.network, params),
+      ]);
       const onChainClaimedIndices = await getOnChainClaimedUmbraInsertionIndexSet(
         runtime,
         params.treeIndex,
@@ -2788,8 +2868,10 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
         : new Set(params.excludedInsertionIndices as readonly number[]);
 
   return withUmbraRuntime(params, async (runtime) => {
-    const registrationStatus = await queryUmbraVaultRegistrationStatus(runtime, walletAddress);
-    const scanResult = await scanUmbraPrivateP2PUtxos(runtime, params.network, params);
+    const [registrationStatus, scanResult] = await Promise.all([
+      queryUmbraVaultRegistrationStatus(runtime, walletAddress),
+      scanUmbraPrivateP2PUtxos(runtime, params.network, params),
+    ]);
     const receiverClaimableUtxos = filterClaimableUtxos(
       scanResult.receiverClaimableUtxos,
       excluded,
@@ -3153,12 +3235,17 @@ export async function withdrawTokenFromUmbra(
     ? assertRecipientAddress(params.recipient)
     : walletAddress;
   const token = await resolveUmbraToken(params);
-  await verifyOffpayUmbraRpcReadiness(params.network);
-  const readiness = await assertOffpayUmbraVaultFeeAccountsReady({
-    action: 'withdraw',
-    mint: token.metadata.mint,
-    network: params.network,
-  });
+  // RPC readiness and vault fee account checks are independent — both
+  // need only (mint, network) which are already known, so we can fan
+  // them out concurrently. On a cold cache this saves up to ~1s.
+  const [, readiness] = await Promise.all([
+    verifyOffpayUmbraRpcReadiness(params.network),
+    assertOffpayUmbraVaultFeeAccountsReady({
+      action: 'withdraw',
+      mint: token.metadata.mint,
+      network: params.network,
+    }),
+  ]);
   const runLegacyWithdraw = (): Promise<UmbraExecutionResult> =>
     withLegacyUmbraRuntime(params, async (runtime) => {
       const withdraw = getLegacyEncryptedBalanceToPublicBalanceDirectWithdrawerFunction(

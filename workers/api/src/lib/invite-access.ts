@@ -190,6 +190,30 @@ async function findInviteAccessByCodeAndEmail(
   return document != null;
 }
 
+/**
+ * Look up an existing invite_access record by email.
+ * This prevents a single email from consuming multiple invite codes.
+ */
+async function findInviteAccessByEmail(
+  config: InviteGateConfig,
+  email: string,
+): Promise<{ segment?: string } | null> {
+  const document = await withMongoDatabase(config, (db) =>
+    inviteAccessCollection(db).findOne(
+      {
+        email,
+        status: { $in: ['active', 'pending'] },
+      },
+      {
+        projection: { invite_code_segment: 1 },
+      },
+    ),
+  );
+
+  if (document == null) return null;
+  return { segment: document.invite_code_segment };
+}
+
 async function upsertInviteAccess(params: {
   config: InviteGateConfig;
   walletAddress: string;
@@ -200,6 +224,34 @@ async function upsertInviteAccess(params: {
   email?: string | null;
 }): Promise<void> {
   await withMongoDatabase(params.config, async (db) => {
+    // First, try to find and upgrade a pending record with matching email and code
+    if (params.email != null && params.email.length > 0) {
+      const pendingRecord = await inviteAccessCollection(db).findOne({
+        invite_code_hash: params.inviteCodeHash,
+        email: params.email,
+        status: 'pending',
+      });
+
+      if (pendingRecord != null) {
+        // Upgrade pending record to active with wallet info
+        await inviteAccessCollection(db).updateOne(
+          {
+            _id: pendingRecord._id,
+          },
+          {
+            $set: {
+              status: 'active',
+              wallet_address: params.walletAddress,
+              device_id_hash: params.deviceIdHash,
+              updated_at: params.nowIso,
+            },
+          },
+        );
+        return;
+      }
+    }
+
+    // Otherwise, use the standard upsert logic
     await inviteAccessCollection(db).updateOne(
       {
         wallet_address: params.walletAddress,
@@ -209,14 +261,51 @@ async function upsertInviteAccess(params: {
         $set: {
           status: 'active',
           updated_at: params.nowIso,
-          ...(params.email != null ? { email: params.email } : {}),
+          ...(params.email != null && params.email.length > 0 ? { email: params.email } : {}),
         },
         $setOnInsert: {
           wallet_address: params.walletAddress,
           device_id_hash: params.deviceIdHash,
           invite_code_hash: params.inviteCodeHash,
           invite_code_segment: params.segment,
-          ...(params.email != null ? { email: params.email } : {}),
+          ...(params.email != null && params.email.length > 0 ? { email: params.email } : {}),
+          created_at: params.nowIso,
+        },
+      },
+      { upsert: true },
+    );
+  });
+}
+
+/**
+ * Save a pending invite verification record with email before wallet creation.
+ * This allows the email to be associated with the invite code during verification,
+ * even before the user completes wallet setup.
+ */
+async function savePendingInviteVerification(params: {
+  config: InviteGateConfig;
+  inviteCodeHash: string;
+  email: string;
+  deviceIdHash: string;
+  segment: string;
+  nowIso: string;
+}): Promise<void> {
+  await withMongoDatabase(params.config, async (db) => {
+    await inviteAccessCollection(db).updateOne(
+      {
+        invite_code_hash: params.inviteCodeHash,
+        email: params.email,
+      },
+      {
+        $set: {
+          status: 'pending',
+          email: params.email,
+          device_id_hash: params.deviceIdHash,
+          invite_code_hash: params.inviteCodeHash,
+          invite_code_segment: params.segment,
+          updated_at: params.nowIso,
+        },
+        $setOnInsert: {
           created_at: params.nowIso,
         },
       },
@@ -351,6 +440,17 @@ export async function verifyInviteCodeForAccess(
     };
   }
 
+  if (normalizedEmail != null && normalizedEmail.length > 0) {
+    const existingAccess = await findInviteAccessByEmail(config, normalizedEmail);
+    if (existingAccess != null) {
+      return {
+        segment: existingAccess.segment ?? parsedInvite.segment,
+        gate: 'required',
+        email: normalizedEmail,
+      };
+    }
+  }
+
   const codeHash = await hmacSha256Hex(config.pepper, parsedInvite.code);
   const nowIso = new Date().toISOString();
   const document = await findInviteCodeDocument(config, codeHash);
@@ -364,6 +464,18 @@ export async function verifyInviteCodeForAccess(
     document.locked !== true &&
     !isExpired(document.expires_at, nowIso)
   ) {
+    // Save the pending invite verification with email
+    if (normalizedEmail != null && normalizedEmail.length > 0 && deviceIdHash != null) {
+      await savePendingInviteVerification({
+        config,
+        inviteCodeHash: codeHash,
+        email: normalizedEmail,
+        deviceIdHash,
+        segment: document.segment ?? parsedInvite.segment,
+        nowIso,
+      });
+    }
+    
     return {
       segment: document.segment ?? parsedInvite.segment,
       gate: 'required',
@@ -496,4 +608,26 @@ export async function ensureInviteAccessForBootstrap(
 
 export function isInviteGateRequired(bindings: Bindings): boolean {
   return getInviteGateConfig(bindings).enabled;
+}
+
+export async function checkInviteEmailForAccess(
+  bindings: Bindings,
+  email: string,
+): Promise<{ verified: boolean; segment?: string }> {
+  const config = getInviteGateConfig(bindings);
+  if (!config.enabled) {
+    return { verified: true };
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  if (normalizedEmail.length === 0) {
+    return { verified: false };
+  }
+
+  const existingAccess = await findInviteAccessByEmail(config, normalizedEmail);
+  if (existingAccess != null) {
+    return { verified: true, segment: existingAccess.segment };
+  }
+
+  return { verified: false };
 }

@@ -8,6 +8,7 @@ import {
   zeroOutBytes,
 } from '@/lib/crypto/offpay-api-auth';
 import { signMessageForWallet } from '@/lib/crypto/solana-transaction-signing';
+import { getCachedOrSign, invalidateSignCacheForWallet } from '@/lib/crypto/sign-cache';
 import Constants from 'expo-constants';
 import {
   clearOffpayBootstrapCredentials,
@@ -29,7 +30,10 @@ import {
   getWalletSigningBlocker,
   walletHasLocalSigningMaterial,
 } from '@/lib/wallet/wallet-capabilities';
-import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import {
+  readJsonResponseAdaptive,
+  stringifyJsonAdaptive,
+} from '@/lib/perf/ui-work-scheduler';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type {
@@ -321,14 +325,8 @@ function isBackendErrorEnvelope(value: unknown): value is BackendErrorEnvelope {
 }
 
 async function parseJsonResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (text.length === 0) return null;
-
   try {
-    await yieldToUi();
-    const payload = JSON.parse(text);
-    await yieldToEventLoop();
-    return payload;
+    return await readJsonResponseAdaptive(response);
   } catch {
     throw new OffpayApiError({
       code: 'INTERNAL_ERROR',
@@ -427,9 +425,7 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
   const init: RequestInit = { method, headers };
   if (options.body !== undefined && options.body !== null) {
     headers['Content-Type'] = 'application/json';
-    await yieldToUi();
-    init.body = JSON.stringify(options.body);
-    await yieldToEventLoop();
+    init.body = await stringifyJsonAdaptive(options.body);
   }
 
   const handle = withTimeout(options.signal, options.timeoutMs);
@@ -689,11 +685,13 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
             pathAndQuery,
             body: options.body,
             signCanonicalMessage: (message) =>
-              signMessageForWallet({
-                message,
-                walletAddress: authContext.walletAddress,
-                walletId: authContext.walletInfo.id,
-              }),
+              getCachedOrSign(authContext.walletAddress, message, (cachedMessage) =>
+                signMessageForWallet({
+                  message: cachedMessage,
+                  walletAddress: authContext.walletAddress,
+                  walletId: authContext.walletInfo.id,
+                }),
+              ),
           });
 
     const headers: Record<string, string> = {
@@ -705,9 +703,7 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
     const init: RequestInit = { method, headers };
     if (options.body !== undefined && options.body !== null) {
       headers['Content-Type'] = 'application/json';
-      await yieldToUi();
-      init.body = JSON.stringify(options.body);
-      await yieldToEventLoop();
+      init.body = await stringifyJsonAdaptive(options.body);
     }
 
     const handle = withTimeout(options.signal);
@@ -740,6 +736,11 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
       options.retryAuthRecovery !== false
     ) {
       const reprovisionAuth = options.reprovisionAuth ?? offpayAuthRecoveryHandler;
+      // Drop cached signatures for this wallet — bootstrap is about to be
+      // re-derived, and replaying the old signatures during recovery would
+      // produce confusing server logs even though the signatures themselves
+      // remain mathematically valid for the old (wallet, message) pair.
+      invalidateSignCacheForWallet(authContext.walletAddress);
       if (await recoverOffpayAuth(reprovisionAuth)) {
         return offpayApiRequest<T>({
           ...options,
@@ -790,7 +791,6 @@ export async function provisionBootstrap(
   ]);
 
   try {
-    await yieldToUi();
     const walletSignature =
       signingSeed != null
         ? signBootstrapNonce(body.nonce, signingSeed)
@@ -885,6 +885,15 @@ export async function verifyInviteCode(
     path: '/api/invite/verify',
     method: 'POST',
     body: { inviteCode, email },
+    headers: await buildOffpayPublicReadHeaders(),
+  });
+}
+
+export async function checkInviteEmail(email: string): Promise<{ verified: boolean; segment?: string }> {
+  return offpayPublicRequest<{ verified: boolean; segment?: string }>({
+    path: '/api/invite/check-email',
+    method: 'POST',
+    body: { email },
     headers: await buildOffpayPublicReadHeaders(),
   });
 }

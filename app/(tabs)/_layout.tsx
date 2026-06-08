@@ -3,44 +3,22 @@
  */
 import { Tabs } from 'expo-router';
 import { useMemo } from 'react';
-import { Easing, StyleSheet, useWindowDimensions } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { TabBar } from '@/components/navigation/TabBar';
 
 import type { BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
 
-const TAB_SLIDE_DURATION_MS = 260;
-
 export default function TabLayout(): React.JSX.Element {
-  const { width } = useWindowDimensions();
-  const slideDistance = Math.max(width, 1);
   const screenOptions = useMemo<BottomTabNavigationOptions>(
     () => ({
       headerShown: false,
       sceneStyle: styles.scene,
       lazy: true,
+      freezeOnBlur: true,
       tabBarStyle: styles.tabBarContainer,
-      transitionSpec: {
-        animation: 'timing' as const,
-        config: {
-          duration: TAB_SLIDE_DURATION_MS,
-          easing: Easing.out(Easing.cubic),
-        },
-      },
-      sceneStyleInterpolator: ({ current }) => ({
-        sceneStyle: {
-          transform: [
-            {
-              translateX: current.progress.interpolate({
-                inputRange: [-1, 0, 1],
-                outputRange: [-slideDistance, 0, slideDistance],
-              }),
-            },
-          ],
-        },
-      }),
     }),
-    [slideDistance],
+    [],
   );
 
   return (

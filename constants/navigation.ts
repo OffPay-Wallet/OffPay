@@ -16,6 +16,7 @@ export const globalScreenOptions: NativeStackNavigationOptions = {
   gestureEnabled: true,
   animation: 'ios_from_right',
   animationTypeForReplace: 'push',
+  freezeOnBlur: true,
   contentStyle: { backgroundColor: colors.backgroundGradient.base },
 };
 

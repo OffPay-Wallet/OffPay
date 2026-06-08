@@ -635,11 +635,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.glassTint,
     borderWidth: 1,
     borderColor: colors.glass.rimSubtle,
-    boxShadow: [
-      '0 5px 14px rgba(0, 0, 0, 0.38)',
-      'inset 0 1px 1px rgba(255, 255, 255, 0.16)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.28)',
-    ].join(', '),
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.35)',
   },
   walletTextBlock: {
     flexShrink: 1,
@@ -708,11 +704,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     overflow: 'hidden',
-    boxShadow: [
-      'inset 0 1px 1px rgba(255, 255, 255, 0.2)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
-      '0 6px 14px rgba(0, 0, 0, 0.32)',
-    ].join(', '),
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
   },
   toggleKnob: {
     backgroundColor: colors.brand.whiteStream,
@@ -720,11 +712,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.82)',
-    boxShadow: [
-      '0 3px 8px rgba(0, 0, 0, 0.3)',
-      'inset 0 1px 0 rgba(255, 255, 255, 0.95)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.08)',
-    ].join(', '),
+    boxShadow: '0 3px 8px rgba(0, 0, 0, 0.3)',
   },
   toggleIconLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -749,12 +737,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     overflow: 'hidden',
-    boxShadow: [
-      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
-      'inset 0 0 10px rgba(255, 255, 255, 0.05)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.32)',
-      '0 6px 14px rgba(0, 0, 0, 0.32)',
-    ].join(', '),
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
   },
   faucetGloss: {
     position: 'absolute',
@@ -779,12 +762,7 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     overflow: 'visible',
-    boxShadow: [
-      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
-      'inset 0 0 8px rgba(255, 255, 255, 0.04)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
-      '0 6px 14px rgba(0, 0, 0, 0.32)',
-    ].join(', '),
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
   },
   notificationTouch: {
     borderRadius: radii.full,

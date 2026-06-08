@@ -311,9 +311,9 @@ export default function RootLayout(): React.JSX.Element | null {
             <Stack.Screen name="restore-wallet" options={createWalletScreenOptions} />
           </Stack>
           <StatusBar
-            style="dark"
+            style="light"
             backgroundColor={colors.backgroundGradient.base}
-            translucent={false}
+            translucent
           />
         </View>
       </ThemeProvider>
