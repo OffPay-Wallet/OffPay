@@ -121,6 +121,25 @@ export function bootstrapMmkvEncryption(): Promise<void> {
 // rehydrates, the encrypted instance is usually ready.
 void bootstrapMmkvEncryption();
 
+/**
+ * Check if MMKV encryption has been successfully applied.
+ * Returns true once the encryption key is loaded from SecureStore and
+ * applied via recrypt. This is useful for gating routing decisions
+ * until persistent stores are in a known-good state.
+ */
+export function isMmkvEncryptionReady(): boolean {
+  return encryptionApplied;
+}
+
+/**
+ * Wait for MMKV encryption to be applied. Returns a promise that
+ * resolves once the encryption key is loaded and the store is ready.
+ * Safe to call multiple times.
+ */
+export function waitForMmkvEncryption(): Promise<void> {
+  return bootstrapMmkvEncryption();
+}
+
 export const mmkvStorage = {
   getItem(name: string): string | null {
     void migrateFromSecureStoreIfPresent(name);

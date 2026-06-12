@@ -43,6 +43,7 @@ import { AppProviders } from '@/providers';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
+import { waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
 
 import type { Theme } from '@react-navigation/native';
 
@@ -133,6 +134,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const [hasHiddenSplash, setHasHiddenSplash] = useState(false);
   const [rootLayoutReady, setRootLayoutReady] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+  const [mmkvReady, setMmkvReady] = useState(false);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -152,6 +154,16 @@ export default function RootLayout(): React.JSX.Element | null {
       setPreferencesHydrated(true);
     }
     return unsubscribe;
+  }, []);
+
+  // Wait for MMKV encryption to be applied before reading app state.
+  // On physical devices, SecureStore → MMKV encryption key resolution
+  // can take longer than on emulators. Without this gate, hasOnboarded
+  // can read stale/unencrypted data and route the user incorrectly.
+  useEffect(() => {
+    void waitForMmkvEncryption().then(() => {
+      setMmkvReady(true);
+    });
   }, []);
 
   // Hydrate wallet from SecureStore on app launch
@@ -194,15 +206,23 @@ export default function RootLayout(): React.JSX.Element | null {
     : inviteAccessVerified
       ? inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup
       : inInviteCode;
+
+  // Critical fix: Repair the onboarding flag BEFORE routing decisions.
   // If MMKV app-state is reset or unreadable during a storage migration,
   // SecureStore is still the source of truth for whether a wallet exists.
-  // Repair the onboarding flag instead of routing an existing wallet back
-  // through first-run onboarding.
+  // This repair must run after MMKV encryption is ready and wallet hydration
+  // completes, but BEFORE any routing logic executes.
+  const [hasRepairedOnboardingFlag, setHasRepairedOnboardingFlag] = useState(false);
+
   useEffect(() => {
+    if (!mmkvReady || !walletHydrated || hasRepairedOnboardingFlag) return;
+    
     if (!hasOnboarded && storedWalletCount) {
       setHasOnboarded(true);
     }
-  }, [hasOnboarded, storedWalletCount, setHasOnboarded]);
+    
+    setHasRepairedOnboardingFlag(true);
+  }, [mmkvReady, walletHydrated, hasOnboarded, storedWalletCount, setHasOnboarded, hasRepairedOnboardingFlag]);
 
   // Backfill wallet metadata for users who already completed
   // username setup before wallet display names were persisted.
@@ -241,9 +261,13 @@ export default function RootLayout(): React.JSX.Element | null {
   }, [profileImageUri, setProfileImageUri]);
 
   // Resolve onboarding routing before the native splash fades away.
+  // Wait for all stores to hydrate before making routing decisions to
+  // prevent physical devices from incorrectly routing to onboarding.
   useEffect(() => {
     if (!appReady) return;
     if (!rootLayoutReady) return;
+    if (!mmkvReady) return;
+    if (!hasRepairedOnboardingFlag) return;
     if (rootNavigationState.key.length === 0) return;
 
     if (!hasCompletedOnboarding && !inviteAccessVerified && !inInviteCode) {
@@ -270,6 +294,7 @@ export default function RootLayout(): React.JSX.Element | null {
     appReady,
     appLockChecking,
     hasCompletedOnboarding,
+    hasRepairedOnboardingFlag,
     inAppLock,
     inAuthFlow,
     inInviteCode,
@@ -278,6 +303,7 @@ export default function RootLayout(): React.JSX.Element | null {
     inUsernameSetup,
     inWalletFlow,
     inviteAccessVerified,
+    mmkvReady,
     rootLayoutReady,
     rootNavigationState.key,
     router,
@@ -288,6 +314,8 @@ export default function RootLayout(): React.JSX.Element | null {
   useEffect(() => {
     if (!appReady || hasHiddenSplash) return;
     if (!rootLayoutReady) return;
+    if (!mmkvReady) return;
+    if (!hasRepairedOnboardingFlag) return;
     if (rootNavigationState.key.length === 0) return;
     if (!routeReadyForDisplay) return;
     if (hasCompletedOnboarding && !walletHydrated) return;
@@ -303,11 +331,13 @@ export default function RootLayout(): React.JSX.Element | null {
     appLockChecking,
     hasCompletedOnboarding,
     hasHiddenSplash,
+    hasRepairedOnboardingFlag,
     routeReadyForDisplay,
     rootLayoutReady,
     rootNavigationState.key,
     shouldShowAppLockRoute,
     inAppLock,
+    mmkvReady,
     walletHydrated,
   ]);
 
