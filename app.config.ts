@@ -24,15 +24,13 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     icon: APP_ICON_PATH,
     scheme: APP_SCHEME,
     userInterfaceStyle: 'automatic',
-    newArchEnabled: true,
+    // newArchEnabled is configured via gradle.properties for compatibility
     backgroundColor: BRAND_BACKGROUND_COLOR,
     ios: {
       supportsTablet: true,
       icon: APP_ICON_PATH,
       bundleIdentifier: IOS_BUNDLE_IDENTIFIER,
       infoPlist: {
-        // ProMotion: allow UIKit/Reanimated to render above 60 Hz on supported iPhones.
-        CADisableMinimumFrameDurationOnPhone: true,
         NSBluetoothAlwaysUsageDescription:
           'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',
         NSBluetoothPeripheralUsageDescription:
@@ -64,7 +62,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
         // https://docs.privy.io/basics/android/advanced/setup-passkeys
         'android.permission.USE_BIOMETRIC',
       ],
-      edgeToEdgeEnabled: true,
+      // Note: edgeToEdgeEnabled is set in gradle.properties instead
+      // to maintain compatibility across Expo SDK versions
       predictiveBackGestureEnabled: false,
     },
     androidStatusBar: {
@@ -80,6 +79,9 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     },
     plugins: [
       'expo-router',
+      'expo-asset',
+      'expo-image',
+      'expo-status-bar',
       [
         'expo-audio',
         {

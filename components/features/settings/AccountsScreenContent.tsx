@@ -508,13 +508,13 @@ const styles = StyleSheet.create({
     opacity: 0.76,
   },
   addWalletOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
   addWalletBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.58)',
   },
   addWalletCard: {

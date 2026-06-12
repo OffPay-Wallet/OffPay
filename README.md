@@ -10,6 +10,14 @@ OffPay is an Expo Router React Native wallet client for iOS, Android, and static
 - Wallet and chain libraries: `@solana/web3.js`, `@scure/bip39`, `@noble/curves`, `bs58`, `@umbra-privacy/sdk`.
 - Device capabilities: QR generation, camera, Bluetooth/BLE, clipboard, file system, splash screen.
 
+## Expo Go Compatibility
+
+**Cannot run in Expo Go.** The app uses native modules (Privy, BLE, MMKV, passkeys, biometrics) that require a custom native build. Use:
+
+- `npm run android` or `npm run ios` for local development builds
+- EAS development client for shared builds
+- See [Build And Testing](documentation/build-and-testing.md) for complete setup
+
 ## Documentation
 
 - [Client Documentation Index](documentation/README.md)

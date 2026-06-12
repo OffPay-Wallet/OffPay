@@ -27,7 +27,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.background,
   },
   softFocus: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.backgroundGradient.blobGloss,
   },
 });

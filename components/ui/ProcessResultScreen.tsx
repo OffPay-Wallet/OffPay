@@ -413,7 +413,7 @@ export function ProcessResultScreen({
 
 const styles = StyleSheet.create({
   screen: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10020,
     elevation: 10020,
     backgroundColor: colors.backgroundGradient.base,

@@ -291,7 +291,7 @@ function TokenListEmptyState(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'flex-start',
     paddingHorizontal: spacing.md,
   },

@@ -22,7 +22,7 @@ import Animated, {
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router/react-navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
@@ -637,7 +637,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   confirmScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.58)',
   },
   confirmCard: {
@@ -669,7 +669,7 @@ const styles = StyleSheet.create({
     opacity: 0.86,
   },
   confirmCardBlurVeil: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.brand.graphiteDepth,
     zIndex: 2,
   },

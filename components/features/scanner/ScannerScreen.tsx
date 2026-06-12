@@ -3,7 +3,7 @@ import { InteractionManager, Pressable, StyleSheet, View, useWindowDimensions } 
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from 'expo-router/react-navigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundGradient.base,
   },
   camera: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   permissionFallback: {
     flex: 1,
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'space-between',
   },
   header: {
@@ -676,12 +676,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scanGuide: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
   },
   scanFrameSurface: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     borderTopWidth: 1,

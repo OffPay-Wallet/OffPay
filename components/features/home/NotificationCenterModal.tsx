@@ -506,11 +506,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.backgroundGradient.bottomDepth,
   },
   backdropPressable: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   sheetShell: {
     alignSelf: 'center',
@@ -527,7 +527,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sheetTint: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.surface.cardElevated,
   },
   header: {

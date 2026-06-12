@@ -278,11 +278,11 @@ export const reviewStyles = StyleSheet.create({
     color: colors.semantic.error,
   },
   tokenPickerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'flex-end',
   },
   tokenPickerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.glass.depthShadow,
   },
   tokenPickerSheet: {

@@ -3,7 +3,7 @@
  */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from 'expo-router/react-navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

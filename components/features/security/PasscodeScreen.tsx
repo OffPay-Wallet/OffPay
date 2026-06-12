@@ -565,14 +565,14 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   resetOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing['3xl'],
     zIndex: 1,
   },
   resetScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.72)',
   },
   resetCard: {

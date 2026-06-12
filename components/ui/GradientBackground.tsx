@@ -15,7 +15,7 @@ export const GradientBackground = memo(function GradientBackground(): React.JSX.
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.backgroundGradient.base,
     zIndex: 0,
   },

@@ -583,7 +583,7 @@ const styles = StyleSheet.create({
     elevation: 100,
   },
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.56)',
   },
   sheet: {
@@ -638,7 +638,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ring: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: CIRCLE_SIZE / 2,
     borderWidth: RING_THICKNESS,
     borderColor: colors.glass.smokeWash,
@@ -661,7 +661,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   confettiLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,

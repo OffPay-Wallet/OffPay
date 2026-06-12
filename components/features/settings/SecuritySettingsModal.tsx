@@ -811,7 +811,7 @@ export function SecuritySettingsModal({
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
@@ -878,7 +878,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   toastOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,

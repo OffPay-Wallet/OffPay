@@ -150,7 +150,7 @@ export function ThreeDPressable({
       <View
         pointerEvents="none"
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           {
             borderRadius,
             backgroundColor: shelfColor,

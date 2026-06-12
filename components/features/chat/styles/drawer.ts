@@ -15,7 +15,7 @@ export const drawerStyles = StyleSheet.create({
     flexDirection: 'row',
   },
   drawerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.62)',
   },
   drawerPanel: {

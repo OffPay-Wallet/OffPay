@@ -1,10 +1,9 @@
 /**
  * HomeHeader — wallet identity, connectivity toggle, and notifications.
  */
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  InteractionManager,
   Pressable,
   StyleSheet,
   useWindowDimensions,
@@ -21,6 +20,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
+import { NotificationCenterModal } from '@/components/features/home/NotificationCenterModal';
 import { useAppToast } from '@/components/ui/AppToast';
 import { PuffyBellIcon } from '@/components/ui/icons/PuffyBellIcon';
 import { PuffyFaucetGiftIcon } from '@/components/ui/icons/PuffyFaucetGiftIcon';
@@ -43,22 +43,6 @@ import {
 import { useAppStore } from '@/store/app';
 import { useNotificationStore } from '@/store/notificationStore';
 import { useWalletStore } from '@/store/walletStore';
-
-// Lazy-load the notification sheet so its 470-line tree only ships when
-// the user taps the bell. We prefetch the chunk on header mount so the
-// first tap never waits on a `import()`.
-const NOTIFICATION_MODAL_IMPORT = (): Promise<{
-  default: typeof import('@/components/features/home/NotificationCenterModal').NotificationCenterModal;
-}> =>
-  import('@/components/features/home/NotificationCenterModal').then((module) => ({
-    default: module.NotificationCenterModal,
-  }));
-let notificationModalPrefetch: Promise<unknown> | null = null;
-function prefetchNotificationModal(): void {
-  if (notificationModalPrefetch != null) return;
-  notificationModalPrefetch = NOTIFICATION_MODAL_IMPORT();
-}
-const NotificationCenterModal = lazy(NOTIFICATION_MODAL_IMPORT);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -194,16 +178,6 @@ function HomeHeaderComponent({
     toggleProgress.value = withTiming(isOffline ? 1 : 0, TOGGLE_TIMING);
   }, [isOffline, toggleProgress]);
 
-  // Prefetch the notification sheet bundle once the home screen has
-  // settled. This means the very first bell tap never waits on a
-  // dynamic `import()` and the entrance animation can play immediately.
-  useEffect(() => {
-    const handle = InteractionManager.runAfterInteractions(() => {
-      prefetchNotificationModal();
-    });
-    return () => handle.cancel();
-  }, []);
-
   useEffect(
     () => () => {
       if (markReadTimerRef.current != null) {
@@ -282,10 +256,6 @@ function HomeHeaderComponent({
       setFaucetBusy(false);
     }
   }, [faucetBusy, network, publicKey, queryClient, showToast]);
-
-  const handlePrefetchNotifications = useCallback((): void => {
-    prefetchNotificationModal();
-  }, []);
 
   const handleProfileImageError = useCallback((): void => {
     if (profileImageUri == null) return;
@@ -560,7 +530,6 @@ function HomeHeaderComponent({
               pressed ? styles.actionControlPressed : null,
             ]}
             onPress={handleOpenNotifications}
-            onPressIn={handlePrefetchNotifications}
             hitSlop={6}
             accessibilityRole="button"
             accessibilityLabel="Notifications"
@@ -588,15 +557,13 @@ function HomeHeaderComponent({
           </Pressable>
         </View>
       </View>
-      <Suspense fallback={null}>
-        {notificationsVisible ? (
-          <NotificationCenterModal
-            visible={notificationsVisible}
-            onClose={handleCloseNotifications}
-            sheetTopOffset={notificationSheetTopOffset}
-          />
-        ) : null}
-      </Suspense>
+      {notificationsVisible ? (
+        <NotificationCenterModal
+          visible={notificationsVisible}
+          onClose={handleCloseNotifications}
+          sheetTopOffset={notificationSheetTopOffset}
+        />
+      ) : null}
     </>
   );
 }
@@ -715,7 +682,7 @@ const styles = StyleSheet.create({
     boxShadow: '0 3px 8px rgba(0, 0, 0, 0.3)',
   },
   toggleIconLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

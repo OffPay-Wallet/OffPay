@@ -1,5 +1,48 @@
 # Build And Testing
 
+## Expo Go Compatibility
+
+**This app cannot run in Expo Go.** It requires a development or production build because it uses native modules that are not included in the Expo Go client.
+
+### Native Modules Requiring Custom Build
+
+The following dependencies use native code that requires a custom native build:
+
+| Package | Purpose | Native Requirement |
+| --- | --- | --- |
+| `@privy-io/expo` | Authentication & wallet | Native encryption, passkeys |
+| `@privy-io/expo-native-extensions` | Privy extensions | Native crypto operations |
+| `react-native-ble-manager` | Bluetooth LE | Native BLE APIs |
+| `munim-bluetooth` | Bluetooth printer | Native BLE APIs |
+| `react-native-passkeys` | WebAuthn passkeys | Android Credential Manager |
+| `react-native-mmkv` | Key-value storage | Native storage engine |
+| `react-native-nitro-modules` | Native bridge | TurboModules |
+| `react-native-worklets` | Worklet runtime | Native threading |
+| `lottie-react-native` | Lottie animations | Native animation engine |
+| `expo-local-authentication` | Biometrics | Native biometric APIs |
+| `expo-secure-store` | Secure storage | Native secure storage |
+
+### Development Workflow
+
+Instead of Expo Go, use:
+
+1. **Development build** (recommended for local dev):
+   ```bash
+   npm run android  # Android native build
+   npm run ios      # iOS native build
+   ```
+
+2. **EAS development client**:
+   ```bash
+   eas build --profile development --platform android
+   eas build --profile development --platform ios
+   ```
+
+3. **Preview build** (Android APK):
+   ```bash
+   eas build --profile preview --platform android
+   ```
+
 ## Native Configuration
 
 `app.config.ts` defines:

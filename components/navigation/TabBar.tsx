@@ -25,7 +25,7 @@ import { useWalletModeState } from '@/hooks/useWalletModeState';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 import { useTabHistoryStore, isTabRouteName } from '@/store/tabHistoryStore';
 
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/js-tabs';
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -98,16 +98,16 @@ const QUICK_ACTION_SHADOW = '0 8px 20px rgba(16, 16, 16, 0.16)';
 // Spring for the bar hide/show so it pops in/out with the same tactile
 // feel as the button presses. Runs on the UI thread.
 const TAB_VISIBILITY_SPRING: WithSpringConfig = {
-  damping: 20,
-  stiffness: 320,
-  mass: 0.6,
+  damping: 28,
+  stiffness: 420,
+  mass: 0.4,
 };
 const TAB_SLIDER_ANIMATION = {
-  duration: 280,
-  easing: Easing.out(Easing.cubic),
+  duration: 180,
+  easing: Easing.bezier(0.25, 0.1, 0.25, 1),
 } as const;
 const FAB_FADE_ANIMATION = {
-  duration: 180,
+  duration: 150,
   easing: Easing.bezier(0.25, 0.1, 0.25, 1),
 } as const;
 
@@ -338,8 +338,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       hasPositionedSliderRef.current = true;
       translateX.value = activePillX;
       sliderOpacity.value = withTiming(hasPrimaryActiveRoute ? 1 : 0, {
-        duration: 90,
-        easing: Easing.out(Easing.cubic),
+        duration: 60,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
       });
       return;
     }
@@ -347,8 +347,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     // When the active route isn't a primary tab (chat / shopping / rwas),
     // fade the pill out so Home doesn't appear highlighted by default.
     sliderOpacity.value = withTiming(hasPrimaryActiveRoute ? 1 : 0, {
-      duration: 160,
-      easing: Easing.out(Easing.cubic),
+      duration: 120,
+      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
     });
 
     if (hasPrimaryActiveRoute) {
@@ -678,10 +678,10 @@ const styles = StyleSheet.create({
     boxShadow: BAR_SHADOW,
   },
   barTint: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   tabRow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   tabItem: {
     position: 'absolute',
@@ -731,7 +731,7 @@ const styles = StyleSheet.create({
     borderColor: PILL_BORDER_COLOR,
   },
   pillTint: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     boxShadow: PILL_SHADOW,
   },
   fabFrame: {
@@ -741,7 +741,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   fabPuck: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: 'hidden',
     borderCurve: 'continuous',
     borderTopWidth: 1.5,
@@ -753,7 +753,7 @@ const styles = StyleSheet.create({
     boxShadow: FAB_PUCK_SHADOW,
   },
   fabPress: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

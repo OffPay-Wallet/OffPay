@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, View, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router/react-navigation';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { WalletAccountDetails } from '@/components/features/settings/WalletAccountDetails';

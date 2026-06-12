@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
     elevation: 10000,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'flex-end',
     paddingHorizontal: spacing.md,
     alignItems: 'center',

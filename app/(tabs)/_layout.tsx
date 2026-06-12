@@ -3,11 +3,11 @@
  */
 import { Tabs } from 'expo-router';
 import { useMemo } from 'react';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 import { TabBar } from '@/components/navigation/TabBar';
 
-import type { BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
+import type { BottomTabNavigationOptions } from 'expo-router/js-tabs';
 
 export default function TabLayout(): React.JSX.Element {
   const screenOptions = useMemo<BottomTabNavigationOptions>(
@@ -17,6 +17,12 @@ export default function TabLayout(): React.JSX.Element {
       lazy: true,
       freezeOnBlur: true,
       tabBarStyle: styles.tabBarContainer,
+      animation: 'shift',
+      animationDuration: 150,
+      // Use native driver for smoother animations
+      ...(Platform.OS === 'ios' && {
+        animationEnabled: true,
+      }),
     }),
     [],
   );

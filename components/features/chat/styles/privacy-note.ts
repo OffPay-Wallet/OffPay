@@ -5,7 +5,7 @@ import { fontFamily } from '@/constants/typography';
 
 export const privacyNoteStyles = StyleSheet.create({
   screenOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
     pointerEvents: 'none',

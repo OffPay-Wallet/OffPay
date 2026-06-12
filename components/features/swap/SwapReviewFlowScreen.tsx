@@ -361,7 +361,7 @@ function TokenLegRow({
 
 const styles = StyleSheet.create({
   screen: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10000,
     elevation: 10000,
     backgroundColor: colors.backgroundGradient.base,

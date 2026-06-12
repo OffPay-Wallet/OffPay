@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
     elevation: 9999,
   },
   sheetFrame: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     width: '100%',
     alignItems: 'center',
     justifyContent: 'flex-end',

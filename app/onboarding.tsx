@@ -360,7 +360,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   heroGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.95,
   },
   heroBrandLockup: {

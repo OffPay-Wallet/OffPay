@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   routeCardFill: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.brand.glossAccent,
     borderRadius: radii.lg,
     borderWidth: 0,

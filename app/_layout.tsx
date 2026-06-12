@@ -13,7 +13,7 @@ import { installQueryCachePersistence } from '@/lib/cache/query-persistence';
  *
  * Spec: Section 3.3 (legal disclosure at first launch)
  */
-import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DefaultTheme, ThemeProvider } from 'expo-router/react-navigation';
 import { isRunningInExpoGo } from 'expo';
 import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { useFonts } from 'expo-font';
@@ -45,7 +45,7 @@ import { useWalletStore } from '@/store/walletStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
 
-import type { Theme } from '@react-navigation/native';
+import type { Theme } from 'expo-router/react-navigation';
 
 installNetworkAccessPolicy();
 
@@ -173,7 +173,7 @@ export default function RootLayout(): React.JSX.Element | null {
 
   // Geist/Quicksand ship via the expo-font config plugin on native builds.
   // Cirka is also listed there, but we load it at runtime so portfolio
-  // money type renders correctly in Expo Go and before the next rebuild.
+  // money type renders correctly during the first render cycle.
   const [cirkaFontsLoaded, cirkaFontError] = useFonts(cirkaFontMap);
   const appReady = cirkaFontsLoaded || cirkaFontError != null;
   const firstSegment = segments[0];
@@ -378,7 +378,7 @@ export default function RootLayout(): React.JSX.Element | null {
             <Stack.Screen name="privy-wallet" options={createWalletScreenOptions} />
             <Stack.Screen name="restore-wallet" options={createWalletScreenOptions} />
           </Stack>
-          <StatusBar style="light" backgroundColor={colors.backgroundGradient.base} translucent />
+          <StatusBar style="light" />
         </View>
       </ThemeProvider>
     </AppProviders>

@@ -1103,7 +1103,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.smokeWash,
   },
   chartLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.lg,

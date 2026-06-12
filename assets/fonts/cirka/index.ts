@@ -1,6 +1,6 @@
 import { fontFamily } from '@/constants/typography';
 
-/** Runtime Cirka map — works in Expo Go and until a native rebuild picks up app.config fonts. */
+/** Runtime Cirka map — loaded at runtime for first-render consistency. */
 export const cirkaFontMap = {
   [fontFamily.moneyBold]: require('./Cirka-Bold.otf'),
   [fontFamily.moneyLight]: require('./Cirka-Light.otf'),

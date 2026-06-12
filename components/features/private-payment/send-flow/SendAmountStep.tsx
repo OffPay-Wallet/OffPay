@@ -160,7 +160,7 @@ export function SendAmountStep({
           locations={[0, 0.48, 1]}
           start={{ x: 0.1, y: 0 }}
           end={{ x: 0.9, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         <View pointerEvents="none" style={styles.amountHeroSheen} />
         <View

@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   feedbackCard: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.xl,
