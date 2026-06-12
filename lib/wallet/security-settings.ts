@@ -64,9 +64,16 @@ export interface SecuritySettingsSnapshot {
 // mutates one of the underlying entries.
 const SECURITY_SETTINGS_TTL_MS = 5_000;
 let cachedSecuritySettings: { value: SecuritySettingsSnapshot; expiresAt: number } | null = null;
+let securitySettingsPreload: Promise<SecuritySettingsSnapshot> | null = null;
 
 function invalidateSecuritySettingsCache(): void {
   cachedSecuritySettings = null;
+  securitySettingsPreload = null;
+}
+
+export function getCachedSecuritySettings(now = Date.now()): SecuritySettingsSnapshot | null {
+  if (cachedSecuritySettings == null || now >= cachedSecuritySettings.expiresAt) return null;
+  return cachedSecuritySettings.value;
 }
 
 export async function getSecuritySettings(): Promise<SecuritySettingsSnapshot> {
@@ -172,6 +179,17 @@ async function getPasscodeMaterial(): Promise<{ saltHex: string; storedHash: str
 
 export async function preloadPasscodeMaterial(): Promise<void> {
   await getPasscodeMaterial();
+}
+
+export function warmSecuritySettings(): Promise<SecuritySettingsSnapshot> {
+  if (securitySettingsPreload == null) {
+    securitySettingsPreload = getSecuritySettings();
+  }
+  return securitySettingsPreload;
+}
+
+export function useWarmSecuritySettings(): void {
+  void warmSecuritySettings();
 }
 
 export async function verifyPasscode(passcode: string): Promise<boolean> {

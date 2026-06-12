@@ -13,7 +13,7 @@
  *
  * `metering` (0..1) is surfaced for the live waveform while recording.
  *
- * App-lock suppression: recording suppresses the `AppLockGate` so the
+ * App-lock suppression: recording suppresses the app-lock route so the
  * permission dialog or any brief app-backgrounding doesn't trigger the
  * lock screen / password prompt during a voice session.
  */

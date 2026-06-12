@@ -23,7 +23,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
-import { AppLockGate } from '@/components/features/security/AppLockGate';
+import { useAppLockState } from '@/hooks/useAppLockState';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { colors } from '@/constants/colors';
 import {
@@ -42,6 +42,7 @@ import {
 import { AppProviders } from '@/providers';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
+import { usePreferencesStore } from '@/store/preferencesStore';
 
 import type { Theme } from '@react-navigation/native';
 
@@ -123,6 +124,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const hydrateWallet = useWalletStore((s) => s.hydrate);
   const walletHydrated = useWalletStore((s) => s.isHydrated);
   const walletCount = useWalletStore((s) => s.wallets.length);
+  const walletPublicKey = useWalletStore((s) => s.publicKey);
   const accountName = useWalletStore((s) => s.accountName);
   const setActiveWalletName = useWalletStore((s) => s.setActiveWalletName);
   const router = useRouter();
@@ -130,6 +132,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const rootNavigationState = useRootNavigationState();
   const [hasHiddenSplash, setHasHiddenSplash] = useState(false);
   const [rootLayoutReady, setRootLayoutReady] = useState(false);
+  const [preferencesHydrated, setPreferencesHydrated] = useState(false);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -139,6 +142,16 @@ export default function RootLayout(): React.JSX.Element | null {
     return () => {
       cancelAnimationFrame(frame);
     };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = usePreferencesStore.persist.onFinishHydration(() => {
+      setPreferencesHydrated(true);
+    });
+    if (usePreferencesStore.persist.hasHydrated()) {
+      setPreferencesHydrated(true);
+    }
+    return unsubscribe;
   }, []);
 
   // Hydrate wallet from SecureStore on app launch
@@ -160,18 +173,23 @@ export default function RootLayout(): React.JSX.Element | null {
   const inPrivyWallet = firstSegment === 'privy-wallet';
   const inOAuthCallback = firstSegment === 'oauth';
   const inSecuritySetup = firstSegment === 'security-setup';
+  const inAppLock = firstSegment === 'app-lock';
   const inWalletFlow = inCreateWallet || inRestoreWallet || inPrivyWallet;
   const inAuthFlow = inInviteCode || inOnboarding || inOAuthCallback;
-  // The wallet-setup flow (onboarding + security setup + create/
-  // restore wallet + privy wallet) paints a flat neutral surface
-  // inside `CreateWalletScreenLayout`. We opt those routes out of
-  // the screen-wide gradient so the design stays one calm tint
-  // across the full flow — no gradients, no shadows, no rims.
-  const inFlatFlow = inInviteCode || inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
+  const inFlatFlow =
+    inInviteCode || inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
   const showGradient = inAuthFlow && !inFlatFlow;
-  const hasStoredWallet = walletHydrated && walletCount > 0;
-  const effectiveHasOnboarded = hasOnboarded || hasStoredWallet;
-  const routeReadyForDisplay = effectiveHasOnboarded
+
+  const storedWalletCount = walletHydrated && walletCount > 0;
+  const hasCompletedOnboarding = hasOnboarded || storedWalletCount;
+
+  const shouldEnableLock = hasCompletedOnboarding && walletHydrated;
+  const { locked, hasPasscode, checking } = useAppLockState(shouldEnableLock);
+  const appLockChecking = shouldEnableLock && checking;
+  const shouldShowAppLockRoute =
+    shouldEnableLock && hasPasscode && locked && walletPublicKey == null;
+
+  const routeReadyForDisplay = hasCompletedOnboarding
     ? segments.length > 0 && !inInviteCode && !inOnboarding
     : inviteAccessVerified
       ? inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup
@@ -181,32 +199,32 @@ export default function RootLayout(): React.JSX.Element | null {
   // Repair the onboarding flag instead of routing an existing wallet back
   // through first-run onboarding.
   useEffect(() => {
-    if (!hasOnboarded && hasStoredWallet) {
+    if (!hasOnboarded && storedWalletCount) {
       setHasOnboarded(true);
     }
-  }, [hasOnboarded, hasStoredWallet, setHasOnboarded]);
+  }, [hasOnboarded, storedWalletCount, setHasOnboarded]);
 
   // Backfill wallet metadata for users who already completed
   // username setup before wallet display names were persisted.
   useEffect(() => {
-    if (username == null || !hasStoredWallet || !isGeneratedAccountName(accountName)) return;
+    if (username == null || !storedWalletCount || !isGeneratedAccountName(accountName)) return;
 
     void setActiveWalletName(username).catch((error: unknown) => {
       console.warn('[RootLayout] Failed to backfill wallet display name:', error);
     });
-  }, [accountName, hasStoredWallet, setActiveWalletName, username]);
+  }, [accountName, storedWalletCount, setActiveWalletName, username]);
 
   // If app-state loses the username during a cold-start storage
   // migration, recover it from the SecureStore-backed active wallet
   // display name. Generated account labels are not usernames.
   useEffect(() => {
-    if (username != null || !hasStoredWallet || isGeneratedAccountName(accountName)) return;
+    if (username != null || !storedWalletCount || isGeneratedAccountName(accountName)) return;
 
     const restoredUsername = formatOffpayUsername(accountName);
     if (restoredUsername != null) {
       setUsername(restoredUsername);
     }
-  }, [accountName, hasStoredWallet, setUsername, username]);
+  }, [accountName, storedWalletCount, setUsername, username]);
 
   // Keep the local profile image stable across restarts and app
   // container path changes. If MMKV loses the URI, recover the newest
@@ -228,12 +246,12 @@ export default function RootLayout(): React.JSX.Element | null {
     if (!rootLayoutReady) return;
     if (rootNavigationState.key.length === 0) return;
 
-    if (!effectiveHasOnboarded && !inviteAccessVerified && !inInviteCode) {
+    if (!hasCompletedOnboarding && !inviteAccessVerified && !inInviteCode) {
       router.replace('/invite-code');
-    } else if (!effectiveHasOnboarded && inviteAccessVerified && inInviteCode) {
+    } else if (!hasCompletedOnboarding && inviteAccessVerified && inInviteCode) {
       router.replace('/onboarding');
     } else if (
-      !effectiveHasOnboarded &&
+      !hasCompletedOnboarding &&
       inviteAccessVerified &&
       !inAuthFlow &&
       !inUsernameSetup &&
@@ -241,12 +259,18 @@ export default function RootLayout(): React.JSX.Element | null {
       !inSecuritySetup
     ) {
       router.replace('/onboarding');
-    } else if (effectiveHasOnboarded && (inInviteCode || inOnboarding)) {
+    } else if (hasCompletedOnboarding && (inInviteCode || inOnboarding)) {
+      router.replace('/(tabs)');
+    } else if (shouldShowAppLockRoute && !inAppLock) {
+      router.replace('/app-lock/passcode');
+    } else if (!appLockChecking && inAppLock && !shouldShowAppLockRoute) {
       router.replace('/(tabs)');
     }
   }, [
     appReady,
-    effectiveHasOnboarded,
+    appLockChecking,
+    hasCompletedOnboarding,
+    inAppLock,
     inAuthFlow,
     inInviteCode,
     inOnboarding,
@@ -257,15 +281,18 @@ export default function RootLayout(): React.JSX.Element | null {
     rootLayoutReady,
     rootNavigationState.key,
     router,
+    shouldShowAppLockRoute,
   ]);
 
-  // Fade out the native splash only once the correct first screen is mounted.
+  // Fade out the native splash only once the correct first screen is mounted
   useEffect(() => {
     if (!appReady || hasHiddenSplash) return;
     if (!rootLayoutReady) return;
     if (rootNavigationState.key.length === 0) return;
     if (!routeReadyForDisplay) return;
-    if (effectiveHasOnboarded && !walletHydrated) return;
+    if (hasCompletedOnboarding && !walletHydrated) return;
+    if (appLockChecking) return;
+    if (shouldShowAppLockRoute && !inAppLock) return;
 
     void SplashScreen.hideAsync().then(() => {
       setHasHiddenSplash(true);
@@ -273,27 +300,38 @@ export default function RootLayout(): React.JSX.Element | null {
     });
   }, [
     appReady,
-    effectiveHasOnboarded,
+    appLockChecking,
+    hasCompletedOnboarding,
     hasHiddenSplash,
     routeReadyForDisplay,
     rootLayoutReady,
     rootNavigationState.key,
+    shouldShowAppLockRoute,
+    inAppLock,
     walletHydrated,
   ]);
 
   if (!appReady) return null;
+
+  if (!preferencesHydrated && hasCompletedOnboarding) {
+    return null;
+  }
+
+  if ((appLockChecking || shouldShowAppLockRoute) && !inAppLock) {
+    return null;
+  }
 
   return (
     <AppProviders>
       <ThemeProvider value={OffPayTheme}>
         <View style={styles.appShell}>
           {showGradient ? <GradientBackground /> : null}
-          <AppLockGate enabled={effectiveHasOnboarded && walletHydrated} />
           <Stack screenOptions={globalScreenOptions}>
             <Stack.Screen name="invite-code" />
             <Stack.Screen name="onboarding" />
             <Stack.Screen name="oauth/callback" options={createWalletScreenOptions} />
             <Stack.Screen name="security-setup" options={createWalletScreenOptions} />
+            <Stack.Screen name="app-lock/passcode" />
             <Stack.Screen name="username-setup" />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="private-payment" options={privatePaymentScreenOptions} />
@@ -310,11 +348,7 @@ export default function RootLayout(): React.JSX.Element | null {
             <Stack.Screen name="privy-wallet" options={createWalletScreenOptions} />
             <Stack.Screen name="restore-wallet" options={createWalletScreenOptions} />
           </Stack>
-          <StatusBar
-            style="light"
-            backgroundColor={colors.backgroundGradient.base}
-            translucent
-          />
+          <StatusBar style="light" backgroundColor={colors.backgroundGradient.base} translucent />
         </View>
       </ThemeProvider>
     </AppProviders>

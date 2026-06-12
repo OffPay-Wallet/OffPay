@@ -11,7 +11,7 @@
  *   wallet per unlock.
  *
  * Security boundary:
- *   The cache lives only inside the unlocked session. AppLockGate already
+ *   The cache lives only inside the unlocked session. The app-lock route already
  *   models "secrets allowed in memory" — when it transitions the wallet to
  *   locked or backgrounded, this cache is cleared. Wallet switch / delete /
  *   reset / fresh import also flush the cache. The cache never writes to
@@ -20,7 +20,7 @@
  * Lifetime rules (tightest wins):
  *   - Sliding TTL: 2 minutes since last `getOrDeriveSigningSeed` hit.
  *   - Hard TTL: 10 minutes since the entry was first cached.
- *   - Manual clear from AppLockGate / wallet mutations.
+ *   - Manual clear from app-lock / wallet mutations.
  *
  * Cache key:
  *   The cache is keyed by Solana wallet public key (base58 string, the same
@@ -258,7 +258,7 @@ export async function getOrDeriveSigningSeed(params: {
  * triggering lock/background/switch event.
  *
  * Call this from:
- *   - AppLockGate when the wallet transitions to locked/backgrounded
+ *   - App-lock when the wallet transitions to locked/backgrounded
  *   - Wallet switch / delete / reset / fresh import paths
  *   - Any other privilege-state change that should drop in-memory secrets
  */

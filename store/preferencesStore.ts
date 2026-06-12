@@ -111,8 +111,12 @@ export const usePreferencesStore = create<PreferencesState>()(
       name: 'offpay-preferences',
       storage: createJSONStorage(() => mmkvStorage),
       version: 5,
-      migrate: (persistedState, _version) => {
+      migrate: (persistedState, version) => {
         if (typeof persistedState !== 'object' || persistedState === null) {
+          return persistedState;
+        }
+
+        if (version === 5) {
           return persistedState;
         }
 

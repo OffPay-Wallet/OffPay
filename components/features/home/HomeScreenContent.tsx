@@ -11,13 +11,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -35,7 +28,6 @@ import { TransactionDetailsSheet } from '@/components/features/history/Transacti
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
-import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
 import { OFFLINE_PAYMENT_SLOT_DEFAULT } from '@/constants/offline-payment-slots';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -794,24 +786,11 @@ export function HomeScreenContent(): React.JSX.Element {
     setPrivacyHidden((current) => !current);
   }, []);
 
-  // Entrance animations — opacity only.
-  const headerOpacity = useSharedValue(0);
-  const balanceOpacity = useSharedValue(0);
-  const tokensOpacity = useSharedValue(0);
-
+  const [contentVisible, setContentVisible] = useState(false);
   useEffect(() => {
-    headerOpacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
-
-    balanceOpacity.value = withDelay(
-      80,
-      withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) }),
-    );
-
-    tokensOpacity.value = withDelay(
-      140,
-      withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) }),
-    );
-  }, [headerOpacity, balanceOpacity, tokensOpacity]);
+    const timer = setTimeout(() => setContentVisible(true), 50);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const previous = previousSlotStatusRef.current;
@@ -891,18 +870,6 @@ export function HomeScreenContent(): React.JSX.Element {
     offlineSetupPendingSlots,
     slotPromptVisible,
   ]);
-
-  const headerStyle = useAnimatedStyle(() => ({
-    opacity: headerOpacity.value,
-  }));
-
-  const balanceStyle = useAnimatedStyle(() => ({
-    opacity: balanceOpacity.value,
-  }));
-
-  const tokensStyle = useAnimatedStyle(() => ({
-    opacity: tokensOpacity.value,
-  }));
 
   const navigateToStack = useCallback(
     (path: string): void => {
@@ -1099,14 +1066,14 @@ export function HomeScreenContent(): React.JSX.Element {
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS === 'android'}
       >
-        <Animated.View style={[styles.homeContentFrame, headerStyle]}>
+        <View style={[styles.homeContentFrame, contentVisible ? styles.contentVisible : styles.contentHidden]}>
           <HomeHeader
             isOffline={isOffline}
             onToggleOffline={handleToggleOffline}
             onPressWalletDetails={handleOpenAccounts}
             privacyHidden={privacyHidden}
           />
-        </Animated.View>
+        </View>
 
         <View style={styles.homeContentFrame}>
           <HomeBalanceModeDivider
@@ -1143,9 +1110,7 @@ export function HomeScreenContent(): React.JSX.Element {
           accessibilityElementsHidden={shieldedPaneActive}
           importantForAccessibility={shieldedPaneActive ? 'no-hide-descendants' : 'auto'}
         >
-          <Animated.View
-            style={[styles.balanceSection, { marginBottom: sectionGap }, balanceStyle]}
-          >
+          <View style={[styles.balanceSection, { marginBottom: sectionGap }, contentVisible ? styles.contentVisible : styles.contentHidden]}>
             <BalanceCard
               publicKey={publicKey}
               networkLabel={networkLabel}
@@ -1170,9 +1135,9 @@ export function HomeScreenContent(): React.JSX.Element {
                 isOffline ? OFFLINE_DISABLED_ACTION_IDS : EMPTY_DISABLED_ACTION_IDS
               }
             />
-          </Animated.View>
+          </View>
 
-          <StaggerRevealItem index={0} style={tokensStyle}>
+          <View style={contentVisible ? styles.contentVisible : styles.contentHidden}>
             <TokenHoldingsCard
               holdings={previewHoldings}
               onTokenPress={handleTokenPress}
@@ -1184,9 +1149,9 @@ export function HomeScreenContent(): React.JSX.Element {
               valuations={portfolioValuationQuery.data?.tokenValues}
               loading={holdingsLoading}
             />
-          </StaggerRevealItem>
+          </View>
 
-          <StaggerRevealItem index={1} style={tokensStyle}>
+          <View style={contentVisible ? styles.contentVisible : styles.contentHidden}>
             <RecentActivityCard
               transactions={recentActivity}
               onTransactionPress={handleActivityPress}
@@ -1198,7 +1163,7 @@ export function HomeScreenContent(): React.JSX.Element {
               loading={activityLoading}
               tokenLogos={tokenLogoMap}
             />
-          </StaggerRevealItem>
+          </View>
         </View>
       </ScrollView>
 
@@ -1241,6 +1206,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     alignItems: 'center',
+  },
+  contentVisible: {
+    opacity: 1,
+  },
+  contentHidden: {
+    opacity: 0,
   },
   homeContentFrame: {
     width: '100%',
