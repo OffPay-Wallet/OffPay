@@ -1,5 +1,5 @@
 /**
- * Virtualized payroll row preview. Uses FlashList so a 5,000-row run stays
+ * Virtualized batch-send row preview. Uses FlashList so a 5,000-row run stays
  * smooth — allocation is bounded by visible rows, never the full array. No
  * `.map()` over the row array in a ScrollView.
  */

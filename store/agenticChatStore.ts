@@ -29,6 +29,64 @@ export type AgenticActionStatus =
   | 'cancelled'
   | 'failed';
 
+export type AgenticFlashPositionOperation =
+  | 'open_position'
+  | 'close_position'
+  | 'add_collateral'
+  | 'remove_collateral'
+  | 'place_trigger_order'
+  | 'edit_trigger_order'
+  | 'cancel_trigger_order'
+  | 'cancel_all_trigger_orders'
+  | 'reverse_position';
+
+export interface AgenticFlashTriggerOrderSummary {
+  orderType: 'take_profit' | 'stop_loss';
+  triggerPrice: number;
+  sizePercent: number;
+}
+
+export interface AgenticFlashPositionAction {
+  id: string;
+  kind: 'flash_position';
+  status: AgenticActionStatus;
+  operation: AgenticFlashPositionOperation;
+  actionLabel: string;
+  walletAddress: string;
+  network: 'mainnet';
+  positionKey?: string | null;
+  orderId?: string | null;
+  marketSymbol: string;
+  side: 'long' | 'short';
+  leverage: number;
+  collateralUsd: number;
+  inputTokenSymbol: string;
+  tradeType: 'market' | 'limit';
+  limitPrice?: number | null;
+  entryPrice: number;
+  liquidationPrice: number;
+  sizeUsd: number;
+  entryFeeUsd: number;
+  amountUsd?: number | null;
+  amountTokenSymbol?: string | null;
+  exitPrice?: number | null;
+  feesUsd?: number | null;
+  realizedPnlUsd?: number | null;
+  newLeverage?: number | null;
+  newLiquidationPrice?: number | null;
+  transactionBase64: string;
+  expiresAt: number;
+  triggerOrders?: AgenticFlashTriggerOrderSummary[];
+  requestedTriggerOrders?: AgenticFlashTriggerOrderSummary[];
+  warnings?: string[];
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  errorMessage?: string | null;
+}
+
 export interface AgenticPrivateSendAction {
   id: string;
   kind: 'private_send' | 'normal_send';
@@ -108,12 +166,17 @@ export interface AgenticPayrollAction {
   errorMessage?: string | null;
 }
 
-export type AgenticChatAction = AgenticPrivateSendAction | AgenticSwapAction | AgenticPayrollAction;
+export type AgenticChatAction =
+  | AgenticPrivateSendAction
+  | AgenticSwapAction
+  | AgenticPayrollAction
+  | AgenticFlashPositionAction;
 
 type AgenticActionPatch =
   | Partial<Omit<AgenticPrivateSendAction, 'id'>>
   | Partial<Omit<AgenticSwapAction, 'id'>>
-  | Partial<Omit<AgenticPayrollAction, 'id'>>;
+  | Partial<Omit<AgenticPayrollAction, 'id'>>
+  | Partial<Omit<AgenticFlashPositionAction, 'id'>>;
 
 export interface AgenticChatMessage {
   id: string;

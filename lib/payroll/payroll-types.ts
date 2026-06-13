@@ -1,8 +1,8 @@
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 /**
- * Private-only payroll routes. There is intentionally no `normal`/public
- * route: payroll never falls back to a transparent transfer.
+ * Private-only batch-send routes. There is intentionally no `normal`/public
+ * route: batch send never falls back to a transparent transfer.
  */
 export type PayrollRoute = 'umbra' | 'magicblock';
 
@@ -15,7 +15,7 @@ export type PayrollRoute = 'umbra' | 'magicblock';
 export type PayrollRoutePolicy = 'private_auto' | 'umbra_only' | 'magicblock_only';
 
 /**
- * Lifecycle of a whole payroll run.
+ * Lifecycle of a whole batch-send run.
  *  - `completed_with_claims_pending`: every row landed, but one or more
  *    Umbra rows are `deposited_unclaimed` and await recipient claim.
  *  - `completed_with_errors`: run finished but some rows failed.

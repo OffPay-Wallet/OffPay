@@ -100,7 +100,7 @@ function scoreColumn(table: PayrollTable, header: string, role: PayrollColumnRol
 
 /**
  * Infers column roles from headers plus local value heuristics. Deterministic
- * and local — never sends payroll rows anywhere.
+ * and local — never sends batch-send rows anywhere.
  */
 export function inferPayrollColumns(table: PayrollTable): PayrollColumnInference {
   const mapping: PayrollColumnMapping = {

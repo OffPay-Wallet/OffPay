@@ -49,8 +49,8 @@ import { useWalletStore } from '@/store/walletStore';
 
 import { ChatHeader } from './ChatHeader';
 import { ChatHistoryDrawer } from './ChatHistoryDrawer';
+import { ChatCtaCards } from './ChatCtaCards';
 import { ChatMessageList } from './ChatMessageList';
-import { ChatPrivacyNote } from './ChatPrivacyNote';
 import { ChatPromptDock } from './ChatPromptDock';
 import { CHAT_DRAWER_MAX_WIDTH, PROMPT_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
@@ -243,7 +243,7 @@ export function ChatScreen(): React.JSX.Element {
   );
 
   // Outcome read-aloud. Speaks short, sanitized status lines after a send or
-  // payroll run resolves. Silent-fail and privacy-gated inside the hook.
+  // batch-send run resolves. Silent-fail and privacy-gated inside the hook.
   const speech = useAgenticSpeech();
   const voiceLanguageRef = useRef<string | null>(null);
   const activeWalletId = useWalletStore((s) => s.activeWalletId);
@@ -338,7 +338,7 @@ export function ChatScreen(): React.JSX.Element {
       const conversationId =
         options.conversationId ??
         activeConversation?.id ??
-        createConversation(scope, 'Payroll batch');
+        createConversation(scope, 'Batch send');
       const messageId = createAgenticId('payroll-assistant');
       addMessage({
         id: messageId,
@@ -376,7 +376,7 @@ export function ChatScreen(): React.JSX.Element {
         setPayrollReplyPendingRunIds((current) => new Set(current).add(outcome.runId));
         const { summary } = outcome;
         const now = Date.now();
-        const conversationId = activeConversation?.id ?? createConversation(scope, 'Payroll batch');
+        const conversationId = activeConversation?.id ?? createConversation(scope, 'Batch send');
         const actionId = payrollActionId(outcome.runId);
         upsertAction({
           id: actionId,
@@ -434,7 +434,7 @@ export function ChatScreen(): React.JSX.Element {
 
   const handleSetupUmbraForPayroll = useCallback(async () => {
     if (scope.walletAddress == null || scope.network == null) {
-      Alert.alert('Connect a wallet', 'Connect a wallet before setting up Umbra payroll.');
+      Alert.alert('Connect a wallet', 'Connect a wallet before setting up Umbra batch send.');
       return;
     }
     try {
@@ -446,7 +446,7 @@ export function ChatScreen(): React.JSX.Element {
       await payrollIntake.refreshRoutes();
       showToast({
         title: 'Umbra setup complete',
-        message: 'Payroll routes were refreshed.',
+        message: 'Batch send routes were refreshed.',
         variant: 'success',
       });
     } catch (caught) {
@@ -535,7 +535,7 @@ export function ChatScreen(): React.JSX.Element {
   }, [agentBusy, prompt, submit]);
 
   const voice = useAgenticVoice({
-    onTranscript: (transcript, detectedLanguage) => {
+    onTranscript: (transcript, _detectedLanguage) => {
       if (agentBusy) {
         // Don't trample an in-flight turn; seed the input for the user.
         setPrompt(transcript);
@@ -625,6 +625,20 @@ export function ChatScreen(): React.JSX.Element {
   ]);
 
   const canSubmit = prompt.trim().length > 0 && !agentBusy;
+  const showEmptyState =
+    scopedMessages.length === 0 &&
+    activePayrollRunId == null &&
+    payrollIntake.error == null &&
+    payrollIntake.mappingRequest == null;
+  const handleCtaPrompt = useCallback(
+    (nextPrompt: string) => {
+      if (agentBusy) return;
+      voiceInputRef.current = false;
+      setPrompt('');
+      submit(nextPrompt);
+    },
+    [agentBusy, submit],
+  );
   const handlePromptDockLayout = useCallback((event: LayoutChangeEvent) => {
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
     setPromptDockHeight((currentHeight) =>
@@ -690,6 +704,16 @@ export function ChatScreen(): React.JSX.Element {
               <Text variant="caption" color={colors.semantic.error}>
                 {payrollIntake.error}
               </Text>
+            </View>
+          ) : null}
+
+          {showEmptyState ? (
+            <View style={headerStyles.emptyCtaWrap}>
+              <ChatCtaCards
+                compact={compact}
+                disabled={agentBusy || payrollIntake.busy}
+                onSelect={handleCtaPrompt}
+              />
             </View>
           ) : null}
 
@@ -769,12 +793,6 @@ export function ChatScreen(): React.JSX.Element {
           ) : null}
         </ScrollView>
 
-        {scopedMessages.length === 0 &&
-          activePayrollRunId == null &&
-          payrollIntake.error == null &&
-          payrollIntake.mappingRequest == null ? (
-          <ChatPrivacyNote horizontalPadding={horizontalPadding} />
-        ) : null}
       </View>
 
       <ChatPromptDock

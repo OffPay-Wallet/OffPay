@@ -19,7 +19,7 @@ function token(mint: string, symbol: string): WalletBalanceResponse['tokens'][nu
   };
 }
 
-describe('payroll token inference', () => {
+describe('batch-send token inference', () => {
   it('infers a single token column from CSV text', async () => {
     await expect(
       inferPayrollTokenIdentifier({
@@ -30,7 +30,7 @@ describe('payroll token inference', () => {
     ).resolves.toBe('USDC');
   });
 
-  it('does not infer mixed-token files into a single-token payroll', async () => {
+  it('does not infer mixed-token files into a single-token batch send', async () => {
     await expect(
       inferPayrollTokenIdentifier({
         fileName: 'payroll.csv',

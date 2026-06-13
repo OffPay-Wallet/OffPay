@@ -7,6 +7,7 @@ import type {
   AgenticChatScope,
   AgenticPrivateSendAction,
   AgenticSwapAction,
+  AgenticFlashPositionAction,
 } from '@/store/agenticChatStore';
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
@@ -29,7 +30,20 @@ export type AgenticToolName =
   | 'check_private_send_ready'
   | 'draft_normal_send'
   | 'draft_private_send'
-  | 'stage_payroll';
+  | 'stage_payroll'
+  | 'flash_get_markets'
+  | 'flash_get_positions'
+  | 'flash_get_prices'
+  | 'flash_get_orders'
+  | 'flash_open_position'
+  | 'flash_close_position'
+  | 'flash_add_collateral'
+  | 'flash_remove_collateral'
+  | 'flash_place_trigger_order'
+  | 'flash_edit_trigger_order'
+  | 'flash_cancel_trigger_order'
+  | 'flash_cancel_all_trigger_orders'
+  | 'flash_reverse_position';
 
 export type AgenticTransferRoute = 'normal' | 'magicblock' | 'umbra';
 export type AgenticSwapRoute = 'normal';
@@ -65,6 +79,13 @@ export type AgenticToolDraft =
       draft: Omit<
         AgenticSwapAction,
         'id' | 'kind' | 'status' | 'route' | 'createdAt' | 'updatedAt'
+      >;
+    }
+  | {
+      kind: 'flash_position';
+      draft: Omit<
+        AgenticFlashPositionAction,
+        'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'
       >;
     };
 

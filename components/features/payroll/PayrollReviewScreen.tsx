@@ -1,5 +1,5 @@
 /**
- * Full-screen payroll row review. Lets the user inspect and edit staged rows
+ * Full-screen batch-send row review. Lets the user inspect and edit staged rows
  * before confirmation, then marks routes dirty so the chat card refreshes
  * readiness with the edited recipients, amounts, and tokens.
  *
@@ -257,7 +257,7 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
               onPress={handleCancel}
               style={reviewStyles.headerCancelButton}
               accessibilityRole="button"
-              accessibilityLabel="Cancel payroll"
+              accessibilityLabel="Cancel batch send"
               hitSlop={8}
             >
               <Text style={reviewStyles.headerCancelText}>Cancel</Text>
@@ -270,7 +270,7 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
 
       {run == null || rows == null ? (
         <View style={reviewStyles.emptyState}>
-          <Text style={styles.claimNote}>This payroll run is no longer available.</Text>
+          <Text style={styles.claimNote}>This batch send is no longer available.</Text>
         </View>
       ) : (
         <>
@@ -299,7 +299,7 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
                     onPress={addRow}
                     style={reviewStyles.addRowButton}
                     accessibilityRole="button"
-                    accessibilityLabel="Add payroll row"
+                    accessibilityLabel="Add batch send row"
                     hitSlop={8}
                   >
                     <Ionicons name="add" size={layout.iconSizeInline} color={colors.text.primary} />
@@ -445,7 +445,7 @@ function PayrollReviewRow({
             onPress={() => onDeleteRow(row)}
             style={reviewStyles.deleteRowButton}
             accessibilityRole="button"
-            accessibilityLabel="Delete payroll row"
+            accessibilityLabel="Delete batch send row"
             hitSlop={8}
           >
             <Ionicons
@@ -861,7 +861,7 @@ function revalidateEditableRows(run: PayrollRun, rows: readonly PayrollRow[]): P
       return invalid('Recipient is not a valid Solana wallet address.');
     }
     if (recipient === run.walletAddress) {
-      return invalid('Self-payment is not allowed in payroll.');
+      return invalid('Self-payment is not allowed in batch send.');
     }
     if (amountRaw.length === 0) {
       return invalid('Missing amount.');

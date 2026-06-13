@@ -6,7 +6,7 @@ export const stagePayrollTool: AgenticToolDefinition = {
   schema: {
     name: 'stage_payroll',
     description:
-      'Opens payroll intake UI so the user can upload or paste recipients and amounts. The app parses, validates, routes, and confirms locally. Never sends payroll rows to the AI.',
+      'Opens batch-send intake UI so the user can upload or paste recipients and amounts. The app parses, validates, routes, and confirms locally. Never sends batch-send rows to the AI.',
     parameters: {
       type: 'object',
       properties: {

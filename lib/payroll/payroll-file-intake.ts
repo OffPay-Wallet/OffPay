@@ -58,7 +58,7 @@ export async function pickPayrollFile(): Promise<PayrollFilePickResult> {
     const asset = picked.assets?.[0];
     if (asset == null) return { ok: false, message: 'No file was selected.' };
 
-    const fileName = asset.name?.trim() || 'payroll';
+    const fileName = asset.name?.trim() || 'batch-send';
     const mimeType = asset.mimeType ?? null;
 
     const format = resolvePayrollFormat(fileName, mimeType);
@@ -69,7 +69,7 @@ export async function pickPayrollFile(): Promise<PayrollFilePickResult> {
     // Prefer the picker-reported size; fall back to the File handle.
     const reportedSize = asset.size ?? null;
     if (reportedSize != null && reportedSize > PAYROLL_MAX_FILE_BYTES) {
-      return { ok: false, message: 'This file is larger than the 2 MB payroll limit.' };
+      return { ok: false, message: 'This file is larger than the 2 MB batch send limit.' };
     }
 
     try {
@@ -78,7 +78,7 @@ export async function pickPayrollFile(): Promise<PayrollFilePickResult> {
         return { ok: false, message: 'The selected file could not be read. Try uploading again.' };
       }
       if (file.size > PAYROLL_MAX_FILE_BYTES) {
-        return { ok: false, message: 'This file is larger than the 2 MB payroll limit.' };
+        return { ok: false, message: 'This file is larger than the 2 MB batch send limit.' };
       }
       const text = await file.text();
       if (text.trim().length === 0) {

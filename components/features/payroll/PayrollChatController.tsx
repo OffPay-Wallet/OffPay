@@ -244,7 +244,7 @@ export function PayrollChatController({
     <Animated.View entering={CARD_ENTERING} layout={CARD_LAYOUT} style={styles.card}>
       <View style={styles.runStatusHeader}>
         <View style={styles.runStatusTitleBlock}>
-          <Text style={styles.runStatusEyebrow}>Payroll</Text>
+          <Text style={styles.runStatusEyebrow}>Batch Send</Text>
           <Text style={styles.runStatusTitle}>{humanStatusTitle(status)}</Text>
         </View>
         <View style={[styles.runStatusPill, status === 'cancelled' && styles.runStatusPillMuted]}>
@@ -362,7 +362,7 @@ function PayrollReceiptList({
           ]}
           onPress={() => onCopy(receipt)}
           accessibilityRole="button"
-          accessibilityLabel={`Copy payroll ${receipt.kind.toLowerCase()} ${index + 1}`}
+          accessibilityLabel={`Copy batch send ${receipt.kind.toLowerCase()} ${index + 1}`}
         >
           <Text style={styles.payrollReceiptLabel}>
             {receipt.kind} {index + 1}
@@ -378,7 +378,7 @@ function PayrollReceiptList({
           onPress={onOpenDetails}
           style={styles.secondaryButton}
           accessibilityRole="button"
-          accessibilityLabel="Open all payroll receipts"
+          accessibilityLabel="Open all batch send receipts"
         >
           <Text style={styles.secondaryButtonText}>View {hiddenCount} more</Text>
         </Pressable>

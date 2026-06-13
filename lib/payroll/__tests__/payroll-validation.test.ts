@@ -128,7 +128,7 @@ describe('validatePayrollRows', () => {
         senderAddress: SENDER,
       });
       expect(result.validCount).toBe(0);
-      expect(result.rows[0].validationError).toMatch(/does not match the payroll token USDC/);
+      expect(result.rows[0].validationError).toMatch(/does not match the batch send token USDC/);
     });
 
     it('accepts a row whose token cell matches by symbol or mint, or is empty', async () => {

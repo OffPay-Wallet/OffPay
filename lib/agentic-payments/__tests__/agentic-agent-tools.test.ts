@@ -1,7 +1,11 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
 
-import { runAgenticTools, type AgenticToolRunnerContext } from '@/lib/agentic-payments/agent-tools';
+import {
+  AGENTIC_TOOL_SCHEMAS,
+  runAgenticTools,
+  type AgenticToolRunnerContext,
+} from '@/lib/agentic-payments/agent-tools';
 import * as offpayApiClient from '@/lib/api/offpay-api-client';
 
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
@@ -20,6 +24,22 @@ const usdcMint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const umbraDusdcMint = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
 
 const available = { available: true, reason: 'available', message: 'Available' } as const;
+const geminiToolDeclarationBudget = 40;
+const flashToolNames = [
+  'flash_get_markets',
+  'flash_get_positions',
+  'flash_get_prices',
+  'flash_get_orders',
+  'flash_open_position',
+  'flash_close_position',
+  'flash_add_collateral',
+  'flash_remove_collateral',
+  'flash_place_trigger_order',
+  'flash_edit_trigger_order',
+  'flash_cancel_trigger_order',
+  'flash_cancel_all_trigger_orders',
+  'flash_reverse_position',
+] as const;
 
 const capabilities: CapabilitiesResponse['capabilities'] = {
   wallet: { balance: available, transactions: available },
@@ -84,6 +104,13 @@ const baseContext: AgenticToolRunnerContext = {
 };
 
 describe('runAgenticTools', () => {
+  it('keeps every Flash Trade tool inside the model declaration budget', () => {
+    const toolNames = AGENTIC_TOOL_SCHEMAS.map((schema) => schema.name);
+
+    expect(AGENTIC_TOOL_SCHEMAS.length).toBeLessThanOrEqual(geminiToolDeclarationBudget);
+    expect(toolNames).toEqual(expect.arrayContaining([...flashToolNames]));
+  });
+
   it('returns a privacy-safe token list without addresses or mints', async () => {
     const run = await runAgenticTools(
       [{ id: 'call-1', name: 'list_wallet_tokens', args: {} }],

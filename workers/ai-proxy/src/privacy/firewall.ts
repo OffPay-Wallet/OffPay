@@ -25,6 +25,8 @@ const HEX_PRIVATE_KEY_PATTERN = /\b(?:0x)?[a-f0-9]{64}\b/i;
 const FORBIDDEN_CONTEXT_KEY_PATTERN =
   /\b(walletAddress|walletBalanceApiResponse|tokenMints|tokenMint|contractAddress|privateKey|seedPhrase|mnemonic|txHash|signature)\b/i;
 const BIP39_WORDS = new Set<string>(wordlist);
+const MAX_SAFE_CONTEXT_TOKEN_SYMBOLS = 24;
+const MAX_SAFE_CONTEXT_ACTIONS = 40;
 
 export function sanitizeChatRequestForProvider(body: AgentChatRequest): AgentChatRequest {
   if (containsForbiddenContextKey(body.context)) {
@@ -132,10 +134,14 @@ function sanitizeIntentContext(value: AgentChatRequest['context']): AgentChatReq
     locale: value.locale,
     capabilities: value.capabilities,
     tokenSymbols: Array.isArray(value.tokenSymbols)
-      ? value.tokenSymbols.filter((entry) => typeof entry === 'string').slice(0, 24)
+      ? value.tokenSymbols
+          .filter((entry) => typeof entry === 'string')
+          .slice(0, MAX_SAFE_CONTEXT_TOKEN_SYMBOLS)
       : undefined,
     supportedActions: Array.isArray(value.supportedActions)
-      ? value.supportedActions.filter((entry) => typeof entry === 'string').slice(0, 24)
+      ? value.supportedActions
+          .filter((entry) => typeof entry === 'string')
+          .slice(0, MAX_SAFE_CONTEXT_ACTIONS)
       : undefined,
   };
 }

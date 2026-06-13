@@ -1,5 +1,5 @@
 /**
- * Manual column-mapping sheet. Shown when payroll staging parsed the file but
+ * Manual column-mapping sheet. Shown when batch-send staging parsed the file but
  * could not auto-detect the recipient/amount columns. The user assigns each
  * role to one of the parsed headers; recipient + amount are required, token
  * and label are optional. Submitting re-stages with the chosen mapping.
@@ -33,7 +33,7 @@ const ROLES: { role: PayrollColumnRole; label: string; required: boolean }[] = [
   { role: 'recipient', label: 'Recipient wallet', required: true },
   { role: 'amount', label: 'Amount', required: true },
   { role: 'token', label: 'Token (optional)', required: false },
-  { role: 'label', label: 'Employee name (optional)', required: false },
+  { role: 'label', label: 'Label (optional)', required: false },
 ];
 
 export function PayrollColumnMapSheet({

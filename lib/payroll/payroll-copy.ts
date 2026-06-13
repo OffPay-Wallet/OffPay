@@ -7,17 +7,17 @@ import type {
 
 /** Human copy for route block reasons. Pure — shared by chat card + review. */
 const BLOCK_REASON_COPY: Record<PayrollRouteBlockReason, string> = {
-  wallet_cannot_sign: 'Payroll signing is not ready. Unlock or reconnect the active wallet.',
-  network_offline: 'You are offline. Reconnect to run payroll.',
+  wallet_cannot_sign: 'Batch send signing is not ready. Unlock or reconnect the active wallet.',
+  network_offline: 'You are offline. Reconnect to run batch send.',
   rpc_unavailable: 'The network RPC is unavailable right now.',
-  token_unsupported: 'This token is not supported for private payroll.',
-  insufficient_balance: 'Not enough balance for the full payroll total.',
+  token_unsupported: 'This token is not supported for private batch send.',
+  insufficient_balance: 'Not enough balance for the full batch send total.',
   insufficient_fee_sol: 'Not enough SOL to cover network fees.',
   capabilities_loading: 'Still checking what is available. Try again in a moment.',
   umbra_prover_unavailable: 'Umbra private payments need a native build on this device.',
   umbra_capability_unavailable: 'Umbra is not available on this network right now.',
   umbra_vault_unready: 'Umbra vault is not ready for this token/network.',
-  umbra_sender_not_registered: 'Set up Umbra once before running payroll.',
+  umbra_sender_not_registered: 'Set up Umbra once before running batch send.',
   umbra_recipient_not_registered: 'Recipient is not Umbra-ready.',
   magicblock_validator_missing: 'MagicBlock is not configured for this network.',
   magicblock_capability_unavailable: 'MagicBlock private payments are unavailable right now.',
@@ -54,7 +54,7 @@ export function payrollRowStatusCopy(status: PayrollRowStatus): string {
 }
 
 /**
- * Short, sanitized spoken outcome for a finished payroll run. Returns null
+ * Short, sanitized spoken outcome for a finished batch-send run. Returns null
  * when the terminal status has nothing worth speaking (e.g. still running).
  * Never includes addresses, amounts, or recipient detail — safe for cloud TTS
  * under `payrollMode`.
@@ -62,17 +62,17 @@ export function payrollRowStatusCopy(status: PayrollRowStatus): string {
 export function payrollRunOutcomeSpeech(status: PayrollRunStatus): string | null {
   switch (status) {
     case 'completed':
-      return 'Payroll completed.';
+      return 'Batch send completed.';
     case 'completed_with_claims_pending':
-      return 'Payroll submitted. Some recipients still need to claim their funds.';
+      return 'Batch send submitted. Some recipients still need to claim their funds.';
     case 'completed_with_errors':
-      return 'Payroll finished, but some rows failed or were skipped.';
+      return 'Batch send finished, but some rows failed or were skipped.';
     case 'paused':
-      return 'Payroll paused.';
+      return 'Batch send paused.';
     case 'cancelled':
-      return 'Payroll cancelled.';
+      return 'Batch send cancelled.';
     case 'failed':
-      return 'Payroll failed.';
+      return 'Batch send failed.';
     default:
       return null;
   }

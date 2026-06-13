@@ -67,6 +67,9 @@ export const confirmationStyles = StyleSheet.create({
   confirmationError: {
     lineHeight: 16,
   },
+  confirmationWarnings: {
+    gap: spacing.xs,
+  },
   routeChoiceBlock: {
     gap: spacing.xs,
   },

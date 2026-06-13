@@ -33,7 +33,7 @@ export interface PayrollTableResult {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw createAbortError('Payroll parsing was cancelled.');
+    throw createAbortError('Batch send parsing was cancelled.');
   }
 }
 
@@ -109,7 +109,7 @@ function tableFromJsonArray(values: unknown[]): PayrollTable {
   const objects: Record<string, unknown>[] = [];
   for (const value of values) {
     if (value == null || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('JSON payroll must be an array of row objects.');
+      throw new Error('JSON batch send must be an array of row objects.');
     }
     const record = value as Record<string, unknown>;
     for (const key of Object.keys(record)) headerSet.add(key.trim().toLowerCase());
@@ -142,13 +142,26 @@ async function parseJson(text: string, signal?: AbortSignal): Promise<PayrollTab
   const rows = Array.isArray(parsed)
     ? parsed
     : parsed != null && typeof parsed === 'object'
-      ? ((['rows', 'data', 'items', 'employees', 'recipients', 'payroll'] as const)
+      ? (([
+          'rows',
+          'data',
+          'items',
+          'recipients',
+          'batch_send',
+          'batchSend',
+          'multi_send',
+          'multiSend',
+          'payroll',
+          'employees',
+        ] as const)
           .map((key) => (parsed as Record<string, unknown>)[key])
           .find((value): value is unknown[] => Array.isArray(value)) ?? null)
       : null;
 
   if (rows == null) {
-    throw new Error('JSON payroll must be an array of rows, or an object with a "rows" array.');
+    throw new Error(
+      'JSON batch send must be an array of rows, or an object with a "rows" array.',
+    );
   }
 
   await yieldToUi();

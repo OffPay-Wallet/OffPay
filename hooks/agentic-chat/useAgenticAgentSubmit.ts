@@ -321,6 +321,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
               params.capabilities ?? null,
               'payment.privateBalance',
             ),
+            flashTrade: params.scope.network === 'mainnet' && params.canUseNetwork,
           },
           tokenSymbols: buildSafeTokenSymbols(params.balance),
         },
@@ -420,19 +421,30 @@ function persistDraftAction({
           createdAt: now,
           updatedAt: now,
         }
-      : {
-          ...draft.draft,
-          id: createAgenticId(
-            draft.kind === 'normal_send' ? 'agentic-normal-send' : 'agentic-private-send',
-          ),
-          kind: draft.kind,
-          status: 'needs_confirmation',
-          route: draft.route,
-          conversationId,
-          toolCallId: createAgenticId('intent'),
-          createdAt: now,
-          updatedAt: now,
-        };
+      : draft.kind === 'flash_position'
+        ? {
+            ...draft.draft,
+            id: createAgenticId('agentic-flash'),
+            kind: 'flash_position',
+            status: 'needs_confirmation',
+            conversationId,
+            toolCallId: createAgenticId('intent'),
+            createdAt: now,
+            updatedAt: now,
+          }
+        : {
+            ...draft.draft,
+            id: createAgenticId(
+              draft.kind === 'normal_send' ? 'agentic-normal-send' : 'agentic-private-send',
+            ),
+            kind: draft.kind,
+            status: 'needs_confirmation',
+            route: draft.route,
+            conversationId,
+            toolCallId: createAgenticId('intent'),
+            createdAt: now,
+            updatedAt: now,
+          };
   store.upsertAction(action);
   return action.id;
 }

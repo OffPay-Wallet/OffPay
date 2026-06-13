@@ -17,6 +17,7 @@ interface ConfirmationRowProps {
   mono?: boolean;
   onPress?: () => void;
   accessibilityLabel?: string;
+  valueColor?: string;
 }
 
 export function ConfirmationRow({
@@ -25,11 +26,12 @@ export function ConfirmationRow({
   mono,
   onPress,
   accessibilityLabel,
+  valueColor,
 }: ConfirmationRowProps): React.JSX.Element {
   const valueElement = (
     <Text
       variant="captionBold"
-      color={onPress != null ? colors.brand.glossAccent : colors.text.primary}
+      color={valueColor ?? (onPress != null ? colors.brand.glossAccent : colors.text.primary)}
       style={[
         styles.confirmationRowValue,
         mono === true && styles.monoText,

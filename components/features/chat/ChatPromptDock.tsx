@@ -86,7 +86,7 @@ interface ChatPromptDockProps {
   onLayout?: (event: LayoutChangeEvent) => void;
   onChangeText: (next: string) => void;
   onSubmit: () => void;
-  /** Optional payroll/file upload affordance ("+" button). */
+  /** Optional batch-send/file upload affordance ("+" button). */
   onUpload?: () => void;
   /** Optional long-press on upload (e.g. open paste sheet). */
   onUploadLongPress?: () => void;
@@ -228,8 +228,8 @@ function ComposerCard({
               disabled={uploadBusy}
               style={styles.promptAccessory}
               accessibilityRole="button"
-              accessibilityLabel="Upload payroll file"
-              accessibilityHint="Long press to paste payroll rows"
+              accessibilityLabel="Upload batch send file"
+              accessibilityHint="Long press to paste batch send rows"
               hitSlop={8}
             >
               {uploadBusy ? (
@@ -245,7 +245,7 @@ function ComposerCard({
               disabled={uploadBusy}
               style={styles.promptAccessory}
               accessibilityRole="button"
-              accessibilityLabel="Paste payroll rows"
+              accessibilityLabel="Paste batch send rows"
               hitSlop={8}
             >
               <Ionicons name="document-text-outline" size={21} color={colors.text.primary} />

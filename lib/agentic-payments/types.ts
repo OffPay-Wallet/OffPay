@@ -37,6 +37,7 @@ export type AgentSafeContext = {
     umbraVaultBalance?: boolean;
     magicblockPrivateBalance?: boolean;
     privateBalance?: boolean;
+    flashTrade?: boolean;
   };
   supportedActions?: string[];
   tokenSymbols?: string[];
@@ -101,6 +102,7 @@ export type AiIntentContext = {
     umbraVaultBalance?: boolean;
     magicblockPrivateBalance?: boolean;
     privateBalance?: boolean;
+    flashTrade?: boolean;
   };
   tokenSymbols?: string[];
   supportedActions?: string[];

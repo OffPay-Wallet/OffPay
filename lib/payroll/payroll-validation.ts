@@ -42,7 +42,7 @@ const VALIDATION_BATCH = 100;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw createAbortError('Payroll validation was cancelled.');
+    throw createAbortError('Batch send validation was cancelled.');
   }
 }
 
@@ -73,7 +73,7 @@ function tokenCellMatchesRun(cell: string, token: PayrollTokenContext): boolean 
 
 /**
  * Counts the fraction digits in a normalized-but-untruncated amount string.
- * Used to reject over-precise payroll amounts instead of silently slicing
+ * Used to reject over-precise batch-send amounts instead of silently slicing
  * them (e.g. `1.1234567` against a 6-decimal token).
  */
 function fractionDigitCount(amount: string): number {
@@ -124,7 +124,7 @@ function buildRow(params: {
 }
 
 /**
- * Validates and normalizes mapped table records into payroll rows.
+ * Validates and normalizes mapped table records into batch-send rows.
  *
  * Runs in batches of 100 with `yieldToUiIfNeeded` so a 5,000-row file never
  * blocks the JS thread. Enforces single-token (the run's mint), positive
@@ -180,9 +180,9 @@ export async function validatePayrollRows(
     if (!isValidSolanaAddress(recipient)) {
       invalid('Recipient is not a valid Solana wallet address.');
     } else if (recipient === params.senderAddress) {
-      invalid('Self-payment is not allowed in payroll.');
+      invalid('Self-payment is not allowed in batch send.');
     } else if (!tokenCellMatchesRun(tokenRaw, token)) {
-      invalid(`Row token "${tokenRaw.trim()}" does not match the payroll token ${token.symbol}.`);
+      invalid(`Row token "${tokenRaw.trim()}" does not match the batch send token ${token.symbol}.`);
     } else if (amountRaw.trim().length === 0) {
       invalid('Missing amount.');
     } else if (

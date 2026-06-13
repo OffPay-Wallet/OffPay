@@ -26,16 +26,16 @@ In strict privacy mode, chat providers receive sanitized prompt text only and re
 Use Cloudflare secrets for provider keys. Do not add these to the Expo app `.env`.
 
 ```sh
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put SARVAM_API_KEY
-npx wrangler secret put ELEVENLABS_API_KEY
-npx wrangler secret put ELEVENLABS_VOICE_ID
-npx wrangler secret put AI_PROXY_SESSION_SECRET
+npx wrangler secret put GEMINI_API_KEY --config workers/ai-proxy/wrangler.toml
+npx wrangler secret put SARVAM_API_KEY --config workers/ai-proxy/wrangler.toml
+npx wrangler secret put ELEVENLABS_API_KEY --config workers/ai-proxy/wrangler.toml
+npx wrangler secret put ELEVENLABS_VOICE_ID --config workers/ai-proxy/wrangler.toml
+npx wrangler secret put AI_PROXY_SESSION_SECRET --config workers/ai-proxy/wrangler.toml
 ```
 
 | Name | Required | Used for |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | No | Gemini chat fallback when explicitly enabled |
+| `GEMINI_API_KEY` | Yes | Gemini chat provider |
 | `SARVAM_API_KEY` | Yes | Primary voice STT and TTS provider |
 | `ELEVENLABS_API_KEY` | No | Voice fallback when Sarvam fails and strict privacy gates allow fallback |
 | `ELEVENLABS_VOICE_ID` | No | ElevenLabs TTS fallback voice |
@@ -102,8 +102,13 @@ EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET=<same value set as AI_PROXY_SESSION_SECRET>
 ## Deploy
 
 ```sh
-cd workers/ai-proxy
-npx wrangler deploy
+npm run deploy:ai-proxy
+```
+
+Equivalent direct command:
+
+```sh
+npx wrangler deploy --config workers/ai-proxy/wrangler.toml
 ```
 
 After deploy, set the public Worker URL in the app:

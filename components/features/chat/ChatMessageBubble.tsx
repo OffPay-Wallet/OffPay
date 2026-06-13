@@ -24,6 +24,7 @@ import { AiLoaderLottie } from './AiLoaderLottie';
 import { ChatBubble } from './ChatBubble';
 import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
 import { SwapConfirmationCard } from './SwapConfirmationCard';
+import { FlashPositionConfirmationCard } from './FlashPositionConfirmationCard';
 import { messageStyles as styles } from './styles/message';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
@@ -183,6 +184,12 @@ export function ChatMessageBubble({
               />
             ) : action.kind === 'swap' ? (
               <SwapConfirmationCard
+                action={action}
+                onConfirm={onConfirmPrivateSend}
+                onCancel={onCancelPrivateSend}
+              />
+            ) : action.kind === 'flash_position' ? (
+              <FlashPositionConfirmationCard
                 action={action}
                 onConfirm={onConfirmPrivateSend}
                 onCancel={onCancelPrivateSend}

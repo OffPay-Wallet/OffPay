@@ -160,12 +160,12 @@ describe('agenticChatStore', () => {
   });
 
   it('deletes a chat with linked payroll action cards', () => {
-    const conversationId = useAgenticChatStore.getState().createConversation(scope, 'Payroll');
+    const conversationId = useAgenticChatStore.getState().createConversation(scope, 'Batch send');
 
     useAgenticChatStore.getState().addMessage({
       id: 'message-1',
       role: 'assistant',
-      text: 'Payroll staged.',
+      text: 'Batch send staged.',
       createdAt: 1,
       walletAddress: scope.walletAddress,
       network: scope.network,
@@ -192,13 +192,13 @@ describe('agenticChatStore', () => {
   });
 
   it('deletes linked payroll run data when deleting a payroll chat', () => {
-    const conversationId = useAgenticChatStore.getState().createConversation(scope, 'Payroll');
+    const conversationId = useAgenticChatStore.getState().createConversation(scope, 'Batch send');
     usePayrollStore.getState().createRun(makePayrollRun(), [makePayrollRow()]);
 
     useAgenticChatStore.getState().addMessage({
       id: 'message-1',
       role: 'assistant',
-      text: 'Payroll cancelled.',
+      text: 'Batch send cancelled.',
       createdAt: 1,
       walletAddress: scope.walletAddress,
       network: scope.network,

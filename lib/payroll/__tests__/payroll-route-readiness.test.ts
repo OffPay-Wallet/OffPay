@@ -35,13 +35,13 @@ const registeredRecipient: PayrollRecipientFacts = {
   umbraRecipientRegistered: true,
 };
 
-describe('payroll route readiness', () => {
+describe('batch-send route readiness', () => {
   it('marks both routes ready when all facts pass', () => {
     expect(evaluateUmbraReadiness(readyFacts(), registeredRecipient).ready).toBe(true);
     expect(evaluateMagicBlockReadiness(readyFacts()).ready).toBe(true);
   });
 
-  it('blocks payroll when the wallet cannot sign', () => {
+  it('blocks batch send when the wallet cannot sign', () => {
     const facts = readyFacts({ walletCanSign: false });
     expect(evaluateUmbraReadiness(facts, registeredRecipient).blockedReasons).toContain(
       'wallet_cannot_sign',
@@ -49,7 +49,7 @@ describe('payroll route readiness', () => {
     expect(evaluateMagicBlockReadiness(facts).blockedReasons).toContain('wallet_cannot_sign');
   });
 
-  it('does not mark routes invalid just because the payroll total exceeds balance', () => {
+  it('does not mark routes invalid just because the batch-send total exceeds balance', () => {
     const facts = readyFacts({ hasTokenBalanceForRun: false });
     expect(evaluateUmbraReadiness(facts, registeredRecipient).blockedReasons).not.toContain(
       'insufficient_balance',

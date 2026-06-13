@@ -15,12 +15,12 @@ export interface PayrollSubmitterContext {
 }
 
 /**
- * Bridges a routed payroll row to the real Umbra / MagicBlock send paths and
+ * Bridges a routed batch-send row to the real Umbra / MagicBlock send paths and
  * normalizes their differing result shapes into a single
  * `PayrollSubmitOutcome`.
  *
  * Heavy modules (`@/lib/magicblock/private-payment`, `@/lib/umbra/...`) are
- * lazy-imported so payroll can be staged and validated without pulling the
+ * lazy-imported so batch send can be staged and validated without pulling the
  * prover / MagicBlock client into the bundle until execution actually runs.
  */
 export function createPayrollRowSubmitter(
@@ -29,7 +29,7 @@ export function createPayrollRowSubmitter(
   return async ({ row, route }) => {
     const signingBlocker = getWalletSigningBlocker(
       context.walletImportMethod,
-      'Payroll',
+      'Batch send',
       context.walletAddress,
     );
     if (signingBlocker != null) {

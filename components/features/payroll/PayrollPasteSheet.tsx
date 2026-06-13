@@ -1,5 +1,5 @@
 /**
- * Modal sheet for pasting raw payroll rows (CSV/TSV/JSON/plain text) or
+ * Modal sheet for pasting raw batch-send rows (CSV/TSV/JSON/plain text) or
  * entering them manually. Submits the pasted text through the same staging
  * pipeline as a file upload (`stageFromText`), so paste and upload share one
  * validation/route path.
@@ -48,7 +48,7 @@ export function PayrollPasteSheet({
     // Name it so format detection falls back to delimiter sniffing / JSON.
     const looksJson = trimmed.startsWith('{') || trimmed.startsWith('[');
     const accepted = await onSubmit(
-      looksJson ? 'pasted-payroll.json' : 'pasted-payroll.txt',
+      looksJson ? 'pasted-batch-send.json' : 'pasted-batch-send.txt',
       trimmed,
     );
     if (accepted) setText('');
@@ -63,7 +63,7 @@ export function PayrollPasteSheet({
         >
           <View style={pasteStyles.sheet}>
             <View style={styles.headerRow}>
-              <Text style={styles.title}>Paste payroll</Text>
+              <Text style={styles.title}>Paste batch send</Text>
               <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
                 <Text style={styles.secondaryButtonText}>Close</Text>
               </Pressable>
@@ -90,7 +90,7 @@ export function PayrollPasteSheet({
                 multiline
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="Payroll rows"
+                accessibilityLabel="Batch send rows"
               />
             </ScrollView>
 
@@ -101,10 +101,10 @@ export function PayrollPasteSheet({
               }}
               disabled={!canSubmit}
               accessibilityRole="button"
-              accessibilityLabel="Stage pasted payroll"
+              accessibilityLabel="Stage pasted batch send"
               accessibilityState={{ disabled: !canSubmit }}
             >
-              <Text style={styles.primaryButtonText}>Stage payroll</Text>
+              <Text style={styles.primaryButtonText}>Stage batch send</Text>
             </Pressable>
           </View>
         </KeyboardAvoidingView>

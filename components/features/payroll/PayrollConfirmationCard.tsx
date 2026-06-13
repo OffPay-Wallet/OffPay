@@ -1,5 +1,5 @@
 /**
- * In-chat payroll confirmation card. Presentation only — all totals and
+ * In-chat batch-send confirmation card. Presentation only — all totals and
  * gating come from `buildPayrollConfirmationSummary`. The single "Start
  * confirmation control begins the whole batch; there are no per-recipient
  * prompts after this. Large batches require a typed confirmation that voice
@@ -112,7 +112,7 @@ export function PayrollConfirmationCard({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <Text style={styles.title} numberOfLines={1}>
-          Review payroll
+          Review batch send
         </Text>
         <View style={styles.routeSummaryPill}>
           <Text style={styles.routeSummaryText} numberOfLines={1}>
@@ -152,7 +152,7 @@ export function PayrollConfirmationCard({
                   pressed && !selected && styles.routePickerOptionPressed,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel={`Use ${option.label} payroll route`}
+                accessibilityLabel={`Use ${option.label} batch send route`}
                 accessibilityState={{ selected, disabled: busy || onRoutePolicyChange == null }}
               >
                 <Text
@@ -239,7 +239,7 @@ export function PayrollConfirmationCard({
 
       {blockedBySetup ? (
         <>
-          <Text style={styles.warningText}>Umbra setup required before payroll can start.</Text>
+          <Text style={styles.warningText}>Umbra setup required before batch send can start.</Text>
           <Pressable
             style={[styles.secondaryButton, setupBusy && styles.primaryButtonDisabled]}
             onPress={onSetupUmbra}
@@ -268,7 +268,7 @@ export function PayrollConfirmationCard({
             placeholderTextColor={colors.text.placeholder}
             style={styles.typedConfirmInput}
             selectionColor={colors.brand.whiteStream}
-            accessibilityLabel="Type to confirm payroll"
+            accessibilityLabel="Type to confirm batch send"
           />
         </View>
       ) : null}
@@ -279,7 +279,7 @@ export function PayrollConfirmationCard({
           onPress={onStart}
           disabled={!canStart}
           accessibilityRole="button"
-          accessibilityLabel="Confirm payroll batch"
+          accessibilityLabel="Confirm batch send"
           accessibilityState={{ disabled: !canStart }}
         >
           {busy ? (
@@ -299,7 +299,7 @@ export function PayrollConfirmationCard({
                 style={styles.secondaryButton}
                 onPress={onOpenDetails}
                 accessibilityRole="button"
-                accessibilityLabel="Open payroll details"
+                accessibilityLabel="Open batch send details"
               >
                 <Ionicons name="list-outline" size={15} color={colors.text.primary} />
                 <Text style={styles.secondaryButtonText}>Review</Text>
@@ -311,7 +311,7 @@ export function PayrollConfirmationCard({
                 onPress={onCancel}
                 disabled={busy}
                 accessibilityRole="button"
-                accessibilityLabel="Cancel payroll"
+                accessibilityLabel="Cancel batch send"
                 accessibilityState={{ disabled: busy }}
               >
                 <Ionicons name="close" size={15} color={colors.semantic.error} />

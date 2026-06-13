@@ -44,6 +44,7 @@ import {
   type AgenticChatScope,
   type AgenticPrivateSendAction,
   type AgenticSwapAction,
+  type AgenticFlashPositionAction,
 } from '@/store/agenticChatStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -169,6 +170,17 @@ export function useAgenticConfirmSend({
 
       if (action.kind === 'swap') {
         await confirmSwapAction({
+          action,
+          walletId,
+          queryClient,
+          updateAction,
+          showToast,
+        });
+        return;
+      }
+
+      if (action.kind === 'flash_position') {
+        await confirmFlashPositionAction({
           action,
           walletId,
           queryClient,
@@ -662,5 +674,87 @@ async function confirmSwapAction(params: {
     const message = error instanceof Error ? error.message : 'Unable to submit swap.';
     updateAction(action.id, { status: 'failed', errorMessage: message });
     showToast({ title: 'Yuga swap failed', message, variant: 'error' });
+  }
+}
+
+function formatFlashNotificationAmount(action: AgenticFlashPositionAction): string {
+  if (action.amountUsd != null) {
+    return `${action.actionLabel} $${action.amountUsd.toFixed(2)}`;
+  }
+  return `${action.actionLabel} $${action.sizeUsd.toFixed(2)}`;
+}
+
+async function confirmFlashPositionAction(params: {
+  action: AgenticFlashPositionAction;
+  walletId: string | null;
+  queryClient: ReturnType<typeof useQueryClient>;
+  updateAction: ReturnType<typeof useAgenticChatStore.getState>['updateAction'];
+  showToast: ReturnType<typeof useAppToast>['showToast'];
+}): Promise<void> {
+  const { action, walletId, queryClient, updateAction, showToast } = params;
+
+  if (walletId == null) {
+    const message = 'Unlock wallet and try again.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'Confirmation blocked', message, variant: 'error' });
+    return;
+  }
+
+  if (action.expiresAt - Date.now() <= 0) {
+    const message = 'Quote expired. Ask Yuga to prepare a fresh transaction.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'Quote expired', message, variant: 'error' });
+    return;
+  }
+
+  updateAction(action.id, { status: 'submitting', errorMessage: null });
+  await yieldToUi();
+
+  try {
+    const { signSerializedTransactionForWallet } =
+      await import('@/lib/crypto/solana-transaction-signing');
+    const { broadcastRawTransaction } = await import('@/lib/api/offpay-api-client');
+
+    const signedTransaction = await signSerializedTransactionForWallet({
+      unsignedTransaction: action.transactionBase64,
+      walletAddress: action.walletAddress,
+      walletId,
+    });
+
+    const result = await broadcastRawTransaction({
+      rawTransaction: signedTransaction,
+      network: action.network,
+    });
+
+    void presentWalletTransactionEventNotification({
+      identifier: `wallet-transaction-${action.network}-${result.signature}`,
+      type: 'send',
+      amountLabel: formatFlashNotificationAmount(action),
+      signature: result.signature,
+    });
+
+    await invalidateAfterTransfer({
+      queryClient,
+      walletAddress: action.walletAddress,
+      network: action.network,
+      isNormalRoute: true,
+    });
+
+    updateAction(action.id, {
+      status: 'submitted',
+      signature: result.signature,
+      errorMessage: null,
+    });
+
+    showToast({
+      title: 'Flash Trade submitted',
+      message: `${action.actionLabel}: ${action.marketSymbol}`,
+      variant: 'success',
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unable to submit Flash Trade transaction.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'Flash Trade failed', message, variant: 'error' });
   }
 }

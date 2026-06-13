@@ -1,12 +1,12 @@
 /**
  * Outcome read-aloud for the Yuga assistant. Speaks short, sanitized status
- * lines after a send/payroll resolves (e.g. "Payroll completed", "Payment
+ * lines after a send/batch-send resolves (e.g. "Batch send completed", "Payment
  * failed") via the Worker's Sarvam-locked TTS endpoint.
  *
  * Hard safety rules (enforced here, not left to callers):
  *  - Outcome-only: callers pass a status phrase, never row detail.
  *  - Never speak wallet addresses, signatures, or exact amounts. Every
- *    utterance is gated through `canUseCloudTtsForText`; payroll outcomes use
+ *    utterance is gated through `canUseCloudTtsForText`; batch-send outcomes use
  *    `payrollMode` so plain token/currency amounts are also blocked.
  *  - Silent-fail: a blocked or failed utterance never surfaces an error — the
  *    text status is already on screen. TTS is purely additive.

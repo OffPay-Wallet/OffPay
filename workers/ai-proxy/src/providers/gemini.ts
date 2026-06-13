@@ -33,6 +33,8 @@ type GeminiPartInput =
       };
     };
 
+const MAX_FUNCTION_DECLARATIONS = 40;
+
 export async function generateGeminiIntent(
   body: AgentChatRequest,
   env: AiProxyEnv,
@@ -169,7 +171,7 @@ function buildToolDeclarations(
   schemas: AgentChatRequest['toolSchemas'],
 ): Array<Record<string, unknown>> {
   if (schemas == null || schemas.length === 0) return [];
-  return schemas.slice(0, 24).map((schema: AgentToolSchema) => {
+  return schemas.slice(0, MAX_FUNCTION_DECLARATIONS).map((schema: AgentToolSchema) => {
     const parameters = normalizeToolParameters(schema.parameters);
     const declaration: Record<string, unknown> = {
       name: schema.name.slice(0, 64),

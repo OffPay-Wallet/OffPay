@@ -36,7 +36,7 @@ export interface GatherPayrollRunReadinessParams {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw createAbortError('Payroll readiness gathering was cancelled.');
+    throw createAbortError('Batch send readiness gathering was cancelled.');
   }
 }
 

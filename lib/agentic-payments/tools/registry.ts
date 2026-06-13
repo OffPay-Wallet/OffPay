@@ -17,6 +17,21 @@ import { prepareSwapQuoteTool } from './prepare-swap-quote';
 import { resolveRecipientTool } from './resolve-recipient';
 import { scanUmbraClaimsTool } from './scan-umbra-claims';
 import { stagePayrollTool } from './stage-payroll';
+import {
+  flashGetMarketsTool,
+  flashGetPositionsTool,
+  flashGetPricesTool,
+  flashGetOrdersTool,
+  flashOpenPositionTool,
+  flashClosePositionTool,
+  flashAddCollateralTool,
+  flashRemoveCollateralTool,
+  flashPlaceTriggerOrderTool,
+  flashEditTriggerOrderTool,
+  flashCancelTriggerOrderTool,
+  flashCancelAllTriggerOrdersTool,
+  flashReversePositionTool,
+} from './flash-trade';
 import type {
   AgenticToolDefinition,
   AgenticToolName,
@@ -43,6 +58,19 @@ export const AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   draftNormalSendTool,
   draftPrivateSendTool,
   stagePayrollTool,
+  flashGetMarketsTool,
+  flashGetPositionsTool,
+  flashGetPricesTool,
+  flashGetOrdersTool,
+  flashOpenPositionTool,
+  flashClosePositionTool,
+  flashAddCollateralTool,
+  flashRemoveCollateralTool,
+  flashPlaceTriggerOrderTool,
+  flashEditTriggerOrderTool,
+  flashCancelTriggerOrderTool,
+  flashCancelAllTriggerOrdersTool,
+  flashReversePositionTool,
 ] as const;
 
 export const AGENTIC_TOOL_SCHEMAS = AGENTIC_TOOL_DEFINITIONS.map((definition) => definition.schema);

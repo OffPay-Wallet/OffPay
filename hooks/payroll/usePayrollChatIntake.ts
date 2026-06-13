@@ -111,6 +111,7 @@ function isRouteBlockValidationError(message: string | null): boolean {
   return !(
     message === 'Recipient is not a valid Solana wallet address.' ||
     message === 'Self-payment is not allowed in payroll.' ||
+    message === 'Self-payment is not allowed in batch send.' ||
     message === 'Missing amount.' ||
     message === 'Amount must be greater than zero.' ||
     message === 'Duplicate recipient — remove or merge this row.' ||
@@ -427,7 +428,7 @@ export function usePayrollChatIntake(
     ): Promise<PayrollStageOutcome> => {
       setError(null);
       if (params.walletAddress == null || params.network == null) {
-        const message = 'Connect a wallet before staging payroll.';
+        const message = 'Connect a wallet before staging batch send.';
         setError(message);
         return { status: 'error', message };
       }
@@ -442,7 +443,7 @@ export function usePayrollChatIntake(
         mappingOverride,
       });
       if (token == null) {
-        const message = 'No supported payroll token balance found in the active wallet.';
+        const message = 'No supported batch send token balance found in the active wallet.';
         setError(message);
         return { status: 'error', message };
       }
@@ -483,7 +484,7 @@ export function usePayrollChatIntake(
         const routed = await routeRows(staged.run, staged.rows, token);
         if (staged.summary.validCount === 0) {
           const message =
-            'No valid payroll rows found. Check the recipient and amount columns and try again.';
+            'No valid batch send rows found. Check the recipient and amount columns and try again.';
           setError(message);
           return { status: 'blocked', message };
         }
@@ -495,11 +496,11 @@ export function usePayrollChatIntake(
         return { status: 'staged', runId: staged.run.id, summary: routed.summary };
       } catch (caught) {
         if (isAbortError(caught)) {
-          const message = 'Payroll staging was cancelled.';
+          const message = 'Batch send staging was cancelled.';
           setError(message);
           return { status: 'error', message };
         }
-        const message = caught instanceof Error ? caught.message : 'Failed to stage payroll.';
+        const message = caught instanceof Error ? caught.message : 'Failed to stage batch send.';
         setError(message);
         return { status: 'error', message };
       } finally {
@@ -541,7 +542,7 @@ export function usePayrollChatIntake(
     async (mapping: PayrollColumnMapping): Promise<PayrollStageOutcome> => {
       const request = mappingRequest;
       if (request == null) {
-        return { status: 'error', message: 'No payroll file is waiting for column mapping.' };
+        return { status: 'error', message: 'No batch send file is waiting for column mapping.' };
       }
       return stage(request.fileName, request.mimeType, request.text, mapping);
     },
@@ -567,7 +568,7 @@ export function usePayrollChatIntake(
       setSummary(routed.summary);
     } catch (caught) {
       if (isAbortError(caught)) return;
-      setError(caught instanceof Error ? caught.message : 'Failed to refresh payroll routes.');
+      setError(caught instanceof Error ? caught.message : 'Failed to refresh batch send routes.');
     } finally {
       setBusy(false);
     }
@@ -580,7 +581,7 @@ export function usePayrollChatIntake(
       const run = getRun(activeRunId);
       if (run == null || run.routePolicy === policy) return;
       if (run.status !== 'ready' && run.status !== 'draft') {
-        setError('Payroll route can only be changed before confirming the batch.');
+        setError('Batch send route can only be changed before confirming the batch.');
         return;
       }
 
@@ -596,7 +597,7 @@ export function usePayrollChatIntake(
         setSummary(routed.summary);
       } catch (caught) {
         if (isAbortError(caught)) return;
-        setError(caught instanceof Error ? caught.message : 'Failed to update payroll route.');
+        setError(caught instanceof Error ? caught.message : 'Failed to update batch send route.');
       } finally {
         setBusy(false);
       }

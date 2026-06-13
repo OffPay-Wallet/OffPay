@@ -21,6 +21,8 @@
     "typecheck": "tsc --noEmit",
     "typecheck:ai-proxy": "tsc -p workers/ai-proxy/tsconfig.json --noEmit",
     "typecheck:api-worker": "tsc -p workers/api/tsconfig.json --noEmit",
+    "deploy:ai-proxy": "npx wrangler deploy --config workers/ai-proxy/wrangler.toml",
+    "tail:ai-proxy": "npx wrangler tail --config workers/ai-proxy/wrangler.toml",
     "deploy:api-worker": "npx wrangler deploy --config workers/api/wrangler.toml",
     "tail:api-worker": "npx wrangler tail --config workers/api/wrangler.toml",
     "verify:hardening": "node scripts/verify-client-hardening.js"

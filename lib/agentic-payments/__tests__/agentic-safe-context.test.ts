@@ -101,6 +101,7 @@ describe('buildAgentSafeContext (privacy-narrowed)', () => {
       umbraVaultBalance: true,
       privateBalance: true,
       magicblockPrivateBalance: true,
+      flashTrade: false,
     });
     expect(context.supportedActions).toEqual([
       'get_client_capabilities',
@@ -117,6 +118,19 @@ describe('buildAgentSafeContext (privacy-narrowed)', () => {
       'draft_normal_send',
       'draft_private_send',
       'stage_payroll',
+      'flash_get_markets',
+      'flash_get_positions',
+      'flash_get_prices',
+      'flash_get_orders',
+      'flash_open_position',
+      'flash_close_position',
+      'flash_add_collateral',
+      'flash_remove_collateral',
+      'flash_place_trigger_order',
+      'flash_edit_trigger_order',
+      'flash_cancel_trigger_order',
+      'flash_cancel_all_trigger_orders',
+      'flash_reverse_position',
     ]);
     expect(context.tokenSymbols).toEqual(['SOL', 'USDC']);
   });

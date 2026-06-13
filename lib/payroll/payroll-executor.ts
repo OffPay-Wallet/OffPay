@@ -49,7 +49,7 @@ export interface PayrollBatchSummary {
 }
 
 /**
- * Executes a payroll batch sequentially. One row at a time to avoid JS /
+ * Executes a batch send sequentially. One row at a time to avoid JS /
  * prover / RPC saturation; yields to the UI between rows so the screen stays
  * responsive during a long run.
  *

@@ -43,11 +43,11 @@ AI_PROXY_RATE_LIMIT_MAX = "40"
 AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
 
 # Set secrets with:
-# npx wrangler secret put GEMINI_API_KEY
-# npx wrangler secret put SARVAM_API_KEY
-# npx wrangler secret put ELEVENLABS_API_KEY
-# npx wrangler secret put ELEVENLABS_VOICE_ID
-# npx wrangler secret put AI_PROXY_SESSION_SECRET
+# npx wrangler secret put GEMINI_API_KEY --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put SARVAM_API_KEY --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put ELEVENLABS_API_KEY --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put ELEVENLABS_VOICE_ID --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put AI_PROXY_SESSION_SECRET --config workers/ai-proxy/wrangler.toml
 #
 # AI_PROXY_SESSION_SECRET is the HMAC secret the Worker uses to verify
 # the `x-offpay-ai-session` header. Distribute the same value to clients

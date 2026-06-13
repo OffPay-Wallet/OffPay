@@ -30,6 +30,12 @@ export const headerStyles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
   },
+  emptyCtaWrap: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: spacing['4xl'],
+  },
   payrollCardWrap: {
     marginTop: spacing.sm,
     paddingHorizontal: spacing.md,

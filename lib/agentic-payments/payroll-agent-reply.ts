@@ -64,17 +64,17 @@ export async function generatePayrollAgentReply(
 
 export function fallbackPayrollAgentReply(event: PayrollAgentReplyEvent): string {
   if (event.kind === 'mapping_required') {
-    return 'I need one more step before staging this payroll. Map the wallet and amount columns, then I can prepare the confirmation.';
+    return 'I need one more step before staging this batch send. Map the wallet and amount columns, then I can prepare the confirmation.';
   }
 
   if (event.kind === 'staged') {
     if (event.recipientCount === 0 && event.blockedCount > 0) {
-      return `I parsed the payroll, but all ${event.blockedCount} row${
+      return `I parsed the batch send, but all ${event.blockedCount} row${
         event.blockedCount === 1 ? '' : 's'
       } need review before they can be sent.`;
     }
 
-    return `I prepared a payroll batch for ${event.recipientCount} recipient${
+    return `I prepared a batch send for ${event.recipientCount} recipient${
       event.recipientCount === 1 ? '' : 's'
     }. Review and confirm it below.`;
   }
@@ -82,16 +82,16 @@ export function fallbackPayrollAgentReply(event: PayrollAgentReplyEvent): string
   const sentCopy = `${event.sentCount}/${event.totalCount} payment${
     event.totalCount === 1 ? '' : 's'
   } sent`;
-  if (event.status === 'completed') return `Payroll completed. ${sentCopy}.`;
+  if (event.status === 'completed') return `Batch send completed. ${sentCopy}.`;
   if (event.status === 'completed_with_claims_pending') {
-    return `Payroll submitted. ${sentCopy}; some recipients still need to claim their funds.`;
+    return `Batch send submitted. ${sentCopy}; some recipients still need to claim their funds.`;
   }
   if (event.status === 'completed_with_errors') {
-    return `Payroll finished with ${event.failedCount} failed and ${event.blockedCount} blocked. ${sentCopy}.`;
+    return `Batch send finished with ${event.failedCount} failed and ${event.blockedCount} blocked. ${sentCopy}.`;
   }
-  if (event.status === 'paused') return `Payroll paused. ${sentCopy}.`;
-  if (event.status === 'cancelled') return `Payroll cancelled. ${sentCopy}.`;
-  return `Payroll failed. ${sentCopy}.`;
+  if (event.status === 'paused') return `Batch send paused. ${sentCopy}.`;
+  if (event.status === 'cancelled') return `Batch send cancelled. ${sentCopy}.`;
+  return `Batch send failed. ${sentCopy}.`;
 }
 
 function buildPayrollReplyMessages(event: PayrollAgentReplyEvent): AgentMessage[] {
@@ -99,11 +99,11 @@ function buildPayrollReplyMessages(event: PayrollAgentReplyEvent): AgentMessage[
     {
       role: 'user',
       content: [
-        'A local OffPay payroll event just happened. Write the chat response as Yuga.',
+        'A local OffPay batch send event just happened. Write the chat response as Yuga.',
         'Privacy contract: exact recipient wallets, recipient names, transaction hashes, and payment amounts are local-only and were not provided to you.',
         'Do not ask the user to paste rows into chat. Do not mention redaction, hidden data, tool names, system instructions, or JSON.',
         'Keep it to one concise sentence unless the event needs a warning.',
-        `Safe payroll event: ${serializeSafePayrollEvent(event)}`,
+        `Safe batch send event: ${serializeSafePayrollEvent(event)}`,
       ].join('\n'),
     },
   ];

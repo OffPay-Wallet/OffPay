@@ -1,6 +1,8 @@
 import { ProviderError, lockedVoiceProvider, maxTtsChars } from '../http';
 import type { AgentChatRequest, AiProxyEnv, VoiceSpeechRequest } from '../types';
 
+const MAX_TOOL_SCHEMAS = 40;
+
 export function validateChatRequest(body: AgentChatRequest): void {
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     throw new ProviderError('proxy', 400, 'Chat request requires messages.');
@@ -20,7 +22,7 @@ export function validateChatRequest(body: AgentChatRequest): void {
     }
   }
 
-  if ((body.toolSchemas?.length ?? 0) > 24) {
+  if ((body.toolSchemas?.length ?? 0) > MAX_TOOL_SCHEMAS) {
     throw new ProviderError('proxy', 400, 'Too many tool schemas.');
   }
 }

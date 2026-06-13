@@ -25,7 +25,7 @@ export interface PayrollStartGate {
 }
 
 /**
- * Pure gating for the confirmation card's "Start payroll" control. Keeps the
+ * Pure gating for the confirmation card's "Start batch send" control. Keeps the
  * money-flow rule — never silently pay a subset when rows are blocked — in
  * one testable place. A run with blocked/invalid rows requires explicit
  * acknowledgment; a run needing Umbra setup or a typed confirmation cannot

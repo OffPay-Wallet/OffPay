@@ -97,7 +97,7 @@ describe('parsePayrollTable', () => {
     });
   });
 
-  it('parses headerless manual payroll rows', async () => {
+  it('parses headerless manual batch-send rows', async () => {
     const result = await parsePayrollTable({
       text:
         '11111111111111111111111111111111 100\n' +
@@ -143,7 +143,7 @@ describe('parsePayrollTable', () => {
     });
   });
 
-  it('parses headerless CSV rows as manual payroll rows', async () => {
+  it('parses headerless CSV rows as manual batch-send rows', async () => {
     const result = await parsePayrollTable({
       text:
         '11111111111111111111111111111111,100\n' + 'So11111111111111111111111111111111111111112,50',
@@ -245,7 +245,7 @@ describe('inferPayrollColumns', () => {
     expect(inference.needsManualMapping).toBe(false);
   });
 
-  it('does not treat known payroll token mints as recipient columns', () => {
+  it('does not treat known batch-send token mints as recipient columns', () => {
     const inference = inferPayrollColumns({
       headers: ['column_a', 'column_b', 'column_c'],
       records: [
