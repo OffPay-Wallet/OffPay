@@ -19,9 +19,11 @@ module.exports = {
     '^@solana/wallet-standard-features$':
       '<rootDir>/node_modules/@solana/wallet-standard-features/lib/cjs/index.js',
     '^@solana/(.*)$': '<rootDir>/node_modules/@solana/$1/dist/index.node.cjs',
+    '^rpc-websockets$': '<rootDir>/node_modules/rpc-websockets/dist/index.cjs',
+    '^uuid$': '<rootDir>/node_modules/rpc-websockets/node_modules/uuid/dist/cjs/index.js',
   },
   testPathIgnorePatterns: ['/node_modules/', '/.expo/', '/android/', '/ios/', '/dist/'],
   transformIgnorePatterns: [
-    'node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native|react-native|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|expo-.*|@noble/.*|@scure/.*|@solana/.*|bs58|tweetnacl|@umbra-privacy/.*))',
+    'node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native|react-native|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|expo-.*|@noble/.*|@scure/.*|@solana/.*|bs58|jayson|uuid|tweetnacl|@umbra-privacy/.*))',
   ],
 };

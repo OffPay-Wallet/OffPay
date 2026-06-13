@@ -22,6 +22,12 @@ export const FLASH_SUPPORTED_INPUT_TOKENS = ['USDC', 'SOL', 'JitoSOL'] as const;
 
 export const FLASH_SUPPORTED_MARKETS = ['SOL', 'BTC', 'ETH'] as const;
 
+export const FLASH_ANALYTICS_TIMEOUT_MS = 60_000;
+
+export const FLASH_ANALYTICS_MAX_POSITIONS = 500;
+
+export const FLASH_ANALYTICS_CACHE_TTL_MS = 15_000;
+
 export type FlashSupportedInputToken = (typeof FLASH_SUPPORTED_INPUT_TOKENS)[number];
 
 export type FlashSupportedMarket = (typeof FLASH_SUPPORTED_MARKETS)[number];

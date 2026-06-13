@@ -149,9 +149,13 @@ let cachedPasscodeMaterial: {
   storedHash: string;
   expiresAt: number;
 } | null = null;
+let passcodeMaterialLoad: Promise<{ saltHex: string; storedHash: string } | null> | null = null;
+let passcodeMaterialPreload: Promise<void> | null = null;
 
 function invalidatePasscodeCache(): void {
   cachedPasscodeMaterial = null;
+  passcodeMaterialLoad = null;
+  passcodeMaterialPreload = null;
 }
 
 async function getPasscodeMaterial(): Promise<{ saltHex: string; storedHash: string } | null> {
@@ -163,22 +167,41 @@ async function getPasscodeMaterial(): Promise<{ saltHex: string; storedHash: str
     };
   }
 
-  const [saltHex, storedHash] = await Promise.all([
+  if (passcodeMaterialLoad != null) {
+    return await passcodeMaterialLoad;
+  }
+
+  passcodeMaterialLoad = Promise.all([
     SecureStore.getItemAsync(KEYS.PASSCODE_SALT_HEX),
     SecureStore.getItemAsync(KEYS.PASSCODE_HASH_HEX),
-  ]);
-  if (saltHex == null || storedHash == null) return null;
+  ])
+    .then(([saltHex, storedHash]) => {
+      if (saltHex == null || storedHash == null) return null;
 
-  cachedPasscodeMaterial = {
-    saltHex,
-    storedHash,
-    expiresAt: now + PASSCODE_CACHE_TTL_MS,
-  };
-  return { saltHex, storedHash };
+      cachedPasscodeMaterial = {
+        saltHex,
+        storedHash,
+        expiresAt: now + PASSCODE_CACHE_TTL_MS,
+      };
+      return { saltHex, storedHash };
+    })
+    .finally(() => {
+      passcodeMaterialLoad = null;
+    });
+
+  return await passcodeMaterialLoad;
 }
 
 export async function preloadPasscodeMaterial(): Promise<void> {
-  await getPasscodeMaterial();
+  if (passcodeMaterialPreload == null) {
+    passcodeMaterialPreload = getPasscodeMaterial()
+      .then(() => undefined)
+      .finally(() => {
+        passcodeMaterialPreload = null;
+      });
+  }
+
+  await passcodeMaterialPreload;
 }
 
 export function warmSecuritySettings(): Promise<SecuritySettingsSnapshot> {

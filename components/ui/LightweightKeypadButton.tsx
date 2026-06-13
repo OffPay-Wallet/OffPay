@@ -30,6 +30,7 @@ export const LightweightKeypadButton = memo(function LightweightKeypadButton({
         ]}
         onPress={onPress}
         disabled={disabled}
+        unstable_pressDelay={0}
         accessibilityRole={accessibilityRole}
         accessibilityLabel={accessibilityLabel}
       >
@@ -37,7 +38,21 @@ export const LightweightKeypadButton = memo(function LightweightKeypadButton({
       </Pressable>
     </View>
   );
-});
+}, areLightweightKeypadButtonPropsEqual);
+
+function areLightweightKeypadButtonPropsEqual(
+  previous: LightweightKeypadButtonProps,
+  next: LightweightKeypadButtonProps,
+): boolean {
+  return (
+    previous.frameStyle === next.frameStyle &&
+    previous.onPress === next.onPress &&
+    previous.disabled === next.disabled &&
+    previous.muted === next.muted &&
+    previous.accessibilityRole === next.accessibilityRole &&
+    previous.accessibilityLabel === next.accessibilityLabel
+  );
+}
 
 const styles = StyleSheet.create({
   key: {

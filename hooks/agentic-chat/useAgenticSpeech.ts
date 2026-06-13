@@ -116,7 +116,9 @@ export function useAgenticSpeech(params: UseAgenticSpeechParams = {}): UseAgenti
       const controller = new AbortController();
       abortRef.current = controller;
       setState('loading');
-      console.log('[TTS] speak requested:', phrase.slice(0, 60));
+      if (__DEV__) {
+        console.log('[TTS] speak requested:', phrase.slice(0, 60));
+      }
 
       try {
         const result = await speakAgentText(
@@ -140,7 +142,9 @@ export function useAgenticSpeech(params: UseAgenticSpeechParams = {}): UseAgenti
         playerRef.current = player;
         player.play();
         setState('speaking');
-        console.log('[TTS] playing audio');
+        if (__DEV__) {
+          console.log('[TTS] playing audio');
+        }
         clearResetTimer();
         resetTimerRef.current = setTimeout(() => {
           teardownPlayer();

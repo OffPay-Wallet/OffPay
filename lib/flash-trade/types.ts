@@ -62,10 +62,141 @@ export interface FlashTriggerOrder {
 }
 
 export interface FlashPoolStats {
+  poolPubkey: string;
+  poolName: string;
   totalAumUsd: number;
   totalCollateralUsd: number;
   utilizationPercent: number;
   lpTokenSupply: string;
+  aprPercent?: number;
+  feePoolUsd?: number;
+}
+
+export interface FlashFundingRate {
+  marketSymbol: FlashMarketSymbol;
+  longRatePercent: number;
+  shortRatePercent: number;
+  longPositions: number;
+  shortPositions: number;
+  longUsd: number;
+  shortUsd: number;
+  imbalanceRatio: number;
+  timestamp: number;
+}
+
+export interface FlashLiquidation {
+  positionKey: string;
+  marketSymbol: FlashMarketSymbol;
+  side: FlashSide;
+  liquidationPrice: number;
+  currentPrice: number;
+  distancePercent: number;
+  sizeUsd: number;
+  leverage: number;
+  timestamp: number;
+}
+
+export interface FlashOpenInterest {
+  marketSymbol: FlashMarketSymbol;
+  longUsd: number;
+  shortUsd: number;
+  totalUsd: number;
+  longPositions: number;
+  shortPositions: number;
+  avgLeverage: number;
+  timestamp: number;
+}
+
+export interface FlashPriceCandle {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface FlashTraderLeaderboardEntry {
+  rank: number;
+  walletAddress: string;
+  totalPnlUsd: number;
+  winRatePercent: number;
+  totalTrades: number;
+  avgLeverage: number;
+  bestTradeUsd: number;
+  worstTradeUsd: number;
+}
+
+export interface FlashVolumeMetric {
+  marketSymbol: FlashMarketSymbol;
+  volume24hUsd: number;
+  volume7dUsd: number;
+  volume30dUsd: number;
+  trades24h: number;
+  avgTradeSizeUsd: number;
+  timestamp: number;
+}
+
+export interface FlashFeeAnalytic {
+  marketSymbol: FlashMarketSymbol;
+  totalFeesUsd: number;
+  avgFeePercent: number;
+  feePoolUsd: number;
+  volumeUsd: number;
+  timestamp: number;
+}
+
+export interface FlashLiquidationHeatmap {
+  priceRangeLow: number;
+  priceRangeHigh: number;
+  totalSizeUsd: number;
+  positionCount: number;
+  avgLeverage: number;
+}
+
+export interface FlashCorrelation {
+  marketA: FlashMarketSymbol;
+  marketB: FlashMarketSymbol;
+  correlation: number;
+  sampleSize: number;
+}
+
+export interface FlashAbsorptionMetric {
+  marketSymbol: FlashMarketSymbol;
+  bidDepthUsd: number;
+  askDepthUsd: number;
+  totalPositionSizeUsd: number;
+  absorptionRatio: number;
+  timestamp: number;
+}
+
+export interface FlashOptimalEntry {
+  marketSymbol: FlashMarketSymbol;
+  side: FlashSide;
+  recommendedPrice: number;
+  estimatedSlippage: number;
+  optimalSizeUsd: number;
+  priceImpactPercent: number;
+  entryFeeUsd: number;
+}
+
+export interface FlashPositionSizing {
+  recommendedCollateralUsd: number;
+  recommendedLeverage: number;
+  maxLossUsd: number;
+  maxLossPercent: number;
+  kellyFraction?: number;
+  riskLevel: 'conservative' | 'moderate' | 'aggressive';
+}
+
+export interface FlashHedgeSuggestion {
+  primaryMarket: FlashMarketSymbol;
+  primarySide: FlashSide;
+  hedgeMarket: FlashMarketSymbol;
+  hedgeSide: FlashSide;
+  hedgeSizePercent: number;
+  correlation: number;
+  reasoning: string;
 }
 
 export interface FlashOpenPositionRequest {

@@ -62,6 +62,7 @@ const PILL_TINT = colors.brand.glossAccent;
 // not a detached highlight patch or gradient paint.
 const FAB_PRESSED_OVERLAY = 'rgba(255, 255, 255, 0.08)';
 const QUICK_ACTION_PUCK_TINT = '#FFFFFF';
+const IS_ANDROID = process.env.EXPO_OS === 'android';
 
 // Tab accent colours - active items take the strong monochrome action,
 // inactive items stay solid dark ink with muted grey labels.
@@ -83,11 +84,9 @@ const HAIRLINE = StyleSheet.hairlineWidth;
 const SCRIM_COLOR = colors.brand.glassTint;
 const SCRIM_OPACITY = 0.82;
 
-// Shadows — kept to a single layer per element on Android to avoid
-// multiple off-screen bitmap allocations per frame. The visual
-// difference on dark UI is negligible; Android doesn't natively
-// support inset shadows so multi-layer strings cause Skia to
-// rasterize each shadow independently.
+// Shadows stay off Android's animated tab surfaces. APK builds were
+// spending too much work rasterizing shadowed, transformed views on
+// physical devices even though emulators looked fine.
 const BAR_SHADOW = '0 8px 24px rgba(0, 0, 0, 0.5)';
 const PILL_SHADOW = '0 2px 6px rgba(0, 0, 0, 0.1)';
 const FAB_PUCK_SHADOW = '0 6px 16px rgba(0, 0, 0, 0.4)';
@@ -103,12 +102,16 @@ const TAB_VISIBILITY_SPRING: WithSpringConfig = {
   mass: 0.4,
 };
 const TAB_SLIDER_ANIMATION = {
-  duration: 180,
+  duration: 90,
   easing: Easing.bezier(0.25, 0.1, 0.25, 1),
 } as const;
 const FAB_FADE_ANIMATION = {
-  duration: 150,
+  duration: 90,
   easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+} as const;
+const TAB_VISIBILITY_TIMING = {
+  duration: 70,
+  easing: Easing.out(Easing.cubic),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -223,7 +226,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const fabExpansion = useSharedValue(0);
 
   useEffect(() => {
-    barVisibility.value = withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING);
+    barVisibility.value = IS_ANDROID
+      ? withTiming(tabBarHidden ? 0 : 1, TAB_VISIBILITY_TIMING)
+      : withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING);
   }, [barVisibility, tabBarHidden]);
 
   useEffect(() => {
@@ -254,10 +259,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const barStyle = useAnimatedStyle(() => ({
     opacity: barVisibility.value,
-    transform: [
-      { translateY: (1 - barVisibility.value) * 14 },
-      { scale: 0.98 + barVisibility.value * 0.02 },
-    ],
+    transform: [{ translateY: (1 - barVisibility.value) * 10 }],
   }));
 
   const fabIconStyle = useAnimatedStyle(() => ({
@@ -270,13 +272,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const quickActionStackStyle = useAnimatedStyle(() => ({
     opacity: fabExpansion.value,
-    transform: [
-      // Glide the rows up into place and scale them in from the FAB so
-      // the menu opens/closes as one smooth motion instead of a flat
-      // pop-in fade.
-      { translateY: (1 - fabExpansion.value) * 16 },
-      { scale: 0.92 + fabExpansion.value * 0.08 },
-    ],
+    transform: [{ translateY: (1 - fabExpansion.value) * 12 }],
   }));
 
   const compactTabs = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
@@ -393,10 +389,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [navigation, recordTabSwitch, state.index, state.routes],
   );
 
+  if (tabBarHidden) {
+    return null;
+  }
+
   return (
     <View
       style={[styles.container, { height: containerHeight }]}
-      pointerEvents={tabBarHidden ? 'none' : 'box-none'}
+      pointerEvents="box-none"
     >
       {/* Frost scrim - sits behind the bar/FAB/quick actions and fades
           everything underneath to the app's neutral tone. Tap-to-dismiss;
@@ -423,14 +423,16 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         ]}
       >
         <View pointerEvents="none" style={[styles.barTint, { backgroundColor: BAR_TINT }]} />
-        <LinearGradient
-          pointerEvents="none"
-          colors={BAR_GLOSS_COLORS}
-          locations={BAR_GLOSS_LOCATIONS}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
+        {!IS_ANDROID ? (
+          <LinearGradient
+            pointerEvents="none"
+            colors={BAR_GLOSS_COLORS}
+            locations={BAR_GLOSS_LOCATIONS}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : null}
 
         <View style={styles.tabRow}>
           <Animated.View
@@ -470,6 +472,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
                 onPress={() => handleTabPress(route.name, focused)}
+                unstable_pressDelay={0}
                 accessibilityRole="tab"
                 accessibilityLabel={label}
                 accessibilityState={{ selected: focused }}
@@ -547,6 +550,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
           <Pressable
             style={({ pressed }) => [styles.fabPress, pressed && styles.fabPressed]}
             onPress={handleFabToggle}
+            unstable_pressDelay={0}
             accessibilityRole="button"
             accessibilityLabel={fabExpanded ? 'Close quick actions' : 'Open quick actions'}
             accessibilityState={{ expanded: fabExpanded }}
@@ -616,6 +620,7 @@ function QuickActionRow({
   return (
     <Pressable
       onPress={() => onPress(action)}
+      unstable_pressDelay={0}
       accessibilityRole="button"
       accessibilityLabel={action.label}
       hitSlop={6}
@@ -675,7 +680,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: HAIRLINE,
     borderRightWidth: HAIRLINE,
     borderColor: BAR_BORDER_COLOR,
-    boxShadow: BAR_SHADOW,
+    ...(IS_ANDROID ? {} : { boxShadow: BAR_SHADOW }),
   },
   barTint: {
     ...StyleSheet.absoluteFill,
@@ -732,7 +737,7 @@ const styles = StyleSheet.create({
   },
   pillTint: {
     ...StyleSheet.absoluteFill,
-    boxShadow: PILL_SHADOW,
+    ...(IS_ANDROID ? {} : { boxShadow: PILL_SHADOW }),
   },
   fabFrame: {
     position: 'absolute',
@@ -750,7 +755,7 @@ const styles = StyleSheet.create({
     borderRightWidth: HAIRLINE,
     borderColor: FAB_BORDER_COLOR,
     backgroundColor: colors.brand.actionFill,
-    boxShadow: FAB_PUCK_SHADOW,
+    ...(IS_ANDROID ? {} : { boxShadow: FAB_PUCK_SHADOW }),
   },
   fabPress: {
     ...StyleSheet.absoluteFill,
@@ -766,7 +771,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.whiteStream,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.9)',
-    boxShadow: '0 0 6px rgba(255, 255, 255, 0.4)',
+    ...(IS_ANDROID ? {} : { boxShadow: '0 0 6px rgba(255, 255, 255, 0.4)' }),
   },
   fabPressed: {
     backgroundColor: FAB_PRESSED_OVERLAY,
@@ -795,6 +800,6 @@ const styles = StyleSheet.create({
     backgroundColor: QUICK_ACTION_PUCK_TINT,
     borderWidth: HAIRLINE,
     borderColor: 'rgba(16, 16, 16, 0.12)',
-    boxShadow: QUICK_ACTION_SHADOW,
+    ...(IS_ANDROID ? {} : { boxShadow: QUICK_ACTION_SHADOW }),
   },
 });

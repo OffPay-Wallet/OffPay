@@ -15,5 +15,26 @@ export {
   flashCancelAllTriggerOrdersTool,
   flashReversePositionTool,
 } from './trigger-order-tools';
+export {
+  flashGetPoolStatsTool,
+  flashGetFundingRatesTool,
+  flashGetOpenInterestTool,
+  flashGetLiquidationClustersTool,
+} from './analytics-tools';
+export {
+  flashGetMarketMetricsTool,
+  flashGetPortfolioRiskTool,
+  flashGetAbsorptionAnalysisTool,
+} from './trading-analytics-tools';
+export {
+  flashGetOptimalEntryTool,
+  flashGetPositionSizingTool,
+  flashGetHedgeSuggestionsTool,
+} from './smart-routing-tools';
+export {
+  flashGetDataPoolsTool,
+  flashValidateDataAccessTool,
+  flashGetRateLimitsTool,
+} from './guardrails-tools';
 
 export type { FlashTradeToolName, FlashTradeDraft } from './types';

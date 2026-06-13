@@ -277,11 +277,19 @@ export function ChatScreen(): React.JSX.Element {
     },
     onReplyText: (text) => {
       if (!voiceInputRef.current) {
-        console.log('[VoiceReply] skipped — not a voice submission');
+        if (__DEV__) {
+          console.log('[VoiceReply] skipped — not a voice submission');
+        }
         return;
       }
       const language = voiceLanguageRef.current ?? undefined;
-      console.log('[VoiceReply] auto-speaking reply:', text.slice(0, 60), language ? `[lang: ${language}]` : '');
+      if (__DEV__) {
+        console.log(
+          '[VoiceReply] auto-speaking reply:',
+          text.slice(0, 60),
+          language ? `[lang: ${language}]` : '',
+        );
+      }
       void speech.speak(text, { languageHint: language });
     },
   });

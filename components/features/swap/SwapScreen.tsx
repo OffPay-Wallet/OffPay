@@ -12,10 +12,10 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRootNavigationState, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router/react-navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, {
-  FadeIn,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -37,7 +37,7 @@ import {
   type ProcessResultVariant,
 } from '@/components/ui/ProcessResultScreen';
 import { Text } from '@/components/ui/Text';
-import { StaggerRevealGroup } from '@/components/ui/StaggerReveal';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { PuffySettingsIcon } from '@/components/ui/icons/PuffySettingsIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -196,6 +196,7 @@ const PRIVATE_TOGGLE_SPRING: WithSpringConfig = {
   stiffness: 320,
   mass: 0.6,
 };
+const SWAP_DATA_FALLBACK_DELAY_MS = 650;
 
 function PrivateSwapToggle({
   enabled,
@@ -277,11 +278,25 @@ function PrivateSwapToggle({
   );
 }
 
+function SwapDataFallbackCard({ dense }: { dense: boolean }): React.JSX.Element {
+  return (
+    <View style={[styles.dataFallbackCard, dense && styles.dataFallbackCardDense]}>
+      <View style={styles.dataFallbackHeader}>
+        <SkeletonBlock width="34%" height={dense ? 12 : 14} radius={radii.full} />
+        <SkeletonBlock width={dense ? 64 : 76} height={dense ? 12 : 14} radius={radii.full} />
+      </View>
+      <View style={styles.dataFallbackRows}>
+        <SkeletonBlock width="100%" height={dense ? 12 : 14} radius={radii.full} />
+        <SkeletonBlock width="76%" height={dense ? 12 : 14} radius={radii.full} />
+      </View>
+    </View>
+  );
+}
+
 export function SwapScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const router = useRouter();
-  const rootNavigationState = useRootNavigationState();
   const previousRoute = useTabHistoryStore((s) => s.previousRoute);
   const params = useLocalSearchParams<{
     inputMint?: string;
@@ -357,6 +372,7 @@ export function SwapScreen(): React.JSX.Element {
   const [debouncedPayAmount, setDebouncedPayAmount] = useState('');
   const [quoteExpiryTick, setQuoteExpiryTick] = useState(0);
   const [sliderResetNonce, setSliderResetNonce] = useState(0);
+  const [showDeferredDataFallback, setShowDeferredDataFallback] = useState(false);
   const [reviewSwap, setReviewSwap] = useState<SwapReviewState | null>(null);
   const [privateSwapMode, setPrivateSwapMode] = useState(false);
   const [privateReviewSwap, setPrivateReviewSwap] = useState<PrivateSwapReviewState | null>(null);
@@ -374,22 +390,35 @@ export function SwapScreen(): React.JSX.Element {
     [],
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setModalVisible(false);
+        setSelectingFor(null);
+        setReviewSwap(null);
+        setPrivateReviewSwap(null);
+        Keyboard.dismiss();
+      };
+    }, []),
+  );
+
   useEffect(() => {
     setTabDataReady(false);
+    setShowDeferredDataFallback(false);
     const scheduled = scheduleUiWorkAfterFirstPaint(() => setTabDataReady(true), {
       timeoutMs: 2500,
       fallbackDelayMs: 350,
     });
+    const fallbackTimeout = setTimeout(
+      () => setShowDeferredDataFallback(true),
+      SWAP_DATA_FALLBACK_DELAY_MS,
+    );
 
     return () => {
       scheduled.cancel();
+      clearTimeout(fallbackTimeout);
     };
   }, [network, walletAddress]);
-
-  useEffect(() => {
-    if (rootNavigationState?.key == null) return;
-    router.prefetch('/advanced-swap' as never);
-  }, [rootNavigationState?.key, router]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedPayAmount(payAmount), QUOTE_DEBOUNCE_MS);
@@ -1593,32 +1622,37 @@ export function SwapScreen(): React.JSX.Element {
     swapActionRefreshAvailable ? 'refresh-error' : 'ready',
   ].join(':');
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     const target =
       previousRoute !== 'index' && previousRoute !== 'swap'
         ? TAB_ROUTE_HREFS[previousRoute]
         : TAB_ROUTE_HREFS.index;
     router.navigate(target);
-  };
+  }, [previousRoute, router]);
 
-  const handleTogglePrivateSwapMode = () => {
+  const handleTogglePrivateSwapMode = useCallback(() => {
     setPrivateSwapMode((enabled) => !enabled);
     setReviewSwap(null);
     setPrivateReviewSwap(null);
     swapInputActions.clearActionState();
     swapInputActions.setLastSwapResult(null);
     setSliderResetNonce((value) => value + 1);
-  };
+  }, [swapInputActions]);
 
-  const handleFlip = () => {
+  const handleFlip = useCallback(() => {
     swapInputActions.flip({
       payMint: receiveToken.mint,
       receiveMint: payToken.mint,
       nextAmount: !privateSwapMode && receiveAmount !== '...' ? receiveAmount : undefined,
     });
-  };
+  }, [payToken.mint, privateSwapMode, receiveAmount, receiveToken.mint, swapInputActions]);
 
-  const handleTokenSelect = (token: SwapTokenOption) => {
+  const handleOpenTokenSelector = useCallback((type: 'pay' | 'receive') => {
+    setSelectingFor(type);
+    setModalVisible(true);
+  }, []);
+
+  const handleTokenSelect = useCallback((token: SwapTokenOption) => {
     if (selectingFor === 'pay') {
       if (token.mint != null && token.mint === receiveToken.mint) {
         handleFlip();
@@ -1640,7 +1674,7 @@ export function SwapScreen(): React.JSX.Element {
 
       swapInputActions.setReceiveToken(token.mint);
     }
-  };
+  }, [handleFlip, payToken.mint, receiveToken.mint, selectingFor, swapInputActions]);
 
   const handleRefreshSwapQuote = () => {
     quoteController.refreshOnUserGesture('refresh');
@@ -1918,14 +1952,14 @@ export function SwapScreen(): React.JSX.Element {
     swapInputActions.setProcessResult(null);
   };
 
-  const handleOpenAdvancedModes = () => {
+  const handleOpenAdvancedModes = useCallback(() => {
     const params = new URLSearchParams();
     if (payToken?.mint != null) params.set('inputMint', payToken.mint);
     if (receiveToken?.mint != null) params.set('outputMint', receiveToken.mint);
     if (currentInputAmount != null) params.set('amount', currentInputAmount);
     const query = params.toString();
     router.push((query.length > 0 ? `/advanced-swap?${query}` : '/advanced-swap') as never);
-  };
+  }, [currentInputAmount, payToken?.mint, receiveToken?.mint, router]);
 
   const compactSwap = windowWidth < 390 || windowHeight < 820 || fontScale > 1.05;
   const denseSwap = windowWidth < 350 || windowHeight < 720 || fontScale > 1.18;
@@ -1935,6 +1969,14 @@ export function SwapScreen(): React.JSX.Element {
       ? spacing.lg
       : spacing['2xl'];
   const sectionGap = denseSwap ? spacing.sm : compactSwap ? 10 : spacing.md;
+  const dataStillDeferred =
+    !isOfflineMode &&
+    (!tabDataReady ||
+      capabilitiesQuery.isCapabilitiesPending ||
+      (canLoadTokens && swapTokensQuery.data == null && swapTokensQuery.error == null) ||
+      (walletAddress != null && balanceQuery.data == null && balanceQuery.error == null));
+  const showDataFallback =
+    showDeferredDataFallback && dataStillDeferred && !showLiveSwapDetails;
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -1959,12 +2001,9 @@ export function SwapScreen(): React.JSX.Element {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentInsetAdjustmentBehavior="automatic"
-            removeClippedSubviews={Platform.OS === 'android'}
+            removeClippedSubviews={false}
           >
-            <Animated.View
-              entering={FadeIn.duration(400).delay(100)}
-              style={[styles.contentFrame, styles.header]}
-            >
+            <View style={[styles.contentFrame, styles.header]}>
               <HeaderIconButton onPress={handleBack} accessibilityLabel="Go back">
                 <Ionicons
                   name="chevron-back"
@@ -1989,9 +2028,9 @@ export function SwapScreen(): React.JSX.Element {
               >
                 <PuffySettingsIcon size={layout.iconSizeNav} color={colors.text.primary} focused />
               </HeaderIconButton>
-            </Animated.View>
+            </View>
 
-            <StaggerRevealGroup itemStyle={styles.contentFrame}>
+            <View style={[styles.contentFrame, styles.swapContentStack, { gap: sectionGap }]}>
               <SwapCard
                 payToken={payToken}
                 receiveToken={receiveToken}
@@ -1999,10 +2038,7 @@ export function SwapScreen(): React.JSX.Element {
                 receiveAmount={receiveAmount}
                 onPayAmountChange={swapInputActions.setUserAmount}
                 onFlip={handleFlip}
-                onSelectToken={(type) => {
-                  setSelectingFor(type);
-                  setModalVisible(true);
-                }}
+                onSelectToken={handleOpenTokenSelector}
               />
 
               <PrivateSwapToggle
@@ -2012,6 +2048,8 @@ export function SwapScreen(): React.JSX.Element {
                 policyLabel={privateSwapPolicyLabel}
                 onToggle={handleTogglePrivateSwapMode}
               />
+
+              {showDataFallback ? <SwapDataFallbackCard dense={denseSwap} /> : null}
 
               {showLiveSwapDetails ? (
                 <SwapDetailsCard
@@ -2033,11 +2071,11 @@ export function SwapScreen(): React.JSX.Element {
               ) : null}
 
               {visibleSwapStatusMessage != null ? (
-                <Animated.View style={styles.statusWrap}>
+                <View style={styles.statusWrap}>
                   <Text variant="small" color={colors.text.tertiary} align="center">
                     {visibleSwapStatusMessage}
                   </Text>
-                </Animated.View>
+                </View>
               ) : null}
 
               <SwapConfirmationButton
@@ -2063,7 +2101,7 @@ export function SwapScreen(): React.JSX.Element {
                 }
                 onPress={handleReviewSwap}
               />
-            </StaggerRevealGroup>
+            </View>
           </ScrollView>
         </KeyboardAvoidingView>
 
@@ -2125,6 +2163,9 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: SWAP_CONTENT_MAX_WIDTH,
   },
+  swapContentStack: {
+    width: '100%',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2162,6 +2203,32 @@ const styles = StyleSheet.create({
   },
   statusWrap: {
     paddingHorizontal: spacing.md,
+  },
+  dataFallbackCard: {
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.strongFill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  dataFallbackCardDense: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  dataFallbackHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  dataFallbackRows: {
+    gap: spacing.xs,
   },
   privateTogglePressable: {
     borderRadius: radii.xl,

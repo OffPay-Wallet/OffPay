@@ -21,7 +21,20 @@ export type FlashTradeToolName =
   | 'flash_preview_limit_order'
   | 'flash_preview_tp_sl'
   | 'flash_preview_margin'
-  | 'flash_preview_exit_fee';
+  | 'flash_preview_exit_fee'
+  | 'flash_get_pool_stats'
+  | 'flash_get_funding_rates'
+  | 'flash_get_open_interest'
+  | 'flash_get_liquidation_clusters'
+  | 'flash_get_market_metrics'
+  | 'flash_get_portfolio_risk'
+  | 'flash_get_absorption_analysis'
+  | 'flash_get_optimal_entry'
+  | 'flash_get_position_sizing'
+  | 'flash_get_hedge_suggestions'
+  | 'flash_get_data_pools'
+  | 'flash_validate_data_access'
+  | 'flash_get_rate_limits';
 
 export interface FlashTradeDraft {
   kind: 'flash_position';

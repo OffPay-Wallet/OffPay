@@ -55,7 +55,7 @@ import { createAgenticId, getProxyErrorMessage } from '@/components/features/cha
 
 import { revealAssistantMessageText } from './revealAssistantMessageText';
 
-const MAX_TOOL_TURNS = 4;
+const MAX_TOOL_TURNS = 6;
 
 interface UseAgenticAgentSubmitParams {
   scope: AgenticChatScope;
@@ -342,17 +342,17 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     if (turn.kind === 'agent_text') {
       const cleaned =
         sanitizeAssistantText(turn.text, attachedActionId != null) || turn.text.trim();
-      
+
       // Start voice synthesis immediately in parallel with text reveal
       if (cleaned.length > 0) {
         params.onReplyText?.(cleaned);
       }
-      
+
       await revealAssistantMessageText(params.assistantMessageId, cleaned, {
         signal: params.controller.signal,
         patch: attachedActionId != null ? { actionId: attachedActionId } : undefined,
       });
-      
+
       return;
     }
 
@@ -391,7 +391,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
   // Loop hit its budget without a final text turn.
   await revealAssistantMessageText(
     params.assistantMessageId,
-    'I needed too many tool calls for that. Try a more specific request.',
+    'I could not finish that in one pass. Send one clear action with the amount, token or market, and any trade details like side, leverage, collateral, and order type.',
     {
       signal: params.controller.signal,
       patch: attachedActionId != null ? { actionId: attachedActionId } : undefined,

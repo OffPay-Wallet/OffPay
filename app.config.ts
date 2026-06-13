@@ -168,7 +168,6 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
         },
       ],
       './plugins/with-ble-scan-location-permission',
-      './plugins/with-adaptive-display-refresh-rate',
       // Required by `@privy-io/expo` so the SDK can open the OAuth
       // flow in a Custom Tab on Android. The plugin wires up the
       // intent filter on the Android manifest side.

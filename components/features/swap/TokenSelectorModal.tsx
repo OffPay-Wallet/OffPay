@@ -3,12 +3,12 @@ import {
   View,
   StyleSheet,
   TouchableWithoutFeedback,
-  Dimensions,
   Pressable,
   TextInput,
   KeyboardAvoidingView,
   Platform,
   FlatList,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -30,8 +30,8 @@ import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
 import type { SwapTokenOption } from './types';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const TOKEN_ROW_HEIGHT = layout.avatarLg + spacing.lg;
+const EMPTY_TOKEN_LIST: SwapTokenOption[] = [];
 
 interface TokenSelectorModalProps {
   visible: boolean;
@@ -67,12 +67,16 @@ export function TokenSelectorModal({
   onSelect,
 }: TokenSelectorModalProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
+  const { height: screenHeight } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
   const [searchQuery, setSearchQuery] = useState('');
-  const translateY = useSharedValue(-SCREEN_HEIGHT);
+  const translateY = useSharedValue(-screenHeight);
   const opacity = useSharedValue(0);
+  const sortableTokens = mounted ? tokens : EMPTY_TOKEN_LIST;
 
   useEffect(() => {
+    let searchResetTimeout: ReturnType<typeof setTimeout> | null = null;
+
     if (visible) {
       setMounted(true);
       opacity.value = withTiming(1, { duration: 300 });
@@ -81,23 +85,29 @@ export function TokenSelectorModal({
         easing: Easing.out(Easing.poly(3)),
       });
     } else {
-      translateY.value = withTiming(-SCREEN_HEIGHT, {
+      translateY.value = withTiming(-screenHeight, {
         duration: 250,
         easing: Easing.in(Easing.ease),
       });
       opacity.value = withTiming(0, { duration: 250 }, (finished) => {
         if (finished) runOnJS(setMounted)(false);
       });
-      setTimeout(() => setSearchQuery(''), 300);
+      searchResetTimeout = setTimeout(() => setSearchQuery(''), 300);
     }
-  }, [visible, opacity, translateY]);
+
+    return () => {
+      if (searchResetTimeout != null) {
+        clearTimeout(searchResetTimeout);
+      }
+    };
+  }, [visible, opacity, screenHeight, translateY]);
 
   const filteredTokens = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const matchedTokens =
       query.length === 0
-        ? tokens
-        : tokens.filter((token) => {
+        ? sortableTokens
+        : sortableTokens.filter((token) => {
             return (
               token.name.toLowerCase().includes(query) ||
               token.symbol.toLowerCase().includes(query) ||
@@ -106,7 +116,7 @@ export function TokenSelectorModal({
           });
 
     return [...matchedTokens].sort(compareTokenSelectorRows);
-  }, [searchQuery, tokens]);
+  }, [searchQuery, sortableTokens]);
 
   const keyExtractor = useCallback((token: SwapTokenOption, index: number): string => {
     return token.mint ?? `${token.symbol}-${token.name}-${index}`;
@@ -114,7 +124,7 @@ export function TokenSelectorModal({
 
   const handleClose = () => {
     translateY.value = withTiming(
-      -SCREEN_HEIGHT,
+      -screenHeight,
       { duration: 250, easing: Easing.in(Easing.ease) },
       () => {
         runOnJS(onClose)();
@@ -264,7 +274,7 @@ export function TokenSelectorModal({
             maxToRenderPerBatch={10}
             updateCellsBatchingPeriod={40}
             windowSize={7}
-            removeClippedSubviews={Platform.OS === 'android'}
+            removeClippedSubviews={false}
           />
         </Animated.View>
       </KeyboardAvoidingView>

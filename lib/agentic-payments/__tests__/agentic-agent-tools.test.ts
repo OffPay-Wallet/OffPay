@@ -25,7 +25,7 @@ const umbraDusdcMint = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
 
 const available = { available: true, reason: 'available', message: 'Available' } as const;
 const geminiToolDeclarationBudget = 40;
-const flashToolNames = [
+const modelVisibleFlashToolNames = [
   'flash_get_markets',
   'flash_get_positions',
   'flash_get_prices',
@@ -39,6 +39,21 @@ const flashToolNames = [
   'flash_cancel_trigger_order',
   'flash_cancel_all_trigger_orders',
   'flash_reverse_position',
+] as const;
+const modelHiddenFlashToolNames = [
+  'flash_get_pool_stats',
+  'flash_get_funding_rates',
+  'flash_get_open_interest',
+  'flash_get_liquidation_clusters',
+  'flash_get_market_metrics',
+  'flash_get_portfolio_risk',
+  'flash_get_absorption_analysis',
+  'flash_get_optimal_entry',
+  'flash_get_position_sizing',
+  'flash_get_hedge_suggestions',
+  'flash_get_data_pools',
+  'flash_validate_data_access',
+  'flash_get_rate_limits',
 ] as const;
 
 const capabilities: CapabilitiesResponse['capabilities'] = {
@@ -101,14 +116,18 @@ const baseContext: AgenticToolRunnerContext = {
   knownWallets: [{ name: 'Account 1', address: walletAddress, active: true }],
   redactions: [],
   userText: 'irrelevant',
+  walletImportMethod: 'generated',
 };
 
 describe('runAgenticTools', () => {
-  it('keeps every Flash Trade tool inside the model declaration budget', () => {
+  it('keeps core Flash Trade tools inside the model declaration budget', () => {
     const toolNames = AGENTIC_TOOL_SCHEMAS.map((schema) => schema.name);
 
     expect(AGENTIC_TOOL_SCHEMAS.length).toBeLessThanOrEqual(geminiToolDeclarationBudget);
-    expect(toolNames).toEqual(expect.arrayContaining([...flashToolNames]));
+    expect(toolNames).toEqual(expect.arrayContaining([...modelVisibleFlashToolNames]));
+    for (const hiddenToolName of modelHiddenFlashToolNames) {
+      expect(toolNames).not.toContain(hiddenToolName);
+    }
   });
 
   it('returns a privacy-safe token list without addresses or mints', async () => {

@@ -31,6 +31,19 @@ import {
   flashCancelTriggerOrderTool,
   flashCancelAllTriggerOrdersTool,
   flashReversePositionTool,
+  flashGetPoolStatsTool,
+  flashGetFundingRatesTool,
+  flashGetOpenInterestTool,
+  flashGetLiquidationClustersTool,
+  flashGetMarketMetricsTool,
+  flashGetPortfolioRiskTool,
+  flashGetAbsorptionAnalysisTool,
+  flashGetOptimalEntryTool,
+  flashGetPositionSizingTool,
+  flashGetHedgeSuggestionsTool,
+  flashGetDataPoolsTool,
+  flashValidateDataAccessTool,
+  flashGetRateLimitsTool,
 } from './flash-trade';
 import type {
   AgenticToolDefinition,
@@ -38,6 +51,22 @@ import type {
   AgenticToolRunnerContext,
   ToolHandlerOutcome,
 } from './types';
+
+const MODEL_HIDDEN_TOOL_NAMES = new Set<AgenticToolName>([
+  'flash_get_pool_stats',
+  'flash_get_funding_rates',
+  'flash_get_open_interest',
+  'flash_get_liquidation_clusters',
+  'flash_get_market_metrics',
+  'flash_get_portfolio_risk',
+  'flash_get_absorption_analysis',
+  'flash_get_optimal_entry',
+  'flash_get_position_sizing',
+  'flash_get_hedge_suggestions',
+  'flash_get_data_pools',
+  'flash_validate_data_access',
+  'flash_get_rate_limits',
+]);
 
 export const AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   getClientCapabilitiesTool,
@@ -71,9 +100,28 @@ export const AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   flashCancelTriggerOrderTool,
   flashCancelAllTriggerOrdersTool,
   flashReversePositionTool,
+  flashGetPoolStatsTool,
+  flashGetFundingRatesTool,
+  flashGetOpenInterestTool,
+  flashGetLiquidationClustersTool,
+  flashGetMarketMetricsTool,
+  flashGetPortfolioRiskTool,
+  flashGetAbsorptionAnalysisTool,
+  flashGetOptimalEntryTool,
+  flashGetPositionSizingTool,
+  flashGetHedgeSuggestionsTool,
+  flashGetDataPoolsTool,
+  flashValidateDataAccessTool,
+  flashGetRateLimitsTool,
 ] as const;
 
-export const AGENTIC_TOOL_SCHEMAS = AGENTIC_TOOL_DEFINITIONS.map((definition) => definition.schema);
+export const AGENTIC_MODEL_TOOL_DEFINITIONS = AGENTIC_TOOL_DEFINITIONS.filter(
+  (definition) => !MODEL_HIDDEN_TOOL_NAMES.has(definition.name),
+);
+
+export const AGENTIC_TOOL_SCHEMAS = AGENTIC_MODEL_TOOL_DEFINITIONS.map(
+  (definition) => definition.schema,
+);
 
 const TOOL_HANDLERS = new Map<AgenticToolName, AgenticToolDefinition>(
   AGENTIC_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]),

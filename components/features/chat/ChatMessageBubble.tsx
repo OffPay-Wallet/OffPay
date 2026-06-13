@@ -4,10 +4,9 @@
  */
 
 import React from 'react';
-import { View } from 'react-native';
+import { Text as RNText, View } from 'react-native';
 import Animated, { Easing, FadeInUp, LinearTransition } from 'react-native-reanimated';
 
-import { Text } from '@/components/ui/Text';
 import {
   PayrollChatController,
   type PayrollOutcomeAnnouncement,
@@ -22,6 +21,7 @@ import type {
 
 import { AiLoaderLottie } from './AiLoaderLottie';
 import { ChatBubble } from './ChatBubble';
+import { MarkdownText } from './MarkdownText';
 import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
 import { SwapConfirmationCard } from './SwapConfirmationCard';
 import { FlashPositionConfirmationCard } from './FlashPositionConfirmationCard';
@@ -59,9 +59,9 @@ function AgentThinkingContent({ statusPhrase }: { statusPhrase: string }): React
       <View style={styles.agentLoaderSlot}>
         <AiLoaderLottie size={20} tone="onDark" accessibilityLabel={statusPhrase} />
       </View>
-      <Text style={styles.thinkingStatusText} numberOfLines={2}>
+      <RNText style={styles.thinkingStatusText} numberOfLines={2}>
         {statusPhrase}
-      </Text>
+      </RNText>
     </View>
   );
 }
@@ -72,7 +72,7 @@ function AgentStreamContent({ text }: { text: string }): React.JSX.Element {
       <View style={styles.agentLoaderSlot}>
         <AiLoaderLottie size={20} tone="onDark" />
       </View>
-      <Text style={styles.streamText}>{text}</Text>
+      <MarkdownText text={text} variant="agent" style={styles.streamText} />
     </View>
   );
 }
@@ -110,7 +110,7 @@ export function ChatMessageBubble({
         style={[styles.messageRow, styles.messageRowUser]}
       >
         <ChatBubble variant="user">
-          <Text style={styles.bubbleTextUser}>{message.text}</Text>
+          <MarkdownText text={message.text} variant="user" />
         </ChatBubble>
       </Animated.View>
     );
@@ -157,7 +157,7 @@ export function ChatMessageBubble({
       <View style={styles.agentMessageStack}>
         {hasText ? (
           <ChatBubble variant="agent">
-            <Text style={styles.bubbleTextAgent}>{message.text}</Text>
+            <MarkdownText text={message.text} variant="agent" />
           </ChatBubble>
         ) : null}
         {action != null ? (

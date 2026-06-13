@@ -113,7 +113,7 @@ export function getInviteCodeValidationMessage(reason: InviteCodeValidationReaso
     case 'invalid_format':
       return 'Invalid invite code format.';
     case 'invalid_checksum':
-      return 'Typo detected — check the last two digits.';
+      return 'Check for a typo - verify the last two digits.';
     default:
       return '';
   }

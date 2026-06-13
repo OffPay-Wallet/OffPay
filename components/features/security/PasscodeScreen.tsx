@@ -27,9 +27,11 @@ import {
 import { getStoredWalletInfo } from '@/lib/wallet/secure-wallet-store';
 import { useWalletStore } from '@/store/walletStore';
 
-function SimpleDot({ filled }: { filled: boolean }): React.JSX.Element {
+const PASSCODE_AUTO_BIOMETRIC_PROMPT_DELAY_MS = 750;
+
+const SimpleDot = memo(function SimpleDot({ filled }: { filled: boolean }): React.JSX.Element {
   return <View style={[styles.dot, filled ? styles.dotFilled : styles.dotEmpty]} />;
-}
+});
 
 interface PasscodeScreenProps {
   fingerprintEnabled?: boolean;
@@ -187,8 +189,9 @@ export const PasscodeScreen = memo(function PasscodeScreen({
 
     autoBiometricPromptedRef.current = true;
     const timeout = setTimeout(() => {
+      if (passcodeRef.current.length > 0 || unlockingRef.current) return;
       void handleBiometricUnlock();
-    }, 120);
+    }, PASSCODE_AUTO_BIOMETRIC_PROMPT_DELAY_MS);
 
     return () => clearTimeout(timeout);
   }, [fingerprintEnabled, handleBiometricUnlock, unlocking]);
@@ -240,6 +243,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     (digit: string): void => {
       if (inputDisabledRef.current) return;
       if (passcodeRef.current.length >= 6) return;
+      autoBiometricPromptedRef.current = true;
       const next = `${passcodeRef.current}${digit}`.slice(0, 6);
       setPasscodeValue(next);
       if (next.length === 6) {

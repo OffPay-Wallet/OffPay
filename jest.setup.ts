@@ -14,6 +14,18 @@ const mockDownloadFileAsync = jest.fn(async (_url: string, destination: { uri: s
   return destination;
 });
 
+const mockDefaultUploadFileAsync = async (
+  _file: { uri: string },
+  _url: string,
+  _options?: unknown,
+) => ({
+  status: 200,
+  body: JSON.stringify({ kind: 'voice_transcript', transcript: 'hello', language: 'en' }),
+  headers: { 'content-type': 'application/json' },
+});
+
+const mockUploadFileAsync = jest.fn(mockDefaultUploadFileAsync);
+
 function mockNormalizeFileSystemPart(part: unknown): string {
   if (typeof part === 'string') {
     return part;
@@ -191,6 +203,10 @@ jest.mock('expo-file-system', () => {
       return mockFileSystemValues.get(this.uri) ?? '';
     }
 
+    async upload(url: string, options?: unknown): Promise<unknown> {
+      return mockUploadFileAsync(this, url, options);
+    }
+
     textSync(): string {
       return mockFileSystemValues.get(this.uri) ?? '';
     }
@@ -214,16 +230,23 @@ jest.mock('expo-file-system', () => {
     __esModule: true,
     Directory,
     File,
+    UploadType: {
+      BINARY_CONTENT: 0,
+      MULTIPART: 1,
+    },
     Paths: {
       cache: 'file:///cache',
       document: 'file:///document',
     },
+    __INTERNAL_UPLOAD_MOCK: mockUploadFileAsync,
     __INTERNAL_RESET: () => {
       mockFileSystemValues.clear();
       mockDirectories.clear();
       mockDirectories.add('file:///cache');
       mockDirectories.add('file:///document');
       mockDownloadFileAsync.mockClear();
+      mockUploadFileAsync.mockReset();
+      mockUploadFileAsync.mockImplementation(mockDefaultUploadFileAsync);
     },
   };
 });

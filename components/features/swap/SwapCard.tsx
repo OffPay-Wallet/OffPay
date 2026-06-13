@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { View, StyleSheet, TextInput, Pressable, useWindowDimensions } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, {
@@ -84,7 +84,7 @@ function formatQuickAmount(value: number, referenceAmount: string): string {
   });
 }
 
-export function SwapCard({
+export const SwapCard = memo(function SwapCard({
   payToken,
   receiveToken,
   payAmount,
@@ -389,7 +389,7 @@ export function SwapCard({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

@@ -11,13 +11,33 @@ import { queryClient } from '@/lib/cache/query-client';
 import { OffpayBootstrapProvider } from '@/providers/OffpayBootstrapProvider';
 import { OffpayLaunchProvider } from '@/providers/OffpayLaunchProvider';
 
+type AppProvidersRuntime = 'full' | 'lock';
+
+interface AppProvidersProps {
+  children: React.ReactNode;
+  runtime?: AppProvidersRuntime;
+}
+
 /**
  * Application-level providers wrapper.
  * Add new providers here (auth, theme, etc.) to keep the root layout clean.
  */
 const offpayAttestationAdapter = getConfiguredOffpayAttestationAdapter();
 
-export function AppProviders({ children }: { children: React.ReactNode }): React.JSX.Element {
+export function AppProviders({
+  children,
+  runtime = 'full',
+}: AppProvidersProps): React.JSX.Element {
+  if (runtime === 'lock') {
+    return (
+      <SafeAreaProvider style={styles.provider}>
+        <QueryClientProvider client={queryClient}>
+          <AppToastProvider>{children}</AppToastProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider style={styles.provider}>
       <QueryClientProvider client={queryClient}>

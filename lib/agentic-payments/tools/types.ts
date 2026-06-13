@@ -43,7 +43,20 @@ export type AgenticToolName =
   | 'flash_edit_trigger_order'
   | 'flash_cancel_trigger_order'
   | 'flash_cancel_all_trigger_orders'
-  | 'flash_reverse_position';
+  | 'flash_reverse_position'
+  | 'flash_get_pool_stats'
+  | 'flash_get_funding_rates'
+  | 'flash_get_open_interest'
+  | 'flash_get_liquidation_clusters'
+  | 'flash_get_market_metrics'
+  | 'flash_get_portfolio_risk'
+  | 'flash_get_absorption_analysis'
+  | 'flash_get_optimal_entry'
+  | 'flash_get_position_sizing'
+  | 'flash_get_hedge_suggestions'
+  | 'flash_get_data_pools'
+  | 'flash_validate_data_access'
+  | 'flash_get_rate_limits';
 
 export type AgenticTransferRoute = 'normal' | 'magicblock' | 'umbra';
 export type AgenticSwapRoute = 'normal';

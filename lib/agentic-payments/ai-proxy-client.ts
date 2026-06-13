@@ -16,6 +16,7 @@ import {
   OffpayAiSessionTokenUnavailableError,
 } from '@/lib/agentic-payments/session-token';
 import { sanitizeTextForCloudTts } from '@/lib/agentic-payments/voice-privacy';
+import { File as ExpoFile, UploadType } from 'expo-file-system';
 
 const DEFAULT_CHAT_TIMEOUT_MS = 25_000;
 const DEFAULT_VOICE_TIMEOUT_MS = 35_000;
@@ -222,7 +223,7 @@ export async function streamAgentChat(
 }
 
 export async function transcribeAgentVoice(
-  audio: Blob | FormData,
+  audio: Blob | FormData | VoiceAudioFileUpload,
   options: {
     languageHint?: string;
     signal?: AbortSignal;
@@ -237,6 +238,18 @@ export async function transcribeAgentVoice(
     headers['x-offpay-language-hint'] = options.languageHint;
   }
 
+  if (isVoiceAudioFileUpload(audio)) {
+    const result = await proxyUploadFile('/api/ai/voice/transcribe', {
+      uri: audio.uri,
+      contentType: audio.contentType,
+      headers,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs ?? DEFAULT_VOICE_TIMEOUT_MS,
+    });
+
+    return parseVoiceTranscriptionUploadResult(result);
+  }
+
   const response = await proxyFetch('/api/ai/voice/transcribe', {
     method: 'POST',
     headers,
@@ -246,6 +259,42 @@ export async function transcribeAgentVoice(
   });
 
   return (await response.json()) as VoiceTranscriptionResult;
+}
+
+export interface VoiceAudioFileUpload {
+  uri: string;
+  contentType: string;
+}
+
+function isVoiceAudioFileUpload(value: unknown): value is VoiceAudioFileUpload {
+  return (
+    typeof value === 'object' &&
+    value != null &&
+    'uri' in value &&
+    typeof (value as { uri?: unknown }).uri === 'string' &&
+    'contentType' in value &&
+    typeof (value as { contentType?: unknown }).contentType === 'string'
+  );
+}
+
+async function parseVoiceTranscriptionUploadResult(params: {
+  status: number;
+  body: string;
+  headers: Record<string, string>;
+}): Promise<VoiceTranscriptionResult> {
+  if (params.status < 200 || params.status >= 300) {
+    throw errorFromUploadResult(params);
+  }
+
+  try {
+    return JSON.parse(params.body) as VoiceTranscriptionResult;
+  } catch {
+    throw new AgenticPaymentsProxyError({
+      code: 'INVALID_VOICE_TRANSCRIPTION_RESPONSE',
+      message: 'Yuga returned an invalid voice transcription response.',
+      status: 502,
+    });
+  }
 }
 
 export async function speakAgentText(
@@ -317,6 +366,56 @@ async function proxyFetch(
   }
 }
 
+async function proxyUploadFile(
+  path: string,
+  params: {
+    uri: string;
+    contentType: string;
+    headers: HeadersInit;
+    signal?: AbortSignal;
+    timeoutMs: number;
+  },
+): Promise<{ status: number; body: string; headers: Record<string, string> }> {
+  if (!isAgenticPaymentsProxyConfigured()) {
+    throw new AgenticPaymentsProxyError({
+      code: 'PROXY_NOT_CONFIGURED',
+      message: 'Yuga is not configured.',
+      status: 0,
+    });
+  }
+
+  const headers = headersInitToRecord(await attachSessionTokenHeader(params.headers));
+  headers['content-type'] = params.contentType;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort('ai proxy timeout'), params.timeoutMs);
+  const abortListener = () => controller.abort(params.signal?.reason);
+  params.signal?.addEventListener('abort', abortListener, { once: true });
+
+  try {
+    const file = new ExpoFile(params.uri);
+    return await file.upload(buildProxyUrl(path), {
+      httpMethod: 'POST',
+      uploadType: UploadType.BINARY_CONTENT,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted && params.signal?.aborted !== true) {
+      throw new AgenticPaymentsProxyError({
+        code: 'PROXY_TIMEOUT',
+        message: 'Yuga timed out.',
+        status: 0,
+      });
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    params.signal?.removeEventListener('abort', abortListener);
+  }
+}
+
 /**
  * If the AI session secret is configured for this build, mint a short-lived
  * signed token and attach it on every proxy request. Build-time configs
@@ -346,6 +445,15 @@ async function attachSessionTokenHeader(
   }
 }
 
+function headersInitToRecord(headers: HeadersInit | undefined): Record<string, string> {
+  const merged = new Headers(headers);
+  const record: Record<string, string> = {};
+  merged.forEach((value, key) => {
+    record[key] = value;
+  });
+  return record;
+}
+
 async function errorFromResponse(response: Response): Promise<AgenticPaymentsProxyError> {
   const retryAfterMs = retryAfterHeaderToMs(response.headers.get('retry-after'));
 
@@ -362,6 +470,33 @@ async function errorFromResponse(response: Response): Promise<AgenticPaymentsPro
       code: 'AI_PROXY_ERROR',
       message: 'Yuga request failed.',
       status: response.status,
+      retryAfterMs,
+    });
+  }
+}
+
+function errorFromUploadResult(params: {
+  status: number;
+  body: string;
+  headers: Record<string, string>;
+}): AgenticPaymentsProxyError {
+  const retryAfterMs = retryAfterHeaderToMs(
+    params.headers['retry-after'] ?? params.headers['Retry-After'] ?? null,
+  );
+
+  try {
+    const body = JSON.parse(params.body) as Partial<AgentProxyErrorEvent>;
+    return new AgenticPaymentsProxyError({
+      code: typeof body.code === 'string' ? body.code : 'AI_PROXY_ERROR',
+      message: typeof body.message === 'string' ? body.message : 'Yuga request failed.',
+      status: params.status,
+      retryAfterMs: body.retryAfterMs ?? retryAfterMs,
+    });
+  } catch {
+    return new AgenticPaymentsProxyError({
+      code: 'AI_PROXY_ERROR',
+      message: 'Yuga request failed.',
+      status: params.status,
       retryAfterMs,
     });
   }

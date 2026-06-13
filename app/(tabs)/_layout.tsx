@@ -3,7 +3,7 @@
  */
 import { Tabs } from 'expo-router';
 import { useMemo } from 'react';
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { TabBar } from '@/components/navigation/TabBar';
 
@@ -17,12 +17,7 @@ export default function TabLayout(): React.JSX.Element {
       lazy: true,
       freezeOnBlur: true,
       tabBarStyle: styles.tabBarContainer,
-      animation: 'shift',
-      animationDuration: 150,
-      // Use native driver for smoother animations
-      ...(Platform.OS === 'ios' && {
-        animationEnabled: true,
-      }),
+      animation: 'none',
     }),
     [],
   );

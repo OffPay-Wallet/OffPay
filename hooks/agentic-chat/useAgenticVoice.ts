@@ -60,10 +60,25 @@ export interface UseAgenticVoiceResult {
 const TRANSCRIBE_TIMEOUT_MS = 15_000;
 // expo-audio reports metering in dBFS (roughly -60 silent .. 0 loud).
 const METERING_FLOOR_DB = -60;
+const MIN_RECORDING_BYTES = 512;
 
-function fileNameForUri(uri: string): string {
-  const base = uri.split('/').pop();
-  return base != null && base.length > 0 ? base : 'recording.m4a';
+function contentTypeForUri(uri: string): string {
+  const path = uri.split('?')[0].toLowerCase();
+  if (path.endsWith('.m4a') || path.endsWith('.mp4')) return 'audio/mp4';
+  if (path.endsWith('.3gp')) return 'audio/3gpp';
+  if (path.endsWith('.webm')) return 'audio/webm';
+  if (path.endsWith('.wav')) return 'audio/wav';
+  if (path.endsWith('.mp3')) return 'audio/mpeg';
+  return 'audio/mp4';
+}
+
+function isUsableRecordingFile(uri: string): boolean {
+  try {
+    const file = new File(uri);
+    return file.exists && file.size >= MIN_RECORDING_BYTES;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeMetering(metering: number | undefined): number {
@@ -239,7 +254,8 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
     let uri: string | null = null;
     try {
       await recorder.stop();
-      uri = recorder.uri;
+      const stoppedStatus = recorder.getStatus();
+      uri = recorder.uri ?? stoppedStatus.url ?? recorderState.url;
       lastRecordingUriRef.current = uri;
 
       // Release the app lock now — we have the file and no longer need the mic.
@@ -250,26 +266,23 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
         return;
       }
 
-      if (uri == null) {
+      if (uri == null || !isUsableRecordingFile(uri)) {
         fail('No audio was captured. Hold the mic and speak, then tap again.');
         return;
       }
 
-      const form = new FormData();
-      // React Native FormData accepts a file descriptor object.
-      form.append('file', {
-        uri,
-        name: fileNameForUri(uri),
-        type: 'audio/mp4',
-      } as unknown as Blob);
+      if (__DEV__) {
+        console.log('[Voice] transcribing file:', uri);
+      }
 
-      console.log('[Voice] transcribing file:', uri);
-
-      const result = await transcribeAgentVoice(form, {
-        languageHint: paramsRef.current.languageHint,
-        signal: abortRef.current?.signal,
-        timeoutMs: TRANSCRIBE_TIMEOUT_MS,
-      });
+      const result = await transcribeAgentVoice(
+        { uri, contentType: contentTypeForUri(uri) },
+        {
+          languageHint: paramsRef.current.languageHint,
+          signal: abortRef.current?.signal,
+          timeoutMs: TRANSCRIBE_TIMEOUT_MS,
+        },
+      );
 
       if (cancelledRef.current) {
         setState('idle');
@@ -277,7 +290,9 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
       }
 
       const recognized = normalizeVoiceTranscript(result.transcript?.trim() ?? '');
-      console.log('[Voice] transcript result:', recognized.slice(0, 80));
+      if (__DEV__) {
+        console.log('[Voice] transcript result:', recognized.slice(0, 80));
+      }
 
       if (recognized.length === 0) {
         fail("Didn't catch that. Try speaking again.");
@@ -303,7 +318,7 @@ export function useAgenticVoice(params: UseAgenticVoiceParams): UseAgenticVoiceR
       lastRecordingUriRef.current = null;
       void restorePlaybackAudioMode();
     }
-  }, [fail, recorder, releaseAppLock]);
+  }, [fail, recorder, recorderState.url, releaseAppLock]);
 
   const toggle = useCallback(() => {
     if (stateRef.current === 'idle') {

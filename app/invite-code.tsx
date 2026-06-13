@@ -190,7 +190,7 @@ export default function InviteCodeScreen(): React.JSX.Element {
       } else {
         setStage('code');
       }
-    } catch (error) {
+    } catch (_error) {
       // If error (e.g. not found), proceed to code stage
       setStage('code');
     } finally {

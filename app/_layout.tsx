@@ -351,8 +351,10 @@ export default function RootLayout(): React.JSX.Element | null {
     return null;
   }
 
+  const providerRuntime = inAppLock ? 'lock' : 'full';
+
   return (
-    <AppProviders>
+    <AppProviders runtime={providerRuntime}>
       <ThemeProvider value={OffPayTheme}>
         <View style={styles.appShell}>
           {showGradient ? <GradientBackground /> : null}
