@@ -2,7 +2,6 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import {
   FlatList,
   Pressable,
-  RefreshControl,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -585,13 +584,6 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           visibleUtxos.length === 0 ? styles.scrollContentCentered : null,
         ]}
         ItemSeparatorComponent={ClaimRowSeparator}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => void runScan('refresh')}
-            tintColor={colors.text.primary}
-          />
-        }
         ListHeaderComponent={
           <View style={styles.header}>
             <Pressable
@@ -623,7 +615,32 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
             >
               Pending Claims
             </Text>
-            <View style={styles.headerSpacer} />
+            <Pressable
+              style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
+              onPress={() => void runScan('refresh')}
+              disabled={!canScan || refreshing || scanning || deepScanning}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh pending claims"
+              accessibilityState={{
+                busy: refreshing,
+                disabled: !canScan || refreshing || scanning || deepScanning,
+              }}
+            >
+              <View
+                style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}
+              >
+                {refreshing ? (
+                  <LazyLoadingSpinner size={18} color={colors.text.primary} />
+                ) : (
+                  <Ionicons
+                    name="refresh"
+                    size={layout.iconSizeInline}
+                    color={colors.text.primary}
+                  />
+                )}
+              </View>
+            </Pressable>
           </View>
         }
         ListEmptyComponent={

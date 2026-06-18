@@ -7,8 +7,10 @@
 
 import React, { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 
@@ -44,7 +46,7 @@ export function PayrollColumnMapSheet({
   suggestedMapping,
   onClose,
   onSubmit,
-}: PayrollColumnMapSheetProps): React.JSX.Element {
+}: PayrollColumnMapSheetProps): React.JSX.Element | null {
   const [mapping, setMapping] = useState<PayrollColumnMapping>(suggestedMapping);
 
   // Reset local state whenever a new mapping request arrives.
@@ -68,16 +70,33 @@ export function PayrollColumnMapSheet({
   };
 
   const canSubmit = mapping.recipient != null && mapping.amount != null && !busy;
+  const { mounted, progress } = useReanimatedModalProgress(visible);
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+  }));
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - progress.value) * 36 }],
+  }));
 
   const preview = (header: string): string => {
     const value = sampleRows.find((row) => row[header]?.length > 0)?.[header];
     return value != null && value.length > 0 ? value : '—';
   };
 
+  if (!mounted) return null;
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={mapStyles.backdrop} onPress={onClose}>
-        <Pressable style={mapStyles.sheet} onPress={(event) => event.stopPropagation()}>
+    <Modal visible={mounted} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[mapStyles.backdrop, backdropStyle]}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close column mapping"
+        />
+        <Animated.View style={[mapStyles.sheet, sheetStyle]}>
           <View style={styles.headerRow}>
             <Text style={styles.title}>Map columns</Text>
             <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
@@ -135,8 +154,8 @@ export function PayrollColumnMapSheet({
           >
             <Text style={styles.primaryButtonText}>Use these columns</Text>
           </Pressable>
-        </Pressable>
-      </Pressable>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }

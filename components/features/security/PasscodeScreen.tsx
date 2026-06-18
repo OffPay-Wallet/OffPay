@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   AppState,
   Pressable,
   StyleSheet,
@@ -11,7 +10,14 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { LightweightKeypadButton } from '@/components/ui/LightweightKeypadButton';
 import { PuffyFingerprintIcon } from '@/components/ui/icons/PuffyFingerprintIcon';
 import { colors } from '@/constants/colors';
@@ -52,7 +58,6 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   const [unlocking, setUnlocking] = useState(false);
   const [showingReset, setShowingReset] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [shake, setShake] = useState(false);
   const [fingerprintEnabled, setFingerprintEnabled] = useState(() => {
     if (initialFingerprintEnabled != null) return initialFingerprintEnabled;
     return getCachedSecuritySettings()?.fingerprintEnabled === true;
@@ -63,6 +68,11 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   const passcodeRef = useRef('');
   const unlockFrameRef = useRef<number | null>(null);
   const autoBiometricPromptedRef = useRef(false);
+  const shakeOffset = useSharedValue(0);
+
+  const dotRowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeOffset.value }],
+  }));
 
   useEffect(() => {
     unlockingRef.current = unlocking;
@@ -120,6 +130,16 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     passcodeRef.current = nextPasscode;
     setPasscodeLength(nextPasscode.length);
   }, []);
+
+  const triggerShake = useCallback((): void => {
+    shakeOffset.value = 0;
+    shakeOffset.value = withSequence(
+      withTiming(-8, { duration: 55 }),
+      withTiming(8, { duration: 80 }),
+      withTiming(-5, { duration: 70 }),
+      withTiming(0, { duration: 65 }),
+    );
+  }, [shakeOffset]);
 
   const cancelScheduledUnlock = useCallback((): void => {
     if (unlockFrameRef.current == null) return;
@@ -211,20 +231,18 @@ export const PasscodeScreen = memo(function PasscodeScreen({
           await unlockWallet();
         } else {
           setToast('Incorrect wallet password.');
-          setShake(true);
-          setTimeout(() => setShake(false), 400);
+          triggerShake();
           setPasscodeValue('');
         }
       } catch {
         setToast('Could not unlock wallet.');
-        setShake(true);
-        setTimeout(() => setShake(false), 400);
+        triggerShake();
         setPasscodeValue('');
       } finally {
         setUnlocking(false);
       }
     },
-    [setPasscodeValue, unlockWallet],
+    [setPasscodeValue, triggerShake, unlockWallet],
   );
 
   const schedulePasscodeUnlock = useCallback(
@@ -350,14 +368,14 @@ export const PasscodeScreen = memo(function PasscodeScreen({
           </RNText>
         </View>
 
-        <View style={[styles.dotRow, shake && styles.dotRowShake]}>
+        <Animated.View style={[styles.dotRow, dotRowStyle]}>
           <SimpleDot filled={passcodeLength > 0} />
           <SimpleDot filled={passcodeLength > 1} />
           <SimpleDot filled={passcodeLength > 2} />
           <SimpleDot filled={passcodeLength > 3} />
           <SimpleDot filled={passcodeLength > 4} />
           <SimpleDot filled={passcodeLength > 5} />
-        </View>
+        </Animated.View>
 
         <View style={styles.keypad}>
           {keypadRows.map((row, rowIndex) => (
@@ -465,7 +483,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
                 onPress={() => void handleForgotPasswordReset()}
               >
                 {resetting ? (
-                  <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+                  <LazyLoadingSpinner size={18} color={colors.brand.whiteStream} />
                 ) : (
                   <RNText style={styles.resetConfirmText}>Reset</RNText>
                 )}
@@ -511,9 +529,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
-  },
-  dotRowShake: {
-    transform: [{ translateX: -8 }],
   },
   dot: {
     width: spacing.xl,

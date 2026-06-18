@@ -188,6 +188,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
             // which lives in androidx.credentials. The 1.2.x line
             // matches the version Privy's SDK is built against.
             extraMavenRepos: [],
+            usePrecompiledHeaders: true,
           },
         },
       ],

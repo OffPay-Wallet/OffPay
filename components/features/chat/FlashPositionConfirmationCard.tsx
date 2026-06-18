@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
@@ -58,9 +59,7 @@ function getSideColor(side: 'long' | 'short'): string {
   return side === 'long' ? colors.semantic.receive : colors.semantic.error;
 }
 
-function getOperationIcon(
-  action: AgenticFlashPositionAction,
-): keyof typeof Ionicons.glyphMap {
+function getOperationIcon(action: AgenticFlashPositionAction): keyof typeof Ionicons.glyphMap {
   if (action.operation === 'close_position') return 'log-out-outline';
   if (action.operation === 'add_collateral') return 'add-circle-outline';
   if (action.operation === 'remove_collateral') return 'remove-circle-outline';
@@ -155,11 +154,7 @@ export function FlashPositionConfirmationCard({
     <View style={styles.confirmationCard}>
       <View style={styles.confirmationHeader}>
         <View style={styles.confirmationIcon}>
-          <Ionicons
-            name={getOperationIcon(action)}
-            size={18}
-            color={getSideColor(action.side)}
-          />
+          <Ionicons name={getOperationIcon(action)} size={18} color={getSideColor(action.side)} />
         </View>
         <View style={styles.confirmationTitleStack}>
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
@@ -212,16 +207,17 @@ export function FlashPositionConfirmationCard({
 
         {action.operation === 'close_position' ? (
           <>
-            <ConfirmationRow label="Close size" value={formatUsd(action.amountUsd ?? action.sizeUsd)} />
+            <ConfirmationRow
+              label="Close size"
+              value={formatUsd(action.amountUsd ?? action.sizeUsd)}
+            />
             <ConfirmationRow label="Exit price" value={formatPrice(action.exitPrice)} />
             <ConfirmationRow label="Fees" value={formatUsd(action.feesUsd ?? 0)} />
             <ConfirmationRow
               label="P&L"
               value={formatSignedUsd(action.realizedPnlUsd)}
               valueColor={
-                (action.realizedPnlUsd ?? 0) >= 0
-                  ? colors.semantic.receive
-                  : colors.semantic.error
+                (action.realizedPnlUsd ?? 0) >= 0 ? colors.semantic.receive : colors.semantic.error
               }
             />
           </>
@@ -231,7 +227,10 @@ export function FlashPositionConfirmationCard({
           <>
             <ConfirmationRow label="Amount" value={amountLabel(action)} />
             <ConfirmationRow label="Collateral after" value={formatUsd(action.collateralUsd)} />
-            <ConfirmationRow label="New leverage" value={formatLeverage(action.newLeverage ?? action.leverage)} />
+            <ConfirmationRow
+              label="New leverage"
+              value={formatLeverage(action.newLeverage ?? action.leverage)}
+            />
             <ConfirmationRow
               label="New liquidation"
               value={formatPrice(action.newLiquidationPrice ?? action.liquidationPrice)}
@@ -335,11 +334,13 @@ export function FlashPositionConfirmationCard({
             onPress={handleConfirm}
             disabled={!canAct || submitting || isExpired}
             accessibilityRole="button"
-            accessibilityLabel={isExpired ? 'Flash Trade quote expired' : 'Confirm Flash Trade action'}
+            accessibilityLabel={
+              isExpired ? 'Flash Trade quote expired' : 'Confirm Flash Trade action'
+            }
             accessibilityState={{ disabled: !canAct || submitting || isExpired }}
           >
             {submitting ? (
-              <ActivityIndicator size="small" color={colors.brand.deepShadow} />
+              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
             ) : (
               <Text variant="buttonSmall" color={colors.text.onAccent}>
                 {isExpired ? 'Expired' : 'Confirm'}

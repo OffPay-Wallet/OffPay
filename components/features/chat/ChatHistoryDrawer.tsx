@@ -5,10 +5,12 @@
 
 import React, { useCallback, useMemo } from 'react';
 import { Modal, Pressable, View } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Text } from '@/components/ui/Text';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 
@@ -63,7 +65,7 @@ export function ChatHistoryDrawer({
   onNewChat,
   onOpenConversation,
   onDeleteConversation,
-}: ChatHistoryDrawerProps): React.JSX.Element {
+}: ChatHistoryDrawerProps): React.JSX.Element | null {
   const items = useMemo<DrawerListItem[]>(() => {
     const list: DrawerListItem[] = [];
 
@@ -124,17 +126,28 @@ export function ChatHistoryDrawer({
     },
     [onDeleteConversation, onOpenConversation],
   );
+  const { mounted, progress } = useReanimatedModalProgress(visible);
+
+  const rootStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+  }));
+
+  const panelStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: (1 - progress.value) * -width }],
+  }));
+
+  if (!mounted) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.drawerRoot}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
+      <Animated.View style={[styles.drawerRoot, rootStyle]}>
         <Pressable
           style={styles.drawerBackdrop}
           onPress={onClose}
           accessibilityRole="button"
           accessibilityLabel="Close chat history"
         />
-        <View
+        <Animated.View
           style={[
             styles.drawerPanel,
             {
@@ -142,6 +155,7 @@ export function ChatHistoryDrawer({
               paddingTop: topInset + spacing.md,
               paddingBottom: Math.max(bottomInset, spacing.lg),
             },
+            panelStyle,
           ]}
         >
           <View style={styles.drawerChrome}>
@@ -189,8 +203,8 @@ export function ChatHistoryDrawer({
               contentContainerStyle={styles.drawerListContent}
             />
           </View>
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }

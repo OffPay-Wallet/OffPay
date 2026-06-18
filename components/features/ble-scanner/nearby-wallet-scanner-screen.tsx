@@ -36,21 +36,6 @@ function ScanButtonLabel({
   scanning: boolean;
   idleLabel: string;
 }): React.JSX.Element {
-  const [dotCount, setDotCount] = useState(1);
-
-  useEffect(() => {
-    if (!scanning) {
-      setDotCount(1);
-      return undefined;
-    }
-
-    const intervalId = setInterval(() => {
-      setDotCount((current) => (current >= 4 ? 1 : current + 1));
-    }, 360);
-
-    return () => clearInterval(intervalId);
-  }, [scanning]);
-
   return (
     <Text
       variant="button"
@@ -58,7 +43,7 @@ function ScanButtonLabel({
       numberOfLines={1}
       style={styles.scanButtonText}
     >
-      {scanning ? `Scanning${'.'.repeat(dotCount)}` : idleLabel}
+      {scanning ? 'Scanning' : idleLabel}
     </Text>
   );
 }

@@ -13,8 +13,9 @@
  *   - solidDark  -> black fill, white text. Use for a third
  *                  emphasis tier (rare).
  */
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -113,7 +114,7 @@ export function GlassActionButton({
         >
           {label}
         </Text>
-        {loading ? <ActivityIndicator size="small" color={tokens.label} /> : null}
+        {loading ? <LazyLoadingSpinner size={18} color={tokens.label} /> : null}
       </View>
     </Pressable>
   );

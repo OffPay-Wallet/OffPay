@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -33,6 +32,7 @@ import {
 import { SendTokenSelectStep } from '@/components/features/private-payment/send-flow/SendTokenSelectStep';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import {
   type ProcessResultDetailRow,
   type ProcessResultTokenLeg,
@@ -2038,7 +2038,7 @@ function PrimaryButton({
       accessibilityState={{ disabled: isDisabled, busy: loading }}
     >
       {loading ? (
-        <ActivityIndicator size="small" color={colors.text.onAccent} />
+        <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
       ) : (
         <Text
           variant="button"

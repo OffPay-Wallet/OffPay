@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Keyboard,
   Pressable,
   StyleSheet,
@@ -12,6 +11,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -83,7 +83,7 @@ export function UsernameSetupForm({
           </View>
           <View style={styles.avatarBadge}>
             {pickingProfileImage ? (
-              <ActivityIndicator size="small" color={colors.text.onAccent} />
+              <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
             ) : (
               <Ionicons name="camera-outline" size={14} color={colors.text.onAccent} />
             )}
@@ -104,7 +104,7 @@ export function UsernameSetupForm({
             accessibilityLabel="Change profile photo"
           >
             {pickingProfileImage ? (
-              <ActivityIndicator size="small" color={colors.text.primary} />
+              <LazyLoadingSpinner size={18} color={colors.text.primary} />
             ) : (
               <Ionicons
                 name="image-outline"

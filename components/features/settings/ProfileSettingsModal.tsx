@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Keyboard,
   Pressable,
   ScrollView,
@@ -24,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { useAppToast } from '@/components/ui/AppToast';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -86,10 +86,8 @@ export function ProfileSettingsModal({
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const sheetMaxWidth = 430;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const resolvedHeaderHeight =
-    headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
-  const resolvedFooterHeight =
-    footerHeight > 0 ? footerHeight : FOOTER_FALLBACK_HEIGHT;
+  const resolvedHeaderHeight = headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
+  const resolvedFooterHeight = footerHeight > 0 ? footerHeight : FOOTER_FALLBACK_HEIGHT;
   const bodyMaxHeight = Math.max(
     120,
     maxSheetHeight - resolvedHeaderHeight - resolvedFooterHeight - SHEET_CHROME_PADDING,
@@ -103,17 +101,8 @@ export function ProfileSettingsModal({
       return maxSheetHeight;
     }
 
-    return Math.min(
-      maxSheetHeight,
-      Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentBlockHeight),
-    );
-  }, [
-    formHeight,
-    maxSheetHeight,
-    resolvedFooterHeight,
-    resolvedHeaderHeight,
-    scrollOverflows,
-  ]);
+    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentBlockHeight));
+  }, [formHeight, maxSheetHeight, resolvedFooterHeight, resolvedHeaderHeight, scrollOverflows]);
   const avatarSize = dense ? 56 : compact ? 62 : 68;
   const usernameError = draftUsername.length > 0 ? getOffpayUsernameError(draftUsername) : null;
   const normalizedUsername = useMemo(
@@ -391,7 +380,7 @@ export function ProfileSettingsModal({
               accessibilityState={{ busy: saving, disabled: !canSave }}
             >
               {saving ? (
-                <ActivityIndicator size="small" color={colors.text.onAccent} />
+                <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
               ) : (
                 <Text
                   variant="buttonSmall"
@@ -453,7 +442,7 @@ function ProfileFormFields({
             <WalletAvatar size={avatarSize} solidFill />
             <View style={styles.avatarBadge}>
               {pickingProfileImage ? (
-                <ActivityIndicator size="small" color={colors.text.onAccent} />
+                <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
               ) : (
                 <Ionicons name="camera-outline" size={14} color={colors.text.onAccent} />
               )}
@@ -494,7 +483,7 @@ function ProfileFormFields({
             accessibilityLabel="Change profile photo"
           >
             {pickingProfileImage ? (
-              <ActivityIndicator size="small" color={colors.text.primary} />
+              <LazyLoadingSpinner size={18} color={colors.text.primary} />
             ) : (
               <Ionicons
                 name="image-outline"

@@ -6,12 +6,13 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { Easing, FadeInUp, LinearTransition } from 'react-native-reanimated';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { usePayrollRun } from '@/hooks/payroll/usePayrollRun';
 import { usePayrollStore } from '@/store/payrollStore';
@@ -256,7 +257,7 @@ export function PayrollChatController({
 
       {isRunning ? (
         <View style={styles.payrollBackgroundStatus}>
-          <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+          <LazyLoadingSpinner size={18} color={colors.brand.whiteStream} />
           <Text style={styles.claimNote}>
             Sending in the background. You can keep chatting while Yuga works through the batch.
           </Text>

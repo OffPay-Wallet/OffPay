@@ -1,7 +1,10 @@
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -28,22 +31,37 @@ export function ConfirmDialogCard({
   busy = false,
   onCancel,
   onConfirm,
-}: ConfirmDialogCardProps): React.JSX.Element {
+}: ConfirmDialogCardProps): React.JSX.Element | null {
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const dense = windowWidth < 340 || fontScale > 1.18;
   const compact = windowWidth < 390 || fontScale > 1.18;
   const maxWidth = Math.min(360, Math.max(280, windowWidth - spacing['3xl'] * 2));
   const buttonHeight = dense ? 44 : compact ? 46 : 48;
+  const { mounted, progress } = useReanimatedModalProgress(visible);
+
+  const layerStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+  }));
+
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - progress.value) * 8 }, { scale: 0.96 + progress.value * 0.04 }],
+  }));
+
+  if (!mounted) return null;
 
   return (
     <Modal
-      visible={visible}
+      visible={mounted}
       transparent
-      animationType="fade"
+      animationType="none"
       onRequestClose={onCancel}
       statusBarTranslucent
     >
-      <View style={styles.layer} accessibilityViewIsModal accessibilityLabel={title}>
+      <Animated.View
+        style={[styles.layer, layerStyle]}
+        accessibilityViewIsModal
+        accessibilityLabel={title}
+      >
         <Pressable
           style={styles.scrim}
           onPress={onCancel}
@@ -51,7 +69,7 @@ export function ConfirmDialogCard({
           accessibilityRole="button"
           accessibilityLabel="Dismiss"
         />
-        <View style={[styles.card, { maxWidth }]}>
+        <Animated.View style={[styles.card, { maxWidth }, cardStyle]}>
           <Text
             variant="h3"
             color={colors.text.primary}
@@ -109,8 +127,8 @@ export function ConfirmDialogCard({
               accessibilityState={{ busy, disabled: busy }}
             >
               {busy ? (
-                <ActivityIndicator
-                  size="small"
+                <LazyLoadingSpinner
+                  size={18}
                   color={destructive ? colors.text.onAccent : colors.text.onAccent}
                 />
               ) : (
@@ -126,8 +144,8 @@ export function ConfirmDialogCard({
               )}
             </Pressable>
           </View>
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -156,8 +174,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
     padding: spacing.xl,
     gap: spacing.md,
-    boxShadow:
-      'inset 0 1px 1px rgba(255, 255, 255, 0.14), 0 18px 36px rgba(0, 0, 0, 0.5)',
+    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.14), 0 18px 36px rgba(0, 0, 0, 0.5)',
   },
   title: {
     fontFamily: fontFamily.moneyBold,

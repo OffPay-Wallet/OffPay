@@ -2,13 +2,7 @@
  * HomeHeader — wallet identity, connectivity toggle, and notifications.
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useQueryClient } from '@tanstack/react-query';
 import Animated, {
@@ -23,6 +17,7 @@ import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { NotificationCenterModal } from '@/components/features/home/NotificationCenterModal';
 import { useAppToast } from '@/components/ui/AppToast';
 import { PuffyBellIcon } from '@/components/ui/icons/PuffyBellIcon';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { PuffyFaucetGiftIcon } from '@/components/ui/icons/PuffyFaucetGiftIcon';
 import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
@@ -512,7 +507,7 @@ function HomeHeaderComponent({
               >
                 <View pointerEvents="none" style={styles.faucetGloss} />
                 {faucetBusy ? (
-                  <ActivityIndicator size="small" color={colors.text.primary} />
+                  <LazyLoadingSpinner size={18} color={colors.text.primary} />
                 ) : (
                   <PuffyFaucetGiftIcon size={faucetIconSize} color={colors.text.primary} />
                 )}

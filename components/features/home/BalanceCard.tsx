@@ -37,6 +37,7 @@ import { ThreeDPressable, SNAPPY_PRESS_SPRING } from '@/components/ui/ThreeDPres
 import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
 import { SlotText } from '@/components/ui/SlotText';
 import { Text } from '@/components/ui/Text';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { CURRENCIES } from '@/constants/currencies';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
@@ -74,7 +75,11 @@ const HEADER_CONTAINER_SHADOW = '0 10px 24px rgba(0, 0, 0, 0.45)';
 // Static gradient overlay — all props are constants so this never
 // needs to re-render. Memoising prevents the native LinearGradient
 // view from being recreated on every BalanceCard render cycle.
-const GRADIENT_COLORS = ['rgba(58, 58, 58, 0.95)', 'rgba(34, 34, 34, 0.94)', 'rgba(14, 14, 14, 0.98)'] as const;
+const GRADIENT_COLORS = [
+  'rgba(58, 58, 58, 0.95)',
+  'rgba(34, 34, 34, 0.94)',
+  'rgba(14, 14, 14, 0.98)',
+] as const;
 const GRADIENT_LOCATIONS = [0, 0.45, 1] as const;
 const GRADIENT_START = { x: 0.5, y: 0 } as const;
 const GRADIENT_END = { x: 0.5, y: 1 } as const;
@@ -273,6 +278,16 @@ export function BalanceCard({
 
   const actionsRowStyle = useAnimatedStyle(() => ({
     opacity: actionsOpacity.value,
+  }));
+  const { mounted: currencyMenuMounted, progress: currencyMenuProgress } =
+    useReanimatedModalProgress(currencyMenuOpen);
+
+  const currencyBackdropStyle = useAnimatedStyle(() => ({
+    opacity: currencyMenuProgress.value,
+  }));
+
+  const currencySheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - currencyMenuProgress.value) * 28 }],
   }));
 
   useEffect(
@@ -700,21 +715,27 @@ export function BalanceCard({
               )}
             </View>
             <Modal
-              visible={currencyMenuOpen}
+              visible={currencyMenuMounted}
               transparent
-              animationType="fade"
+              animationType="none"
               onRequestClose={() => setCurrencyMenuOpen(false)}
             >
-              <Pressable style={styles.modalBackdrop} onPress={() => setCurrencyMenuOpen(false)}>
+              <Animated.View style={[styles.modalBackdrop, currencyBackdropStyle]}>
                 <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={() => setCurrencyMenuOpen(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close currency selector"
+                />
+                <Animated.View
                   style={[
                     styles.currencySheet,
                     {
                       height: currencySheetHeight,
                       paddingBottom: currencySheetBottomPadding,
                     },
+                    currencySheetStyle,
                   ]}
-                  onPress={(event) => event.stopPropagation()}
                 >
                   <View style={styles.currencySheetHeader}>
                     <Text
@@ -802,8 +823,8 @@ export function BalanceCard({
                       );
                     })}
                   </ScrollView>
-                </Pressable>
-              </Pressable>
+                </Animated.View>
+              </Animated.View>
             </Modal>
           </View>
         </View>

@@ -20,8 +20,13 @@ import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import 'react-native-reanimated';
+import { StyleSheet } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { useAppLockState } from '@/hooks/useAppLockState';
 import { GradientBackground } from '@/components/ui/GradientBackground';
@@ -73,10 +78,15 @@ void import('@/lib/wallet/biometric-auth').then((module) => {
 void SplashScreen.preventAutoHideAsync();
 if (!isRunningInExpoGo()) {
   SplashScreen.setOptions({
-    duration: 240,
-    fade: true,
+    duration: 0,
+    fade: false,
   });
 }
+
+const ROOT_REVEAL_TIMING = {
+  duration: 240,
+  easing: Easing.out(Easing.cubic),
+} as const;
 
 /** OffPay glossy dark theme - neutral glass surfaces with high-contrast ink. */
 const OffPayTheme: Theme = {
@@ -135,6 +145,10 @@ export default function RootLayout(): React.JSX.Element | null {
   const [rootLayoutReady, setRootLayoutReady] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [mmkvReady, setMmkvReady] = useState(false);
+  const rootReveal = useSharedValue(0);
+  const rootRevealStyle = useAnimatedStyle(() => ({
+    opacity: rootReveal.value,
+  }));
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -145,6 +159,11 @@ export default function RootLayout(): React.JSX.Element | null {
       cancelAnimationFrame(frame);
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasHiddenSplash) return;
+    rootReveal.value = withTiming(1, ROOT_REVEAL_TIMING);
+  }, [hasHiddenSplash, rootReveal]);
 
   useEffect(() => {
     const unsubscribe = usePreferencesStore.persist.onFinishHydration(() => {
@@ -216,13 +235,20 @@ export default function RootLayout(): React.JSX.Element | null {
 
   useEffect(() => {
     if (!mmkvReady || !walletHydrated || hasRepairedOnboardingFlag) return;
-    
+
     if (!hasOnboarded && storedWalletCount) {
       setHasOnboarded(true);
     }
-    
+
     setHasRepairedOnboardingFlag(true);
-  }, [mmkvReady, walletHydrated, hasOnboarded, storedWalletCount, setHasOnboarded, hasRepairedOnboardingFlag]);
+  }, [
+    mmkvReady,
+    walletHydrated,
+    hasOnboarded,
+    storedWalletCount,
+    setHasOnboarded,
+    hasRepairedOnboardingFlag,
+  ]);
 
   // Backfill wallet metadata for users who already completed
   // username setup before wallet display names were persisted.
@@ -310,7 +336,8 @@ export default function RootLayout(): React.JSX.Element | null {
     shouldShowAppLockRoute,
   ]);
 
-  // Fade out the native splash only once the correct first screen is mounted
+  // Hide the native splash only once the correct first screen is mounted.
+  // The visible reveal is handled by the Reanimated app shell opacity.
   useEffect(() => {
     if (!appReady || hasHiddenSplash) return;
     if (!rootLayoutReady) return;
@@ -356,7 +383,7 @@ export default function RootLayout(): React.JSX.Element | null {
   return (
     <AppProviders runtime={providerRuntime}>
       <ThemeProvider value={OffPayTheme}>
-        <View style={styles.appShell}>
+        <Animated.View style={[styles.appShell, rootRevealStyle]}>
           {showGradient ? <GradientBackground /> : null}
           <Stack screenOptions={globalScreenOptions}>
             <Stack.Screen name="invite-code" />
@@ -381,7 +408,7 @@ export default function RootLayout(): React.JSX.Element | null {
             <Stack.Screen name="restore-wallet" options={createWalletScreenOptions} />
           </Stack>
           <StatusBar style="light" />
-        </View>
+        </Animated.View>
       </ThemeProvider>
     </AppProviders>
   );

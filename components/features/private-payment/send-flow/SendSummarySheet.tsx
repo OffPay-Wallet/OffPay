@@ -98,7 +98,6 @@ const SUCCESS_LOTTIE_DURATION_MS =
       )
     : 1400;
 const SUCCESS_CONFETTI_DELAY_MS = Math.max(520, SUCCESS_LOTTIE_DURATION_MS - 360);
-const SUCCESS_CONFETTI_VISIBLE_MS = 980;
 
 const CONFETTI_PARTICLES = [
   { x: -74, y: -64, rotate: -34, delay: 0, width: 5, height: 13, color: colors.brand.whiteStream },
@@ -134,7 +133,6 @@ export function SendSummarySheet({
   const { height: windowHeight } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
   const [sheetHeight, setSheetHeight] = useState(0);
-  const [showSuccessConfetti, setShowSuccessConfetti] = useState(false);
 
   const progress = useSharedValue(0);
   const dragY = useSharedValue(0);
@@ -176,26 +174,6 @@ export function SendSummarySheet({
       cancelAnimation(ringSpin);
     };
   }, [phase, ringSpin]);
-
-  useEffect(() => {
-    if (phase !== 'success' || result?.status !== 'submitted') {
-      setShowSuccessConfetti(false);
-      return undefined;
-    }
-
-    setShowSuccessConfetti(false);
-    const showTimer = setTimeout(() => {
-      setShowSuccessConfetti(true);
-    }, SUCCESS_CONFETTI_DELAY_MS);
-    const hideTimer = setTimeout(() => {
-      setShowSuccessConfetti(false);
-    }, SUCCESS_CONFETTI_DELAY_MS + SUCCESS_CONFETTI_VISIBLE_MS);
-
-    return () => {
-      clearTimeout(showTimer);
-      clearTimeout(hideTimer);
-    };
-  }, [phase, result?.status]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -240,6 +218,7 @@ export function SendSummarySheet({
   const isProcessing = phase === 'sending';
   const isSuccess = phase === 'success';
   const showStatusCircle = isProcessing || isSuccess;
+  const showSuccessConfetti = phase === 'success' && result?.status === 'submitted';
   const queued = result?.status === 'queued';
 
   return (
@@ -532,7 +511,7 @@ function ConfettiParticle({
   useEffect(() => {
     burst.value = 0;
     burst.value = withDelay(
-      particle.delay,
+      SUCCESS_CONFETTI_DELAY_MS + particle.delay,
       withTiming(1, { duration: 680, easing: Easing.out(Easing.cubic) }),
     );
   }, [burst, particle.delay]);

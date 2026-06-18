@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SvgUri } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
@@ -130,18 +131,23 @@ export function TokenIcon({
       ) : null}
 
       {normalizedLogoUri != null && !remoteFailed && !useSvgLogo ? (
-        <Image
-          source={{ uri: normalizedLogoUri }}
+        <Animated.View
+          key={recyclingKey ?? normalizedLogoUri}
+          entering={FadeIn.duration(120)}
           style={styles.fill}
-          contentFit="contain"
-          // `expo-image` decodes off-thread, caches in memory + on disk
-          // by default, and re-binds cleanly inside FlashList recycler
-          // pools when `recyclingKey` is set.
-          cachePolicy="memory-disk"
-          transition={120}
-          recyclingKey={recyclingKey ?? normalizedLogoUri}
-          onError={() => setRemoteFailed(true)}
-        />
+        >
+          <Image
+            source={{ uri: normalizedLogoUri }}
+            style={styles.fill}
+            contentFit="contain"
+            // `expo-image` decodes off-thread, caches in memory + on disk
+            // by default, and re-binds cleanly inside FlashList recycler
+            // pools when `recyclingKey` is set.
+            cachePolicy="memory-disk"
+            recyclingKey={recyclingKey ?? normalizedLogoUri}
+            onError={() => setRemoteFailed(true)}
+          />
+        </Animated.View>
       ) : null}
     </View>
   );

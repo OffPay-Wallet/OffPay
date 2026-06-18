@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Linking,
   Modal,
   Pressable,
@@ -23,6 +22,7 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIsFocused } from 'expo-router/react-navigation';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
@@ -431,7 +431,7 @@ export function SettingsScreenContent({
                     label={destroying ? 'Resetting wallet' : 'Reset wallet'}
                     rightNode={
                       destroying ? (
-                        <ActivityIndicator size="small" color={colors.semantic.error} />
+                        <LazyLoadingSpinner size={18} color={colors.semantic.error} />
                       ) : undefined
                     }
                     destructive
@@ -563,7 +563,7 @@ export function SettingsScreenContent({
                 accessibilityState={{ busy: destroying, disabled: destroying || confirmClosing }}
               >
                 {destroying ? (
-                  <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+                  <LazyLoadingSpinner size={18} color={colors.brand.whiteStream} />
                 ) : (
                   <View style={styles.confirmResetContent}>
                     <Ionicons name="trash" size={dialogIconSize} color={colors.brand.whiteStream} />

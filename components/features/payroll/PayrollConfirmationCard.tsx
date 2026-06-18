@@ -7,9 +7,10 @@
  */
 
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
@@ -249,7 +250,7 @@ export function PayrollConfirmationCard({
             accessibilityState={{ disabled: setupBusy || onSetupUmbra == null }}
           >
             {setupBusy ? (
-              <ActivityIndicator size="small" color={colors.brand.deepShadow} />
+              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
             ) : (
               <Text style={styles.secondaryButtonText}>Set up Umbra</Text>
             )}
@@ -283,7 +284,7 @@ export function PayrollConfirmationCard({
           accessibilityState={{ disabled: !canStart }}
         >
           {busy ? (
-            <ActivityIndicator size="small" color={colors.brand.whiteStream} />
+            <LazyLoadingSpinner size={18} color={colors.brand.whiteStream} />
           ) : (
             <>
               <Ionicons name="send" size={15} color={colors.brand.whiteStream} />

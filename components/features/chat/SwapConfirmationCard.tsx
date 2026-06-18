@@ -1,8 +1,9 @@
 import React, { useCallback } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
@@ -116,7 +117,7 @@ export function SwapConfirmationCard({
             accessibilityLabel="Confirm Yuga swap"
           >
             {submitting ? (
-              <ActivityIndicator size="small" color={colors.brand.deepShadow} />
+              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
             ) : (
               <Text variant="buttonSmall" color={colors.text.onAccent}>
                 Confirm

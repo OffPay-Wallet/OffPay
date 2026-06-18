@@ -6,12 +6,13 @@
  *   - Primary CTA uses the app's light gloss fill.
  *   - Secondary and auth actions use solid dark fills with subtle rims.
  */
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import LottieView from 'lottie-react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { PuffyTwitterXIcon } from '@/components/ui/icons/PuffyTwitterXIcon';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { whiteSuccessLottie } from '@/components/ui/success-lottie';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -116,7 +117,7 @@ export function OnboardingActionPanel({
           ]}
         >
           {busy ? (
-            <ActivityIndicator size="small" color={colors.text.onAccent} />
+            <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
           ) : (
             <Text
               variant="button"
@@ -206,7 +207,7 @@ export function OnboardingActionPanel({
         >
           <View style={styles.passkeyContent}>
             {passkeyBusy ? (
-              <ActivityIndicator size="small" color={colors.text.primary} />
+              <LazyLoadingSpinner size={18} color={colors.text.primary} />
             ) : (
               <Ionicons
                 name="finger-print"
@@ -254,7 +255,7 @@ export function OnboardingActionPanel({
             ]}
           >
             {xBusy ? (
-              <ActivityIndicator size="small" color={colors.text.primary} />
+              <LazyLoadingSpinner size={18} color={colors.text.primary} />
             ) : (
               <PuffyTwitterXIcon size={20} color={colors.text.primary} focused />
             )}
@@ -273,7 +274,7 @@ export function OnboardingActionPanel({
             ]}
           >
             {googleBusy ? (
-              <ActivityIndicator size="small" color={colors.text.primary} />
+              <LazyLoadingSpinner size={18} color={colors.text.primary} />
             ) : (
               <Ionicons name="logo-google" size={22} color={colors.text.primary} />
             )}

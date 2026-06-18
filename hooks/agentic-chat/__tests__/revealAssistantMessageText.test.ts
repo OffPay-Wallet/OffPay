@@ -9,14 +9,9 @@ describe('revealAssistantMessageText', () => {
       conversations: [],
       activeConversationIdByScope: {},
     });
-    jest.useFakeTimers();
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
-
-  it('reveals text in chunks and clears pending when finished', async () => {
+  it('commits text and clears pending in one update', async () => {
     const id = 'assistant-1';
     useAgenticChatStore.setState({
       messages: [
@@ -33,20 +28,7 @@ describe('revealAssistantMessageText', () => {
       ],
     });
 
-    const revealPromise = revealAssistantMessageText(id, 'Hello');
-
-    expect(useAgenticChatStore.getState().messages[0]).toMatchObject({
-      text: '',
-      pending: true,
-    });
-
-    jest.advanceTimersByTime(28);
-    await Promise.resolve();
-
-    expect(useAgenticChatStore.getState().messages[0].text.length).toBeGreaterThan(0);
-
-    jest.runAllTimers();
-    await revealPromise;
+    await revealAssistantMessageText(id, 'Hello');
 
     expect(useAgenticChatStore.getState().messages[0]).toMatchObject({
       text: 'Hello',
@@ -54,7 +36,7 @@ describe('revealAssistantMessageText', () => {
     });
   });
 
-  it('finishes immediately when aborted', async () => {
+  it('commits full text even when the provided signal is aborted', async () => {
     const id = 'assistant-2';
     useAgenticChatStore.setState({
       messages: [
@@ -72,13 +54,10 @@ describe('revealAssistantMessageText', () => {
     });
 
     const controller = new AbortController();
-    const revealPromise = revealAssistantMessageText(id, 'Long reply text', {
+    controller.abort();
+    await revealAssistantMessageText(id, 'Long reply text', {
       signal: controller.signal,
     });
-
-    controller.abort();
-    jest.runAllTimers();
-    await revealPromise;
 
     expect(useAgenticChatStore.getState().messages[0]).toMatchObject({
       text: 'Long reply text',

@@ -3,7 +3,6 @@ import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   type GestureResponderEvent,
   Platform,
   Pressable,
@@ -30,6 +29,7 @@ import { GradientBackground } from '@/components/ui/GradientBackground';
 import { PuffyReceiveIcon } from '@/components/ui/icons/PuffyReceiveIcon';
 import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { useAppToast } from '@/components/ui/AppToast';
 import { Text } from '@/components/ui/Text';
@@ -440,7 +440,7 @@ function PriceLineChart({
         <View style={styles.chartEmptyLine} />
         {loading ? (
           <View style={styles.chartLoadingOverlay} pointerEvents="none">
-            <ActivityIndicator size="small" color={colors.brand.glossAccent} />
+            <LazyLoadingSpinner size={18} color={colors.brand.glossAccent} />
           </View>
         ) : null}
       </View>
@@ -522,7 +522,7 @@ function PriceLineChart({
       </Svg>
       {loading ? (
         <View style={styles.chartLoadingOverlay} pointerEvents="none">
-          <ActivityIndicator size="small" color={colors.brand.glossAccent} />
+          <LazyLoadingSpinner size={18} color={colors.brand.glossAccent} />
         </View>
       ) : null}
     </View>
@@ -900,7 +900,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
               ) : transactionsQuery.isLoading ||
                 (transactionsQuery.isFetching && transactionsQuery.transactions.length === 0) ? (
                 <View style={styles.emptyActivityCard}>
-                  <ActivityIndicator size="small" color={colors.brand.glossAccent} />
+                  <LazyLoadingSpinner size={18} color={colors.brand.glossAccent} />
                   <Text variant="small" color={colors.text.secondary} style={styles.emptyText}>
                     Loading recent activity…
                   </Text>

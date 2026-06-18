@@ -13,18 +13,20 @@
  * text composer.
  */
 
-import React, { type RefObject } from 'react';
-import {
-  ActivityIndicator,
-  type LayoutChangeEvent,
-  Pressable,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
-import Animated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import React, { useEffect, type RefObject } from 'react';
+import { type LayoutChangeEvent, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 import { Text } from '@/components/ui/Text';
@@ -51,6 +53,10 @@ const VOICE_CARD_ENTERING = FadeIn.duration(240)
 const VOICE_CARD_EXITING = FadeOut.duration(180).easing(VOICE_CARD_EASE);
 const COMPOSER_CARD_ENTERING = FadeIn.duration(180).easing(VOICE_CARD_EASE);
 const COMPOSER_CARD_EXITING = FadeOut.duration(160).easing(VOICE_CARD_EASE);
+const KEYBOARD_DOCK_TIMING = {
+  duration: 220,
+  easing: Easing.out(Easing.cubic),
+} as const;
 
 export type ChatVoiceState = 'idle' | 'recording' | 'transcribing' | 'review';
 
@@ -125,18 +131,28 @@ export function ChatPromptDock({
 }: ChatPromptDockProps): React.JSX.Element {
   const voiceCardActive =
     voice != null && (voice.state === 'recording' || voice.state === 'review');
+  const keyboardShift = useSharedValue(keyboardOffset);
+
+  useEffect(() => {
+    keyboardShift.value = withTiming(keyboardOffset, KEYBOARD_DOCK_TIMING);
+  }, [keyboardOffset, keyboardShift]);
+
+  const dockStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -keyboardShift.value }],
+  }));
 
   return (
-    <View
+    <Animated.View
       onLayout={onLayout}
       pointerEvents="box-none"
       style={[
         styles.promptDock,
         {
-          bottom: keyboardOffset,
+          bottom: 0,
           paddingHorizontal: horizontalPadding,
           paddingBottom: Math.max(bottomInset, spacing.lg),
         },
+        dockStyle,
       ]}
     >
       <Animated.View layout={VOICE_CARD_LAYOUT_TRANSITION}>
@@ -162,7 +178,7 @@ export function ChatPromptDock({
           </Animated.View>
         )}
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -233,7 +249,7 @@ function ComposerCard({
               hitSlop={8}
             >
               {uploadBusy ? (
-                <ActivityIndicator size="small" color={colors.text.primary} />
+                <LazyLoadingSpinner size={18} color={colors.text.primary} />
               ) : (
                 <Ionicons name="add" size={24} color={colors.text.primary} />
               )}
@@ -319,7 +335,7 @@ function ComposerCard({
               hitSlop={8}
             >
               {transcribing ? (
-                <ActivityIndicator size="small" color={colors.text.onAccent} />
+                <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
               ) : (
                 <VoiceOrbGlyph />
               )}

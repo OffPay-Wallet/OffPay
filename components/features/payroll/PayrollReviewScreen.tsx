@@ -8,12 +8,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, Modal, Pressable, TextInput, View } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 
 import { Text } from '@/components/ui/Text';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
@@ -519,17 +521,29 @@ function PayrollTokenPickerModal({
   selectedMint: string | null;
   onClose: () => void;
   onSelect: (token: ReviewTokenOption) => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  const { mounted, progress } = useReanimatedModalProgress(visible);
+
+  const overlayStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+  }));
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - progress.value) * 10 }, { scale: 0.98 + progress.value * 0.02 }],
+  }));
+
+  if (!mounted) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={reviewStyles.tokenPickerOverlay}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
+      <Animated.View style={[reviewStyles.tokenPickerOverlay, overlayStyle]}>
         <Pressable
           style={reviewStyles.tokenPickerBackdrop}
           onPress={onClose}
           accessibilityRole="button"
           accessibilityLabel="Close token selector"
         />
-        <View style={reviewStyles.tokenPickerSheet}>
+        <Animated.View style={[reviewStyles.tokenPickerSheet, sheetStyle]}>
           <View style={reviewStyles.tokenPickerHeader}>
             <Text style={styles.title}>{title}</Text>
             <Pressable
@@ -601,8 +615,8 @@ function PayrollTokenPickerModal({
               </View>
             }
           />
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }

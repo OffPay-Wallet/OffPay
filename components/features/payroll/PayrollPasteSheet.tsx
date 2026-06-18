@@ -16,8 +16,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 
@@ -37,11 +39,20 @@ export function PayrollPasteSheet({
   error,
   onClose,
   onSubmit,
-}: PayrollPasteSheetProps): React.JSX.Element {
+}: PayrollPasteSheetProps): React.JSX.Element | null {
   const [text, setText] = useState('');
 
   const trimmed = text.trim();
   const canSubmit = trimmed.length > 0 && !busy;
+  const { mounted, progress } = useReanimatedModalProgress(visible);
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+  }));
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - progress.value) * 36 }],
+  }));
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
@@ -54,14 +65,16 @@ export function PayrollPasteSheet({
     if (accepted) setText('');
   };
 
+  if (!mounted) return null;
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={pasteStyles.backdrop}>
+    <Modal visible={mounted} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[pasteStyles.backdrop, backdropStyle]}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={pasteStyles.keyboardAvoider}
         >
-          <View style={pasteStyles.sheet}>
+          <Animated.View style={[pasteStyles.sheet, sheetStyle]}>
             <View style={styles.headerRow}>
               <Text style={styles.title}>Paste batch send</Text>
               <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
@@ -106,9 +119,9 @@ export function PayrollPasteSheet({
             >
               <Text style={styles.primaryButtonText}>Stage batch send</Text>
             </Pressable>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

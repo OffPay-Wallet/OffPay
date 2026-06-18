@@ -344,9 +344,7 @@ export function ChatScreen(): React.JSX.Element {
       options: { conversationId?: string; actionId?: string } = {},
     ) => {
       const conversationId =
-        options.conversationId ??
-        activeConversation?.id ??
-        createConversation(scope, 'Batch send');
+        options.conversationId ?? activeConversation?.id ?? createConversation(scope, 'Batch send');
       const messageId = createAgenticId('payroll-assistant');
       addMessage({
         id: messageId,
@@ -476,11 +474,9 @@ export function ChatScreen(): React.JSX.Element {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const handleShow = (event: KeyboardEvent) => {
-      Keyboard.scheduleLayoutAnimation(event);
       setKeyboardFrame({ screenY: event.endCoordinates.screenY });
     };
-    const handleHide = (event: KeyboardEvent) => {
-      Keyboard.scheduleLayoutAnimation(event);
+    const handleHide = () => {
       setKeyboardFrame(null);
     };
     const showSub = Keyboard.addListener(showEvent, handleShow);
@@ -800,7 +796,6 @@ export function ChatScreen(): React.JSX.Element {
             </View>
           ) : null}
         </ScrollView>
-
       </View>
 
       <ChatPromptDock
