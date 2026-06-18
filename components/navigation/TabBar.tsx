@@ -168,7 +168,7 @@ const QUICK_ACTIONS: QuickAction[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Element | null {
+export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const { effectiveWalletMode } = useWalletModeState();
@@ -409,12 +409,13 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [closeFabMenu, navigation, recordTabSwitch, state.index, state.routes],
   );
 
-  if (tabBarHidden) {
-    return null;
-  }
-
   return (
-    <View style={[styles.container, { height: containerHeight }]} pointerEvents="box-none">
+    <View
+      style={[styles.container, { height: containerHeight }]}
+      pointerEvents={tabBarHidden ? 'none' : 'box-none'}
+      accessibilityElementsHidden={tabBarHidden}
+      importantForAccessibility={tabBarHidden ? 'no-hide-descendants' : 'auto'}
+    >
       {/* Frost scrim - sits behind the bar/FAB/quick actions and fades
           everything underneath to the app's neutral tone. Tap-to-dismiss;
           the negative `top` extends

@@ -78,6 +78,18 @@ export function buildHmacMessage(params: {
   return `${params.timestamp}:${params.walletAddress}:${params.method}:${params.pathAndQuery}`;
 }
 
+function getAuthPerfPayload(params: {
+  method: OffpayApiMethod;
+  network: string;
+  pathAndQuery: string;
+}): { method: OffpayApiMethod; network: string; route: string } {
+  return {
+    method: params.method,
+    network: params.network,
+    route: params.pathAndQuery.split('?')[0] ?? params.pathAndQuery,
+  };
+}
+
 export function signOffpayMessage(message: string, signingSeed: Uint8Array): string {
   const startedAt = mark();
   const signature = ed25519.sign(utf8ToBytes(message), signingSeed);
@@ -191,8 +203,9 @@ export async function buildOffpayAuthHeadersAsync(params: {
   const signAndHmacStart = mark();
   const signature = signOffpayMessage(canonicalMessage, params.signingSeed);
   const appHmac = hmacSha256Hex(params.requestSecret, hmacMessage);
-  measure('apiAuth.signAndHmac', signAndHmacStart, { method: params.method });
-  measure('apiAuth.buildHeadersAsync', startedAt, { method: params.method });
+  const perfPayload = getAuthPerfPayload(params);
+  measure('apiAuth.signAndHmac', signAndHmacStart, perfPayload);
+  measure('apiAuth.buildHeadersAsync', startedAt, perfPayload);
 
   return {
     'X-Wallet-Address': params.walletAddress,
@@ -240,8 +253,9 @@ export async function buildOffpayAuthHeadersWithSignature(params: {
     params.signCanonicalMessage(canonicalMessage),
     Promise.resolve(hmacSha256Hex(params.requestSecret, hmacMessage)),
   ]);
-  measure('apiAuth.externalSignAndHmac', signAndHmacStart, { method: params.method });
-  measure('apiAuth.buildHeadersWithSignature', startedAt, { method: params.method });
+  const perfPayload = getAuthPerfPayload(params);
+  measure('apiAuth.externalSignAndHmac', signAndHmacStart, perfPayload);
+  measure('apiAuth.buildHeadersWithSignature', startedAt, perfPayload);
 
   return {
     'X-Wallet-Address': params.walletAddress,

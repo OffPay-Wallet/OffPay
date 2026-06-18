@@ -3,7 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import {
   getOfflinePaymentSlotRentEstimate,
   reclaimOfflinePaymentSlotRent,
@@ -78,6 +81,7 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
   const offlinePaymentsEnabled = usePreferencesStore((state) => state.offlinePaymentsEnabled);
   const storedTargetSlotCount = usePreferencesStore((state) => state.offlinePaymentPoolSize);
   const targetSlotCount = options?.targetSlotCount ?? storedTargetSlotCount;
+  const hasExplicitTargetSlotCount = options?.targetSlotCount != null;
   const enabledByCaller = options?.enabled ?? true;
   const statusEnabledByCaller = options?.statusEnabled ?? enabledByCaller;
   const rentEstimateEnabledByCaller = options?.rentEstimateEnabled ?? enabledByCaller;
@@ -90,12 +94,6 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
   const nonceStatusCapability = getOffpayFeatureCapability(capabilities, 'offline.nonceStatus');
   const tokenContextCapability = getOffpayFeatureCapability(capabilities, 'offline.tokenContext');
   const rentEstimateCapability = getOffpayFeatureCapability(capabilities, 'offline.rentEstimate');
-  const canReadStatus =
-    statusEnabledByCaller &&
-    canUseNetwork &&
-    isOffpayFeatureAvailable(capabilities, 'offline.nonceStatus') &&
-    walletAddress != null &&
-    network != null;
   const canPrepare =
     enabledByCaller &&
     canUseNetwork &&
@@ -122,6 +120,16 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
   const pendingLocalSlotCount =
     (localSnapshotQuery.data?.counts.preparing ?? 0) +
     (localSnapshotQuery.data?.counts.settling ?? 0);
+  const shouldReadProviderStatus =
+    offlinePaymentsEnabled || hasExplicitTargetSlotCount || pendingLocalSlotCount > 0;
+  const shouldReadRentEstimate = hasExplicitTargetSlotCount;
+  const canReadStatus =
+    shouldReadProviderStatus &&
+    statusEnabledByCaller &&
+    canUseNetwork &&
+    isOffpayFeatureAvailable(capabilities, 'offline.nonceStatus') &&
+    walletAddress != null &&
+    network != null;
 
   const statusQuery = useQuery({
     queryKey: [...offlinePaymentSlotsQueryKey(walletAddress, network), 'provider', targetSlotCount],
@@ -157,6 +165,7 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
     enabled:
       walletAddress != null &&
       network != null &&
+      shouldReadRentEstimate &&
       rentEstimateEnabledByCaller &&
       canUseNetwork &&
       isOffpayFeatureAvailable(capabilities, 'offline.rentEstimate'),
@@ -251,8 +260,15 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
 }
 
 export function useOfflinePaymentSlotsAutoSync(): void {
-  // This hook intentionally keeps the read-only status queries mounted but never prepares
-  // slots automatically. Preparing slots creates durable nonce accounts and spends SOL rent,
-  // so it must happen only after an explicit user confirmation in settings.
-  useOfflinePaymentSlots();
+  const offlinePaymentsEnabled = usePreferencesStore((state) => state.offlinePaymentsEnabled);
+
+  // This hook never prepares slots automatically. Keep launch passive:
+  // local snapshots are cheap, while provider status and rent estimate
+  // reads are wallet-scoped authenticated requests for external-wallet
+  // users. Rent is only needed in visible slot-preparation UI.
+  useOfflinePaymentSlots({
+    enabled: offlinePaymentsEnabled,
+    statusEnabled: offlinePaymentsEnabled,
+    rentEstimateEnabled: false,
+  });
 }

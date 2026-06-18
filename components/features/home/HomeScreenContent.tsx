@@ -218,6 +218,7 @@ export function HomeScreenContent(): React.JSX.Element {
   const setCurrency = usePreferencesStore((s) => s.setCurrency);
   const setOfflinePaymentsEnabled = usePreferencesStore((s) => s.setOfflinePaymentsEnabled);
   const setOfflinePaymentPoolSize = usePreferencesStore((s) => s.setOfflinePaymentPoolSize);
+  const offlinePaymentPoolSize = usePreferencesStore((s) => s.offlinePaymentPoolSize);
   const offlineReceipts = useOfflinePaymentStore((s) => s.receipts);
   const privatePaymentReceipts = usePrivatePaymentStore((s) => s.receipts);
   const swapReceipts = useAdvancedSwapStore((s) => s.receipts);
@@ -254,6 +255,9 @@ export function HomeScreenContent(): React.JSX.Element {
   const tokenLogoReady = homeDataStage >= 3;
   const transactionsReady = homeDataStage >= 4;
   const backgroundStatsReady = homeDataStage >= 5;
+  const promptRentEstimateTargetSlotCount = slotPromptVisible
+    ? Math.max(offlinePaymentPoolSize, OFFLINE_PAYMENT_SLOT_DEFAULT)
+    : undefined;
   const balanceQuery = useOffpayWalletBalance(null, {
     enabled: balanceReady,
     // Capabilities are pre-warmed by the launch warm-start hook, so
@@ -265,8 +269,9 @@ export function HomeScreenContent(): React.JSX.Element {
   });
   const offlinePaymentSlots = useOfflinePaymentSlots({
     enabled: capabilitiesReady,
+    targetSlotCount: promptRentEstimateTargetSlotCount,
     statusEnabled: slotsStatusReady,
-    rentEstimateEnabled: backgroundStatsReady,
+    rentEstimateEnabled: slotPromptVisible && backgroundStatsReady,
   });
   const transactionsQuery = useOffpayWalletTransactions({
     enabled: transactionsReady,

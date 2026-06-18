@@ -10,7 +10,9 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
+  FadeIn,
   interpolate,
+  LinearTransition,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -31,7 +33,6 @@ import { PreferencesModal } from '@/components/features/settings/PreferencesModa
 import { ProfileSettingsModal } from '@/components/features/settings/ProfileSettingsModal';
 import { SecuritySettingsModal } from '@/components/features/settings/SecuritySettingsModal';
 import { useAppToast } from '@/components/ui/AppToast';
-import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { Text } from '@/components/ui/Text';
 import { PuffyTwitterXIcon } from '@/components/ui/icons/PuffyTwitterXIcon';
 import { colors } from '@/constants/colors';
@@ -53,6 +54,13 @@ const RESET_CONFIRM_CONTENT_DELAY_MS = 24;
 const RESET_CONFIRM_IOS_EASING = Easing.bezier(0.2, 0.82, 0.2, 1);
 const RESET_CONFIRM_CLOSE_DURATION_MS = 340;
 const RESET_CONFIRM_CLOSE_EASING = Easing.bezier(0.36, 0, 0.66, 1);
+const SETTINGS_CARD_ENTERING = FadeIn.duration(140)
+  .easing(Easing.out(Easing.cubic))
+  .withInitialValues({
+    opacity: 0,
+    transform: [{ translateY: 4 }],
+  });
+const SETTINGS_CARD_LAYOUT = LinearTransition.duration(180).easing(Easing.out(Easing.cubic));
 
 interface SettingsScreenContentProps {
   bottomPadding: number;
@@ -294,7 +302,7 @@ export function SettingsScreenContent({
       >
         <View style={[styles.contentFrame, { width: contentFrameWidth, gap: sectionGap }]}>
           <View style={[styles.sections, { gap: sectionGap }]}>
-            <StaggerRevealItem index={0}>
+            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -340,9 +348,9 @@ export function SettingsScreenContent({
                   />
                 </SettingsSectionCard>
               </View>
-            </StaggerRevealItem>
+            </Animated.View>
 
-            <StaggerRevealItem index={1}>
+            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -369,9 +377,9 @@ export function SettingsScreenContent({
                   />
                 </SettingsSectionCard>
               </View>
-            </StaggerRevealItem>
+            </Animated.View>
 
-            <StaggerRevealItem index={2}>
+            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -410,9 +418,9 @@ export function SettingsScreenContent({
                   />
                 </SettingsSectionCard>
               </View>
-            </StaggerRevealItem>
+            </Animated.View>
 
-            <StaggerRevealItem index={3}>
+            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -442,9 +450,9 @@ export function SettingsScreenContent({
                   />
                 </SettingsSectionCard>
               </View>
-            </StaggerRevealItem>
+            </Animated.View>
 
-            <StaggerRevealItem index={4}>
+            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
               <View style={styles.versionFooter}>
                 <Text
                   variant="small"
@@ -456,7 +464,7 @@ export function SettingsScreenContent({
                   {versionLabel}
                 </Text>
               </View>
-            </StaggerRevealItem>
+            </Animated.View>
           </View>
         </View>
       </ScrollView>
