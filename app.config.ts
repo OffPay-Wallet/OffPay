@@ -34,7 +34,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
   return {
     name: APP_NAME,
     slug: APP_SLUG,
-    owner: 'offpay',
+    owner: 'karn01',
     version: APP_VERSION,
     orientation: 'portrait',
     icon: APP_ICON_PATH,
@@ -231,7 +231,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     ],
     extra: {
       eas: {
-        projectId: '6196cfd1-17a1-4cf3-9a01-cb70bc136da7',
+        projectId: '7a90d5e4-cb4d-4c23-927c-84cd72247cec',
       },
     },
     experiments: {
