@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -22,6 +23,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useWalletModeState } from '@/hooks/useWalletModeState';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 import { useTabHistoryStore, isTabRouteName } from '@/store/tabHistoryStore';
 
@@ -226,9 +228,20 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const fabExpansion = useSharedValue(0);
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     barVisibility.value = IS_ANDROID
-      ? withTiming(tabBarHidden ? 0 : 1, TAB_VISIBILITY_TIMING)
-      : withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING);
+      ? withTiming(tabBarHidden ? 0 : 1, TAB_VISIBILITY_TIMING, (finished) => {
+          runOnJS(finishAnimationPerf)('navigation.tabBar.visibility', startedAt, finished, {
+            hidden: tabBarHidden,
+            platform: 'android',
+          });
+        })
+      : withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING, (finished) => {
+          runOnJS(finishAnimationPerf)('navigation.tabBar.visibility', startedAt, finished, {
+            hidden: tabBarHidden,
+            platform: 'ios',
+          });
+        });
   }, [barVisibility, tabBarHidden]);
 
   useEffect(() => {
@@ -243,7 +256,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   }, [tabBarHidden, fabExpanded]);
 
   useEffect(() => {
-    fabExpansion.value = withTiming(fabExpanded ? 1 : 0, FAB_FADE_ANIMATION);
+    const startedAt = markAnimationPerf();
+    fabExpansion.value = withTiming(fabExpanded ? 1 : 0, FAB_FADE_ANIMATION, (finished) => {
+      runOnJS(finishAnimationPerf)('navigation.fabExpansion', startedAt, finished, {
+        expanded: fabExpanded,
+      });
+    });
   }, [fabExpanded, fabExpansion]);
 
   useEffect(() => {
@@ -333,22 +351,52 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     if (!hasPositionedSliderRef.current) {
       hasPositionedSliderRef.current = true;
       translateX.value = activePillX;
-      sliderOpacity.value = withTiming(hasPrimaryActiveRoute ? 1 : 0, {
-        duration: 60,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-      });
+      const opacityStartedAt = markAnimationPerf();
+      sliderOpacity.value = withTiming(
+        hasPrimaryActiveRoute ? 1 : 0,
+        {
+          duration: 60,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('navigation.tabSlider.opacity', opacityStartedAt, finished, {
+            active: hasPrimaryActiveRoute,
+            initial: true,
+          });
+        },
+      );
       return;
     }
 
     // When the active route isn't a primary tab (chat / shopping / rwas),
     // fade the pill out so Home doesn't appear highlighted by default.
-    sliderOpacity.value = withTiming(hasPrimaryActiveRoute ? 1 : 0, {
-      duration: 120,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-    });
+    const opacityStartedAt = markAnimationPerf();
+    sliderOpacity.value = withTiming(
+      hasPrimaryActiveRoute ? 1 : 0,
+      {
+        duration: 120,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+      },
+      (finished) => {
+        runOnJS(finishAnimationPerf)('navigation.tabSlider.opacity', opacityStartedAt, finished, {
+          active: hasPrimaryActiveRoute,
+          initial: false,
+        });
+      },
+    );
 
     if (hasPrimaryActiveRoute) {
-      translateX.value = withTiming(activePillX, TAB_SLIDER_ANIMATION);
+      const translateStartedAt = markAnimationPerf();
+      translateX.value = withTiming(activePillX, TAB_SLIDER_ANIMATION, (finished) => {
+        runOnJS(finishAnimationPerf)(
+          'navigation.tabSlider.translate',
+          translateStartedAt,
+          finished,
+          {
+            x: Math.round(activePillX),
+          },
+        );
+      });
     }
   }, [activePillX, hasPrimaryActiveRoute, sliderOpacity, translateX]);
 
@@ -394,10 +442,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   }
 
   return (
-    <View
-      style={[styles.container, { height: containerHeight }]}
-      pointerEvents="box-none"
-    >
+    <View style={[styles.container, { height: containerHeight }]} pointerEvents="box-none">
       {/* Frost scrim - sits behind the bar/FAB/quick actions and fades
           everything underneath to the app's neutral tone. Tap-to-dismiss;
           the negative `top` extends

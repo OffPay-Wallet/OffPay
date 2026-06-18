@@ -522,7 +522,9 @@ function PayrollTokenPickerModal({
   onClose: () => void;
   onSelect: (token: ReviewTokenOption) => void;
 }): React.JSX.Element | null {
-  const { mounted, progress } = useReanimatedModalProgress(visible);
+  const { mounted, progress } = useReanimatedModalProgress(visible, {
+    name: 'payroll.tokenPicker',
+  });
 
   const overlayStyle = useAnimatedStyle(() => ({
     opacity: progress.value,

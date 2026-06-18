@@ -44,7 +44,9 @@ export function PayrollPasteSheet({
 
   const trimmed = text.trim();
   const canSubmit = trimmed.length > 0 && !busy;
-  const { mounted, progress } = useReanimatedModalProgress(visible);
+  const { mounted, progress } = useReanimatedModalProgress(visible, {
+    name: 'payroll.pasteSheet',
+  });
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: progress.value,

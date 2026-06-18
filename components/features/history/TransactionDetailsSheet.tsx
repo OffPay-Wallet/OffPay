@@ -20,6 +20,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 
 import type {
@@ -195,9 +196,14 @@ export function TransactionDetailsSheet({
       setMounted(true);
       translateY.value = height;
       opacity.value = 0;
+      const startedAt = markAnimationPerf();
       const frame = requestAnimationFrame(() => {
         opacity.value = withTiming(1, FADE_TIMING);
-        translateY.value = withTiming(0, SHEET_OPEN_TIMING);
+        translateY.value = withTiming(0, SHEET_OPEN_TIMING, (finished) => {
+          runOnJS(finishAnimationPerf)('history.transactionDetailsSheet', startedAt, finished, {
+            phase: 'open',
+          });
+        });
       });
       return () => cancelAnimationFrame(frame);
     }
@@ -205,7 +211,11 @@ export function TransactionDetailsSheet({
     if (!mounted) return undefined;
 
     opacity.value = withTiming(0, FADE_TIMING);
+    const startedAt = markAnimationPerf();
     translateY.value = withTiming(height, SHEET_CLOSE_TIMING, (finished) => {
+      runOnJS(finishAnimationPerf)('history.transactionDetailsSheet', startedAt, finished, {
+        phase: 'close',
+      });
       if (finished) runOnJS(finishClose)();
     });
 

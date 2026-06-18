@@ -14,6 +14,7 @@ import Animated, {
 import Svg, { Path } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
@@ -85,6 +86,7 @@ export function AnimatedOffPayLogo({
   const progress = useSharedValue(0);
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     progress.value = withRepeat(
       withTiming(1, { duration: 9000, easing: Easing.linear }),
       -1,
@@ -93,8 +95,9 @@ export function AnimatedOffPayLogo({
 
     return () => {
       cancelAnimation(progress);
+      finishAnimationPerf('offpayLogo.loop', startedAt, false, { size });
     };
-  }, [progress]);
+  }, [progress, size]);
 
   const leftEyeProps = useAnimatedProps(() => {
     const offsetX = interpolate(progress.value, KEYFRAME_POINTS, EYE_X, Extrapolation.CLAMP);

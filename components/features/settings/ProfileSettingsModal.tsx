@@ -30,6 +30,7 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useLocalProfileImageManager } from '@/hooks/useLocalProfileImageManager';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import {
   formatOffpayUsername,
   getOffpayUsernameError,
@@ -117,17 +118,25 @@ export function ProfileSettingsModal({
   const animatedSheetHeight = useSharedValue(sheetHeight);
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     if (visible) {
       setMounted(true);
       setFormHeight(0);
       setDraftUsername(sanitizeOffpayUsernameInput(username ?? ''));
       setSaving(false);
       opacity.value = withTiming(1, FADE_TIMING);
-      translateY.value = withTiming(0, SHEET_OPEN_TIMING);
+      translateY.value = withTiming(0, SHEET_OPEN_TIMING, (finished) => {
+        runOnJS(finishAnimationPerf)('settings.profileModal', startedAt, finished, {
+          phase: 'open',
+        });
+      });
       return;
     }
 
     translateY.value = withTiming(windowHeight, SHEET_CLOSE_TIMING, (finished) => {
+      runOnJS(finishAnimationPerf)('settings.profileModal', startedAt, finished, {
+        phase: 'close',
+      });
       if (finished) runOnJS(setMounted)(false);
     });
     opacity.value = withTiming(0, FADE_TIMING);
@@ -171,7 +180,11 @@ export function ProfileSettingsModal({
         afterClose?.();
       };
 
-      translateY.value = withTiming(windowHeight, SHEET_CLOSE_TIMING, () => {
+      const startedAt = markAnimationPerf();
+      translateY.value = withTiming(windowHeight, SHEET_CLOSE_TIMING, (finished) => {
+        runOnJS(finishAnimationPerf)('settings.profileModal', startedAt, finished, {
+          phase: 'manualClose',
+        });
         runOnJS(finishClose)();
       });
       opacity.value = withTiming(0, FADE_TIMING);

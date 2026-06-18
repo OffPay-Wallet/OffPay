@@ -20,6 +20,7 @@ import Animated, {
   FadeIn,
   FadeOut,
   LinearTransition,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -30,6 +31,7 @@ import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 import { Text } from '@/components/ui/Text';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import { AiLoaderLottie } from './AiLoaderLottie';
 import { VoiceWaveform } from './VoiceWaveform';
@@ -134,7 +136,12 @@ export function ChatPromptDock({
   const keyboardShift = useSharedValue(keyboardOffset);
 
   useEffect(() => {
-    keyboardShift.value = withTiming(keyboardOffset, KEYBOARD_DOCK_TIMING);
+    const startedAt = markAnimationPerf();
+    keyboardShift.value = withTiming(keyboardOffset, KEYBOARD_DOCK_TIMING, (finished) => {
+      runOnJS(finishAnimationPerf)('chat.promptDock.keyboardShift', startedAt, finished, {
+        keyboardOffset: Math.round(keyboardOffset),
+      });
+    });
   }, [keyboardOffset, keyboardShift]);
 
   const dockStyle = useAnimatedStyle(() => ({

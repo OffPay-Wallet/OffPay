@@ -18,11 +18,14 @@
 import { Children, isValidElement, useEffect } from 'react';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
+
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import type { ReactNode } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
@@ -58,10 +61,17 @@ export function StaggerRevealItem({
   const progress = useSharedValue(0);
 
   useEffect(() => {
+    const delayMs = baseDelayMs + index * STAGGER_STEP_MS;
+    const startedAt = markAnimationPerf();
     progress.value = 0;
     progress.value = withDelay(
-      baseDelayMs + index * STAGGER_STEP_MS,
-      withTiming(1, { duration: REVEAL_DURATION_MS, easing: REVEAL_EASING }),
+      delayMs,
+      withTiming(1, { duration: REVEAL_DURATION_MS, easing: REVEAL_EASING }, (finished) => {
+        runOnJS(finishAnimationPerf)('staggerReveal.item', startedAt, finished, {
+          delayMs,
+          index,
+        });
+      }),
     );
   }, [index, trigger, baseDelayMs, progress]);
 

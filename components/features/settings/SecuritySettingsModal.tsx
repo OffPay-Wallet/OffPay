@@ -40,6 +40,7 @@ import { SecurityRootStep } from '@/components/features/security/SecurityRootSte
 import { WalletKeysStep } from '@/components/features/security/WalletKeysStep';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { authenticateWithBiometrics, getBiometricAvailability } from '@/lib/wallet/biometric-auth';
 import {
   getSecuritySettings,
@@ -310,19 +311,36 @@ export function SecuritySettingsModal({
 
   // Animation
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     if (visible) {
       setContentHeight(0);
       setMounted(true);
       opacity.value = withTiming(1, { duration: 220 });
-      translateY.value = withTiming(0, {
-        duration: 320,
-        easing: Easing.out(Easing.poly(4)),
-      });
+      translateY.value = withTiming(
+        0,
+        {
+          duration: 320,
+          easing: Easing.out(Easing.poly(4)),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('settings.securityModal', startedAt, finished, {
+            phase: 'open',
+          });
+        },
+      );
     } else {
-      translateY.value = withTiming(windowHeight, {
-        duration: 220,
-        easing: Easing.in(Easing.ease),
-      });
+      translateY.value = withTiming(
+        windowHeight,
+        {
+          duration: 220,
+          easing: Easing.in(Easing.ease),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('settings.securityModal', startedAt, finished, {
+            phase: 'close',
+          });
+        },
+      );
       opacity.value = withTiming(0, { duration: 220 }, (finished) => {
         if (finished) runOnJS(setMounted)(false);
       });
@@ -368,10 +386,16 @@ export function SecuritySettingsModal({
   // ---------------------------------------------------------------------------
 
   const handleClose = useCallback((): void => {
+    const startedAt = markAnimationPerf();
     translateY.value = withTiming(
       windowHeight,
       { duration: 220, easing: Easing.in(Easing.ease) },
-      () => runOnJS(onClose)(),
+      (finished) => {
+        runOnJS(finishAnimationPerf)('settings.securityModal', startedAt, finished, {
+          phase: 'manualClose',
+        });
+        runOnJS(onClose)();
+      },
     );
     opacity.value = withTiming(0, { duration: 220 });
   }, [onClose, opacity, translateY, windowHeight]);
@@ -586,12 +610,8 @@ export function SecuritySettingsModal({
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const compact = compactViewport;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const resolvedHeaderHeight =
-    headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
-  const bodyMaxHeight = Math.max(
-    120,
-    maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING,
-  );
+  const resolvedHeaderHeight = headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
+  const bodyMaxHeight = Math.max(120, maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING);
   const scrollOverflows = contentHeight > bodyMaxHeight;
   const sheetHeight = useMemo(() => {
     const chromeHeight = resolvedHeaderHeight + SHEET_CHROME_PADDING;
@@ -604,10 +624,7 @@ export function SecuritySettingsModal({
       return maxSheetHeight;
     }
 
-    return Math.min(
-      maxSheetHeight,
-      Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight),
-    );
+    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight));
   }, [contentHeight, maxSheetHeight, resolvedHeaderHeight, scrollOverflows, step]);
 
   useEffect(() => {

@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router/react-navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, {
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -78,6 +79,7 @@ import {
   getSwapPrice,
   getSwapTokens,
 } from '@/lib/api/offpay-api-client';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import {
   FALLBACK_SWAP_TOKENS,
@@ -220,13 +222,26 @@ function PrivateSwapToggle({
   // handler already moved the knob, so this is a no-op when the prop
   // catches up.
   useEffect(() => {
-    knobProgress.value = withSpring(enabled ? 1 : 0, PRIVATE_TOGGLE_SPRING);
+    const startedAt = markAnimationPerf();
+    knobProgress.value = withSpring(enabled ? 1 : 0, PRIVATE_TOGGLE_SPRING, (finished) => {
+      runOnJS(finishAnimationPerf)('swap.privateToggle.knob', startedAt, finished, {
+        enabled,
+        source: 'prop',
+      });
+    });
   }, [enabled, knobProgress]);
 
   // Slide the knob immediately on tap, on the UI thread, decoupled from
   // the swap screen's heavier re-render so the switch never feels laggy.
   const handlePress = (): void => {
-    knobProgress.value = withSpring(enabled ? 0 : 1, PRIVATE_TOGGLE_SPRING);
+    const next = !enabled;
+    const startedAt = markAnimationPerf();
+    knobProgress.value = withSpring(next ? 1 : 0, PRIVATE_TOGGLE_SPRING, (finished) => {
+      runOnJS(finishAnimationPerf)('swap.privateToggle.knob', startedAt, finished, {
+        enabled: next,
+        source: 'tap',
+      });
+    });
     onToggle();
   };
 
@@ -1652,29 +1667,32 @@ export function SwapScreen(): React.JSX.Element {
     setModalVisible(true);
   }, []);
 
-  const handleTokenSelect = useCallback((token: SwapTokenOption) => {
-    if (selectingFor === 'pay') {
-      if (token.mint != null && token.mint === receiveToken.mint) {
-        handleFlip();
+  const handleTokenSelect = useCallback(
+    (token: SwapTokenOption) => {
+      if (selectingFor === 'pay') {
+        if (token.mint != null && token.mint === receiveToken.mint) {
+          handleFlip();
+          return;
+        }
+
+        // Token change clears `lastSwapResult`, `swapActionErrorLabel`,
+        // `swapActionRefreshable`, and `processResult` atomically via
+        // the reducer; no manual clears needed here.
+        swapInputActions.setPayToken(token.mint);
         return;
       }
 
-      // Token change clears `lastSwapResult`, `swapActionErrorLabel`,
-      // `swapActionRefreshable`, and `processResult` atomically via
-      // the reducer; no manual clears needed here.
-      swapInputActions.setPayToken(token.mint);
-      return;
-    }
+      if (selectingFor === 'receive') {
+        if (token.mint != null && token.mint === payToken.mint) {
+          handleFlip();
+          return;
+        }
 
-    if (selectingFor === 'receive') {
-      if (token.mint != null && token.mint === payToken.mint) {
-        handleFlip();
-        return;
+        swapInputActions.setReceiveToken(token.mint);
       }
-
-      swapInputActions.setReceiveToken(token.mint);
-    }
-  }, [handleFlip, payToken.mint, receiveToken.mint, selectingFor, swapInputActions]);
+    },
+    [handleFlip, payToken.mint, receiveToken.mint, selectingFor, swapInputActions],
+  );
 
   const handleRefreshSwapQuote = () => {
     quoteController.refreshOnUserGesture('refresh');
@@ -1975,8 +1993,7 @@ export function SwapScreen(): React.JSX.Element {
       capabilitiesQuery.isCapabilitiesPending ||
       (canLoadTokens && swapTokensQuery.data == null && swapTokensQuery.error == null) ||
       (walletAddress != null && balanceQuery.data == null && balanceQuery.error == null));
-  const showDataFallback =
-    showDeferredDataFallback && dataStillDeferred && !showLiveSwapDetails;
+  const showDataFallback = showDeferredDataFallback && dataStillDeferred && !showLiveSwapDetails;
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

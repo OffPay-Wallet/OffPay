@@ -37,7 +37,9 @@ export function ConfirmDialogCard({
   const compact = windowWidth < 390 || fontScale > 1.18;
   const maxWidth = Math.min(360, Math.max(280, windowWidth - spacing['3xl'] * 2));
   const buttonHeight = dense ? 44 : compact ? 46 : 48;
-  const { mounted, progress } = useReanimatedModalProgress(visible);
+  const { mounted, progress } = useReanimatedModalProgress(visible, {
+    name: 'ui.confirmDialog',
+  });
 
   const layerStyle = useAnimatedStyle(() => ({
     opacity: progress.value,

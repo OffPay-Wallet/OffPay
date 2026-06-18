@@ -22,6 +22,7 @@ import Animated, {
   Easing,
   FadeIn,
   FadeOut,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -42,6 +43,7 @@ import { CURRENCIES } from '@/constants/currencies';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -269,18 +271,29 @@ export function BalanceCard({
   const actionsOpacity = useSharedValue(1);
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     actionsOpacity.value = 0.9;
-    actionsOpacity.value = withTiming(1, {
-      duration: 120,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [actionsOpacity, visibleActionKey]);
+    actionsOpacity.value = withTiming(
+      1,
+      {
+        duration: 120,
+        easing: Easing.out(Easing.cubic),
+      },
+      (finished) => {
+        runOnJS(finishAnimationPerf)('home.balanceActions.fade', startedAt, finished, {
+          actionCount: visibleActions.length,
+        });
+      },
+    );
+  }, [actionsOpacity, visibleActionKey, visibleActions.length]);
 
   const actionsRowStyle = useAnimatedStyle(() => ({
     opacity: actionsOpacity.value,
   }));
   const { mounted: currencyMenuMounted, progress: currencyMenuProgress } =
-    useReanimatedModalProgress(currencyMenuOpen);
+    useReanimatedModalProgress(currencyMenuOpen, {
+      name: 'home.currencyMenu',
+    });
 
   const currencyBackdropStyle = useAnimatedStyle(() => ({
     opacity: currencyMenuProgress.value,

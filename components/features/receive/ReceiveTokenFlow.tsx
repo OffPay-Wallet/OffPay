@@ -43,6 +43,7 @@ import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { useUmbraVaultRegistrationStatus } from '@/hooks/useUmbraVaultRegistrationStatus';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { buildOffpayReceiveRequestQr } from '@/lib/offline/offline-payments';
 import {
   getOffpayFeatureCapability,
@@ -502,7 +503,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   // hooks keep their warm React Query cache.
   useEffect(() => {
     if (renderedReceiveMode === receiveMode) return;
+    const startedAt = markAnimationPerf();
     modeContentOpacity.value = withTiming(0, MODE_CONTENT_FADE_OUT, (finished) => {
+      runOnJS(finishAnimationPerf)('receive.modeContentFade', startedAt, finished, {
+        mode: receiveMode,
+      });
       if (!finished) return;
       runOnJS(setRenderedReceiveMode)(receiveMode);
     });

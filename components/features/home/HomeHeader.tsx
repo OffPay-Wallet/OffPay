@@ -9,6 +9,7 @@ import Animated, {
   Easing,
   interpolate,
   interpolateColor,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -31,6 +32,7 @@ import {
 import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import {
   deleteManagedProfileImage,
   resolveStoredProfileImageUri,
@@ -170,7 +172,13 @@ function HomeHeaderComponent({
   const walletDisplayName = username != null ? `@${username}` : accountName;
 
   useEffect(() => {
-    toggleProgress.value = withTiming(isOffline ? 1 : 0, TOGGLE_TIMING);
+    const startedAt = markAnimationPerf();
+    toggleProgress.value = withTiming(isOffline ? 1 : 0, TOGGLE_TIMING, (finished) => {
+      runOnJS(finishAnimationPerf)('home.walletModeToggle', startedAt, finished, {
+        offline: isOffline,
+        source: 'prop',
+      });
+    });
   }, [isOffline, toggleProgress]);
 
   useEffect(
@@ -188,7 +196,13 @@ function HomeHeaderComponent({
     if (onToggleOffline != null) {
       onToggleOffline(next);
     } else {
-      toggleProgress.value = withTiming(next ? 1 : 0, TOGGLE_TIMING);
+      const startedAt = markAnimationPerf();
+      toggleProgress.value = withTiming(next ? 1 : 0, TOGGLE_TIMING, (finished) => {
+        runOnJS(finishAnimationPerf)('home.walletModeToggle', startedAt, finished, {
+          offline: next,
+          source: 'local',
+        });
+      });
       setInternalOffline(next);
     }
   }, [isOffline, onToggleOffline, toggleProgress]);

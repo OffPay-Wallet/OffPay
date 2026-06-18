@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Easing, runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
+
 import type { SharedValue, WithTimingConfig } from 'react-native-reanimated';
 
 const DEFAULT_MODAL_TIMING: WithTimingConfig = {
@@ -9,6 +11,7 @@ const DEFAULT_MODAL_TIMING: WithTimingConfig = {
 };
 
 interface ReanimatedModalProgressOptions {
+  name?: string;
   timing?: WithTimingConfig;
 }
 
@@ -24,18 +27,23 @@ export function useReanimatedModalProgress(
   const [mounted, setMounted] = useState(visible);
   const progress = useSharedValue(visible ? 1 : 0);
   const timing = options.timing ?? DEFAULT_MODAL_TIMING;
+  const name = options.name ?? 'modalProgress';
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     if (visible) {
       setMounted(true);
-      progress.value = withTiming(1, timing);
+      progress.value = withTiming(1, timing, (finished) => {
+        runOnJS(finishAnimationPerf)(name, startedAt, finished, { phase: 'open' });
+      });
       return;
     }
 
     progress.value = withTiming(0, timing, (finished) => {
+      runOnJS(finishAnimationPerf)(name, startedAt, finished, { phase: 'close' });
       if (finished) runOnJS(setMounted)(false);
     });
-  }, [progress, timing, visible]);
+  }, [name, progress, timing, visible]);
 
   return { mounted, progress };
 }

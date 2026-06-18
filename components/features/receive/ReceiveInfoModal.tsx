@@ -23,6 +23,7 @@ import { PuffyQRIcon } from '@/components/ui/icons/PuffyQRIcon';
 import { PuffyShieldIcon } from '@/components/ui/icons/PuffyShieldIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 interface ReceiveInfoModalProps {
   visible: boolean;
@@ -45,29 +46,54 @@ export function ReceiveInfoModal({
   const sheetPadding = compactSheet ? spacing.lg : spacing.xl;
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     if (visible) {
       setMounted(true);
       opacity.value = withTiming(1, { duration: 240 });
-      translateY.value = withTiming(0, {
-        duration: 280,
-        easing: Easing.out(Easing.poly(3)),
-      });
+      translateY.value = withTiming(
+        0,
+        {
+          duration: 280,
+          easing: Easing.out(Easing.poly(3)),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('receive.infoModal', startedAt, finished, {
+            phase: 'open',
+          });
+        },
+      );
       return;
     }
 
-    translateY.value = withTiming(height, {
-      duration: 220,
-      easing: Easing.in(Easing.ease),
-    });
+    translateY.value = withTiming(
+      height,
+      {
+        duration: 220,
+        easing: Easing.in(Easing.ease),
+      },
+      (finished) => {
+        runOnJS(finishAnimationPerf)('receive.infoModal', startedAt, finished, {
+          phase: 'close',
+        });
+      },
+    );
     opacity.value = withTiming(0, { duration: 200 }, (finished) => {
       if (finished) runOnJS(setMounted)(false);
     });
   }, [height, opacity, translateY, visible]);
 
   const handleClose = () => {
-    translateY.value = withTiming(height, { duration: 220, easing: Easing.in(Easing.ease) }, () => {
-      runOnJS(onClose)();
-    });
+    const startedAt = markAnimationPerf();
+    translateY.value = withTiming(
+      height,
+      { duration: 220, easing: Easing.in(Easing.ease) },
+      (finished) => {
+        runOnJS(finishAnimationPerf)('receive.infoModal', startedAt, finished, {
+          phase: 'manualClose',
+        });
+        runOnJS(onClose)();
+      },
+    );
     opacity.value = withTiming(0, { duration: 200 });
   };
 

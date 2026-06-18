@@ -6,6 +6,7 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   Easing,
+  runOnJS,
 } from 'react-native-reanimated';
 
 import { TokenIcon } from '@/components/ui/TokenIcon';
@@ -14,6 +15,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
 import type { SwapTokenOption } from './types';
@@ -130,10 +132,17 @@ export const SwapCard = memo(function SwapCard({
   }));
 
   const handleFlip = () => {
-    rotation.value = withTiming(rotation.value + 180, {
-      duration: 350,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-    });
+    const startedAt = markAnimationPerf();
+    rotation.value = withTiming(
+      rotation.value + 180,
+      {
+        duration: 350,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+      },
+      (finished) => {
+        runOnJS(finishAnimationPerf)('swap.cardFlip', startedAt, finished);
+      },
+    );
     onFlip();
   };
 

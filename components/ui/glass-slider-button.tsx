@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanResponder, StyleSheet, type StyleProp, View, type ViewStyle } from 'react-native';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -13,6 +14,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 const TRACK_HEIGHT = layout.buttonHeightLg;
 const TRACK_PADDING = 3;
@@ -59,6 +61,18 @@ export function GlassSliderButton({
   const effectiveLoading = loading || completionPending;
   const inactive = disabled || effectiveLoading || maxTravel <= 0;
   const showDangerFeedback = feedbackTone === 'danger' && disabled && !effectiveLoading;
+  const animateThumb = useCallback(
+    (toValue: number, phase: string): void => {
+      const startedAt = markAnimationPerf();
+      translateX.value = withTiming(toValue, SLIDE_TIMING, (finished) => {
+        runOnJS(finishAnimationPerf)('ui.glassSlider.thumb', startedAt, finished, {
+          phase,
+          target: Math.round(toValue),
+        });
+      });
+    },
+    [translateX],
+  );
 
   useEffect(() => {
     if (!completionPending || loading || holdOnComplete) return;
@@ -78,30 +92,30 @@ export function GlassSliderButton({
     dragXRef.current = 0;
     startXRef.current = 0;
     if (!loading) {
-      translateX.value = withTiming(0, SLIDE_TIMING);
+      animateThumb(0, 'reset');
     }
-  }, [loading, resetSignal, translateX]);
+  }, [animateThumb, loading, resetSignal]);
 
   useEffect(() => {
     if (effectiveLoading) {
-      translateX.value = withTiming(maxTravel, SLIDE_TIMING);
+      animateThumb(maxTravel, 'loading');
       return;
     }
 
     completedRef.current = false;
     dragXRef.current = 0;
     startXRef.current = 0;
-    translateX.value = withTiming(0, SLIDE_TIMING);
-  }, [effectiveLoading, maxTravel, translateX]);
+    animateThumb(0, 'idle');
+  }, [animateThumb, effectiveLoading, maxTravel]);
 
   const complete = useCallback((): void => {
     if (completedRef.current) return;
     completedRef.current = true;
     dragXRef.current = maxTravel;
     setCompletionPending(true);
-    translateX.value = withTiming(maxTravel, SLIDE_TIMING);
+    animateThumb(maxTravel, 'complete');
     onComplete();
-  }, [maxTravel, onComplete, translateX]);
+  }, [animateThumb, maxTravel, onComplete]);
 
   const panResponder = useMemo(
     () =>
@@ -129,17 +143,17 @@ export function GlassSliderButton({
           }
 
           dragXRef.current = 0;
-          translateX.value = withTiming(0, SLIDE_TIMING);
+          animateThumb(0, 'releaseReset');
         },
         onPanResponderTerminate: () => {
           if (completedRef.current) return;
           dragXRef.current = 0;
-          translateX.value = withTiming(0, SLIDE_TIMING);
+          animateThumb(0, 'terminateReset');
         },
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
       }),
-    [complete, inactive, maxTravel, translateX],
+    [animateThumb, complete, inactive, maxTravel, translateX],
   );
 
   const thumbStyle = useAnimatedStyle(() => ({

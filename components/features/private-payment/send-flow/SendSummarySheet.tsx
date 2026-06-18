@@ -42,6 +42,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import type { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import type { SendTokenOption } from './types';
@@ -142,16 +143,28 @@ export function SendSummarySheet({
   lockedRef.current = phase !== 'review';
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     if (visible) {
       setMounted(true);
       dragY.value = 0;
-      progress.value = withTiming(1, { duration: OPEN_DURATION_MS, easing: OPEN_EASING });
+      progress.value = withTiming(
+        1,
+        { duration: OPEN_DURATION_MS, easing: OPEN_EASING },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('privatePayment.summarySheet', startedAt, finished, {
+            phase: 'open',
+          });
+        },
+      );
       return;
     }
     progress.value = withTiming(
       0,
       { duration: CLOSE_DURATION_MS, easing: CLOSE_EASING },
       (done) => {
+        runOnJS(finishAnimationPerf)('privatePayment.summarySheet', startedAt, done, {
+          phase: 'close',
+        });
         if (done) runOnJS(setMounted)(false);
       },
     );
@@ -160,16 +173,21 @@ export function SendSummarySheet({
   // Spin the progress ring only while sending.
   useEffect(() => {
     if (phase === 'sending') {
+      const startedAt = markAnimationPerf();
       ringSpin.value = 0;
       ringSpin.value = withRepeat(
         withTiming(1, { duration: 900, easing: Easing.linear }),
         -1,
         false,
       );
-    } else {
-      cancelAnimation(ringSpin);
-      ringSpin.value = 0;
+      return () => {
+        cancelAnimation(ringSpin);
+        finishAnimationPerf('privatePayment.summaryRing.loop', startedAt, false);
+      };
     }
+
+    cancelAnimation(ringSpin);
+    ringSpin.value = 0;
     return () => {
       cancelAnimation(ringSpin);
     };
@@ -189,10 +207,27 @@ export function SendSummarySheet({
           runOnJS(onCancel)();
           return;
         }
-        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING });
+        const startedAt = markAnimationPerf();
+        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING }, (finished) => {
+          runOnJS(finishAnimationPerf)(
+            'privatePayment.summarySheet.dragReset',
+            startedAt,
+            finished,
+          );
+        });
       },
       onPanResponderTerminate: () => {
-        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING });
+        const startedAt = markAnimationPerf();
+        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING }, (finished) => {
+          runOnJS(finishAnimationPerf)(
+            'privatePayment.summarySheet.dragReset',
+            startedAt,
+            finished,
+            {
+              phase: 'terminate',
+            },
+          );
+        });
       },
     }),
   ).current;
@@ -502,19 +537,32 @@ function SummaryRow({
 }
 
 function ConfettiParticle({
+  index,
   particle,
 }: {
+  index: number;
   particle: (typeof CONFETTI_PARTICLES)[number];
 }): React.JSX.Element {
   const burst = useSharedValue(0);
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     burst.value = 0;
     burst.value = withDelay(
       SUCCESS_CONFETTI_DELAY_MS + particle.delay,
-      withTiming(1, { duration: 680, easing: Easing.out(Easing.cubic) }),
+      withTiming(1, { duration: 680, easing: Easing.out(Easing.cubic) }, (finished) => {
+        runOnJS(finishAnimationPerf)(
+          'privatePayment.successConfetti.particle',
+          startedAt,
+          finished,
+          {
+            delayMs: SUCCESS_CONFETTI_DELAY_MS + particle.delay,
+            index,
+          },
+        );
+      }),
     );
-  }, [burst, particle.delay]);
+  }, [burst, index, particle.delay]);
 
   const particleStyle = useAnimatedStyle(() => ({
     opacity: interpolate(burst.value, [0, 0.14, 0.78, 1], [0, 1, 1, 0]),
@@ -546,7 +594,11 @@ function SuccessConfetti(): React.JSX.Element {
   return (
     <View pointerEvents="none" style={styles.confettiLayer}>
       {CONFETTI_PARTICLES.map((particle, index) => (
-        <ConfettiParticle key={`${particle.x}-${particle.y}-${index}`} particle={particle} />
+        <ConfettiParticle
+          key={`${particle.x}-${particle.y}-${index}`}
+          index={index}
+          particle={particle}
+        />
       ))}
     </View>
   );

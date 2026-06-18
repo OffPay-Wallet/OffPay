@@ -2,6 +2,7 @@ import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -12,6 +13,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 /**
  * Segmented Standard / Private toggle for the receive screen.
@@ -84,7 +86,13 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
   // Taps already moved the thumb in the press handler, so when the prop
   // later catches up this resolves to the same target (a no-op).
   React.useEffect(() => {
-    selectedIndex.value = withTiming(modeIndex(selectedMode), THUMB_TIMING);
+    const startedAt = markAnimationPerf();
+    selectedIndex.value = withTiming(modeIndex(selectedMode), THUMB_TIMING, (finished) => {
+      runOnJS(finishAnimationPerf)('receive.modeDivider.thumb', startedAt, finished, {
+        mode: selectedMode,
+        source: 'prop',
+      });
+    });
   }, [selectedIndex, selectedMode]);
 
   // Slide the thumb immediately on tap, on the UI thread, without
@@ -92,7 +100,13 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
   // mode via `onChangeMode`; this just unblocks the visual.
   const handleSelect = useCallback(
     (mode: ReceiveMode) => {
-      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING);
+      const startedAt = markAnimationPerf();
+      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING, (finished) => {
+        runOnJS(finishAnimationPerf)('receive.modeDivider.thumb', startedAt, finished, {
+          mode,
+          source: 'tap',
+        });
+      });
       onChangeMode(mode);
     },
     [onChangeMode, selectedIndex],

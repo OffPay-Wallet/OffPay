@@ -70,7 +70,9 @@ export function PayrollColumnMapSheet({
   };
 
   const canSubmit = mapping.recipient != null && mapping.amount != null && !busy;
-  const { mounted, progress } = useReanimatedModalProgress(visible);
+  const { mounted, progress } = useReanimatedModalProgress(visible, {
+    name: 'payroll.columnMapSheet',
+  });
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: progress.value,

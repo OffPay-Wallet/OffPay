@@ -2,6 +2,7 @@ import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -14,6 +15,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 export type HomeBalanceMode = 'default' | 'shielded';
 
@@ -70,14 +72,26 @@ export function HomeBalanceModeDivider({
   // Taps already moved the thumb in the press handler, so when the prop
   // later catches up this resolves to the same target (a no-op).
   useEffect(() => {
-    selectedIndex.value = withTiming(modeIndex(selectedMode), THUMB_TIMING);
+    const startedAt = markAnimationPerf();
+    selectedIndex.value = withTiming(modeIndex(selectedMode), THUMB_TIMING, (finished) => {
+      runOnJS(finishAnimationPerf)('home.balanceModeDivider.thumb', startedAt, finished, {
+        mode: selectedMode,
+        source: 'prop',
+      });
+    });
   }, [selectedIndex, selectedMode]);
 
   // Slide the thumb immediately on tap, on the UI thread, decoupled
   // from the parent's (heavy) Portfolio/Shielded content swap.
   const handleSelect = useCallback(
     (mode: HomeBalanceMode) => {
-      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING);
+      const startedAt = markAnimationPerf();
+      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING, (finished) => {
+        runOnJS(finishAnimationPerf)('home.balanceModeDivider.thumb', startedAt, finished, {
+          mode,
+          source: 'tap',
+        });
+      });
       onChangeMode(mode);
     },
     [onChangeMode, selectedIndex],

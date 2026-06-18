@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -49,6 +50,7 @@ import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import type { Theme } from 'expo-router/react-navigation';
 
@@ -162,7 +164,10 @@ export default function RootLayout(): React.JSX.Element | null {
 
   useEffect(() => {
     if (!hasHiddenSplash) return;
-    rootReveal.value = withTiming(1, ROOT_REVEAL_TIMING);
+    const startedAt = markAnimationPerf();
+    rootReveal.value = withTiming(1, ROOT_REVEAL_TIMING, (finished) => {
+      runOnJS(finishAnimationPerf)('root.appShellReveal', startedAt, finished);
+    });
   }, [hasHiddenSplash, rootReveal]);
 
   useEffect(() => {

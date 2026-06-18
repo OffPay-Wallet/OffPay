@@ -126,7 +126,9 @@ export function ChatHistoryDrawer({
     },
     [onDeleteConversation, onOpenConversation],
   );
-  const { mounted, progress } = useReanimatedModalProgress(visible);
+  const { mounted, progress } = useReanimatedModalProgress(visible, {
+    name: 'chat.historyDrawer',
+  });
 
   const rootStyle = useAnimatedStyle(() => ({
     opacity: progress.value,

@@ -44,6 +44,7 @@ import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
 import { colors } from '@/constants/colors';
 import { SOLANA_NETWORKS } from '@/constants/networks';
 import { layout, radii, spacing } from '@/constants/spacing';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransitionStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
@@ -153,12 +154,8 @@ export function PreferencesModal({
 
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const resolvedHeaderHeight =
-    headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
-  const bodyMaxHeight = Math.max(
-    120,
-    maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING,
-  );
+  const resolvedHeaderHeight = headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
+  const bodyMaxHeight = Math.max(120, maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING);
   const scrollOverflows = contentHeight > bodyMaxHeight;
   const sheetHeight = useMemo(() => {
     const chromeHeight = resolvedHeaderHeight + SHEET_CHROME_PADDING;
@@ -172,10 +169,7 @@ export function PreferencesModal({
       return maxSheetHeight;
     }
 
-    return Math.min(
-      maxSheetHeight,
-      Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight),
-    );
+    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight));
   }, [contentHeight, maxSheetHeight, resolvedHeaderHeight, scrollOverflows, step]);
 
   const translateY = useSharedValue(windowHeight);
@@ -186,19 +180,36 @@ export function PreferencesModal({
 
   // Animation
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     if (visible) {
       setContentHeight(0);
       setMounted(true);
       opacity.value = withTiming(1, { duration: 220 });
-      translateY.value = withTiming(0, {
-        duration: 320,
-        easing: Easing.out(Easing.poly(4)),
-      });
+      translateY.value = withTiming(
+        0,
+        {
+          duration: 320,
+          easing: Easing.out(Easing.poly(4)),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('settings.preferencesModal', startedAt, finished, {
+            phase: 'open',
+          });
+        },
+      );
     } else {
-      translateY.value = withTiming(windowHeight, {
-        duration: 220,
-        easing: Easing.in(Easing.ease),
-      });
+      translateY.value = withTiming(
+        windowHeight,
+        {
+          duration: 220,
+          easing: Easing.in(Easing.ease),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('settings.preferencesModal', startedAt, finished, {
+            phase: 'close',
+          });
+        },
+      );
       opacity.value = withTiming(0, { duration: 220 }, (finished) => {
         if (finished) runOnJS(setMounted)(false);
       });
@@ -231,10 +242,16 @@ export function PreferencesModal({
         afterClose?.();
       };
 
+      const startedAt = markAnimationPerf();
       translateY.value = withTiming(
         windowHeight,
         { duration: 220, easing: Easing.in(Easing.ease) },
-        () => runOnJS(finishClose)(),
+        (finished) => {
+          runOnJS(finishAnimationPerf)('settings.preferencesModal', startedAt, finished, {
+            phase: 'manualClose',
+          });
+          runOnJS(finishClose)();
+        },
       );
       opacity.value = withTiming(0, { duration: 220 });
     },
@@ -404,9 +421,7 @@ export function PreferencesModal({
               onPress={() => navigateToStep('walletMode')}
             />
             <SettingsLineItem
-              icon={
-                <PuffyPaymentsIcon size={rootIconSize} color={colors.text.primary} focused />
-              }
+              icon={<PuffyPaymentsIcon size={rootIconSize} color={colors.text.primary} focused />}
               title="Offline Payments"
               subtitle={
                 offlinePaymentsEnabled
@@ -432,9 +447,7 @@ export function PreferencesModal({
               onPress={() => navigateToStep('offlinePayments')}
             />
             <SettingsLineItem
-              icon={
-                <PuffyNetworkIcon size={rootIconSize} color={colors.text.primary} focused />
-              }
+              icon={<PuffyNetworkIcon size={rootIconSize} color={colors.text.primary} focused />}
               title="Network"
               subtitle="Solana cluster"
               right={
@@ -543,11 +556,7 @@ export function PreferencesModal({
                 accessibilityLabel="Close"
                 hitSlop={6}
               >
-                <Ionicons
-                  name="close"
-                  size={layout.iconSizeInline}
-                  color={colors.text.primary}
-                />
+                <Ionicons name="close" size={layout.iconSizeInline} color={colors.text.primary} />
               </Pressable>
             </View>
           </View>
@@ -566,9 +575,7 @@ export function PreferencesModal({
                 setContentHeight((current) => (current === nextHeight ? current : nextHeight));
               }}
             >
-              <Animated.View style={[styles.stepContent, contentStyle]}>
-                {stepBody}
-              </Animated.View>
+              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
             </ScrollView>
           ) : (
             <View style={styles.bodyStatic} onLayout={handleContentLayout}>

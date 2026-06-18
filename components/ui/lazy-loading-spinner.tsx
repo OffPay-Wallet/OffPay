@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -10,6 +11,7 @@ import Animated, {
 import Svg, { Line } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 /**
  * iOS-style activity indicator — the classic 12 tapered bars arranged
@@ -68,6 +70,7 @@ export function LazyLoadingSpinner({
   const rotation = useSharedValue(0);
 
   useEffect(() => {
+    const startedAt = markAnimationPerf();
     rotation.value = withRepeat(
       // Stepped easing gives the authentic iOS per-bar "tick" while
       // still being a single tween on the UI thread.
@@ -75,7 +78,12 @@ export function LazyLoadingSpinner({
       -1,
       false,
     );
-  }, [rotation]);
+
+    return () => {
+      cancelAnimation(rotation);
+      finishAnimationPerf('loadingSpinner.loop', startedAt, false, { size });
+    };
+  }, [rotation, size]);
 
   const rotateStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${(rotation.value / BAR_COUNT) * 360}deg` }],

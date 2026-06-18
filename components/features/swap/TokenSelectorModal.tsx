@@ -26,6 +26,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
 import type { SwapTokenOption } from './types';
@@ -76,19 +77,36 @@ export function TokenSelectorModal({
 
   useEffect(() => {
     let searchResetTimeout: ReturnType<typeof setTimeout> | null = null;
+    const startedAt = markAnimationPerf();
 
     if (visible) {
       setMounted(true);
       opacity.value = withTiming(1, { duration: 300 });
-      translateY.value = withTiming(0, {
-        duration: 350,
-        easing: Easing.out(Easing.poly(3)),
-      });
+      translateY.value = withTiming(
+        0,
+        {
+          duration: 350,
+          easing: Easing.out(Easing.poly(3)),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('swap.tokenSelectorModal', startedAt, finished, {
+            phase: 'open',
+          });
+        },
+      );
     } else {
-      translateY.value = withTiming(-screenHeight, {
-        duration: 250,
-        easing: Easing.in(Easing.ease),
-      });
+      translateY.value = withTiming(
+        -screenHeight,
+        {
+          duration: 250,
+          easing: Easing.in(Easing.ease),
+        },
+        (finished) => {
+          runOnJS(finishAnimationPerf)('swap.tokenSelectorModal', startedAt, finished, {
+            phase: 'close',
+          });
+        },
+      );
       opacity.value = withTiming(0, { duration: 250 }, (finished) => {
         if (finished) runOnJS(setMounted)(false);
       });
@@ -123,10 +141,14 @@ export function TokenSelectorModal({
   }, []);
 
   const handleClose = () => {
+    const startedAt = markAnimationPerf();
     translateY.value = withTiming(
       -screenHeight,
       { duration: 250, easing: Easing.in(Easing.ease) },
-      () => {
+      (finished) => {
+        runOnJS(finishAnimationPerf)('swap.tokenSelectorModal', startedAt, finished, {
+          phase: 'manualClose',
+        });
         runOnJS(onClose)();
       },
     );

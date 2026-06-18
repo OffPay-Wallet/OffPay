@@ -12,6 +12,7 @@ import Animated, {
 
 import { colors } from '@/constants/colors';
 import { radii } from '@/constants/spacing';
+import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import type { StyleProp, ViewStyle } from 'react-native';
 
@@ -39,6 +40,7 @@ export function SkeletonBlock({
       return undefined;
     }
 
+    const startedAt = markAnimationPerf();
     pulse.value = 0;
     pulse.value = withRepeat(
       withTiming(1, {
@@ -51,8 +53,12 @@ export function SkeletonBlock({
 
     return () => {
       cancelAnimation(pulse);
+      finishAnimationPerf('skeleton.pulse', startedAt, false, {
+        height,
+        width: typeof width === 'number' ? width : width,
+      });
     };
-  }, [pulse, reduceMotion]);
+  }, [height, pulse, reduceMotion, width]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: reduceMotion ? 0.58 : 0.42 + pulse.value * 0.28,
