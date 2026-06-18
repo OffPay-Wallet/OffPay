@@ -1,11 +1,11 @@
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { defaultShouldDehydrateQuery } from '@tanstack/query-core';
 import { persistQueryClient } from '@tanstack/react-query-persist-client';
 
+import { mmkvStorage, waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
 import { queryClient } from '@/lib/cache/query-client';
-import { queryCacheStorage } from '@/lib/cache/query-cache-storage';
 
 import type { Query } from '@tanstack/query-core';
+import type { PersistedClient } from '@tanstack/react-query-persist-client';
 
 /**
  * App version cache buster. Bumping `APP_QUERY_CACHE_VERSION` will
@@ -19,6 +19,8 @@ const QUERY_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
 
 /** Single key under which the cache file is stored. */
 const QUERY_CACHE_KEY = 'offpay-tanstack-query-cache';
+
+const QUERY_CACHE_WRITE_THROTTLE_MS = 1000;
 
 const VOLATILE_WALLET_QUERY_SCOPES = new Set([
   'walletBalance',
@@ -50,6 +52,50 @@ function removeRestoredVolatileWalletQueries(): void {
   }
 }
 
+function createEncryptedMmkvQueryPersister() {
+  let pendingSerializedClient: string | null = null;
+  let writeHandle: ReturnType<typeof setTimeout> | null = null;
+
+  const flushPendingWrite = () => {
+    if (writeHandle != null) {
+      clearTimeout(writeHandle);
+      writeHandle = null;
+    }
+    if (pendingSerializedClient == null) return;
+    mmkvStorage.setItem(QUERY_CACHE_KEY, pendingSerializedClient);
+    pendingSerializedClient = null;
+  };
+
+  return {
+    persistClient(persistedClient: PersistedClient): void {
+      pendingSerializedClient = JSON.stringify(persistedClient);
+      if (writeHandle != null) return;
+      writeHandle = setTimeout(flushPendingWrite, QUERY_CACHE_WRITE_THROTTLE_MS);
+    },
+    restoreClient(): PersistedClient | undefined {
+      flushPendingWrite();
+      const persisted = mmkvStorage.getItem(QUERY_CACHE_KEY);
+      if (persisted == null || persisted.length === 0) return undefined;
+
+      try {
+        return JSON.parse(persisted) as PersistedClient;
+      } catch (error: unknown) {
+        mmkvStorage.removeItem(QUERY_CACHE_KEY);
+        console.warn('[query-persistence] cached query payload was invalid:', error);
+        return undefined;
+      }
+    },
+    removeClient(): void {
+      if (writeHandle != null) {
+        clearTimeout(writeHandle);
+        writeHandle = null;
+      }
+      pendingSerializedClient = null;
+      mmkvStorage.removeItem(QUERY_CACHE_KEY);
+    },
+  };
+}
+
 /**
  * Initialise the React Query cache persister.
  *
@@ -59,37 +105,33 @@ function removeRestoredVolatileWalletQueries(): void {
  *
  * The hydration is async by design: the splash gate stays free of disk
  * IO and the home screen paints with whatever is already in memory.
- * As soon as the on-disk cache loads, observers see the upgraded data
- * via TanStack's normal subscription path. While the cache hydrates,
- * background fetches still run to refresh stale entries.
+ * Restore waits for MMKV's SecureStore-backed encryption key before
+ * reading, then uses sync MMKV access instead of the old file adapter.
+ * As soon as the encrypted cache loads, observers see the upgraded
+ * data via TanStack's normal subscription path. While the cache
+ * hydrates, background fetches still run to refresh stale entries.
  */
 export function installQueryCachePersistence(): Promise<void> {
   if (installed && restorePromise != null) return restorePromise;
   installed = true;
 
-  const persister = createAsyncStoragePersister({
-    storage: queryCacheStorage,
-    key: QUERY_CACHE_KEY,
-    // Throttle writes; React Query batches updates and writes on idle,
-    // but a 1 s minimum keeps the disk cool even if many queries
-    // resolve in quick succession.
-    throttleTime: 1000,
-  });
+  restorePromise = waitForMmkvEncryption()
+    .then(() => {
+      const [, persistedRestore] = persistQueryClient({
+        queryClient,
+        persister: createEncryptedMmkvQueryPersister(),
+        maxAge: QUERY_CACHE_MAX_AGE_MS,
+        buster: APP_QUERY_CACHE_VERSION,
+        // Mutations are inherently transient and shouldn't be replayed
+        // from disk; we only persist completed queries.
+        dehydrateOptions: {
+          shouldDehydrateMutation: () => false,
+          shouldDehydrateQuery,
+        },
+      });
 
-  const [, persistedRestore] = persistQueryClient({
-    queryClient,
-    persister,
-    maxAge: QUERY_CACHE_MAX_AGE_MS,
-    buster: APP_QUERY_CACHE_VERSION,
-    // Mutations are inherently transient and shouldn't be replayed
-    // from disk; we only persist completed queries.
-    dehydrateOptions: {
-      shouldDehydrateMutation: () => false,
-      shouldDehydrateQuery,
-    },
-  });
-
-  restorePromise = persistedRestore
+      return persistedRestore;
+    })
     .then(removeRestoredVolatileWalletQueries)
     .catch((error: unknown) => {
       console.warn('[query-persistence] restore failed:', error);

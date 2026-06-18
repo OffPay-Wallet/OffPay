@@ -16,7 +16,6 @@ import { installQueryCachePersistence } from '@/lib/cache/query-persistence';
 import { DefaultTheme, ThemeProvider } from 'expo-router/react-navigation';
 import { isRunningInExpoGo } from 'expo';
 import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
-import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -39,7 +38,6 @@ import {
   privatePaymentScreenOptions,
 } from '@/constants/navigation';
 import { formatOffpayUsername } from '@/lib/api/offpay-username';
-import { cirkaFontMap } from '@/assets/fonts/cirka';
 import {
   pruneManagedProfileImages,
   resolveStoredProfileImageUri,
@@ -188,11 +186,6 @@ export default function RootLayout(): React.JSX.Element | null {
     void hydrateWallet();
   }, [hydrateWallet]);
 
-  // Geist/Quicksand ship via the expo-font config plugin on native builds.
-  // Cirka is also listed there, but we load it at runtime so portfolio
-  // money type renders correctly during the first render cycle.
-  const [cirkaFontsLoaded, cirkaFontError] = useFonts(cirkaFontMap);
-  const appReady = cirkaFontsLoaded || cirkaFontError != null;
   const firstSegment = segments[0];
   const inInviteCode = firstSegment === 'invite-code';
   const inOnboarding = firstSegment === 'onboarding';
@@ -288,7 +281,6 @@ export default function RootLayout(): React.JSX.Element | null {
   // Wait for all stores to hydrate before making routing decisions to
   // prevent physical devices from incorrectly routing to onboarding.
   useEffect(() => {
-    if (!appReady) return;
     if (!rootLayoutReady) return;
     if (!mmkvReady) return;
     if (!hasRepairedOnboardingFlag) return;
@@ -315,7 +307,6 @@ export default function RootLayout(): React.JSX.Element | null {
       router.replace('/(tabs)');
     }
   }, [
-    appReady,
     appLockChecking,
     hasCompletedOnboarding,
     hasRepairedOnboardingFlag,
@@ -337,7 +328,7 @@ export default function RootLayout(): React.JSX.Element | null {
   // Hide the native splash only once the correct first screen is mounted.
   // The visible reveal is handled by the Reanimated app shell opacity.
   useEffect(() => {
-    if (!appReady || hasHiddenSplash) return;
+    if (hasHiddenSplash) return;
     if (!rootLayoutReady) return;
     if (!mmkvReady) return;
     if (!hasRepairedOnboardingFlag) return;
@@ -352,7 +343,6 @@ export default function RootLayout(): React.JSX.Element | null {
       endBootTimer();
     });
   }, [
-    appReady,
     appLockChecking,
     hasCompletedOnboarding,
     hasHiddenSplash,
@@ -365,8 +355,6 @@ export default function RootLayout(): React.JSX.Element | null {
     mmkvReady,
     walletHydrated,
   ]);
-
-  if (!appReady) return null;
 
   if (!preferencesHydrated && hasCompletedOnboarding) {
     return null;

@@ -5,8 +5,8 @@ const { getDefaultConfig } = require('expo/metro-config');
 const config = getDefaultConfig(__dirname);
 const sideEffectModuleBlockList = Object.fromEntries(
   [
-    path.resolve(__dirname, 'lib/polyfills.ts'),
-    path.resolve(__dirname, 'lib/network-access-policy.ts'),
+    path.resolve(__dirname, 'lib/crypto/polyfills.ts'),
+    path.resolve(__dirname, 'lib/api/network-access-policy.ts'),
   ].map((filePath) => [filePath, true]),
 );
 
@@ -26,10 +26,7 @@ const sideEffectModuleBlockList = Object.fromEntries(
 // Privy's `@privy-io/js-sdk-core` imports `jose` for JWT/JWE handling,
 // so we have to handle the bare `'jose'` specifier as well as the
 // internal subpath imports the bundler hoists.
-const JOSE_BROWSER_ENTRY = path.resolve(
-  __dirname,
-  'node_modules/jose/dist/browser/index.js',
-);
+const JOSE_BROWSER_ENTRY = path.resolve(__dirname, 'node_modules/jose/dist/browser/index.js');
 
 // Pin every nested copy of @noble/hashes' `./crypto.js` subpath to a
 // single resolved file. @noble/hashes@1.8.x dropped the `./crypto.js`

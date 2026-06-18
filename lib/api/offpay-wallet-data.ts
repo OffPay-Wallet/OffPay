@@ -9,7 +9,7 @@ import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
-const HELIUS_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
+const LEGACY_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
 const NATIVE_SOL_SENTINEL_MINT = 'native-sol';
 const NATIVE_SOL_NAME = 'Solana';
 const NATIVE_SOL_SYMBOL = 'SOL';
@@ -488,7 +488,7 @@ function isNativeSolMint(mint: string | null | undefined): boolean {
   const normalized = mint?.trim();
   return (
     normalized === NATIVE_SOL_MINT ||
-    normalized === HELIUS_NATIVE_SOL_MINT ||
+    normalized === LEGACY_NATIVE_SOL_MINT ||
     normalized === NATIVE_SOL_SENTINEL_MINT
   );
 }
@@ -869,7 +869,9 @@ function getReceiptDetailAccountAddress(
   return address?.trim() || null;
 }
 
-function getLocalReceiptDisplayType(receipt: OffpayLocalReceiptViewInput): OffpayDisplayTransactionType {
+function getLocalReceiptDisplayType(
+  receipt: OffpayLocalReceiptViewInput,
+): OffpayDisplayTransactionType {
   if (receipt.type === 'send' || receipt.type === 'receive' || receipt.type === 'swap') {
     return receipt.type;
   }
@@ -1076,7 +1078,11 @@ function getWalletActivityTokenMetadata(
   amounts: ParsedTokenAmount[],
 ): TransactionTokenMetadata {
   const fallbackSymbol = amounts[0]?.symbol ?? null;
-  const tokenSymbol = resolveTransactionTokenSymbol(event.tokenSymbol, event.tokenMint, fallbackSymbol);
+  const tokenSymbol = resolveTransactionTokenSymbol(
+    event.tokenSymbol,
+    event.tokenMint,
+    fallbackSymbol,
+  );
   const tokenName = resolveTransactionTokenName(event.tokenName, tokenSymbol);
   const tokenMint =
     normalizeTransactionTokenMint(event.tokenMint) ??
@@ -1116,7 +1122,8 @@ function mergeLocalReceiptData<T extends OffpayRecentActivityView | OffpayHistor
   const receiptDisplayType = getLocalReceiptDisplayType(receipt);
   const receiptDirection = getLocalReceiptDisplayDirection(receipt, receiptDisplayType);
   const receiptSecondaryAmountLabel = receipt.secondaryAmountLabel?.trim() || null;
-  const shouldUseReceiptTone = view.amountLabel == null && (receipt.direction != null || receipt.type != null);
+  const shouldUseReceiptTone =
+    view.amountLabel == null && (receipt.direction != null || receipt.type != null);
   const privateRouteReceipt = receipt.privacyLabel?.trim().toLowerCase() === 'private route';
   const receiptAccountAddress = getReceiptDetailAccountAddress(receipt, view.type);
   const shouldUseReceiptSubtitle =
@@ -1263,11 +1270,11 @@ export function isDisplayableWalletActivityEvent(event: WalletActivityEvent): bo
   );
   const hasPaymentSignal = Boolean(
     hasAmountSignal ||
-      rawType.includes('swap') ||
-      rawType.includes('transfer') ||
-      rawType.includes('receive') ||
-      rawType.includes('send') ||
-      rawType.includes('payment'),
+    rawType.includes('swap') ||
+    rawType.includes('transfer') ||
+    rawType.includes('receive') ||
+    rawType.includes('send') ||
+    rawType.includes('payment'),
   );
 
   if (!hasPaymentSignal) {
@@ -1292,9 +1299,9 @@ export function isDisplayableWalletPaymentTransaction(
   );
   const hasPaymentSignal = Boolean(
     hasAmountSignal ||
-      rawType.includes('swap') ||
-      rawType.includes('transfer') ||
-      rawType.includes('receive') ||
+    rawType.includes('swap') ||
+    rawType.includes('transfer') ||
+    rawType.includes('receive') ||
     rawType.includes('send') ||
     rawType.includes('payment'),
   );
@@ -1352,8 +1359,13 @@ export function mapLocalReceiptForRecentActivity(
       receipt.routeLabel?.trim() || (isOffpayOfflineP2pReceipt(receipt) ? 'Offline P2P' : null),
     amountLabel,
     secondaryAmountLabel: receipt.secondaryAmountLabel?.trim() || (settled ? null : pendingLabel),
-    amountTone:
-      failed ? 'failed' : type === 'swap' ? 'positive' : direction === 'send' ? 'negative' : 'positive',
+    amountTone: failed
+      ? 'failed'
+      : type === 'swap'
+        ? 'positive'
+        : direction === 'send'
+          ? 'negative'
+          : 'positive',
     tokenMint: token.mint,
     tokenSymbol: token.symbol,
     tokenName: token.name,
@@ -1622,7 +1634,10 @@ export function groupWalletTransactionsByDate(
 ): OffpayHistoryTransactionGroup[] {
   const groups = new Map<string, OffpayHistoryTransactionView[]>();
 
-  for (const transaction of getDisplayableWalletTransactions(transactions, localReceiptsBySignature)) {
+  for (const transaction of getDisplayableWalletTransactions(
+    transactions,
+    localReceiptsBySignature,
+  )) {
     const title = formatDateTitle(transaction.timestamp);
     const group = groups.get(title) ?? [];
     const matchingReceipts = localReceiptsBySignature?.get(transaction.signature);

@@ -69,6 +69,8 @@ const {
   setOffpayNetworkAccessAllowed,
   setOffpayAuthRecoveryHandler,
 } = require('@/lib/api/offpay-api-client') as typeof import('@/lib/api/offpay-api-client');
+const { fetchAlchemyTokenUsdPricesBatch } =
+  require('@/lib/api/alchemy-prices-api') as typeof import('@/lib/api/alchemy-prices-api');
 
 function buildResponse(body: unknown, status = 200): Response {
   return {
@@ -262,6 +264,76 @@ describe('offpay-api-client', () => {
       }),
     );
     expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
+  });
+
+  it('routes batch token valuation reads without wallet signing material', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(
+      buildResponse({
+        network: 'mainnet',
+        currency: 'USD',
+        rate: 1,
+        fetchedAt: 123,
+        unitUsdPrices: {
+          So11111111111111111111111111111111111111112: 92,
+        },
+        pricedCount: 1,
+        expectedCount: 1,
+      }),
+    );
+
+    await expect(
+      fetchAlchemyTokenUsdPricesBatch({
+        network: 'mainnet',
+        currency: 'USD',
+        tokens: [
+          {
+            mint: 'So11111111111111111111111111111111111111112',
+            symbol: 'SOL',
+            priceSymbol: 'SOL',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      network: 'mainnet',
+      currency: 'USD',
+      rate: 1,
+      unitUsdPrices: {
+        So11111111111111111111111111111111111111112: 92,
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/market/token-prices-batch'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'X-App-Version': OFFPAY_APP_VERSION,
+          'X-Device-Id': 'device-1',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          'X-Signature': expect.any(String),
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({
+        network: 'mainnet',
+        currency: 'USD',
+        tokens: [
+          {
+            mint: 'So11111111111111111111111111111111111111112',
+            symbol: 'SOL',
+            priceSymbol: 'SOL',
+          },
+        ],
+      }),
+    );
     expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
   });
 

@@ -253,6 +253,28 @@ export interface FxRateResponse {
   source: 'frankfurter' | 'currency-api';
 }
 
+export interface MarketTokenPriceBatchInput {
+  mint: string;
+  symbol: string;
+  priceSymbol: string;
+}
+
+export interface MarketTokenPricesBatchRequest {
+  network: OffpayNetwork;
+  currency: string;
+  tokens: MarketTokenPriceBatchInput[];
+}
+
+export interface MarketTokenPricesBatchResponse {
+  network: OffpayNetwork;
+  currency: string;
+  rate: number;
+  fetchedAt: number;
+  unitUsdPrices: Record<string, number>;
+  pricedCount: number;
+  expectedCount: number;
+}
+
 export interface SwapQuoteRequest {
   inputMint: string;
   outputMint: string;

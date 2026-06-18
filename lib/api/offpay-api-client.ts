@@ -31,6 +31,7 @@ import {
   walletHasLocalSigningMaterial,
 } from '@/lib/wallet/wallet-capabilities';
 import { readJsonResponseAdaptive, stringifyJsonAdaptive } from '@/lib/perf/ui-work-scheduler';
+import { assertWorkerCandidateSafe, classifyWorkerCandidate } from '@/lib/perf/work-offload-policy';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type {
@@ -412,6 +413,24 @@ function withTimeout(
     signal: controller.signal,
     cleanup: () => clearTimeout(timer),
   };
+}
+
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<Response> {
+  const handle = withTimeout(options?.signal ?? init.signal ?? undefined, options?.timeoutMs);
+  const { signal: _signal, ...restInit } = init;
+
+  try {
+    return await fetch(url, {
+      ...restInit,
+      signal: handle.signal,
+    });
+  } finally {
+    handle.cleanup();
+  }
 }
 
 function getExternalSignerTimestamp(method: OffpayApiMethod): number | undefined {
@@ -1573,6 +1592,13 @@ export function getOfflineRentEstimate(params: {
   slotCount: number;
   network: OffpayNetwork;
 }): Promise<OfflineRentEstimateResponse> {
+  assertWorkerCandidateSafe(
+    classifyWorkerCandidate({
+      name: 'offline.rentEstimate',
+      security: 'walletScoped',
+      reason: 'Rent estimation uses public chain metadata and wallet-scoped auth only.',
+    }),
+  );
   return assertAuthenticatedWallet(params.walletAddress, 'Offline rent estimate').then(() =>
     offpayApiRequest<OfflineRentEstimateResponse>({
       path: '/api/offline/rent-estimate',
@@ -1589,6 +1615,14 @@ export function getOfflineRentEstimate(params: {
 export function prepareOfflineNoncePool(
   request: OfflineNoncePoolPrepareRequest,
 ): Promise<OfflineNoncePoolPrepareResponse> {
+  assertWorkerCandidateSafe(
+    classifyWorkerCandidate({
+      name: 'offline.noncePool.prepare',
+      security: 'walletScoped',
+      reason:
+        'Nonce pool preparation sends public nonce account addresses for backend transaction construction.',
+    }),
+  );
   return assertAuthenticatedWallet(request.walletAddress, 'Offline slot preparation').then(() =>
     offpayApiRequest<OfflineNoncePoolPrepareResponse>({
       path: '/api/offline/nonce-pool/prepare',
@@ -1610,6 +1644,14 @@ export function prepareOfflineNoncePool(
 export function prepareOfflineNonceAdvance(
   request: OfflineNoncePoolAdvanceRequest,
 ): Promise<OfflineNoncePoolAdvanceResponse> {
+  assertWorkerCandidateSafe(
+    classifyWorkerCandidate({
+      name: 'offline.noncePool.advance',
+      security: 'walletScoped',
+      reason:
+        'Nonce advance preparation uses public nonce account metadata and returns unsigned work.',
+    }),
+  );
   return assertAuthenticatedWallet(request.walletAddress, 'Offline slot refresh').then(() =>
     offpayApiRequest<OfflineNoncePoolAdvanceResponse>({
       path: '/api/offline/nonce-pool/advance',
@@ -1633,6 +1675,13 @@ export function getOfflineNoncePoolStatus(params: {
   network: OffpayNetwork;
   nonceAccounts?: string[];
 }): Promise<OfflineNoncePoolStatusResponse> {
+  assertWorkerCandidateSafe(
+    classifyWorkerCandidate({
+      name: 'offline.noncePool.status',
+      security: 'walletScoped',
+      reason: 'Nonce status reads public account state and returns wallet-scoped metadata.',
+    }),
+  );
   return assertAuthenticatedWallet(params.walletAddress, 'Offline slot status').then(() =>
     offpayApiRequest<OfflineNoncePoolStatusResponse>({
       path: '/api/offline/nonce-pool/status',
@@ -1652,6 +1701,13 @@ export function getOfflineTokenContext(params: {
   recipient: string;
   network: OffpayNetwork;
 }): Promise<OfflineTokenContextResponse> {
+  assertWorkerCandidateSafe(
+    classifyWorkerCandidate({
+      name: 'offline.tokenContext',
+      security: 'walletScoped',
+      reason: 'Token context resolves public token-account metadata for an authenticated sender.',
+    }),
+  );
   return assertAuthenticatedWallet(params.sender, 'Offline token context').then(() =>
     offpayApiRequest<OfflineTokenContextResponse>({
       path: '/api/offline/token-context',

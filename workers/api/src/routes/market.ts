@@ -5,6 +5,7 @@ import {
   fetchAlchemyTokenUsdPrice,
 } from '../lib/alchemy-prices.js';
 import { fetchUsdToCurrencyRate } from '../lib/fx-rates.js';
+import { resolveTokenPriceBatch } from '../lib/market-valuation.js';
 import type { AppEnv } from '../lib/types.js';
 import { networkSchema, readJsonBody, readSearchParams } from '../lib/validation.js';
 
@@ -23,6 +24,21 @@ const priceIdentifierSchema = z.union([
 const tokenPriceBodySchema = z.object({
   identifier: priceIdentifierSchema,
   network: networkSchema,
+});
+
+const tokenPriceBatchBodySchema = z.object({
+  currency: z.string().trim().min(3).max(3),
+  network: networkSchema,
+  tokens: z
+    .array(
+      z.object({
+        mint: z.string().trim().min(1).max(128),
+        symbol: z.string().trim().min(1).max(24),
+        priceSymbol: z.string().trim().min(1).max(24),
+      }),
+    )
+    .min(1)
+    .max(80),
 });
 
 const historicalTokenPriceBodySchema = z.object({
@@ -58,6 +74,26 @@ marketRoutes.post('/token-price', async (context) => {
   const response = context.json({
     price: await fetchAlchemyTokenUsdPrice(context.env, body.identifier),
   });
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+});
+
+marketRoutes.post('/token-prices-batch', async (context) => {
+  const body = await readJsonBody(
+    context.req.raw,
+    tokenPriceBatchBodySchema,
+    'Request body is required.',
+    'Malformed token-prices-batch request body.',
+  );
+
+  const response = context.json(
+    await resolveTokenPriceBatch({
+      bindings: context.env,
+      network: body.network,
+      currency: body.currency,
+      tokens: body.tokens,
+    }),
+  );
   response.headers.set('Cache-Control', 'no-store');
   return response;
 });

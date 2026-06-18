@@ -7,9 +7,9 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  FlatList,
   useWindowDimensions,
 } from 'react-native';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { Easing, useAnimatedStyle } from 'react-native-reanimated';
@@ -120,7 +120,7 @@ export function TokenSelectorModal({
   );
 
   const renderTokenRow = useCallback(
-    ({ item: token }: { item: SwapTokenOption }) => (
+    ({ item: token }: ListRenderItemInfo<SwapTokenOption>) => (
       <Pressable
         style={({ pressed }) => [styles.tokenRow, pressed && styles.tokenRowPressed]}
         onPress={() => handleSelect(token)}
@@ -238,7 +238,7 @@ export function TokenSelectorModal({
             />
           </View>
 
-          <FlatList
+          <FlashList<SwapTokenOption>
             style={styles.tokenList}
             data={filteredTokens}
             keyExtractor={keyExtractor}
@@ -248,11 +248,7 @@ export function TokenSelectorModal({
             contentContainerStyle={styles.tokenListContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            initialNumToRender={12}
-            maxToRenderPerBatch={10}
-            updateCellsBatchingPeriod={40}
-            windowSize={7}
-            removeClippedSubviews={false}
+            drawDistance={320}
           />
         </Animated.View>
       </KeyboardAvoidingView>

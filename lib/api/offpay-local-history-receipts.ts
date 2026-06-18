@@ -11,7 +11,7 @@ import type { PrivatePaymentReceipt } from '@/store/privatePaymentStore';
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
-const HELIUS_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
+const LEGACY_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
 const NATIVE_SOL_SENTINEL_MINT = 'native-sol';
 
 interface BuildLocalHistoryReceiptInputsParams {
@@ -26,7 +26,7 @@ function isNativeSolMint(mint: string | null | undefined): boolean {
   const normalized = mint?.trim();
   return (
     normalized === NATIVE_SOL_MINT ||
-    normalized === HELIUS_NATIVE_SOL_MINT ||
+    normalized === LEGACY_NATIVE_SOL_MINT ||
     normalized === NATIVE_SOL_SENTINEL_MINT
   );
 }
@@ -138,7 +138,9 @@ export function mapPrivatePaymentReceiptToLocalHistoryInput(
   };
 }
 
-function normalizeSwapLeg(leg: SwapReceiptTokenLeg | null | undefined): Required<SwapReceiptTokenLeg> {
+function normalizeSwapLeg(
+  leg: SwapReceiptTokenLeg | null | undefined,
+): Required<SwapReceiptTokenLeg> {
   const mint = leg?.mint?.trim() || null;
   const symbol = normalizeSymbol(leg?.symbol, mint);
   const decimals =
@@ -225,12 +227,14 @@ export function buildLocalHistoryReceiptInputs({
   const privatePayments = privatePaymentReceipts
     .filter(
       (receipt) =>
-        receiptMatchesNetwork(receipt, network) && privateReceiptMatchesWallet(receipt, walletAddress),
+        receiptMatchesNetwork(receipt, network) &&
+        privateReceiptMatchesWallet(receipt, walletAddress),
     )
     .map(mapPrivatePaymentReceiptToLocalHistoryInput);
   const swaps = swapReceipts
     .filter(
-      (receipt) => receiptMatchesNetwork(receipt, network) && swapReceiptMatchesWallet(receipt, walletAddress),
+      (receipt) =>
+        receiptMatchesNetwork(receipt, network) && swapReceiptMatchesWallet(receipt, walletAddress),
     )
     .map(mapSwapReceiptToLocalHistoryInput);
 

@@ -1,9 +1,8 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { hmac } from '@noble/hashes/hmac.js';
-import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 import bs58 from 'bs58';
 
+import { digestHex, hmacSha256HexSafe } from '@/lib/crypto/safe-hash';
 import { mark, measure } from '@/lib/perf/perf-marks';
 
 import type { OffpayApiMethod } from '@/types/offpay-api';
@@ -47,8 +46,7 @@ export function canonicalJsonStringify(value: unknown): string {
 }
 
 export function sha256hex(input: string | Uint8Array): string {
-  const bytes = typeof input === 'string' ? utf8ToBytes(input) : input;
-  return bytesToHex(sha256(bytes));
+  return digestHex('SHA-256', input);
 }
 
 export function canonicalBodyHash(body: unknown): string {
@@ -106,7 +104,7 @@ export function signBootstrapNonce(nonce: string, signingSeed: Uint8Array): stri
 
 export function hmacSha256Hex(secret: string, message: string): string {
   const startedAt = mark();
-  const result = bytesToHex(hmac(sha256, utf8ToBytes(secret), utf8ToBytes(message)));
+  const result = hmacSha256HexSafe(secret, message);
   measure('apiAuth.hmacSha256Hex', startedAt);
   return result;
 }

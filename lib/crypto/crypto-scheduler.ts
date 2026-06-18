@@ -31,6 +31,7 @@
  */
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { classifyClientWork } from '@/lib/perf/work-offload-policy';
 
 /**
  * Yield to the UI thread once, run a sync crypto callback, and log the
@@ -49,6 +50,11 @@ export async function runCryptoTask<T>(
   fn: () => T,
   payload?: Record<string, string | number | boolean | null>,
 ): Promise<T> {
+  classifyClientWork({
+    name,
+    target: 'native:localCpu',
+    security: 'localSecret',
+  });
   await yieldToUi();
   const startedAt = mark();
   try {

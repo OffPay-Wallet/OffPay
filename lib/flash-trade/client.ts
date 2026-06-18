@@ -1,7 +1,5 @@
-import {
-  FLASH_API_BASE_URL,
-  FLASH_API_TIMEOUT_MS,
-} from './constants';
+import { FLASH_API_BASE_URL, FLASH_API_TIMEOUT_MS } from './constants';
+import { fetchWithTimeout } from '@/lib/api/offpay-api-client';
 import type {
   FlashApiErrorResponse,
   FlashMarket,
@@ -106,32 +104,26 @@ export class FlashTradeClient {
     init?: RequestInit & { signal?: AbortSignal },
   ): Promise<R> {
     const url = `${this.baseUrl}${path}`;
-    const controller = new AbortController();
     const upstreamSignal = init?.signal ?? this.defaultSignal;
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
     const headers = init?.headers;
     const { signal: _signal, headers: _headers, ...restInit } = init ?? {};
-    const abortUpstream = () => controller.abort(upstreamSignal?.reason);
-    if (upstreamSignal != null) {
-      if (upstreamSignal.aborted) {
-        controller.abort(upstreamSignal.reason);
-      } else {
-        upstreamSignal.addEventListener('abort', abortUpstream, { once: true });
-      }
-    }
 
     try {
-      const res = await fetch(url, {
-        ...restInit,
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          ...headers,
+      const res = await fetchWithTimeout(
+        url,
+        {
+          ...restInit,
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            ...headers,
+          },
         },
-      } as RequestInit);
-
-      clearTimeout(timeoutId);
+        {
+          signal: upstreamSignal,
+          timeoutMs: this.timeoutMs,
+        },
+      );
 
       if (!res.ok) {
         const body = await res.text().catch(() => '');
@@ -140,8 +132,6 @@ export class FlashTradeClient {
 
       return (await res.json()) as R;
     } catch (error) {
-      clearTimeout(timeoutId);
-
       if (error instanceof FlashTradeApiError) {
         throw error;
       }
@@ -154,10 +144,6 @@ export class FlashTradeClient {
         path,
         error instanceof Error ? error : new Error(String(error)),
       );
-    } finally {
-      if (upstreamSignal != null) {
-        upstreamSignal.removeEventListener('abort', abortUpstream);
-      }
     }
   }
 
@@ -236,9 +222,7 @@ export class FlashTradeClient {
   }
 
   async getPoolData(poolPubkey?: string, signal?: AbortSignal): Promise<FlashPoolStats[]> {
-    const path = poolPubkey
-      ? `/v1/pool-data/${encodeURIComponent(poolPubkey)}`
-      : '/v1/pool-data';
+    const path = poolPubkey ? `/v1/pool-data/${encodeURIComponent(poolPubkey)}` : '/v1/pool-data';
     const response = await this.get<{ pools: FlashPoolStats[] }>(path, signal);
     return response.pools ?? [];
   }

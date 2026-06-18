@@ -3,21 +3,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
+import { fetchAlchemyTokenUsdPricesBatch } from '@/lib/api/alchemy-prices-api';
 import {
-  fetchUsdToCurrencyRate,
   formatCompactFiatCurrency,
   formatFiatCurrency,
   isUsdStablePriceSymbol,
   normalizeCurrency,
 } from '@/lib/currency-rates';
-import { pooledAllSettled } from '@/lib/perf/concurrency';
-import { getTokenUsdPriceForValuation } from '@/lib/market-prices';
 import {
   readCachedTokenUsdPrices,
   readCachedUsdToCurrencyRate,
   writeCachedTokenUsdPrices,
 } from '@/lib/cache/valuation-cache';
-import { yieldToEventLoop, yieldToUi, yieldToUiIfNeeded } from '@/lib/perf/ui-work-scheduler';
+import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
 
@@ -222,71 +220,53 @@ export function useOffpayPortfolioValuation({
         .join('|'),
       canUseNetwork ? 'online' : 'offline-cache',
     ],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (network == null) {
         throw new Error('Portfolio valuation requires a supported network.');
       }
 
+      if (canUseNetwork) {
+        const [valuation, cachedPrices] = await Promise.all([
+          fetchAlchemyTokenUsdPricesBatch(
+            {
+              network,
+              currency: normalizedCurrency,
+              tokens: priceInputs.map((item) => ({
+                mint: item.mint,
+                symbol: item.symbol,
+                priceSymbol: item.priceSymbol,
+              })),
+            },
+            { signal },
+          ),
+          readCachedTokenUsdPrices(network),
+        ]);
+        const unitUsdPrices = { ...cachedPrices, ...valuation.unitUsdPrices };
+
+        void (async () => {
+          await yieldToUi();
+          await writeCachedTokenUsdPrices(network, valuation.unitUsdPrices);
+        })().catch(() => undefined);
+
+        await yieldToUi();
+        return buildPortfolioValuationData({
+          holdings,
+          priceInputs,
+          currency: normalizedCurrency,
+          rate: valuation.rate,
+          unitUsdPrices,
+          fetchedAt: valuation.fetchedAt,
+          allowProviderUsdPriceFallback: false,
+        });
+      }
+
       const [fxRate, cachedPrices] = await Promise.all([
-        canUseNetwork
-          ? fetchUsdToCurrencyRate(normalizedCurrency)
-          : readCachedUsdToCurrencyRate(normalizedCurrency),
+        readCachedUsdToCurrencyRate(normalizedCurrency),
         readCachedTokenUsdPrices(network),
       ]);
 
       if (fxRate == null) {
         throw new Error(`Cached USD/${normalizedCurrency} rate is unavailable.`);
-      }
-
-      const fetchedPrices: Record<string, number> = {};
-      // Cap fan-out at 6 concurrent requests so a wallet with 30+ tokens
-      // doesn't fire 30 RPCs in parallel every refetch.
-      const PRICE_CONCURRENCY_LIMIT = 6;
-      const priceResults = await pooledAllSettled(
-        priceInputs,
-        PRICE_CONCURRENCY_LIMIT,
-        async (item) => {
-          await yieldToEventLoop();
-          if (isUsdStablePriceSymbol(item.priceSymbol)) {
-            return { ...item, usdPrice: 1 };
-          }
-
-          if (!canUseNetwork) {
-            const cachedPrice = cachedPrices[item.mint] ?? item.usdPrice;
-            if (cachedPrice == null) {
-              throw new Error(`Cached ${item.symbol} price is unavailable.`);
-            }
-            return { ...item, usdPrice: cachedPrice };
-          }
-
-          const usdPrice = await getTokenUsdPriceForValuation({
-            mint: item.mint,
-            network,
-            symbol: item.symbol,
-            priceSymbol: item.priceSymbol,
-          });
-          if (usdPrice == null) {
-            throw new Error(`No price available for ${item.symbol}.`);
-          }
-          fetchedPrices[item.mint] = usdPrice;
-          return { ...item, usdPrice };
-        },
-      );
-
-      const unitUsdPrices: Record<string, number> = { ...cachedPrices };
-      let budgetStartedAt = Date.now();
-      for (const result of priceResults) {
-        if (result.status === 'fulfilled') {
-          unitUsdPrices[result.value.mint] = result.value.usdPrice;
-        }
-        budgetStartedAt = await yieldToUiIfNeeded(budgetStartedAt);
-      }
-
-      if (canUseNetwork) {
-        void (async () => {
-          await yieldToUi();
-          await writeCachedTokenUsdPrices(network, fetchedPrices);
-        })().catch(() => undefined);
       }
 
       await yieldToUi();
@@ -295,9 +275,9 @@ export function useOffpayPortfolioValuation({
         priceInputs,
         currency: normalizedCurrency,
         rate: fxRate,
-        unitUsdPrices,
+        unitUsdPrices: cachedPrices,
         fetchedAt: Date.now(),
-        allowProviderUsdPriceFallback: !canUseNetwork,
+        allowProviderUsdPriceFallback: true,
       });
     },
     enabled: enabled && !isNetworkAccessSuspended,

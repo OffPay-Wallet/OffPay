@@ -53,8 +53,7 @@ export default function RwasScreen(): React.JSX.Element {
           numberOfLines={3}
           maxFontSizeMultiplier={1.1}
         >
-          Tokenized real-world assets are coming soon. This space is reserved for the upcoming RWA
-          experience.
+          Tokenized real-world assets will open in a dedicated RWA experience.
         </Text>
       </StaggerRevealGroup>
     </View>

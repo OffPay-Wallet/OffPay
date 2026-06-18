@@ -1,7 +1,17 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 
-import { AdvancedSwapScreen } from '@/components/features/swap';
+import { RouteLoadingFallback } from '@/components/ui/RouteLoadingFallback';
+
+const AdvancedSwapScreen = lazy(() =>
+  import('@/components/features/swap').then((module) => ({
+    default: module.AdvancedSwapScreen,
+  })),
+);
 
 export default function AdvancedSwapRoute(): React.JSX.Element {
-  return <AdvancedSwapScreen />;
+  return (
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <AdvancedSwapScreen />
+    </Suspense>
+  );
 }

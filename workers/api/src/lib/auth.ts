@@ -34,6 +34,7 @@ const PROTECTED_ROUTE_PREFIXES = [
 const PUBLIC_AUTH_EXEMPT_ROUTES = new Set([
   'GET /api/market/fx-rate',
   'POST /api/market/token-price',
+  'POST /api/market/token-prices-batch',
   'POST /api/market/token-price-history',
   'GET /api/swap/tokens',
   'GET /api/swap/price',
@@ -47,6 +48,7 @@ const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'POST /api/invite/verify',
   'GET /api/market/fx-rate',
   'POST /api/market/token-price',
+  'POST /api/market/token-prices-batch',
   'POST /api/market/token-price-history',
   'GET /api/swap/tokens',
   'GET /api/swap/price',

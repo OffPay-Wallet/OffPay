@@ -1,5 +1,10 @@
 import { buildOffpayPublicReadHeaders, offpayPublicRequest } from '@/lib/api/offpay-api-client';
 
+import type {
+  MarketTokenPricesBatchRequest,
+  MarketTokenPricesBatchResponse,
+} from '@/types/offpay-api';
+
 export type AlchemyTokenPriceIdentifier =
   | {
       type: 'symbol';
@@ -52,6 +57,19 @@ export async function fetchAlchemyTokenUsdPrice(
   });
 
   return response.price;
+}
+
+export async function fetchAlchemyTokenUsdPricesBatch(
+  request: MarketTokenPricesBatchRequest,
+  options?: { signal?: AbortSignal },
+): Promise<MarketTokenPricesBatchResponse> {
+  return offpayPublicRequest<MarketTokenPricesBatchResponse>({
+    path: '/api/market/token-prices-batch',
+    method: 'POST',
+    body: request,
+    signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
+  });
 }
 
 export async function fetchAlchemyHistoricalTokenUsdPrices(

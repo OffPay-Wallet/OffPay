@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, Modal, Pressable, TextInput, View } from 'react-native';
+import { Modal, Pressable, TextInput, View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
@@ -558,12 +558,13 @@ function PayrollTokenPickerModal({
               <Ionicons name="close" size={layout.iconSizeInline} color={colors.text.primary} />
             </Pressable>
           </View>
-          <FlatList
-            data={[...tokens]}
+          <FlashList<ReviewTokenOption>
+            data={tokens}
             keyExtractor={(token) => token.mint}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             contentContainerStyle={reviewStyles.tokenPickerList}
+            drawDistance={320}
             renderItem={({ item: token }) => {
               const selected = selectedMint === token.mint;
               return (

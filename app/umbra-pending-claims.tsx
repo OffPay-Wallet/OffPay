@@ -1,7 +1,17 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 
-import { UmbraPendingClaimsScreen } from '@/components/features/receive/UmbraPendingClaimsScreen';
+import { RouteLoadingFallback } from '@/components/ui/RouteLoadingFallback';
+
+const UmbraPendingClaimsScreen = lazy(() =>
+  import('@/components/features/receive/UmbraPendingClaimsScreen').then((module) => ({
+    default: module.UmbraPendingClaimsScreen,
+  })),
+);
 
 export default function UmbraPendingClaimsRoute(): React.JSX.Element {
-  return <UmbraPendingClaimsScreen />;
+  return (
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <UmbraPendingClaimsScreen />
+    </Suspense>
+  );
 }

@@ -268,7 +268,7 @@ export function useOfflinePaymentSlotsAutoSync(): void {
   // users. Rent is only needed in visible slot-preparation UI.
   useOfflinePaymentSlots({
     enabled: offlinePaymentsEnabled,
-    statusEnabled: offlinePaymentsEnabled,
+    statusEnabled: false,
     rentEstimateEnabled: false,
   });
 }

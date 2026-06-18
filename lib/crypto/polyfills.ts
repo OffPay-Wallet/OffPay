@@ -20,7 +20,7 @@ import 'fast-text-encoding';
 import { Buffer } from 'buffer';
 import '@ethersproject/shims';
 
-import { sha256, sha384, sha512 } from '@noble/hashes/sha2.js';
+import { digestBytesAsync } from '@/lib/crypto/safe-hash';
 
 // Make Buffer available everywhere. `@solana/web3.js`, `bs58`, and Privy's
 // embedded-wallet plumbing all reach for it as a global. Setting it here,
@@ -104,19 +104,11 @@ function normalizeDigestAlgorithm(algorithm: DigestAlgorithmIdentifier): string 
   return rawName.replace(/[-_]/g, '').toUpperCase();
 }
 
-function digestBytes(algorithm: DigestAlgorithmIdentifier, data: BufferSource): Uint8Array {
-  const bytes = toBytes(data);
-
-  switch (normalizeDigestAlgorithm(algorithm)) {
-    case 'SHA256':
-      return sha256(bytes);
-    case 'SHA384':
-      return sha384(bytes);
-    case 'SHA512':
-      return sha512(bytes);
-    default:
-      throw new Error(`Unsupported digest algorithm: ${String(algorithm)}`);
-  }
+function digestBytes(
+  algorithm: DigestAlgorithmIdentifier,
+  data: BufferSource,
+): Promise<Uint8Array> {
+  return digestBytesAsync(normalizeDigestAlgorithm(algorithm), toBytes(data));
 }
 
 function normalizeAlgorithmName(algorithm: AlgorithmIdentifier): string {
@@ -390,7 +382,7 @@ export function installSubtleDigestPolyfill(): void {
     Object.defineProperty(subtleTarget, 'digest', {
       configurable: true,
       value: async (algorithm: AlgorithmIdentifier, data: BufferSource) =>
-        toArrayBuffer(digestBytes(algorithm, data)),
+        toArrayBuffer(await digestBytes(algorithm, data)),
       writable: true,
     });
   }

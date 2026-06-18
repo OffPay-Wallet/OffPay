@@ -1,12 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  FlatList,
-  Pressable,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-  type ListRenderItem,
-} from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
@@ -539,8 +533,8 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
     },
     [handleCopyId],
   );
-  const renderClaimItem = useCallback<ListRenderItem<UmbraPendingClaimUtxo>>(
-    ({ item }) => (
+  const renderClaimItem = useCallback(
+    ({ item }: ListRenderItemInfo<UmbraPendingClaimUtxo>) => (
       <ClaimRow
         utxo={item}
         busy={busyId === item.id}
@@ -552,27 +546,14 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
     [busyId, handleClaim, handleCopyIdPress],
   );
   const keyExtractor = useCallback((item: UmbraPendingClaimUtxo) => item.id, []);
-  const getItemLayout = useCallback(
-    (_: ArrayLike<UmbraPendingClaimUtxo> | null | undefined, index: number) => ({
-      length: CLAIM_ROW_ESTIMATED_HEIGHT,
-      offset: CLAIM_ROW_ESTIMATED_HEIGHT * index,
-      index,
-    }),
-    [],
-  );
 
   return (
     <View style={styles.container}>
       <GradientBackground />
-      <FlatList
+      <FlashList<UmbraPendingClaimUtxo>
         data={visibleUtxos}
         renderItem={renderClaimItem}
         keyExtractor={keyExtractor}
-        getItemLayout={getItemLayout}
-        initialNumToRender={6}
-        maxToRenderPerBatch={6}
-        windowSize={7}
-        removeClippedSubviews
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[
           styles.scrollContent,
@@ -584,6 +565,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           visibleUtxos.length === 0 ? styles.scrollContentCentered : null,
         ]}
         ItemSeparatorComponent={ClaimRowSeparator}
+        drawDistance={CLAIM_ROW_ESTIMATED_HEIGHT * 2}
         ListHeaderComponent={
           <View style={styles.header}>
             <Pressable

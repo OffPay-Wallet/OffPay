@@ -47,6 +47,7 @@ const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['GET /api/capabilities', { limit: 60, windowSec: 5 * 60, scope: 'ip' }],
   ['GET /api/market/fx-rate', { limit: 120, windowSec: 60, scope: 'ip' }],
   ['POST /api/market/token-price', { limit: 60, windowSec: 60, scope: 'device' }],
+  ['POST /api/market/token-prices-batch', { limit: 30, windowSec: 60, scope: 'device' }],
   ['POST /api/market/token-price-history', { limit: 30, windowSec: 60, scope: 'device' }],
   ['GET /api/wallet/balance', { limit: 60, windowSec: 60, scope: 'device' }],
   ['GET /api/wallet/transactions', { limit: 20, windowSec: 60, scope: 'device' }],
