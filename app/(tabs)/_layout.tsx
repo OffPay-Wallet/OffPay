@@ -17,7 +17,7 @@ export default function TabLayout(): React.JSX.Element {
       lazy: true,
       freezeOnBlur: true,
       tabBarStyle: styles.tabBarContainer,
-      animation: 'none',
+      animation: 'shift',
     }),
     [],
   );

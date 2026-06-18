@@ -61,10 +61,13 @@ jest.mock('@/lib/wallet/signing-seed-cache', () => ({
 const {
   OFFPAY_APP_VERSION,
   OffpayApiError,
+  buildOffpayPublicReadHeaders,
   clearOffpaySigningSession,
+  getStreamCapabilities,
   getSwapTokens,
   getWalletBalance,
   getWalletTransactions,
+  offpayPublicFetch,
   offpayApiRequest,
   setOffpayNetworkAccessAllowed,
   setOffpayAuthRecoveryHandler,
@@ -264,6 +267,90 @@ describe('offpay-api-client', () => {
       }),
     );
     expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
+  });
+
+  it('routes stream capabilities without requiring local signing material', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(
+      buildResponse({
+        network: 'devnet',
+        provider: 'helius',
+        capabilities: {
+          walletActivity: true,
+        },
+      }),
+    );
+
+    await expect(getStreamCapabilities('devnet')).resolves.toMatchObject({
+      network: 'devnet',
+      capabilities: {
+        walletActivity: true,
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/stream/capabilities?'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'X-App-Version': OFFPAY_APP_VERSION,
+          'X-Device-Id': 'device-1',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          'X-Signature': expect.any(String),
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
+  });
+
+  it('opens public wallet activity streams without wallet signing material', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(buildResponse({ ok: true }));
+
+    await expect(
+      offpayPublicFetch({
+        path: '/api/stream/wallet-activity',
+        query: {
+          wallet: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+          network: 'devnet',
+        },
+        accept: 'text/event-stream',
+        headers: await buildOffpayPublicReadHeaders(),
+        timeoutMs: null,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/stream/wallet-activity?'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Accept: 'text/event-stream',
+          'X-App-Version': OFFPAY_APP_VERSION,
+          'X-Device-Id': 'device-1',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          'X-Signature': expect.any(String),
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(
+      expect.stringContaining('wallet=Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw'),
+    );
     expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
   });
 

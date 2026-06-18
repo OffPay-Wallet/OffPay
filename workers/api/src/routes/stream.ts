@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { PublicKey } from '@solana/web3.js';
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 import { z } from 'zod';
-import { getAuthenticatedContext } from '../lib/auth.js';
 import { AppError } from '../lib/errors.js';
 import {
   DEFAULT_STREAM_ACTIVITY_LIMIT,
@@ -13,17 +12,13 @@ import {
   getWalletTransactions,
   type WalletTransactionRecord,
 } from '../lib/helius.js';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, getSupportedStablecoins } from '../lib/offline.js';
 import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  getSupportedStablecoins,
-} from '../lib/offline.js';
-import { getRpcWebSocketUrlCandidates, type RpcProviderEndpoint } from '../lib/solana-rpc-providers.js';
+  getRpcWebSocketUrlCandidates,
+  type RpcProviderEndpoint,
+} from '../lib/solana-rpc-providers.js';
 import type { AppEnv, Network } from '../lib/types.js';
-import {
-  isValidSolanaAddress,
-  networkSchema,
-  readSearchParams,
-} from '../lib/validation.js';
+import { isValidSolanaAddress, networkSchema, readSearchParams } from '../lib/validation.js';
 
 const streamCapabilitiesQuerySchema = z.object({
   network: networkSchema,
@@ -46,26 +41,6 @@ function assertWalletAddress(value: string): void {
       status: 400,
       code: 'INVALID_REQUEST',
       message: 'Wallet address is invalid.',
-    });
-  }
-}
-
-function assertRequestedNetwork(requestedNetwork: Network, authenticatedNetwork: Network): void {
-  if (requestedNetwork !== authenticatedNetwork) {
-    throw new AppError({
-      status: 400,
-      code: 'INVALID_NETWORK',
-      message: 'Requested network must match the authenticated network.',
-    });
-  }
-}
-
-function assertWalletScope(requestedWallet: string, authenticatedWallet: string): void {
-  if (requestedWallet !== authenticatedWallet) {
-    throw new AppError({
-      status: 400,
-      code: 'INVALID_REQUEST',
-      message: 'Wallet activity streams are limited to the authenticated wallet.',
     });
   }
 }
@@ -148,10 +123,7 @@ function rememberSignatures(
   }
 }
 
-async function sleepUntilNextPoll(
-  stream: SSEStreamingApi,
-  pollIntervalMs: number,
-): Promise<void> {
+async function sleepUntilNextPoll(stream: SSEStreamingApi, pollIntervalMs: number): Promise<void> {
   let remainingMs = pollIntervalMs;
 
   while (remainingMs > 0 && !stream.aborted) {
@@ -261,7 +233,11 @@ async function resolveStreamSubscriptionAddresses(params: {
   network: Network;
 }): Promise<string[]> {
   try {
-    const tokenAccounts = await getWalletTokenAccountAddresses(params.env, params.wallet, params.network);
+    const tokenAccounts = await getWalletTokenAccountAddresses(
+      params.env,
+      params.wallet,
+      params.network,
+    );
     const unique = new Set<string>([params.wallet]);
     for (const stablecoin of getSupportedStablecoins(params.env, params.network)) {
       if (unique.size >= MAX_STREAM_ACCOUNT_SUBSCRIPTIONS) break;
@@ -353,10 +329,7 @@ async function openWalletActivityWebSocket(params: {
 const streamRoutes = new Hono<AppEnv>();
 
 streamRoutes.get('/capabilities', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const query = readSearchParams(context.req.url, streamCapabilitiesQuerySchema);
-
-  assertRequestedNetwork(query.network, authenticatedContext.network);
 
   const response = context.json(await getStreamCapabilities(context.env, query.network));
   response.headers.set('Cache-Control', 'no-store');
@@ -364,12 +337,11 @@ streamRoutes.get('/capabilities', async (context) => {
 });
 
 streamRoutes.get('/wallet-activity', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
   const query = readSearchParams(context.req.url, walletActivityQuerySchema);
 
+  // This emits public on-chain activity only. Private wallet state and
+  // mutations remain on signed, wallet-scoped routes.
   assertWalletAddress(query.wallet);
-  assertRequestedNetwork(query.network, authenticatedContext.network);
-  assertWalletScope(query.wallet, authenticatedContext.wallet);
   assertEventStreamRequest(context.req.header('Accept'));
 
   const capabilities = await getStreamCapabilities(context.env, query.network);
@@ -463,7 +435,10 @@ streamRoutes.get('/wallet-activity', async (context) => {
 
         await stream.writeSSE({
           event: 'ping',
-          data: JSON.stringify({ timestamp: Date.now(), provider: webSocketHandle?.provider ?? 'poll' }),
+          data: JSON.stringify({
+            timestamp: Date.now(),
+            provider: webSocketHandle?.provider ?? 'poll',
+          }),
         });
       }
 

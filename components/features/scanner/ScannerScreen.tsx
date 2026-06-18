@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -19,6 +19,10 @@ import { fontFamily } from '@/constants/typography';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { parseOfflineQrPayload } from '@/lib/offline/offline-payments';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
+import {
+  scheduleUiWorkAfterFirstPaint,
+  type ScheduledUiWork,
+} from '@/lib/perf/ui-work-scheduler';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 
 import type { BarcodeScanningResult } from 'expo-camera';
@@ -185,9 +189,7 @@ export function ScannerScreen(): React.JSX.Element {
   const [scanAlert, setScanAlert] = useState<ScanAlertState | null>(null);
   const autoRequestedPermissionRef = useRef(false);
   const scanAlertClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cameraActivationTaskRef = useRef<ReturnType<
-    typeof InteractionManager.runAfterInteractions
-  > | null>(null);
+  const cameraActivationTaskRef = useRef<ScheduledUiWork | null>(null);
   const cameraStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackMint = typeof params.mint === 'string' ? params.mint : '';
   const compact = width < 390 || height < 760 || fontScale > 1.08;
@@ -217,9 +219,11 @@ export function ScannerScreen(): React.JSX.Element {
     }
 
     cancelCameraActivation();
-    cameraActivationTaskRef.current = InteractionManager.runAfterInteractions(() => {
+    cameraActivationTaskRef.current = scheduleUiWorkAfterFirstPaint(() => {
       cameraActivationTaskRef.current = null;
-      requestAnimationFrame(() => setCameraActive(true));
+      setCameraActive(true);
+    }, {
+      fallbackDelayMs: 80,
     });
   }, [cancelCameraActivation]);
 

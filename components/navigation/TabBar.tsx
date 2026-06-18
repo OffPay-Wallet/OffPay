@@ -110,6 +110,11 @@ const TAB_PILL_FEEDBACK_SPRING: WithSpringConfig = {
   stiffness: 520,
   mass: 0.45,
 };
+const TAB_PILL_SLIDE_SPRING: WithSpringConfig = {
+  damping: 24,
+  stiffness: 440,
+  mass: 0.42,
+};
 const TAB_PILL_PRESS_SCALE = 0.96;
 
 // ---------------------------------------------------------------------------
@@ -317,14 +322,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   useAnimatedReaction(
     () => activePillX,
     (currentPillX) => {
-      activePillTranslateX.value = currentPillX;
+      activePillTranslateX.value = withSpring(currentPillX, TAB_PILL_SLIDE_SPRING);
     },
     [activePillX],
   );
 
   const primeActivePill = useCallback(
     (targetPillX: number) => {
-      activePillTranslateX.value = targetPillX;
+      activePillTranslateX.value = withSpring(targetPillX, TAB_PILL_SLIDE_SPRING);
       activePillFeedback.value = TAB_PILL_PRESS_SCALE;
       activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
     },
@@ -344,19 +349,38 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     ],
   }));
 
-  function handleTabPress(routeName: string, isFocused: boolean): void {
-    if (isOffline && routeName === 'swap') {
+  function handleTabPress(
+    route: BottomTabBarProps['state']['routes'][number],
+    originalIndex: number,
+  ): void {
+    if (isOffline && route.name === 'swap') {
       setOfflineSwapNoticeVisible(true);
       return;
     }
+
+    const isFocused = state.index === originalIndex;
+    const event = navigation.emit({
+      type: 'tabPress',
+      target: route.key,
+      canPreventDefault: true,
+    });
+
+    if (event.defaultPrevented) return;
 
     if (!isFocused) {
       const currentRoute = state.routes[state.index];
       if (currentRoute != null && isTabRouteName(currentRoute.name)) {
         recordTabSwitch(state.index, currentRoute.name);
       }
-      navigation.navigate(routeName);
+      navigation.navigate(route.name, route.params);
     }
+  }
+
+  function handleTabLongPress(route: BottomTabBarProps['state']['routes'][number]): void {
+    navigation.emit({
+      type: 'tabLongPress',
+      target: route.key,
+    });
   }
 
   function renderRouteIcon(
@@ -395,6 +419,20 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const handleQuickActionPress = useCallback(
     (action: QuickAction) => {
+      const targetRoute = state.routes.find((route) => route.name === action.routeName);
+      if (targetRoute != null) {
+        const event = navigation.emit({
+          type: 'tabPress',
+          target: targetRoute.key,
+          canPreventDefault: true,
+        });
+
+        if (event.defaultPrevented) {
+          closeFabMenu();
+          return;
+        }
+      }
+
       closeFabMenu();
       const currentRoute = state.routes[state.index];
       if (
@@ -404,7 +442,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       ) {
         recordTabSwitch(state.index, currentRoute.name);
       }
-      requestAnimationFrame(() => navigation.navigate(action.routeName));
+      navigation.navigate(action.routeName);
     },
     [closeFabMenu, navigation, recordTabSwitch, state.index, state.routes],
   );
@@ -491,7 +529,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
                 onPressIn={() => primeActivePill(targetPillX)}
-                onPress={() => handleTabPress(route.name, focused)}
+                onPress={() => handleTabPress(route, originalIndex)}
+                onLongPress={() => handleTabLongPress(route)}
                 unstable_pressDelay={0}
                 accessibilityRole="tab"
                 accessibilityLabel={label}

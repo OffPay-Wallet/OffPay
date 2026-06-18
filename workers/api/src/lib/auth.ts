@@ -40,6 +40,8 @@ const PUBLIC_AUTH_EXEMPT_ROUTES = new Set([
   'GET /api/swap/price',
   'GET /api/wallet/balance',
   'GET /api/wallet/transactions',
+  'GET /api/stream/capabilities',
+  'GET /api/stream/wallet-activity',
 ]);
 const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/bootstrap/provision',
@@ -54,11 +56,14 @@ const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/swap/price',
   'GET /api/wallet/balance',
   'GET /api/wallet/transactions',
+  'GET /api/stream/capabilities',
+  'GET /api/stream/wallet-activity',
 ]);
 const PUBLIC_RATE_LIMIT_FAIL_CLOSED_ROUTES = new Set([
   'GET /api/bootstrap/provision',
   'POST /api/bootstrap/provision',
   'POST /api/invite/verify',
+  'GET /api/stream/wallet-activity',
 ]);
 
 interface AuthHeaders {

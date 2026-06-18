@@ -207,6 +207,7 @@ interface PublicRequestOptions {
   method?: OffpayApiMethod;
   query?: QueryParams;
   body?: unknown;
+  accept?: string;
   headers?: Record<string, string>;
   /**
    * Optional caller signal. Will be merged with the per-request
@@ -214,7 +215,7 @@ interface PublicRequestOptions {
    * `fetch` instead of leaving the socket open.
    */
   signal?: AbortSignal;
-  timeoutMs?: number;
+  timeoutMs?: number | null;
 }
 
 interface StoredAuthContext {
@@ -492,7 +493,7 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
   const method = options.method ?? 'GET';
   const pathAndQuery = appendQuery(options.path, options.query);
   const headers: Record<string, string> = {
-    Accept: 'application/json',
+    Accept: options.accept ?? 'application/json',
     ...options.headers,
   };
 
@@ -502,8 +503,17 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
     init.body = await stringifyJsonAdaptive(options.body);
   }
 
-  const handle = withTimeout(options.signal, options.timeoutMs);
-  init.signal = handle.signal;
+  const handle =
+    options.timeoutMs === null
+      ? {
+          signal: options.signal,
+          cleanup: () => undefined,
+        }
+      : withTimeout(options.signal, options.timeoutMs);
+
+  if (handle.signal != null) {
+    init.signal = handle.signal;
+  }
 
   try {
     const response = await fetch(buildUrl(pathAndQuery), init);
@@ -511,6 +521,47 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
     if (!response.ok) throwForErrorEnvelope(response.status, payload);
 
     return payload as T;
+  } finally {
+    handle.cleanup();
+  }
+}
+
+export async function offpayPublicFetch(options: PublicRequestOptions): Promise<Response> {
+  assertOffpayNetworkAccessAllowed();
+
+  const method = options.method ?? 'GET';
+  const pathAndQuery = appendQuery(options.path, options.query);
+  const headers: Record<string, string> = {
+    Accept: options.accept ?? 'application/json',
+    ...options.headers,
+  };
+
+  const init: RequestInit = { method, headers };
+  if (options.body !== undefined && options.body !== null) {
+    headers['Content-Type'] = 'application/json';
+    init.body = await stringifyJsonAdaptive(options.body);
+  }
+
+  const handle =
+    options.timeoutMs === null
+      ? {
+          signal: options.signal,
+          cleanup: () => undefined,
+        }
+      : withTimeout(options.signal, options.timeoutMs);
+
+  if (handle.signal != null) {
+    init.signal = handle.signal;
+  }
+
+  try {
+    const response = await fetch(buildUrl(pathAndQuery), init);
+    if (!response.ok) {
+      const payload = await parseJsonResponse(response);
+      throwForErrorEnvelope(response.status, payload);
+    }
+
+    return response;
   } finally {
     handle.cleanup();
   }
@@ -1083,11 +1134,13 @@ export async function getWalletTransactions(
   });
 }
 
-export function getStreamCapabilities(network: OffpayNetwork): Promise<StreamCapabilitiesResponse> {
-  return offpayApiRequest<StreamCapabilitiesResponse>({
+export async function getStreamCapabilities(
+  network: OffpayNetwork,
+): Promise<StreamCapabilitiesResponse> {
+  return offpayPublicRequest<StreamCapabilitiesResponse>({
     path: '/api/stream/capabilities',
     query: { network },
-    network,
+    headers: await buildOffpayPublicReadHeaders(),
   });
 }
 

@@ -1,5 +1,3 @@
-import { InteractionManager } from 'react-native';
-
 interface IdleDeadlineLike {
   didTimeout: boolean;
   timeRemaining: () => number;
@@ -11,10 +9,6 @@ type RequestIdleCallbackFn = (
   options?: { timeout?: number },
 ) => RequestIdleCallbackHandle;
 type CancelIdleCallbackFn = (handle: RequestIdleCallbackHandle) => void;
-
-type InteractionTask = {
-  cancel: () => void;
-};
 
 interface IdleCapableGlobal {
   requestIdleCallback?: RequestIdleCallbackFn;
@@ -123,7 +117,6 @@ export function scheduleUiWorkAfterFirstPaint(
   let frameHandle: number | null = null;
   let idleHandle: RequestIdleCallbackHandle | null = null;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  let interactionTask: InteractionTask | null = null;
   let didRun = false;
 
   const run = () => {
@@ -168,21 +161,6 @@ export function scheduleUiWorkAfterFirstPaint(
       return;
     }
 
-    if (typeof InteractionManager.runAfterInteractions === 'function') {
-      interactionTask = InteractionManager.runAfterInteractions(() => {
-        interactionTask = null;
-        run();
-      }) as InteractionTask;
-
-      timeoutHandle = setTimeout(() => {
-        timeoutHandle = null;
-        interactionTask?.cancel();
-        interactionTask = null;
-        run();
-      }, options?.fallbackDelayMs ?? 300);
-      return;
-    }
-
     timeoutHandle = setTimeout(() => {
       timeoutHandle = null;
       run();
@@ -208,9 +186,6 @@ export function scheduleUiWorkAfterFirstPaint(
         clearTimeout(timeoutHandle);
         timeoutHandle = null;
       }
-
-      interactionTask?.cancel();
-      interactionTask = null;
     },
   };
 }

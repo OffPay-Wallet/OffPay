@@ -1,4 +1,8 @@
-import { getWalletTransactions, offpayAuthenticatedFetch } from '@/lib/api/offpay-api-client';
+import {
+  buildOffpayPublicReadHeaders,
+  getWalletTransactions,
+  offpayPublicFetch,
+} from '@/lib/api/offpay-api-client';
 import { isDisplayableWalletPaymentTransaction } from '@/lib/api/offpay-wallet-data';
 
 import type {
@@ -215,11 +219,11 @@ async function connectWalletActivitySse(
   let closed = false;
 
   try {
-    const response = await offpayAuthenticatedFetch({
+    const response = await offpayPublicFetch({
       path: '/api/stream/wallet-activity',
       query: { wallet: walletAddress, network },
-      network,
       accept: 'text/event-stream',
+      headers: await buildOffpayPublicReadHeaders(),
       signal: controller.signal,
       timeoutMs: null,
     });
