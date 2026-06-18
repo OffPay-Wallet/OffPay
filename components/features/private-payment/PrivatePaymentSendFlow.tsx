@@ -77,6 +77,7 @@ import { presentWalletTransactionEventNotification } from '@/lib/notifications/l
 import { loadOfflinePaymentSlotSnapshot } from '@/lib/offline/offline-payment-slots';
 import { parseRecipientInput, type RecipientCandidate } from '@/lib/identity/recipient-parser';
 import { resolveSnsName } from '@/lib/identity/sns';
+import { submitPrivatePayment } from '@/lib/magicblock/private-payment';
 import {
   isRnZkProverNativeModuleAvailable,
   RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE,
@@ -1666,7 +1667,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
                 };
               })()
             : (async () => {
-                const { submitPrivatePayment } = await import('@/lib/magicblock/private-payment');
                 const privateResult = await submitPrivatePayment({
                   walletAddress,
                   walletId,
