@@ -13,8 +13,24 @@ const ANDROID_ADAPTIVE_ICON_FOREGROUND_PATH = './assets/AppIcons/playstore.png';
 const BRAND_BACKGROUND_COLOR = '#050505';
 const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = '#000000';
 const ANDROID_NOTIFICATION_COLOR = '#F7F7F2';
+const DEFAULT_ANDROID_BUILD_ARCHS = ['arm64-v8a'];
+
+function resolveAndroidBuildArchs(): string[] {
+  const raw =
+    process.env.OFFPAY_ANDROID_BUILD_ARCHS ??
+    process.env.ORG_GRADLE_PROJECT_reactNativeArchitectures ??
+    '';
+  const archs = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return archs.length > 0 ? archs : DEFAULT_ANDROID_BUILD_ARCHS;
+}
 
 export default function appConfig(_context: ConfigContext): ExpoConfig {
+  const androidBuildArchs = resolveAndroidBuildArchs();
+
   return {
     name: APP_NAME,
     slug: APP_SLUG,
@@ -184,6 +200,26 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
             // Manager APIs. Keep this explicit so prebuilds do not
             // fall below the SDK level required by the native module.
             compileSdkVersion: 36,
+            // APK builds should not ship unused emulator/legacy ABI
+            // slices. EAS profiles can override this with
+            // OFFPAY_ANDROID_BUILD_ARCHS when a universal test APK is
+            // intentionally needed.
+            buildArchs: androidBuildArchs,
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
+            enablePngCrunchInReleaseBuilds: true,
+            packagingOptions: {
+              exclude: [
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/LICENSE.md',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+                'META-INF/NOTICE.md',
+                'META-INF/DEPENDENCIES',
+                'META-INF/INDEX.LIST',
+              ],
+            },
             // react-native-passkeys requires Credential Manager,
             // which lives in androidx.credentials. The 1.2.x line
             // matches the version Privy's SDK is built against.

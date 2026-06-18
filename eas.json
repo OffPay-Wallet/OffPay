@@ -9,6 +9,12 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE": "prototype"
+      },
+      "android": {
+        "env": {
+          "OFFPAY_ANDROID_BUILD_ARCHS": "arm64-v8a",
+          "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
+        }
       }
     },
     "preview": {
@@ -19,11 +25,29 @@
       "android": {
         "buildType": "apk",
         "env": {
+          "OFFPAY_ANDROID_BUILD_ARCHS": "arm64-v8a",
+          "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
+        }
+      }
+    },
+    "preview-universal": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE": "prototype"
+      },
+      "android": {
+        "buildType": "apk",
+        "env": {
+          "OFFPAY_ANDROID_BUILD_ARCHS": "armeabi-v7a,arm64-v8a",
           "ORG_GRADLE_PROJECT_reactNativeArchitectures": "armeabi-v7a,arm64-v8a"
         }
       }
     },
     "production": {
+      "env": {
+        "OFFPAY_ANDROID_BUILD_ARCHS": "arm64-v8a",
+        "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
+      },
       "android": {
         "buildType": "app-bundle"
       }

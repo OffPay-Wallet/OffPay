@@ -67,6 +67,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   const inputDisabledRef = useRef(false);
   const passcodeRef = useRef('');
   const unlockFrameRef = useRef<number | null>(null);
+  const unlockAttemptIdRef = useRef(0);
   const autoBiometricPromptedRef = useRef(false);
   const shakeOffset = useSharedValue(0);
 
@@ -175,8 +176,10 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, [onUnlock, router, setPasscodeValue]);
 
   const handleBiometricUnlock = useCallback(async (): Promise<void> => {
-    if (unlocking || !fingerprintEnabled) return;
+    if (unlockingRef.current || !fingerprintEnabled) return;
 
+    unlockingRef.current = true;
+    inputDisabledRef.current = true;
     setUnlocking(true);
     try {
       const result = await authenticateWithBiometrics({
@@ -193,9 +196,11 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     } catch {
       setToast('Could not unlock with fingerprint.');
     } finally {
+      unlockingRef.current = false;
+      inputDisabledRef.current = resetting || showingReset;
       setUnlocking(false);
     }
-  }, [fingerprintEnabled, unlocking, unlockWallet]);
+  }, [fingerprintEnabled, resetting, showingReset, unlockWallet]);
 
   useEffect(() => {
     if (
@@ -224,9 +229,17 @@ export const PasscodeScreen = memo(function PasscodeScreen({
         return;
       }
 
+      const attemptId = unlockAttemptIdRef.current + 1;
+      unlockAttemptIdRef.current = attemptId;
+      unlockingRef.current = true;
+      inputDisabledRef.current = true;
       setUnlocking(true);
       try {
         const ok = await verifyPasscode(candidate);
+        if (attemptId !== unlockAttemptIdRef.current || passcodeRef.current !== candidate) {
+          return;
+        }
+
         if (ok) {
           await unlockWallet();
         } else {
@@ -239,10 +252,14 @@ export const PasscodeScreen = memo(function PasscodeScreen({
         triggerShake();
         setPasscodeValue('');
       } finally {
-        setUnlocking(false);
+        if (attemptId === unlockAttemptIdRef.current) {
+          unlockingRef.current = false;
+          inputDisabledRef.current = resetting || showingReset;
+          setUnlocking(false);
+        }
       }
     },
-    [setPasscodeValue, triggerShake, unlockWallet],
+    [resetting, setPasscodeValue, showingReset, triggerShake, unlockWallet],
   );
 
   const schedulePasscodeUnlock = useCallback(
@@ -273,12 +290,14 @@ export const PasscodeScreen = memo(function PasscodeScreen({
 
   const handleDelete = useCallback((): void => {
     if (inputDisabledRef.current) return;
+    unlockAttemptIdRef.current += 1;
     cancelScheduledUnlock();
     setPasscodeValue(passcodeRef.current.slice(0, -1));
   }, [cancelScheduledUnlock, setPasscodeValue]);
 
   const handleClear = useCallback((): void => {
     if (inputDisabledRef.current) return;
+    unlockAttemptIdRef.current += 1;
     cancelScheduledUnlock();
     setPasscodeValue('');
   }, [cancelScheduledUnlock, setPasscodeValue]);
@@ -296,6 +315,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
 
     setResetting(true);
     setToast(null);
+    unlockAttemptIdRef.current += 1;
     cancelScheduledUnlock();
     setPasscodeValue('');
 
@@ -316,6 +336,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
 
   const handleForgotPasswordPress = useCallback((): void => {
     if (unlocking || resetting) return;
+    unlockAttemptIdRef.current += 1;
     cancelScheduledUnlock();
     setShowingReset(true);
   }, [cancelScheduledUnlock, resetting, unlocking]);
@@ -387,7 +408,8 @@ export const PasscodeScreen = memo(function PasscodeScreen({
                       key={key}
                       frameStyle={keyFrameStyle}
                       onPress={fingerprintPress}
-                      disabled={unlocking || resetting}
+                      disabled={resetting}
+                      activateOnPressIn
                       accessibilityRole="button"
                       accessibilityLabel="Unlock with fingerprint"
                     >
@@ -406,8 +428,9 @@ export const PasscodeScreen = memo(function PasscodeScreen({
                       key={key}
                       frameStyle={keyFrameStyle}
                       onPress={handleClear}
-                      disabled={passcodeLength === 0 || unlocking || resetting}
+                      disabled={passcodeLength === 0 || resetting}
                       muted={passcodeLength === 0}
+                      activateOnPressIn
                       accessibilityRole="button"
                       accessibilityLabel="Clear passcode"
                     >
@@ -422,8 +445,9 @@ export const PasscodeScreen = memo(function PasscodeScreen({
                       key={key}
                       frameStyle={keyFrameStyle}
                       onPress={handleDelete}
-                      disabled={passcodeLength === 0 || unlocking || resetting}
+                      disabled={passcodeLength === 0 || resetting}
                       muted={passcodeLength === 0}
+                      activateOnPressIn
                       accessibilityRole="button"
                       accessibilityLabel="Delete last digit"
                     >
@@ -437,7 +461,8 @@ export const PasscodeScreen = memo(function PasscodeScreen({
                     key={key}
                     frameStyle={keyFrameStyle}
                     onPress={digitHandlers[key as keyof typeof digitHandlers]}
-                    disabled={unlocking || resetting}
+                    disabled={resetting}
+                    activateOnPressIn
                     accessibilityRole="keyboardkey"
                     accessibilityLabel={`Digit ${key}`}
                   >

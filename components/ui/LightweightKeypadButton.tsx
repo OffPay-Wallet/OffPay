@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useCallback, useRef } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
 interface LightweightKeypadButtonProps {
@@ -7,6 +7,7 @@ interface LightweightKeypadButtonProps {
   onPress: () => void;
   disabled?: boolean;
   muted?: boolean;
+  activateOnPressIn?: boolean;
   accessibilityRole?: 'button' | 'keyboardkey';
   accessibilityLabel?: string;
 }
@@ -17,9 +18,26 @@ export const LightweightKeypadButton = memo(function LightweightKeypadButton({
   onPress,
   disabled = false,
   muted = false,
+  activateOnPressIn = false,
   accessibilityRole = 'button',
   accessibilityLabel,
 }: LightweightKeypadButtonProps): React.JSX.Element {
+  const handledPressInRef = useRef(false);
+
+  const handlePressIn = useCallback((): void => {
+    if (!activateOnPressIn || disabled) return;
+    handledPressInRef.current = true;
+    onPress();
+  }, [activateOnPressIn, disabled, onPress]);
+
+  const handlePress = useCallback((): void => {
+    if (activateOnPressIn && handledPressInRef.current) {
+      handledPressInRef.current = false;
+      return;
+    }
+    onPress();
+  }, [activateOnPressIn, onPress]);
+
   return (
     <View style={frameStyle}>
       <Pressable
@@ -28,7 +46,8 @@ export const LightweightKeypadButton = memo(function LightweightKeypadButton({
           muted && styles.keyMuted,
           pressed && !disabled && styles.keyPressed,
         ]}
-        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPress={handlePress}
         disabled={disabled}
         unstable_pressDelay={0}
         accessibilityRole={accessibilityRole}
@@ -49,6 +68,7 @@ function areLightweightKeypadButtonPropsEqual(
     previous.onPress === next.onPress &&
     previous.disabled === next.disabled &&
     previous.muted === next.muted &&
+    previous.activateOnPressIn === next.activateOnPressIn &&
     previous.accessibilityRole === next.accessibilityRole &&
     previous.accessibilityLabel === next.accessibilityLabel
   );

@@ -270,8 +270,6 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
     ['clear', '0', 'delete'],
   ];
 
-  const inputDisabled = !settingsReady || saving || processingEntry;
-
   const digitHandlers = useMemo(
     () => ({
       '0': () => handleDigit('0'),
@@ -324,8 +322,9 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
                         key={key}
                         frameStyle={keyFrameStyle}
                         onPress={handleClear}
-                        disabled={entry.length === 0 || inputDisabled}
+                        disabled={entry.length === 0 || !settingsReady}
                         muted={entry.length === 0}
+                        activateOnPressIn
                         accessibilityRole="button"
                         accessibilityLabel="Clear passcode"
                       >
@@ -340,8 +339,9 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
                         key={key}
                         frameStyle={keyFrameStyle}
                         onPress={handleDelete}
-                        disabled={entry.length === 0 || inputDisabled}
+                        disabled={entry.length === 0 || !settingsReady}
                         muted={entry.length === 0}
+                        activateOnPressIn
                         accessibilityRole="button"
                         accessibilityLabel="Delete last digit"
                       >
@@ -355,7 +355,8 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
                       key={key}
                       frameStyle={keyFrameStyle}
                       onPress={digitHandlers[key as keyof typeof digitHandlers]}
-                      disabled={inputDisabled}
+                      disabled={!settingsReady}
+                      activateOnPressIn
                       accessibilityRole="keyboardkey"
                       accessibilityLabel={`Digit ${key}`}
                     >

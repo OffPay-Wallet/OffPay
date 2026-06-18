@@ -1,6 +1,8 @@
 const path = require('path');
 
 const { getDefaultConfig } = require('expo/metro-config');
+const exclusionListModule = require('metro-config/private/defaults/exclusionList');
+const exclusionList = exclusionListModule.default ?? exclusionListModule;
 
 const config = getDefaultConfig(__dirname);
 const sideEffectModuleBlockList = Object.fromEntries(
@@ -39,6 +41,34 @@ const NOBLE_HASHES_CRYPTO_TARGET = path.resolve(
   __dirname,
   'node_modules/@solana/web3.js/node_modules/@noble/hashes/crypto.js',
 );
+
+// Keep source-only folders and unused binary variants out of Metro's
+// file map. EAS upload is guarded separately by .easignore; this guard
+// prevents accidental runtime imports from reintroducing bulky assets.
+config.resolver.blockList = exclusionList([
+  /\/\.expo\/.*/,
+  /\/coverage\/.*/,
+  /\/dist\/.*/,
+  /\/web-build\/.*/,
+  /\/android\/app\/build\/.*/,
+  /\/android\/app\/\.cxx\/.*/,
+  /\/android\/build\/.*/,
+  /\/ios\/build\/.*/,
+  /\/workers\/.*/,
+  /\/documentation\/.*/,
+  /\/backend-docs\/.*/,
+  /\/client-docs\/.*/,
+  /\/applications\/.*/,
+  /\/umbra-reference\/.*/,
+  /\/assets\/AppIcons\/Assets\.xcassets\/.*/,
+  /\/assets\/AppIcons\/android\/.*/,
+  /\/assets\/onboarding_icons\/.*/,
+  /\/assets\/lotties\/ai-loader\.lottie$/,
+  /\/assets\/fonts\/Geist\/(?:otf|webfonts|variable)\/.*/,
+  /\/assets\/fonts\/GeistMono\/(?:otf|webfonts|variable)\/.*/,
+  /\/assets\/fonts\/Quicksand\/Quicksand-VariableFont_wght\.ttf$/,
+  /\/assets\/fonts\/cirka\/Cirka-Variable\.ttf$/,
+]);
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const normalizedModuleName = moduleName.replace(/\\/g, '/');

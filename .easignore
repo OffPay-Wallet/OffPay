@@ -1,0 +1,140 @@
+# EAS upload payload guard.
+# Keep this stricter than .gitignore: EAS only needs app source, config,
+# package metadata, plugins, patches, and runtime assets that are actually
+# referenced by app.config.ts or Metro.
+
+# VCS / local tool state
+.git/
+.github/
+.expo/
+.cursor/
+.gemini/
+.agents/
+.context/
+.vscode/
+.idea/
+
+# Dependencies and package-manager caches are installed remotely by EAS.
+node_modules/
+.pnp/
+.pnp.js
+.npm/
+.yarn/
+
+# Generated native/build output
+android/
+ios/
+dist/
+web-build/
+coverage/
+*.hbc
+*.bundle
+*.map
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Local logs and OS files
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Secrets and local-only environment files
+.env
+.env.*
+!.env.example
+invite-codes/
+workers/ai-proxy/.dev.vars
+workers/ai-proxy/.dev.vars.*
+workers/api/.dev.vars
+workers/api/.dev.vars.*
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+*.keystore
+
+# Non-client services and planning/reference material
+workers/
+documentation/
+backend-docs/
+client-docs/
+applications/
+.modules/
+.skills/
+umbra-reference/
+app-example/
+plan.md
+client-module-status.md
+missing-ui-screens.md
+OffPay_PRD_v4_0-1.md
+OffPay_API_Hosting_PRD_v3.md
+INVITE_EMAIL_FIX.md
+PASSCODE_PERFORMANCE_FIX.md
+FAB_ANIMATION_FIX.md
+AI_VOICE_SYNC_FIX.md
+PERFORMANCE_FIXES_SUMMARY.md
+
+# Tests and local probes are not part of the mobile runtime.
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+scripts/umbra-*.mjs
+
+# Source-only or unused binary assets. Keep the exact font files referenced
+# by app.config.ts; exclude alternate formats, unused weights, and old
+# onboarding art so they cannot enter the EAS upload or be imported later.
+assets/AppIcons/Assets.xcassets/
+assets/AppIcons/android/
+assets/onboarding_icons/
+assets/lotties/ai-loader.lottie
+assets/fonts/Geist/otf/
+assets/fonts/Geist/webfonts/
+assets/fonts/Geist/variable/
+assets/fonts/Geist/ttf/Geist-Black.ttf
+assets/fonts/Geist/ttf/Geist-BlackItalic.ttf
+assets/fonts/Geist/ttf/Geist-BoldItalic.ttf
+assets/fonts/Geist/ttf/Geist-ExtraBold.ttf
+assets/fonts/Geist/ttf/Geist-ExtraBoldItalic.ttf
+assets/fonts/Geist/ttf/Geist-ExtraLight.ttf
+assets/fonts/Geist/ttf/Geist-ExtraLightItalic.ttf
+assets/fonts/Geist/ttf/Geist-Italic.ttf
+assets/fonts/Geist/ttf/Geist-Light.ttf
+assets/fonts/Geist/ttf/Geist-LightItalic.ttf
+assets/fonts/Geist/ttf/Geist-MediumItalic.ttf
+assets/fonts/Geist/ttf/Geist-SemiBoldItalic.ttf
+assets/fonts/Geist/ttf/Geist-Thin.ttf
+assets/fonts/Geist/ttf/Geist-ThinItalic.ttf
+assets/fonts/GeistMono/otf/
+assets/fonts/GeistMono/webfonts/
+assets/fonts/GeistMono/variable/
+assets/fonts/GeistMono/ttf/GeistMono-Black.ttf
+assets/fonts/GeistMono/ttf/GeistMono-BlackItalic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-Bold.ttf
+assets/fonts/GeistMono/ttf/GeistMono-BoldItalic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-ExtraBold.ttf
+assets/fonts/GeistMono/ttf/GeistMono-ExtraBoldItalic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-ExtraLight.ttf
+assets/fonts/GeistMono/ttf/GeistMono-ExtraLightItalic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-Italic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-Light.ttf
+assets/fonts/GeistMono/ttf/GeistMono-LightItalic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-MediumItalic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-SemiBoldItalic.ttf
+assets/fonts/GeistMono/ttf/GeistMono-Thin.ttf
+assets/fonts/GeistMono/ttf/GeistMono-ThinItalic.ttf
+assets/fonts/Quicksand/OFL.txt
+assets/fonts/Quicksand/README.txt
+assets/fonts/Quicksand/Quicksand-VariableFont_wght.ttf
+assets/fonts/Quicksand/static/Quicksand-Light.ttf
+assets/fonts/cirka/Cirka-Variable.ttf
