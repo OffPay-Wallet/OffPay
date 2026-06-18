@@ -4,6 +4,7 @@ import {
   offpayPublicFetch,
 } from '@/lib/api/offpay-api-client';
 import { isDisplayableWalletPaymentTransaction } from '@/lib/api/offpay-wallet-data';
+import { mark, measure } from '@/lib/perf/perf-marks';
 
 import type {
   OffpayNetwork,
@@ -210,6 +211,8 @@ async function connectWalletActivitySse(
   network: OffpayNetwork,
   handlers: WalletActivityStreamHandlers = {},
 ): Promise<WalletActivityStreamConnection | null> {
+  const startedAt = mark();
+  let result: 'connected' | 'unsupported' | 'error' = 'error';
   const controller = new AbortController();
   const openTimeout = setTimeout(() => {
     controller.abort(new Error(`Wallet activity stream timed out after ${SSE_OPEN_TIMEOUT_MS}ms`));
@@ -230,11 +233,13 @@ async function connectWalletActivitySse(
     clearTimeout(openTimeout);
 
     if (response.body == null || typeof response.body.getReader !== 'function') {
+      result = 'unsupported';
       controller.abort();
       return null;
     }
 
     reader = response.body.getReader();
+    result = 'connected';
     handlers.onOpen?.();
 
     void readSseStream(reader, handlers)
@@ -275,6 +280,11 @@ async function connectWalletActivitySse(
     clearTimeout(openTimeout);
     controller.abort();
     return null;
+  } finally {
+    measure('walletActivity.sse.open', startedAt, {
+      network,
+      result,
+    });
   }
 }
 
@@ -358,8 +368,20 @@ export async function connectWalletActivityStream(
   network: OffpayNetwork,
   handlers: WalletActivityStreamHandlers = {},
 ): Promise<WalletActivityStreamConnection> {
+  const startedAt = mark();
   const streamConnection = await connectWalletActivitySse(walletAddress, network, handlers);
-  if (streamConnection != null) return streamConnection;
+  if (streamConnection != null) {
+    measure('walletActivity.stream.connect', startedAt, {
+      network,
+      transport: 'sse',
+    });
+    return streamConnection;
+  }
 
-  return connectWalletActivityPoller(walletAddress, network, handlers);
+  const pollerConnection = await connectWalletActivityPoller(walletAddress, network, handlers);
+  measure('walletActivity.stream.connect', startedAt, {
+    network,
+    transport: 'poller',
+  });
+  return pollerConnection;
 }

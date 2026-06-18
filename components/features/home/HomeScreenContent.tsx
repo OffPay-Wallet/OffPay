@@ -398,9 +398,8 @@ export function HomeScreenContent(): React.JSX.Element {
 
     // Start the ramp on the next animation frame so the first stage
     // doesn't fire on the same frame as the screen mount, but DON'T
-    // wait for `requestIdleCallback` / `InteractionManager` first —
-    // those cap at the 350ms fallback under load and that's exactly
-    // the lag the user perceives after unlock. The `yieldToUi()`
+    // wait for an idle callback first — that can hit the fallback
+    // under load and feel like lag after unlock. The `yieldToUi()`
     // between each stage already keeps the JS thread responsive.
     const frameHandle = requestAnimationFrame(() => {
       void (async () => {

@@ -51,14 +51,19 @@ function OffpayWalletLiveUpdates(): null {
   const walletAddress = useWalletStore((state) => state.publicKey);
   const { showToast } = useAppToast();
   const handledSignaturesRef = React.useRef(new Set<string>());
+  const statusLogAtRef = React.useRef(Date.now());
 
   React.useEffect(() => {
     if (!__DEV__) return;
+    const now = Date.now();
+    const elapsedMs = now - statusLogAtRef.current;
+    statusLogAtRef.current = now;
     console.log('[wallet-live-updates] stream status', {
       status: walletActivityStream.status,
       isLive: walletActivityStream.isLive,
       isFallback: walletActivityStream.isFallback,
       failureCount: walletActivityStream.failureCount,
+      elapsedMs,
       network: walletActivityStream.network,
       walletAddress: walletActivityStream.walletAddress,
     });

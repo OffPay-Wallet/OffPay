@@ -6,7 +6,10 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import {
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
@@ -230,6 +233,7 @@ export function useOffpayWalletActivityStream(options?: {
   const activityRefreshTimerRefs = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const walletDataInvalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastWalletDataInvalidatedAtRef = useRef(0);
+  const gateLogAtRef = useRef(Date.now());
 
   // Diagnostic logging for the gating predicates so we can see why
   // the WS isn't opening from a single tag in the dev console. The
@@ -237,6 +241,9 @@ export function useOffpayWalletActivityStream(options?: {
   // bails out fast in production.
   useEffect(() => {
     if (!__DEV__) return;
+    const now = Date.now();
+    const elapsedMs = now - gateLogAtRef.current;
+    gateLogAtRef.current = now;
     console.log('[wallet-activity-hook] gate', {
       requested,
       canUseNetwork,
@@ -244,6 +251,7 @@ export function useOffpayWalletActivityStream(options?: {
       network,
       aggregateAvailable,
       streamCapabilityAvailable,
+      elapsedMs,
     });
   }, [
     aggregateAvailable,

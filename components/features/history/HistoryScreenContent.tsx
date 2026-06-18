@@ -2,7 +2,7 @@
  * History screen — chronological list of wallet transactions.
  */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { InteractionManager, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect } from 'expo-router/react-navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
@@ -37,7 +37,7 @@ import type {
 
 function runAfterTapFrame(task: () => void): void {
   requestAnimationFrame(() => {
-    InteractionManager.runAfterInteractions(task);
+    setTimeout(task, 0);
   });
 }
 
@@ -95,8 +95,8 @@ export function HistoryScreenContent(): React.JSX.Element {
   // back gesture) before `refreshHistory` lands, the imperative
   // refetch is skipped before it kicks in. The query itself is still
   // managed by React Query; this just prevents a stale request from
-  // being scheduled by an InteractionManager callback that resolves
-  // after the screen has already lost focus.
+  // being scheduled by a post-frame callback that resolves after the
+  // screen has already lost focus.
   const getScreenSignal = useScreenAbortSignal();
 
   const refreshHistory = useCallback(

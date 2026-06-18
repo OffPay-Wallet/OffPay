@@ -19,10 +19,7 @@ import { fontFamily } from '@/constants/typography';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { parseOfflineQrPayload } from '@/lib/offline/offline-payments';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
-import {
-  scheduleUiWorkAfterFirstPaint,
-  type ScheduledUiWork,
-} from '@/lib/perf/ui-work-scheduler';
+import { scheduleUiWorkAfterFirstPaint, type ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 
 import type { BarcodeScanningResult } from 'expo-camera';
@@ -219,12 +216,15 @@ export function ScannerScreen(): React.JSX.Element {
     }
 
     cancelCameraActivation();
-    cameraActivationTaskRef.current = scheduleUiWorkAfterFirstPaint(() => {
-      cameraActivationTaskRef.current = null;
-      setCameraActive(true);
-    }, {
-      fallbackDelayMs: 80,
-    });
+    cameraActivationTaskRef.current = scheduleUiWorkAfterFirstPaint(
+      () => {
+        cameraActivationTaskRef.current = null;
+        setCameraActive(true);
+      },
+      {
+        fallbackDelayMs: 80,
+      },
+    );
   }, [cancelCameraActivation]);
 
   const stopCameraAfterTransition = useCallback(() => {

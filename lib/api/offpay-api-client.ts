@@ -31,6 +31,7 @@ import {
   walletHasLocalSigningMaterial,
 } from '@/lib/wallet/wallet-capabilities';
 import { readJsonResponseAdaptive, stringifyJsonAdaptive } from '@/lib/perf/ui-work-scheduler';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { assertWorkerCandidateSafe, classifyWorkerCandidate } from '@/lib/perf/work-offload-policy';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
@@ -296,6 +297,10 @@ function appendQuery(path: `/${string}`, query?: QueryParams): string {
   return queryString.length > 0 ? `${path}?${queryString}` : path;
 }
 
+function getPublicRequestNetwork(query?: QueryParams): OffpayNetwork | null {
+  return query?.network === 'mainnet' || query?.network === 'devnet' ? query.network : null;
+}
+
 function buildUrl(pathAndQuery: string): string {
   return `${OFFPAY_API_ORIGIN}${pathAndQuery}`;
 }
@@ -492,6 +497,8 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
 
   const method = options.method ?? 'GET';
   const pathAndQuery = appendQuery(options.path, options.query);
+  const startedAt = mark();
+  let responseStatus: number | null = null;
   const headers: Record<string, string> = {
     Accept: options.accept ?? 'application/json',
     ...options.headers,
@@ -517,12 +524,19 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
 
   try {
     const response = await fetch(buildUrl(pathAndQuery), init);
+    responseStatus = response.status;
     const payload = await parseJsonResponse(response);
     if (!response.ok) throwForErrorEnvelope(response.status, payload);
 
     return payload as T;
   } finally {
     handle.cleanup();
+    measure('apiPublic.request', startedAt, {
+      method,
+      route: options.path,
+      network: getPublicRequestNetwork(options.query),
+      status: responseStatus,
+    });
   }
 }
 
@@ -531,6 +545,8 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
 
   const method = options.method ?? 'GET';
   const pathAndQuery = appendQuery(options.path, options.query);
+  const startedAt = mark();
+  let responseStatus: number | null = null;
   const headers: Record<string, string> = {
     Accept: options.accept ?? 'application/json',
     ...options.headers,
@@ -556,6 +572,7 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
 
   try {
     const response = await fetch(buildUrl(pathAndQuery), init);
+    responseStatus = response.status;
     if (!response.ok) {
       const payload = await parseJsonResponse(response);
       throwForErrorEnvelope(response.status, payload);
@@ -564,6 +581,12 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
     return response;
   } finally {
     handle.cleanup();
+    measure('apiPublic.fetch', startedAt, {
+      method,
+      route: options.path,
+      network: getPublicRequestNetwork(options.query),
+      status: responseStatus,
+    });
   }
 }
 

@@ -3,7 +3,7 @@
  * Shows the words in the RecoveryPhraseGrid and provides copy + confirm actions.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -15,6 +15,7 @@ import { GlassInlineButton } from '@/components/ui/GlassInlineButton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
+import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -87,7 +88,7 @@ export default function BackupPhraseScreen(): React.JSX.Element {
       }
     }
 
-    const generationTask = InteractionManager.runAfterInteractions(() => {
+    const generationTask = scheduleUiWorkAfterFirstPaint(() => {
       if (!cancelled) {
         void generate();
       }
