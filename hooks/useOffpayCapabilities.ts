@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useIsFetching, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getCapabilities } from '@/lib/api/offpay-api-client';
@@ -9,11 +9,13 @@ import {
   CAPABILITIES_STALE_TIME_MS,
 } from '@/lib/api/offpay-capability-fallback';
 import { offpayCapabilitiesCacheKey } from '@/lib/api/offpay-dashboard-cache';
+import { offpayWalletDashboardBaseQueryKey } from '@/lib/api/offpay-wallet-query-keys';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { selectCapability } from '@/lib/api/offpay-capabilities';
 import { observeOfflineSupportedStablecoins } from '@/lib/offline/offline-token-metadata';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
+import { useWalletStore } from '@/store/walletStore';
 
 import type { CapabilitiesResponse, OffpayNetwork } from '@/types/offpay-api';
 
@@ -46,6 +48,11 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
   const { network, unsupportedReason } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended, networkTransitionVersion } =
     useOffpayNetworkAccess();
+  const walletAddress = useWalletStore((state) => state.publicKey);
+  const dashboardFetching =
+    useIsFetching({
+      queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+    }) > 0;
   const deferUntilAfterInteractions = options?.deferUntilAfterInteractions ?? false;
   const enabledByCaller = options?.enabled ?? true;
   const handledTransitionVersionRef = useRef(networkTransitionVersion);
@@ -92,7 +99,10 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
         timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
       });
     },
-    enabled: capabilityIdentity != null && readyCapabilityIdentity === capabilityIdentity,
+    enabled:
+      capabilityIdentity != null &&
+      readyCapabilityIdentity === capabilityIdentity &&
+      !dashboardFetching,
     staleTime: CAPABILITIES_STALE_TIME_MS,
     gcTime: CAPABILITIES_GC_TIME_MS,
     placeholderData: (previousData) =>
@@ -138,7 +148,7 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
       canUseNetwork &&
       network != null &&
       capabilities == null &&
-      !hasCapabilityError,
+      (!hasCapabilityError || dashboardFetching),
   };
 }
 

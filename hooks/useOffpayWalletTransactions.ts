@@ -1,12 +1,16 @@
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { getWalletTransactions } from '@/lib/api/offpay-api-client';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
+import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletTransactionsQueryKey,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -68,6 +72,10 @@ export function useOffpayWalletTransactions(options?: {
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
+  const dashboardFetching =
+    useIsFetching({
+      queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+    }) > 0;
   const capabilitiesQuery = useOffpayCapabilities({ enabled: enabledByCaller });
   const { capabilities } = capabilitiesQuery;
   const queryClient = useQueryClient();
@@ -90,6 +98,7 @@ export function useOffpayWalletTransactions(options?: {
     network != null &&
     enabledByCaller &&
     canUseNetwork &&
+    !dashboardFetching &&
     isOffpayFeatureAvailable(capabilities, 'wallet.transactions');
   const enabled = canFetchTransactions && interactionsSettled;
 
@@ -226,7 +235,8 @@ export function useOffpayWalletTransactions(options?: {
     network,
     capability,
     transactions,
-    isCapabilitiesPending: canUseNetwork && capabilitiesQuery.isCapabilitiesPending,
+    isCapabilitiesPending:
+      canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardFetching),
     isCapabilityEnabled: canFetchTransactions,
   };
 }

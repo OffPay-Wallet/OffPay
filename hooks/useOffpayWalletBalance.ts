@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useIsFetching, useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
@@ -9,7 +9,10 @@ import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
-import { offpayWalletBalanceQueryKey } from '@/lib/api/offpay-wallet-query-keys';
+import {
+  offpayWalletBalanceQueryKey,
+  offpayWalletDashboardBaseQueryKey,
+} from '@/lib/api/offpay-wallet-query-keys';
 import { observeOfflineTokenMetadataFromWalletBalance } from '@/lib/offline/offline-token-metadata';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -33,6 +36,10 @@ export function useOffpayWalletBalance(
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
   const enabledByCaller = options?.enabled ?? true;
+  const dashboardFetching =
+    useIsFetching({
+      queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+    }) > 0;
   const capabilitiesQuery = useOffpayCapabilities({
     deferUntilAfterInteractions: options?.deferCapabilitiesUntilAfterInteractions,
     enabled: enabledByCaller,
@@ -57,6 +64,7 @@ export function useOffpayWalletBalance(
     walletAddress != null &&
     network != null &&
     canUseNetwork &&
+    !dashboardFetching &&
     (capabilityAvailable ||
       (options?.eagerWithoutCapabilities === true &&
         capabilities == null &&
@@ -97,7 +105,8 @@ export function useOffpayWalletBalance(
     walletAddress,
     network,
     capability,
-    isCapabilitiesPending: canUseNetwork && capabilitiesQuery.isCapabilitiesPending,
+    isCapabilitiesPending:
+      canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardFetching),
     isCapabilityEnabled: capabilityAvailable || enabled,
   };
 }
