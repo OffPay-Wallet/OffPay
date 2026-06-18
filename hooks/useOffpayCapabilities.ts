@@ -102,8 +102,7 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
     retry: false,
   });
 
-  const isTransientCapabilityCancel =
-    query.isError && isCapabilityRequestCancellation(query.error);
+  const isTransientCapabilityCancel = query.isError && isCapabilityRequestCancellation(query.error);
   const hasCapabilityError = query.isError && !query.isFetching && !isTransientCapabilityCancel;
   const fallbackCapabilities = useMemo(() => {
     if (!hasCapabilityError || network == null || !enabledByCaller) return null;
