@@ -20,6 +20,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -367,40 +368,45 @@ export default function RootLayout(): React.JSX.Element | null {
   const providerRuntime = inAppLock ? 'lock' : 'full';
 
   return (
-    <AppProviders runtime={providerRuntime}>
-      <ThemeProvider value={OffPayTheme}>
-        <Animated.View style={[styles.appShell, rootRevealStyle]}>
-          {showGradient ? <GradientBackground /> : null}
-          <Stack screenOptions={globalScreenOptions}>
-            <Stack.Screen name="invite-code" />
-            <Stack.Screen name="onboarding" />
-            <Stack.Screen name="oauth/callback" options={createWalletScreenOptions} />
-            <Stack.Screen name="security-setup" options={createWalletScreenOptions} />
-            <Stack.Screen name="app-lock/passcode" />
-            <Stack.Screen name="username-setup" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="private-payment" options={privatePaymentScreenOptions} />
-            <Stack.Screen name="receive-payment" />
-            <Stack.Screen name="umbra-pending-claims" />
-            <Stack.Screen name="payroll-review" />
-            <Stack.Screen name="nearby-wallet-scanner" />
-            <Stack.Screen name="advanced-swap" options={advancedSwapScreenOptions} />
-            <Stack.Screen name="umbra-privacy" />
-            <Stack.Screen name="holdings" options={holdingsScreenOptions} />
-            <Stack.Screen name="token-details" />
-            <Stack.Screen name="accounts" />
-            <Stack.Screen name="create-wallet" options={createWalletScreenOptions} />
-            <Stack.Screen name="privy-wallet" options={createWalletScreenOptions} />
-            <Stack.Screen name="restore-wallet" options={createWalletScreenOptions} />
-          </Stack>
-          <StatusBar style="light" />
-        </Animated.View>
-      </ThemeProvider>
-    </AppProviders>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <AppProviders runtime={providerRuntime}>
+        <ThemeProvider value={OffPayTheme}>
+          <Animated.View style={[styles.appShell, rootRevealStyle]}>
+            {showGradient ? <GradientBackground /> : null}
+            <Stack screenOptions={globalScreenOptions}>
+              <Stack.Screen name="invite-code" />
+              <Stack.Screen name="onboarding" />
+              <Stack.Screen name="oauth/callback" options={createWalletScreenOptions} />
+              <Stack.Screen name="security-setup" options={createWalletScreenOptions} />
+              <Stack.Screen name="app-lock/passcode" />
+              <Stack.Screen name="username-setup" />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="private-payment" options={privatePaymentScreenOptions} />
+              <Stack.Screen name="receive-payment" />
+              <Stack.Screen name="umbra-pending-claims" />
+              <Stack.Screen name="payroll-review" />
+              <Stack.Screen name="nearby-wallet-scanner" />
+              <Stack.Screen name="advanced-swap" options={advancedSwapScreenOptions} />
+              <Stack.Screen name="umbra-privacy" />
+              <Stack.Screen name="holdings" options={holdingsScreenOptions} />
+              <Stack.Screen name="token-details" />
+              <Stack.Screen name="accounts" />
+              <Stack.Screen name="create-wallet" options={createWalletScreenOptions} />
+              <Stack.Screen name="privy-wallet" options={createWalletScreenOptions} />
+              <Stack.Screen name="restore-wallet" options={createWalletScreenOptions} />
+            </Stack>
+            <StatusBar style="light" />
+          </Animated.View>
+        </ThemeProvider>
+      </AppProviders>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   appShell: {
     flex: 1,
     minHeight: '100%',

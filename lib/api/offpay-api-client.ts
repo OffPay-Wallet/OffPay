@@ -789,6 +789,8 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
 
   const method = options.method ?? 'GET';
   const pathAndQuery = appendQuery(options.path, options.query);
+  const startedAt = mark();
+  let responseStatus: number | null = null;
   let authContext: StoredAuthContext;
 
   try {
@@ -831,14 +833,22 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
     const handle = withTimeout(options.signal);
     init.signal = handle.signal;
 
+    const fetchStartedAt = mark();
     try {
       const response = await fetch(buildUrl(pathAndQuery), init);
+      responseStatus = response.status;
       const payload = await parseJsonResponse(response);
       if (!response.ok) throwForErrorEnvelope(response.status, payload);
 
       return payload as T;
     } finally {
       handle.cleanup();
+      measure('apiAuth.request.fetch', fetchStartedAt, {
+        method,
+        route: options.path,
+        network: options.network,
+        status: responseStatus,
+      });
     }
   } catch (error) {
     if (
@@ -876,6 +886,12 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
     if (authContext.signingSeed != null) {
       zeroOutBytes(authContext.signingSeed);
     }
+    measure('apiAuth.request.total', startedAt, {
+      method,
+      route: options.path,
+      network: options.network,
+      status: responseStatus,
+    });
   }
 }
 
@@ -886,6 +902,8 @@ export async function offpayAuthenticatedFetch(
 
   const method = options.method ?? 'GET';
   const pathAndQuery = appendQuery(options.path, options.query);
+  const startedAt = mark();
+  let responseStatus: number | null = null;
   let authContext: StoredAuthContext;
 
   try {
@@ -936,8 +954,10 @@ export async function offpayAuthenticatedFetch(
       init.signal = handle.signal;
     }
 
+    const fetchStartedAt = mark();
     try {
       const response = await fetch(buildUrl(pathAndQuery), init);
+      responseStatus = response.status;
       if (!response.ok) {
         const payload = await parseJsonResponse(response);
         throwForErrorEnvelope(response.status, payload);
@@ -946,6 +966,12 @@ export async function offpayAuthenticatedFetch(
       return response;
     } finally {
       handle.cleanup();
+      measure('apiAuth.fetch.network', fetchStartedAt, {
+        method,
+        route: options.path,
+        network: options.network,
+        status: responseStatus,
+      });
     }
   } catch (error) {
     if (
@@ -979,6 +1005,12 @@ export async function offpayAuthenticatedFetch(
     if (authContext.signingSeed != null) {
       zeroOutBytes(authContext.signingSeed);
     }
+    measure('apiAuth.fetch.total', startedAt, {
+      method,
+      route: options.path,
+      network: options.network,
+      status: responseStatus,
+    });
   }
 }
 

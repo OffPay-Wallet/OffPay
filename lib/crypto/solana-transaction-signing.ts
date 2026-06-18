@@ -304,6 +304,7 @@ export async function signSerializedTransactionForWallet({
   walletAddress,
   walletId,
 }: SignSerializedTransactionParams): Promise<string> {
+  const startedAt = mark();
   const externalSigner = await getExternalSignerForStoredWallet(walletAddress, walletId);
   if (externalSigner != null) {
     await yieldToUi();
@@ -312,6 +313,7 @@ export async function signSerializedTransactionForWallet({
       walletAddress,
       signer: externalSigner,
     });
+    measure('txSign.serializedWithExternal', startedAt, { label: 'wallet transaction' });
     await yieldToEventLoop();
     return signedTransaction;
   }

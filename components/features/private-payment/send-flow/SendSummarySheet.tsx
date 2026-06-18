@@ -11,9 +11,8 @@
  *                 the same circle; the circle eases up and the txn
  *                 details fade in below, with a single Done action.
  *
- * Drag the grabber/sheet down to dismiss while reviewing (PanResponder
- * — works without a GestureHandlerRootView, which this app does not
- * mount). Dismiss is locked while sending.
+ * Drag the grabber/sheet down to dismiss while reviewing. Dismiss is
+ * locked while sending.
  */
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useRef, useState } from 'react';

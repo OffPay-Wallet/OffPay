@@ -1,8 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanResponder, StyleSheet, type StyleProp, View, type ViewStyle } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, type StyleProp, View, type ViewStyle } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -21,10 +23,6 @@ const COMPLETE_THRESHOLD = 0.68;
 const FAST_SWIPE_THRESHOLD = 0.46;
 const DRAG_GAIN = 1.08;
 const SLIDE_TIMING = { duration: 120, easing: Easing.out(Easing.cubic) };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max));
-}
 
 interface GlassSliderButtonProps {
   label: string;
@@ -52,8 +50,11 @@ export function GlassSliderButton({
   const [trackWidth, setTrackWidth] = useState(0);
   const [completionPending, setCompletionPending] = useState(false);
   const translateX = useSharedValue(0);
-  const startXRef = useRef(0);
-  const dragXRef = useRef(0);
+  const startX = useSharedValue(0);
+  const dragX = useSharedValue(0);
+  const maxTravelValue = useSharedValue(0);
+  const inactiveValue = useSharedValue(true);
+  const completedValue = useSharedValue(false);
   const completedRef = useRef(false);
   const maxTravel = Math.max(0, trackWidth - THUMB_SIZE - TRACK_PADDING * 2);
   const effectiveLoading = loading || completionPending;
@@ -65,6 +66,11 @@ export function GlassSliderButton({
     },
     [translateX],
   );
+
+  useEffect(() => {
+    maxTravelValue.value = maxTravel;
+    inactiveValue.value = inactive;
+  }, [inactive, inactiveValue, maxTravel, maxTravelValue]);
 
   useEffect(() => {
     if (!completionPending || loading || holdOnComplete) return;
@@ -80,127 +86,143 @@ export function GlassSliderButton({
 
   useEffect(() => {
     completedRef.current = false;
+    completedValue.value = false;
     setCompletionPending(false);
-    dragXRef.current = 0;
-    startXRef.current = 0;
+    dragX.value = 0;
+    startX.value = 0;
     if (!loading) {
       animateThumb(0);
     }
-  }, [animateThumb, loading, resetSignal]);
+  }, [animateThumb, completedValue, dragX, loading, resetSignal, startX]);
 
   useEffect(() => {
     if (effectiveLoading) {
+      dragX.value = maxTravel;
       animateThumb(maxTravel);
       return;
     }
 
     completedRef.current = false;
-    dragXRef.current = 0;
-    startXRef.current = 0;
+    completedValue.value = false;
+    dragX.value = 0;
+    startX.value = 0;
     animateThumb(0);
-  }, [animateThumb, effectiveLoading, maxTravel]);
+  }, [animateThumb, completedValue, dragX, effectiveLoading, maxTravel, startX]);
 
   const complete = useCallback((): void => {
     if (completedRef.current) return;
     completedRef.current = true;
-    dragXRef.current = maxTravel;
+    completedValue.value = true;
+    dragX.value = maxTravel;
     setCompletionPending(true);
     animateThumb(maxTravel);
     onComplete();
-  }, [animateThumb, maxTravel, onComplete]);
+  }, [animateThumb, completedValue, dragX, maxTravel, onComplete]);
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => !inactive,
-        onStartShouldSetPanResponderCapture: () => !inactive,
-        onMoveShouldSetPanResponder: () => !inactive,
-        onMoveShouldSetPanResponderCapture: () => !inactive,
-        onPanResponderGrant: () => {
-          startXRef.current = dragXRef.current;
-        },
-        onPanResponderMove: (_, gestureState) => {
-          if (inactive) return;
-          const nextX = clamp(startXRef.current + gestureState.dx * DRAG_GAIN, 0, maxTravel);
-          dragXRef.current = nextX;
-          translateX.value = nextX;
-        },
-        onPanResponderRelease: (_, gestureState) => {
-          if (inactive) return;
-          const fastEnough =
-            gestureState.vx > 0.85 && dragXRef.current >= maxTravel * FAST_SWIPE_THRESHOLD;
-          if (fastEnough || dragXRef.current >= maxTravel * COMPLETE_THRESHOLD) {
-            complete();
-            return;
-          }
+  const panGesture = Gesture.Pan()
+    .enabled(!inactive)
+    .minDistance(0)
+    .shouldCancelWhenOutside(false)
+    .onBegin(() => {
+      if (inactiveValue.value) return;
+      startX.value = dragX.value;
+    })
+    .onUpdate((event) => {
+      if (inactiveValue.value || completedValue.value) return;
+      const nextX = Math.max(
+        0,
+        Math.min(maxTravelValue.value, startX.value + event.translationX * DRAG_GAIN),
+      );
+      dragX.value = nextX;
+      translateX.value = nextX;
+    })
+    .onEnd((event) => {
+      if (inactiveValue.value || completedValue.value) return;
+      const maxX = maxTravelValue.value;
+      const fastEnough = event.velocityX > 850 && dragX.value >= maxX * FAST_SWIPE_THRESHOLD;
+      if (fastEnough || dragX.value >= maxX * COMPLETE_THRESHOLD) {
+        completedValue.value = true;
+        dragX.value = maxX;
+        translateX.value = withTiming(maxX, SLIDE_TIMING);
+        runOnJS(complete)();
+        return;
+      }
 
-          dragXRef.current = 0;
-          animateThumb(0);
-        },
-        onPanResponderTerminate: () => {
-          if (completedRef.current) return;
-          dragXRef.current = 0;
-          animateThumb(0);
-        },
-        onPanResponderTerminationRequest: () => false,
-        onShouldBlockNativeResponder: () => true,
-      }),
-    [animateThumb, complete, inactive, maxTravel, translateX],
-  );
+      dragX.value = 0;
+      translateX.value = withTiming(0, SLIDE_TIMING);
+    })
+    .onFinalize(() => {
+      if (inactiveValue.value || completedValue.value) return;
+      dragX.value = 0;
+      translateX.value = withTiming(0, SLIDE_TIMING);
+    });
 
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
 
   const fillStyle = useAnimatedStyle(() => ({
-    width: Math.min(trackWidth, TRACK_PADDING * 2 + THUMB_SIZE + translateX.value),
+    transform: [
+      {
+        translateX:
+          (Math.min(trackWidth, TRACK_PADDING * 2 + THUMB_SIZE + translateX.value) - trackWidth) /
+          2,
+      },
+      {
+        scaleX:
+          trackWidth > 0
+            ? Math.min(trackWidth, TRACK_PADDING * 2 + THUMB_SIZE + translateX.value) / trackWidth
+            : 0,
+      },
+    ],
   }));
 
   return (
-    <View
-      style={[
-        styles.track,
-        showDangerFeedback && styles.trackDanger,
-        style,
-        disabled && !effectiveLoading && !showDangerFeedback && styles.trackDisabled,
-      ]}
-      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-      accessibilityRole="adjustable"
-      accessibilityState={{ disabled, busy: effectiveLoading }}
-      accessibilityLabel={effectiveLoading ? loadingLabel : label}
-      {...panResponder.panHandlers}
-    >
-      {showDangerFeedback ? null : (
-        <Animated.View pointerEvents="none" style={[styles.activeFill, fillStyle]} />
-      )}
-      <Text
-        variant="button"
-        color={
-          showDangerFeedback
-            ? colors.semantic.error
-            : disabled && !effectiveLoading
-              ? colors.text.tertiary
-              : colors.text.primary
-        }
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.72}
-        style={[styles.label, showDangerFeedback && styles.labelDanger]}
+    <GestureDetector gesture={panGesture}>
+      <View
+        style={[
+          styles.track,
+          showDangerFeedback && styles.trackDanger,
+          style,
+          disabled && !effectiveLoading && !showDangerFeedback && styles.trackDisabled,
+        ]}
+        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+        accessibilityRole="adjustable"
+        accessibilityState={{ disabled, busy: effectiveLoading }}
+        accessibilityLabel={effectiveLoading ? loadingLabel : label}
       >
-        {effectiveLoading ? loadingLabel : label}
-      </Text>
-      <Animated.View style={[styles.thumb, showDangerFeedback && styles.thumbDanger, thumbStyle]}>
-        <View style={styles.thumbSurface}>
-          {effectiveLoading ? (
-            <LazyLoadingSpinner size={26} color={colors.brand.deepShadow} />
-          ) : showDangerFeedback ? (
-            <Ionicons name="alert-circle-outline" size={24} color={colors.semantic.error} />
-          ) : (
-            <Ionicons name="arrow-forward" size={24} color={colors.brand.deepShadow} />
-          )}
-        </View>
-      </Animated.View>
-    </View>
+        {showDangerFeedback ? null : (
+          <Animated.View pointerEvents="none" style={[styles.activeFill, fillStyle]} />
+        )}
+        <Text
+          variant="button"
+          color={
+            showDangerFeedback
+              ? colors.semantic.error
+              : disabled && !effectiveLoading
+                ? colors.text.tertiary
+                : colors.text.primary
+          }
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.72}
+          style={[styles.label, showDangerFeedback && styles.labelDanger]}
+        >
+          {effectiveLoading ? loadingLabel : label}
+        </Text>
+        <Animated.View style={[styles.thumb, showDangerFeedback && styles.thumbDanger, thumbStyle]}>
+          <View style={styles.thumbSurface}>
+            {effectiveLoading ? (
+              <LazyLoadingSpinner size={26} color={colors.brand.deepShadow} />
+            ) : showDangerFeedback ? (
+              <Ionicons name="alert-circle-outline" size={24} color={colors.semantic.error} />
+            ) : (
+              <Ionicons name="arrow-forward" size={24} color={colors.brand.deepShadow} />
+            )}
+          </View>
+        </Animated.View>
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -236,6 +258,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     left: 0,
+    width: '100%',
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',

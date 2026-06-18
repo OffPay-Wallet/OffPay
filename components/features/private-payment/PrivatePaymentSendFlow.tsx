@@ -42,6 +42,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useMagicBlockPrivatePaymentFeeEstimate } from '@/hooks/useMagicBlockPrivatePaymentFeeEstimate';
 import { useNormalTransferFeeEstimate } from '@/hooks/useNormalTransferFeeEstimate';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -590,13 +591,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           ? 'Umbra private P2P'
           : 'Normal transfer';
 
-  // Live network-fee estimate using getFeeForMessage on the actual
-  // compiled message. We only run it for the normal route — the
-  // private routes wrap the transfer in additional program calls
-  // whose fee is computed by the corresponding backend at submit
-  // time. For the normal route this is the exact SOL the cluster
-  // will charge.
-  const feeEstimateEnabled =
+  // Live network-fee estimates use getFeeForMessage on the exact
+  // transaction message for the selected route. Normal transfers
+  // compile locally; MagicBlock private sends prepare an unsigned
+  // transaction through the worker, verify it locally, then price
+  // that message before the user slides.
+  const normalFeeEstimateEnabled =
     effectiveWalletMode !== 'offline' && effectivePaymentRoute === 'normal';
   const normalFeeEstimate = useNormalTransferFeeEstimate({
     walletAddress,
@@ -605,20 +605,53 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     rawAmount: amountRaw,
     decimals: selectedToken?.decimals ?? null,
     network,
-    enabled: feeEstimateEnabled,
+    enabled: normalFeeEstimateEnabled,
+  });
+  const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
+    walletAddress,
+    recipient: effectiveRecipientAddress,
+    mint: selectedToken?.mint ?? null,
+    rawAmount: amountRaw,
+    network,
+    enabled:
+      step === 'summary' &&
+      effectiveWalletMode !== 'offline' &&
+      effectivePaymentRoute === 'magicblock' &&
+      selectedToken != null &&
+      effectiveRecipientAddress != null &&
+      amountRaw != null &&
+      walletAddress != null &&
+      walletId != null &&
+      network != null &&
+      !offlineSending &&
+      !normalSending &&
+      !privateSending,
   });
   const networkFeeLabel = useMemo(() => {
     if (effectiveWalletMode === 'offline') return 'Paid at settlement';
-    if (effectivePaymentRoute !== 'normal') return 'Calculated on submit';
-    if (normalFeeEstimate.estimate?.lamports != null) {
-      return `${formatLamportsAsSol(normalFeeEstimate.estimate.lamports, 9)} SOL`;
+    if (effectivePaymentRoute === 'normal') {
+      if (normalFeeEstimate.estimate?.lamports != null) {
+        return `${formatLamportsAsSol(normalFeeEstimate.estimate.lamports, 9)} SOL`;
+      }
+      if (normalFeeEstimate.isFetching) return 'Estimating';
+      if (normalFeeEstimate.isError) return 'Fee unavailable';
+      return 'Fee unavailable';
     }
-    if (normalFeeEstimate.isFetching) return 'Estimating';
-    if (normalFeeEstimate.isError) return 'Calculated on submit';
-    return 'Calculated on submit';
+    if (effectivePaymentRoute === 'magicblock') {
+      if (magicBlockFeeEstimate.plan?.feeLamports != null) {
+        return `${formatLamportsAsSol(magicBlockFeeEstimate.plan.feeLamports, 9)} SOL`;
+      }
+      if (magicBlockFeeEstimate.isFetching) return 'Estimating';
+      if (magicBlockFeeEstimate.isError) return 'Fee unavailable';
+      return 'Fee unavailable';
+    }
+    return 'Fee unavailable';
   }, [
     effectivePaymentRoute,
     effectiveWalletMode,
+    magicBlockFeeEstimate.isError,
+    magicBlockFeeEstimate.isFetching,
+    magicBlockFeeEstimate.plan,
     normalFeeEstimate.estimate,
     normalFeeEstimate.isError,
     normalFeeEstimate.isFetching,
@@ -1674,6 +1707,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
                   amount: amountRaw,
                   mint: selectedToken.mint,
                   network,
+                  preparedPlan: submitRoute === 'magicblock' ? magicBlockFeeEstimate.plan : null,
                 });
 
                 return {
@@ -1787,6 +1821,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     effectiveWalletMode,
     effectiveRecipientAddress,
     endSubmit,
+    magicBlockFeeEstimate.plan,
     network,
     offlineRecipientBleName,
     offlinePaymentSlots.targetSlotCount,
