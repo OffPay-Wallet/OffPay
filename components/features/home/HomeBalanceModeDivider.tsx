@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
@@ -43,6 +43,85 @@ const THUMB_TIMING: WithTimingConfig = {
   duration: 220,
   easing: Easing.out(Easing.cubic),
 };
+
+const ModeSegment = memo(function ModeSegment({
+  mode,
+  selected,
+  segmentHeight,
+  labelFontSize,
+  labelLineHeight,
+  onSelect,
+  onShieldedPressIn,
+}: {
+  mode: (typeof MODES)[number];
+  selected: boolean;
+  segmentHeight: number;
+  labelFontSize: number;
+  labelLineHeight: number;
+  onSelect: (mode: HomeBalanceMode) => void;
+  onShieldedPressIn?: () => void;
+}): React.JSX.Element {
+  const [pressed, setPressed] = useState(false);
+
+  const resetPressed = useCallback((): void => {
+    setPressed(false);
+  }, []);
+
+  const handlePressIn = useCallback((): void => {
+    setPressed(true);
+    if (mode.id === 'shielded') {
+      onShieldedPressIn?.();
+    }
+  }, [mode.id, onShieldedPressIn]);
+
+  const handlePress = useCallback((): void => {
+    resetPressed();
+    if (!selected) {
+      onSelect(mode.id);
+    }
+  }, [mode.id, onSelect, resetPressed, selected]);
+
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      accessibilityLabel={mode.accessibilityLabel}
+      onPressIn={handlePressIn}
+      onPressOut={resetPressed}
+      onPress={handlePress}
+      onResponderTerminate={resetPressed}
+      onResponderTerminationRequest={() => true}
+      hitSlop={6}
+      style={[
+        styles.segment,
+        {
+          minHeight: segmentHeight,
+          borderRadius: segmentHeight / 2,
+        },
+        pressed && !selected ? styles.segmentPressed : undefined,
+      ]}
+    >
+      <Text
+        variant="button"
+        color={selected ? colors.text.primary : colors.text.tertiary}
+        style={[
+          styles.segmentText,
+          selected ? styles.segmentTextSelected : undefined,
+          {
+            fontSize: labelFontSize,
+            lineHeight: labelLineHeight,
+          },
+        ]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        maxFontSizeMultiplier={1.1}
+      >
+        {mode.label}
+      </Text>
+    </Pressable>
+  );
+});
 
 function modeIndex(mode: HomeBalanceMode): number {
   for (let i = 0; i < MODES.length; i += 1) {
@@ -164,46 +243,17 @@ export function HomeBalanceModeDivider({
               ))
             : MODES.map((mode) => {
                 const selected = selectedMode === mode.id;
-                const handlePressIn = mode.id === 'shielded' ? onShieldedPressIn : undefined;
                 return (
-                  <Pressable
+                  <ModeSegment
                     key={mode.id}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={mode.accessibilityLabel}
-                    onPressIn={handlePressIn}
-                    onPress={() => {
-                      if (!selected) handleSelect(mode.id);
-                    }}
-                    hitSlop={6}
-                    style={({ pressed }) => [
-                      styles.segment,
-                      {
-                        minHeight: segmentHeight,
-                        borderRadius: segmentHeight / 2,
-                      },
-                      pressed && !selected ? styles.segmentPressed : undefined,
-                    ]}
-                  >
-                    <Text
-                      variant="button"
-                      color={selected ? colors.text.primary : colors.text.tertiary}
-                      style={[
-                        styles.segmentText,
-                        selected ? styles.segmentTextSelected : undefined,
-                        {
-                          fontSize: labelFontSize,
-                          lineHeight: labelLineHeight,
-                        },
-                      ]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.82}
-                      maxFontSizeMultiplier={1.1}
-                    >
-                      {mode.label}
-                    </Text>
-                  </Pressable>
+                    mode={mode}
+                    selected={selected}
+                    segmentHeight={segmentHeight}
+                    labelFontSize={labelFontSize}
+                    labelLineHeight={labelLineHeight}
+                    onSelect={handleSelect}
+                    onShieldedPressIn={onShieldedPressIn}
+                  />
                 );
               })}
         </View>

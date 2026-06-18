@@ -7,7 +7,7 @@
  *   - verified ticks from API/provider metadata
  *   - real token valuation labels when price data is available
  */
-import { memo } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -77,6 +77,7 @@ const TokenRow = memo(function TokenRow({
   privacyHidden: boolean;
   valuation?: TokenValuationView;
 }): React.JSX.Element {
+  const [pressed, setPressed] = useState(false);
   const amountLabel = privacyHidden ? '****' : `${holding.balance} ${holding.symbol}`;
   const fiatValueLabel = privacyHidden
     ? '****'
@@ -90,18 +91,39 @@ const TokenRow = memo(function TokenRow({
       : null;
   const iconSize = dense ? 30 : compact ? 32 : 38;
   const valueColumnWidth = dense ? 90 : compact ? 112 : 136;
+  const interactive = onPress != null;
+
+  const resetPressed = useCallback((): void => {
+    setPressed(false);
+  }, []);
+
+  const handlePressIn = useCallback((): void => {
+    if (!interactive) return;
+    setPressed(true);
+  }, [interactive]);
+
+  const handlePress = useCallback((): void => {
+    if (!interactive) return;
+    resetPressed();
+    onPress?.(holding);
+  }, [holding, interactive, onPress, resetPressed]);
 
   return (
     <Pressable
-      style={({ pressed }) => [
+      style={[
         styles.row,
         compact && styles.rowCompact,
         dense && styles.rowDense,
         !isLast && styles.rowBorder,
-        pressed && styles.rowPressed,
+        pressed && interactive && styles.rowPressed,
       ]}
-      onPress={() => onPress?.(holding)}
-      accessibilityRole="button"
+      disabled={!interactive}
+      onPressIn={interactive ? handlePressIn : undefined}
+      onPressOut={interactive ? resetPressed : undefined}
+      onPress={interactive ? handlePress : undefined}
+      onResponderTerminate={resetPressed}
+      onResponderTerminationRequest={() => true}
+      accessibilityRole={interactive ? 'button' : undefined}
       accessibilityLabel={`${holding.name} balance: ${privacyHidden ? 'hidden' : amountLabel}`}
     >
       <View

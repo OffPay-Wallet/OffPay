@@ -51,8 +51,11 @@ import {
   buildVisibleTokenHoldings,
   mapWalletTransactionForHistory,
   shortenWalletAddress,
+  walletTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
-import { formatLamportsAsExactSolLabel } from '@/lib/crypto/solana-amounts';
+import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
+import { formatAtomicAmount } from '@/lib/policy/token-amounts';
+import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { usePreferencesStore } from '@/store/preferencesStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
@@ -61,7 +64,7 @@ import type {
   ConvertedTokenPriceHistorySample,
   TokenPriceHistoryTimeframeId,
 } from '@/hooks/useOffpayTokenPriceHistory';
-import type { WalletTransactionsResponse } from '@/types/offpay-api';
+import type { OffpayNetwork, WalletTransactionsResponse } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const MAX_TOKEN_ACTIVITY_ROWS = 8;
@@ -121,42 +124,90 @@ function getTokenActionMint(holding: TokenHolding): string {
 }
 
 function transactionMatchesHolding(transaction: WalletTransaction, holding: TokenHolding): boolean {
-  const tokenMint = transaction.tokenMint?.trim() ?? null;
-  const tokenSymbol = normalizeSymbol(transaction.tokenSymbol);
-  const holdingSymbol = normalizeSymbol(holding.symbol);
-  const description = transaction.description ?? '';
+  return walletTransactionMatchesTokenFilter(transaction, {
+    mint: isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint,
+    symbol: holding.symbol,
+  });
+}
 
-  if (isNativeSolHolding(holding)) {
-    // The OffPay backend's RPC fallback (used on devnet and as the
-    // mainnet fallback when the wallet API is unavailable) does not
-    // surface a token mint or symbol for native SOL transfers — it
-    // only fills `description: 'Native token transfer'` with a
-    // type of `TRANSFER`. The mainnet enhanced API does populate
-    // the SOL mint string. Match all three shapes so SOL transfers
-    // surface in the SOL token-details view regardless of which
-    // upstream provider answered.
-    if (tokenMint === NATIVE_SOL_MINT) return true;
-    if (tokenSymbol === 'SOL') return true;
-    if (/\bSOL\b/i.test(description)) return true;
-    // Fallback for the RPC path: any transaction that *does not*
-    // have an SPL mint/symbol attached and is shaped like a transfer
-    // is a native SOL movement.
-    if (tokenMint == null && tokenSymbol.length === 0) {
-      const rawType = transaction.type?.toUpperCase() ?? '';
-      if (rawType === 'TRANSFER' || rawType === 'NATIVE_TRANSFER') return true;
-      if (
-        transaction.direction === 'send' ||
-        transaction.direction === 'receive' ||
-        transaction.amount?.trim() ||
-        transaction.rawAmount?.trim()
-      ) {
-        return true;
-      }
-    }
-    return false;
+function holdingSupportsPrivateSend(holding: TokenHolding, network: OffpayNetwork | null): boolean {
+  if (network == null) return false;
+  const mint = getTokenActionMint(holding);
+  return (
+    isSupportedStablecoinToken({
+      network,
+      token: mint,
+      symbol: holding.symbol,
+    }) || getUmbraTokenByMint(network, mint)?.mixer === true
+  );
+}
+
+function formatTokenDetailsAmount(value: string): string | null {
+  const normalized = value.trim().replace(/,/g, '');
+  if (!/^[+-]?\d+(?:\.\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 6,
+    minimumFractionDigits: 0,
+  }).format(Math.abs(parsed));
+}
+
+function recoverTokenActivityAmountLabel(
+  transaction: WalletTransaction,
+  holding: TokenHolding,
+  view: OffpayHistoryTransactionView,
+): string | null {
+  if (view.amountLabel != null || view.type === 'swap' || view.status === 'failed') {
+    return view.amountLabel;
   }
 
-  return tokenMint === holding.mint || tokenSymbol === holdingSymbol;
+  const amount =
+    transaction.amount == null || transaction.amount.trim().length === 0
+      ? null
+      : formatTokenDetailsAmount(transaction.amount);
+  const decimals =
+    typeof transaction.tokenDecimals === 'number' && transaction.tokenDecimals >= 0
+      ? Math.trunc(transaction.tokenDecimals)
+      : isNativeSolHolding(holding)
+        ? 9
+        : null;
+  const rawAmount =
+    amount == null &&
+    decimals != null &&
+    transaction.rawAmount != null &&
+    /^-?\d+$/.test(transaction.rawAmount.trim())
+      ? formatAtomicAmount(transaction.rawAmount, decimals, 6)
+      : null;
+  const displayAmount = amount ?? rawAmount;
+  if (displayAmount == null) return null;
+
+  return `${view.type === 'receive' ? '+' : '-'}${displayAmount} ${holding.symbol}`;
+}
+
+function enrichTokenActivityView(
+  transaction: WalletTransaction,
+  holding: TokenHolding,
+  view: OffpayHistoryTransactionView,
+): OffpayHistoryTransactionView {
+  const fallbackAccountAddress =
+    view.type === 'receive' ? transaction.sender?.trim() : transaction.recipient?.trim();
+  const detailAccountAddress =
+    view.detailAccountAddress ??
+    (fallbackAccountAddress != null && fallbackAccountAddress.length > 0
+      ? fallbackAccountAddress
+      : null);
+
+  return {
+    ...view,
+    amountLabel: recoverTokenActivityAmountLabel(transaction, holding, view),
+    tokenMint: view.tokenMint ?? getTokenActionMint(holding),
+    tokenSymbol: view.tokenSymbol ?? holding.symbol,
+    tokenName: view.tokenName ?? holding.name,
+    tokenLogo: view.tokenLogo ?? holding.logo,
+    detailAccountAddress,
+  };
 }
 
 function formatDateTime(timestampSeconds: number): string {
@@ -691,6 +742,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
   });
   const transactionsQuery = useOffpayWalletTransactions({
     deferUntilAfterInteractions: true,
+    refetchOnMount: 'always',
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
   const capabilitiesQuery = useOffpayCapabilities();
@@ -715,6 +767,8 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const valuation = holding == null ? null : (valuationQuery.data?.[holding.mint] ?? null);
   const mintForDisplay =
     holding == null ? requestedMint : isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
+  const selectedTokenSupportsPrivateSend =
+    holding != null && holdingSupportsPrivateSend(holding, capabilitiesQuery.network);
   const priceHistoryQuery = useOffpayTokenPriceHistory({
     mint: holding?.priceMint ?? null,
     symbol: holding?.symbol ?? null,
@@ -729,9 +783,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
     const items: TokenActivityItem[] = [];
     for (const transaction of transactionsQuery.transactions) {
       if (!transactionMatchesHolding(transaction, holding)) continue;
+      const view = mapWalletTransactionForHistory(transaction, null, transactionsQuery.network);
       items.push({
         transaction,
-        view: mapWalletTransactionForHistory(transaction, null, transactionsQuery.network),
+        view: enrichTokenActivityView(transaction, holding, view),
       });
       if (items.length >= MAX_TOKEN_ACTIVITY_ROWS) break;
     }
@@ -762,6 +817,9 @@ export function TokenDetailsScreen(): React.JSX.Element {
         searchParams.set('mode', 'send');
         searchParams.set('mint', holding.mint);
         searchParams.set('token', holding.symbol);
+        if (!selectedTokenSupportsPrivateSend) {
+          searchParams.set('route', 'normal');
+        }
         searchParams.set('advance', 'recipient');
         router.navigate(`/private-payment?${searchParams.toString()}` as never);
         return;
@@ -779,7 +837,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
       searchParams.set('inputSymbol', holding.symbol);
       router.navigate(`/(tabs)/swap?${searchParams.toString()}` as never);
     },
-    [holding, router],
+    [holding, router, selectedTokenSupportsPrivateSend],
   );
   const handleTokenActivityPress = useCallback(
     (transaction: OffpayHistoryTransactionView): void => {
@@ -892,7 +950,6 @@ export function TokenDetailsScreen(): React.JSX.Element {
                       }}
                       compact={compact}
                       tokenLogos={tokenLogoMap}
-                      metaLabel={`Fee ${formatLamportsAsExactSolLabel(transaction.fee)}`}
                       onPress={() => handleTokenActivityPress(view)}
                     />
                   ))}

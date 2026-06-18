@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
 
 import { PuffyReceiveArrowIcon } from '@/components/ui/icons/PuffyReceiveArrowIcon';
 import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
@@ -219,6 +220,7 @@ export function TransactionActivityRow({
   tokenLogos = {},
   metaLabel,
 }: TransactionActivityRowProps): React.JSX.Element {
+  const [pressed, setPressed] = useState(false);
   const amountLabel = privacyHidden ? '****' : tx.amountLabel;
   const secondaryAmountLabel = privacyHidden ? '****' : tx.secondaryAmountLabel;
   const visibleMetaLabel = privacyHidden ? '****' : metaLabel;
@@ -226,17 +228,37 @@ export function TransactionActivityRow({
   const amountColWidth = variant === 'home' ? (compact ? 82 : 96) : compact ? 104 : 118;
   const amountA11y =
     tx.amountLabel == null ? '' : ` ${privacyHidden ? 'amount hidden' : tx.amountLabel}`;
+  const interactive = onPress != null;
+
+  const resetPressed = useCallback((): void => {
+    setPressed(false);
+  }, []);
+
+  const handlePressIn = useCallback((): void => {
+    if (!interactive) return;
+    setPressed(true);
+  }, [interactive]);
+
+  const handlePress = useCallback((): void => {
+    if (!interactive) return;
+    resetPressed();
+    onPress?.(tx.id);
+  }, [interactive, onPress, resetPressed, tx.id]);
 
   return (
     <Pressable
-      style={({ pressed }) => [
+      style={[
         styles.shell,
         variant === 'home' && styles.shellHome,
-        pressed && onPress != null && styles.pressed,
+        pressed && interactive && styles.pressed,
       ]}
-      disabled={onPress == null}
-      onPress={() => onPress?.(tx.id)}
-      accessibilityRole={onPress == null ? undefined : 'button'}
+      disabled={!interactive}
+      onPressIn={interactive ? handlePressIn : undefined}
+      onPressOut={interactive ? resetPressed : undefined}
+      onPress={interactive ? handlePress : undefined}
+      onResponderTerminate={resetPressed}
+      onResponderTerminationRequest={() => true}
+      accessibilityRole={interactive ? 'button' : undefined}
       accessibilityLabel={`${tx.title}${amountA11y}. ${tx.subtitle}`}
     >
       <View

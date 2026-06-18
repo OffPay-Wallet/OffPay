@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
 interface LightweightKeypadButtonProps {
@@ -23,31 +23,50 @@ export const LightweightKeypadButton = memo(function LightweightKeypadButton({
   accessibilityLabel,
 }: LightweightKeypadButtonProps): React.JSX.Element {
   const handledPressInRef = useRef(false);
+  const [pressed, setPressed] = useState(false);
+
+  const resetPressState = useCallback((): void => {
+    handledPressInRef.current = false;
+    setPressed(false);
+  }, []);
 
   const handlePressIn = useCallback((): void => {
-    if (!activateOnPressIn || disabled) return;
+    if (disabled) return;
+    setPressed(true);
+    if (!activateOnPressIn) return;
     handledPressInRef.current = true;
     onPress();
   }, [activateOnPressIn, disabled, onPress]);
 
+  const handlePressOut = useCallback((): void => {
+    setPressed(false);
+  }, []);
+
   const handlePress = useCallback((): void => {
     if (activateOnPressIn && handledPressInRef.current) {
       handledPressInRef.current = false;
+      setPressed(false);
       return;
     }
+    setPressed(false);
     onPress();
   }, [activateOnPressIn, onPress]);
+
+  useEffect(() => {
+    if (disabled) {
+      resetPressState();
+    }
+  }, [disabled, resetPressState]);
 
   return (
     <View style={frameStyle}>
       <Pressable
-        style={({ pressed }) => [
-          styles.key,
-          muted && styles.keyMuted,
-          pressed && !disabled && styles.keyPressed,
-        ]}
+        style={[styles.key, muted && styles.keyMuted, pressed && !disabled && styles.keyPressed]}
         onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
         onPress={handlePress}
+        onResponderTerminate={resetPressState}
+        onResponderTerminationRequest={() => true}
         disabled={disabled}
         unstable_pressDelay={0}
         accessibilityRole={accessibilityRole}

@@ -478,6 +478,11 @@ interface TransactionTokenMetadata {
   logo: string | null;
 }
 
+export interface WalletTransactionTokenFilter {
+  mint: string | null | undefined;
+  symbol: string | null | undefined;
+}
+
 const TOKEN_AMOUNT_PATTERN = /([+-]?\d[\d,]*(?:\.\d+)?)\s+([A-Za-z][A-Za-z0-9]{1,15})/g;
 
 function normalizeTokenSymbol(symbol: string): string {
@@ -520,6 +525,57 @@ function resolveTransactionTokenName(
   if (trimmedName != null && trimmedName.length > 0) return trimmedName;
   if (symbol === NATIVE_SOL_SYMBOL) return NATIVE_SOL_NAME;
   return symbol;
+}
+
+function hasRawWalletTransactionAmountSignal(
+  transaction: WalletTransactionsResponse['transactions'][number],
+): boolean {
+  return Boolean(transaction.amount?.trim() || transaction.rawAmount?.trim());
+}
+
+function isNativeSolTransferDescription(description: string | null | undefined): boolean {
+  return description?.trim().toLowerCase() === 'native token transfer';
+}
+
+function isFeeOnlyDescription(description: string | null | undefined): boolean {
+  const normalized = description?.trim().toLowerCase();
+  if (normalized == null || !/\bfee\b/.test(normalized)) return false;
+  return !/\b(?:send|sent|receive|received|transfer|transferred|native)\b/.test(normalized);
+}
+
+export function walletTransactionMatchesTokenFilter(
+  transaction: WalletTransactionsResponse['transactions'][number],
+  filter: WalletTransactionTokenFilter,
+): boolean {
+  const transactionMint = normalizeTransactionTokenMint(transaction.tokenMint);
+  const transactionSymbol = resolveTransactionTokenSymbol(
+    transaction.tokenSymbol,
+    transaction.tokenMint,
+  );
+  const filterMint = normalizeTransactionTokenMint(filter.mint);
+  const filterSymbol = normalizeTokenSymbol(filter.symbol ?? '');
+  const filterIsNativeSol = isNativeSolMint(filter.mint) || filterSymbol === NATIVE_SOL_SYMBOL;
+
+  if (filterIsNativeSol) {
+    if (transactionMint === NATIVE_SOL_MINT) return true;
+    if (transactionSymbol === NATIVE_SOL_SYMBOL) return true;
+    if (transactionMint != null || transactionSymbol != null) return false;
+
+    const descriptionAmounts = parseTokenAmounts(transaction.description);
+    if (descriptionAmounts.some((amount) => amount.symbol === NATIVE_SOL_SYMBOL)) {
+      return !isFeeOnlyDescription(transaction.description);
+    }
+    if (descriptionAmounts.length > 0) return false;
+
+    if (isNativeSolTransferDescription(transaction.description)) return true;
+
+    return hasRawWalletTransactionAmountSignal(transaction);
+  }
+
+  return (
+    (filterMint != null && transactionMint === filterMint) ||
+    (filterSymbol.length > 0 && transactionSymbol === filterSymbol)
+  );
 }
 
 function normalizeTransactionTypeLabel(type: string): string {

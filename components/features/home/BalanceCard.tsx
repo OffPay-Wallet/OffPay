@@ -190,6 +190,38 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, ADDRESS_TRUNCATE_CHARS)}...${address.slice(-ADDRESS_TRUNCATE_CHARS)}`;
 }
 
+function useCancelSafePressed(disabled = false): {
+  pressed: boolean;
+  onPressIn: () => void;
+  onPressOut: () => void;
+  onResponderTerminate: () => void;
+} {
+  const [pressed, setPressed] = useState(false);
+
+  const resetPressed = useCallback((): void => {
+    setPressed(false);
+  }, []);
+
+  const handlePressIn = useCallback((): void => {
+    if (!disabled) {
+      setPressed(true);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    if (disabled) {
+      resetPressed();
+    }
+  }, [disabled, resetPressed]);
+
+  return {
+    pressed,
+    onPressIn: handlePressIn,
+    onPressOut: resetPressed,
+    onResponderTerminate: resetPressed,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -311,6 +343,11 @@ export function BalanceCard({
   const currencySheetBottomPadding = Math.max(insets.bottom, spacing.md) + spacing.md;
   const networkPillWidth = hasOfflineStatus ? (ultraCompact ? 50 : compact ? 58 : 76) : undefined;
   const currencyCode = selectedCurrency ?? 'USD';
+  const refreshDisabled = onRefresh == null || refreshing;
+  const addressPress = useCancelSafePressed(publicKey == null);
+  const refreshPress = useCancelSafePressed(refreshDisabled);
+  const privacyPress = useCancelSafePressed(onTogglePrivacy == null);
+  const currencyPress = useCancelSafePressed(false);
   const displayedNetworkLabel =
     ultraCompact && networkLabel != null ? networkLabel.replace(/net$/i, '').trim() : networkLabel;
   const displayedOfflineSlotsLabel =
@@ -400,12 +437,16 @@ export function BalanceCard({
                   </Text>
                   <View style={styles.topActions}>
                     <Pressable
-                      style={({ pressed }) => [
+                      style={[
                         styles.addressPill,
                         { height: topControlSize, maxWidth: addressPillMaxWidth },
-                        pressed && styles.controlPressed,
+                        addressPress.pressed && styles.controlPressed,
                       ]}
                       onPress={handleCopy}
+                      onPressIn={addressPress.onPressIn}
+                      onPressOut={addressPress.onPressOut}
+                      onResponderTerminate={addressPress.onResponderTerminate}
+                      onResponderTerminationRequest={() => true}
                       disabled={publicKey == null}
                       hitSlop={6}
                       accessibilityRole="button"
@@ -433,19 +474,23 @@ export function BalanceCard({
                       </View>
                     </Pressable>
                     <Pressable
-                      style={({ pressed }) => [
+                      style={[
                         styles.refreshButton,
                         { width: topControlSize, height: topControlSize },
-                        pressed && !refreshing && styles.controlPressed,
+                        refreshPress.pressed && !refreshing && styles.controlPressed,
                       ]}
                       onPress={onRefresh}
-                      disabled={onRefresh == null || refreshing}
+                      onPressIn={refreshPress.onPressIn}
+                      onPressOut={refreshPress.onPressOut}
+                      onResponderTerminate={refreshPress.onResponderTerminate}
+                      onResponderTerminationRequest={() => true}
+                      disabled={refreshDisabled}
                       hitSlop={6}
                       accessibilityRole="button"
                       accessibilityLabel="Refresh wallet data"
                       accessibilityState={{
                         busy: refreshing,
-                        disabled: onRefresh == null || refreshing,
+                        disabled: refreshDisabled,
                       }}
                     >
                       <View style={styles.iconControlGlass}>
@@ -636,12 +681,16 @@ export function BalanceCard({
                   >
                     <View style={styles.privacyCurrencyRow}>
                       <Pressable
-                        style={({ pressed }) => [
+                        style={[
                           styles.privacyButton,
                           { width: footerControlHeight, height: footerControlHeight },
-                          pressed && styles.controlPressed,
+                          privacyPress.pressed && styles.controlPressed,
                         ]}
                         onPress={onTogglePrivacy}
+                        onPressIn={privacyPress.onPressIn}
+                        onPressOut={privacyPress.onPressOut}
+                        onResponderTerminate={privacyPress.onResponderTerminate}
+                        onResponderTerminationRequest={() => true}
                         disabled={onTogglePrivacy == null}
                         hitSlop={6}
                         accessibilityRole="button"
@@ -662,12 +711,16 @@ export function BalanceCard({
                         </View>
                       </Pressable>
                       <Pressable
-                        style={({ pressed }) => [
+                        style={[
                           styles.currencyPill,
                           { width: currencyPillWidth, height: footerControlHeight },
-                          pressed && styles.controlPressed,
+                          currencyPress.pressed && styles.controlPressed,
                         ]}
                         onPress={() => setCurrencyMenuOpen(true)}
+                        onPressIn={currencyPress.onPressIn}
+                        onPressOut={currencyPress.onPressOut}
+                        onResponderTerminate={currencyPress.onResponderTerminate}
+                        onResponderTerminationRequest={() => true}
                         hitSlop={6}
                         accessibilityRole="button"
                         accessibilityLabel="Select display currency"

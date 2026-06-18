@@ -23,15 +23,15 @@ import type {
   WalletTransactionsResponse,
 } from '@/types/offpay-api';
 
-const CACHE_VERSION = 1;
-const CACHE_KEY_PREFIX = 'offpay_wallet_display_cache_v1';
+const CACHE_VERSION = 2;
+const CACHE_KEY_PREFIX = 'offpay_wallet_display_cache_v2';
 const MAX_CACHED_TOKENS = 24;
 const MAX_CACHED_TRANSACTIONS = 20;
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const cacheWriteLocks = new Map<string, Promise<void>>();
 
 interface WalletDisplayCache {
-  version: 1;
+  version: 2;
   walletAddress: string;
   network: OffpayNetwork;
   balance: WalletBalanceResponse | null;

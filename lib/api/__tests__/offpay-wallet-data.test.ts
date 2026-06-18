@@ -15,11 +15,17 @@ import {
   mapWalletTransactionForHistory,
   mapWalletTransactionForRecentActivity,
   shortenWalletAddress,
+  walletTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 
-import type { WalletActivityEvent, WalletBalanceResponse, WalletTransactionsResponse } from '@/types/offpay-api';
+import type {
+  WalletActivityEvent,
+  WalletBalanceResponse,
+  WalletTransactionsResponse,
+} from '@/types/offpay-api';
 
-const signature = '5r9jzD8fHa9eG4vAMcYQYV5spwG9R4VuYH9zJm7DYd6m8uDj7b4hyY3TwY2Nv4R8ydh7v7FGM5h7EJYvVx3sN4fQ';
+const signature =
+  '5r9jzD8fHa9eG4vAMcYQYV5spwG9R4VuYH9zJm7DYd6m8uDj7b4hyY3TwY2Nv4R8ydh7v7FGM5h7EJYvVx3sN4fQ';
 const nativeSolMint = 'So11111111111111111111111111111111111111112';
 
 function buildTransaction(
@@ -48,6 +54,79 @@ function buildActivityEvent(overrides: Partial<WalletActivityEvent> = {}): Walle
 }
 
 describe('offpay-wallet-data', () => {
+  it('does not match token transfers to SOL details just because SOL paid the network fee', () => {
+    const transaction = buildTransaction({
+      description: 'Sent 2 USDC to test wallet',
+      amount: null,
+      rawAmount: null,
+      tokenMint: null,
+      tokenSymbol: null,
+      direction: 'send',
+      fee: 41_800,
+    });
+
+    expect(
+      walletTransactionMatchesTokenFilter(transaction, {
+        mint: nativeSolMint,
+        symbol: 'SOL',
+      }),
+    ).toBe(false);
+  });
+
+  it('does not match fee-only SOL descriptions to SOL details', () => {
+    const transaction = buildTransaction({
+      description: 'Fee 0.0000418 SOL',
+      amount: null,
+      rawAmount: null,
+      tokenMint: null,
+      tokenSymbol: null,
+      direction: 'send',
+      fee: 41_800,
+    });
+
+    expect(
+      walletTransactionMatchesTokenFilter(transaction, {
+        mint: nativeSolMint,
+        symbol: 'SOL',
+      }),
+    ).toBe(false);
+  });
+
+  it('matches native SOL transfers in SOL details when the provider omits token metadata', () => {
+    const transaction = buildTransaction({
+      description: 'Native token transfer',
+      amount: null,
+      rawAmount: null,
+      tokenMint: null,
+      tokenSymbol: null,
+      direction: 'send',
+    });
+
+    expect(
+      walletTransactionMatchesTokenFilter(transaction, {
+        mint: nativeSolMint,
+        symbol: 'SOL',
+      }),
+    ).toBe(true);
+  });
+
+  it('matches explicit native SOL token metadata in SOL details', () => {
+    const transaction = buildTransaction({
+      description: null,
+      amount: null,
+      rawAmount: null,
+      tokenMint: nativeSolMint,
+      tokenSymbol: 'SOL',
+    });
+
+    expect(
+      walletTransactionMatchesTokenFilter(transaction, {
+        mint: 'native-sol',
+        symbol: 'SOL',
+      }),
+    ).toBe(true);
+  });
+
   it('uses configured token metadata when the provider only returns the mint', () => {
     const balance: WalletBalanceResponse = {
       address: 'CBbAfDh79oEhNn2ZouMi97Ek3y1vQYKuH5VbZqx3okMk',
@@ -737,7 +816,9 @@ describe('offpay-wallet-data', () => {
         description: null,
         tokenMint: null,
         tokenSymbol: null,
-        counterparties: [{ address: 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3', role: 'sender' }],
+        counterparties: [
+          { address: 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3', role: 'sender' },
+        ],
       }),
     ];
     const localReceipts = [
@@ -834,9 +915,11 @@ describe('offpay-wallet-data', () => {
       ],
     });
 
-    expect(isDisplayableWalletPaymentTransaction(
-      buildTransaction({ type: 'commit_state', description: 'Commit private payment state' }),
-    )).toBe(false);
+    expect(
+      isDisplayableWalletPaymentTransaction(
+        buildTransaction({ type: 'commit_state', description: 'Commit private payment state' }),
+      ),
+    ).toBe(false);
     expect(groups.flatMap((group) => group.data).map((item) => item.id)).toEqual([
       transferSignature,
     ]);

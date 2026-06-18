@@ -416,6 +416,23 @@ function readNonNegativeBigInt(value: unknown): bigint | null {
   return null;
 }
 
+function readBigInt(value: unknown): bigint | null {
+  if (typeof value === 'bigint') {
+    return value;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return BigInt(Math.trunc(value));
+  }
+
+  const trimmed = readTrimmedString(value);
+  if (trimmed != null && /^-?\d+$/.test(trimmed)) {
+    return BigInt(trimmed);
+  }
+
+  return null;
+}
+
 function readBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
@@ -2623,11 +2640,48 @@ function collectRpcParsedInstructions(
   return parsedInstructions;
 }
 
+function readAccountKeyAddress(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (!isRecord(value)) return null;
+  return readTrimmedString(value.pubkey) ?? readTrimmedString(value.account) ?? null;
+}
+
+function extractWalletNativeSolBalanceDelta(
+  result: Record<string, unknown>,
+  walletAddress: string,
+): bigint | null {
+  const transaction = isRecord(result.transaction) ? result.transaction : null;
+  const message = transaction && isRecord(transaction.message) ? transaction.message : null;
+  const accountKeys = message && Array.isArray(message.accountKeys) ? message.accountKeys : [];
+  const meta = isRecord(result.meta) ? result.meta : null;
+  const preBalances = meta && Array.isArray(meta.preBalances) ? meta.preBalances : [];
+  const postBalances = meta && Array.isArray(meta.postBalances) ? meta.postBalances : [];
+  const walletIndex = accountKeys.findIndex(
+    (accountKey) => readAccountKeyAddress(accountKey) === walletAddress,
+  );
+  if (walletIndex < 0) return null;
+
+  const preBalance = readBigInt(preBalances[walletIndex]);
+  const postBalance = readBigInt(postBalances[walletIndex]);
+  if (preBalance === null || postBalance === null) return null;
+
+  let rawDelta = postBalance - preBalance;
+  const fee = meta ? readNonNegativeBigInt(meta.fee) : null;
+  const feePayerAddress = readAccountKeyAddress(accountKeys[0]);
+  if (rawDelta < 0n && fee !== null && feePayerAddress === walletAddress) {
+    rawDelta += fee;
+  }
+
+  return rawDelta === 0n ? null : rawDelta;
+}
+
 function extractWalletNativeSolTransferDeltas(
   instructions: readonly unknown[],
   walletAddress: string,
+  result: Record<string, unknown>,
 ): TokenBalanceDelta[] {
   let rawDelta = 0n;
+  let sawWalletSystemTransfer = false;
 
   for (const instruction of instructions) {
     if (!isRecord(instruction)) {
@@ -2642,21 +2696,40 @@ function extractWalletNativeSolTransferDeltas(
       continue;
     }
 
+    const source = readTrimmedString(info.source);
+    const destination = readTrimmedString(info.destination);
+    const walletIsSource = source === walletAddress;
+    const walletIsDestination = destination === walletAddress;
+    if (!walletIsSource && !walletIsDestination) {
+      continue;
+    }
+
+    sawWalletSystemTransfer = true;
+
     const lamports = readNonNegativeBigInt(info.lamports);
     if (lamports === null || lamports === 0n) {
       continue;
     }
 
-    if (readTrimmedString(info.source) === walletAddress) {
+    if (walletIsSource) {
       rawDelta -= lamports;
     }
-    if (readTrimmedString(info.destination) === walletAddress) {
+    if (walletIsDestination) {
       rawDelta += lamports;
     }
   }
 
   if (rawDelta === 0n) {
-    return [];
+    if (!sawWalletSystemTransfer) {
+      return [];
+    }
+
+    const fallbackDelta = extractWalletNativeSolBalanceDelta(result, walletAddress);
+    if (fallbackDelta === null) {
+      return [];
+    }
+
+    rawDelta = fallbackDelta;
   }
 
   return [
@@ -2992,7 +3065,7 @@ async function buildRpcTransactionRecordFromResult(
 
   const tokenBalanceDeltas = [
     ...extractWalletTokenBalanceDeltas(meta, walletAddress),
-    ...extractWalletNativeSolTransferDeltas(parsedInstructions, walletAddress),
+    ...extractWalletNativeSolTransferDeltas(parsedInstructions, walletAddress, result),
   ];
   const tokenMetadata = await fetchTokenMetadataMap(
     bindings,

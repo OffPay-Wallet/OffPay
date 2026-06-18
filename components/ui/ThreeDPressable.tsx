@@ -26,6 +26,7 @@
  */
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -35,7 +36,7 @@ import Animated, {
 import { radii } from '@/constants/spacing';
 
 import type { ReactNode } from 'react';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GestureResponderEvent, ViewStyle, AccessibilityRole } from 'react-native';
 
 export interface ThreeDPressableProps {
@@ -120,28 +121,43 @@ export function ThreeDPressable({
 }: ThreeDPressableProps): React.JSX.Element {
   const offset = useSharedValue(0);
   const onPressRef = useRef(onPress);
+  const [pressed, setPressed] = useState(false);
   onPressRef.current = onPress;
 
   const animatedCapStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: offset.value }],
   }));
 
-  const handlePressIn = (): void => {
-    'worklet';
-    offset.value = withSpring(depth, pressSpring);
-  };
-
-  const handlePressOut = (): void => {
-    'worklet';
+  const resetPressState = useCallback((): void => {
+    setPressed(false);
+    cancelAnimation(offset);
     offset.value = withSpring(0, pressSpring);
-  };
+  }, [offset, pressSpring]);
+
+  const handlePressIn = useCallback((): void => {
+    if (disabled) return;
+    setPressed(true);
+    cancelAnimation(offset);
+    offset.value = withSpring(depth, pressSpring);
+  }, [depth, disabled, offset, pressSpring]);
+
+  const handlePressOut = useCallback((): void => {
+    resetPressState();
+  }, [resetPressState]);
 
   const handlePress = useCallback(
     (event: GestureResponderEvent) => {
+      resetPressState();
       onPressRef.current?.(event);
     },
-    [],
+    [resetPressState],
   );
+
+  useEffect(() => {
+    if (disabled) {
+      resetPressState();
+    }
+  }, [disabled, resetPressState]);
 
   return (
     <View style={[styles.frame, { paddingBottom: depth }, style]}>
@@ -188,13 +204,13 @@ export function ThreeDPressable({
           onPress={disabled ? undefined : handlePress}
           onPressIn={disabled ? undefined : handlePressIn}
           onPressOut={disabled ? undefined : handlePressOut}
-          style={({ pressed }) => [
+          onResponderTerminate={resetPressState}
+          onResponderTerminationRequest={() => true}
+          style={[
             styles.capInner,
             { borderRadius },
             capStyle,
-            pressed && pressedSurfaceColor
-              ? { backgroundColor: pressedSurfaceColor }
-              : null,
+            pressed && pressedSurfaceColor ? { backgroundColor: pressedSurfaceColor } : null,
           ]}
         >
           {children}

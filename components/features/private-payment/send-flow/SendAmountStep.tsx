@@ -256,7 +256,7 @@ export function SendAmountStep({
       {/* Route choice is embedded here so the user picks Normal vs.
           private route up front, rather than on a separate summary
           screen. Renders nothing when no route choice applies. */}
-      {routeOptions.length > 0 && selectedRoute != null ? (
+      {routeOptions.length > 1 && selectedRoute != null ? (
         <Animated.View layout={LinearTransition.duration(220)} style={styles.routeBlock}>
           <Text variant="small" color={colors.text.secondary} style={styles.routeBlockLabel}>
             Route

@@ -72,6 +72,38 @@ const HeaderWalletProfileIcon = memo(function HeaderWalletProfileIcon({
   );
 });
 
+function useCancelSafePressed(disabled = false): {
+  pressed: boolean;
+  onPressIn: () => void;
+  onPressOut: () => void;
+  onResponderTerminate: () => void;
+} {
+  const [pressed, setPressed] = useState(false);
+
+  const resetPressed = useCallback((): void => {
+    setPressed(false);
+  }, []);
+
+  const handlePressIn = useCallback((): void => {
+    if (!disabled) {
+      setPressed(true);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    if (disabled) {
+      resetPressed();
+    }
+  }, [disabled, resetPressed]);
+
+  return {
+    pressed,
+    onPressIn: handlePressIn,
+    onPressOut: resetPressed,
+    onResponderTerminate: resetPressed,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -172,6 +204,9 @@ function HomeHeaderComponent({
   const notificationSheetTopOffset =
     headerTopPadding + layout.minTouchTarget + spacing.xs + headerBottomGap + spacing.xs;
   const walletDisplayName = username != null ? `@${username}` : accountName;
+  const walletPress = useCancelSafePressed(onPressWalletDetails == null);
+  const faucetPress = useCancelSafePressed(faucetBusy || publicKey == null);
+  const notificationPress = useCancelSafePressed(false);
 
   useEffect(
     () => () => {
@@ -366,12 +401,16 @@ function HomeHeaderComponent({
         style={[styles.header, { paddingTop: headerTopPadding, marginBottom: headerBottomGap }]}
       >
         <Pressable
-          style={({ pressed }) => [
+          style={[
             styles.walletPressable,
             { marginRight: headerGap },
-            pressed ? styles.walletPressed : null,
+            walletPress.pressed ? styles.walletPressed : null,
           ]}
           onPress={onPressWalletDetails}
+          onPressIn={walletPress.onPressIn}
+          onPressOut={walletPress.onPressOut}
+          onResponderTerminate={walletPress.onResponderTerminate}
+          onResponderTerminationRequest={() => true}
           disabled={onPressWalletDetails == null}
           accessibilityRole="button"
           accessibilityLabel="Open accounts"
@@ -481,16 +520,20 @@ function HomeHeaderComponent({
 
           {showDevnetFaucet ? (
             <Pressable
-              style={({ pressed }) => [
+              style={[
                 styles.faucetTouch,
                 {
                   width: Math.max(layout.minTouchTarget, faucetWidth),
                   height: Math.max(layout.minTouchTarget, actionButtonSize),
                 },
-                pressed && !faucetBusy ? styles.actionControlPressed : null,
+                faucetPress.pressed && !faucetBusy ? styles.actionControlPressed : null,
                 faucetBusy || publicKey == null ? styles.faucetDisabled : null,
               ]}
               onPress={handleRequestDevnetAirdrop}
+              onPressIn={faucetPress.onPressIn}
+              onPressOut={faucetPress.onPressOut}
+              onResponderTerminate={faucetPress.onResponderTerminate}
+              onResponderTerminationRequest={() => true}
               disabled={faucetBusy || publicKey == null}
               hitSlop={6}
               accessibilityRole="button"
@@ -518,15 +561,19 @@ function HomeHeaderComponent({
           ) : null}
 
           <Pressable
-            style={({ pressed }) => [
+            style={[
               styles.notificationTouch,
               {
                 width: Math.max(layout.minTouchTarget, actionButtonSize),
                 height: Math.max(layout.minTouchTarget, actionButtonSize),
               },
-              pressed ? styles.actionControlPressed : null,
+              notificationPress.pressed ? styles.actionControlPressed : null,
             ]}
             onPress={handleOpenNotifications}
+            onPressIn={notificationPress.onPressIn}
+            onPressOut={notificationPress.onPressOut}
+            onResponderTerminate={notificationPress.onResponderTerminate}
+            onResponderTerminationRequest={() => true}
             hitSlop={6}
             accessibilityRole="button"
             accessibilityLabel="Notifications"
