@@ -11,6 +11,7 @@ import {
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -308,6 +309,10 @@ export function useOffpayWalletActivityStream(options?: {
     const invalidateWalletDataNow = () => {
       walletDataInvalidationTimerRef.current = null;
       lastWalletDataInvalidatedAtRef.current = Date.now();
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+        refetchType: 'active',
+      });
       void queryClient.invalidateQueries({
         queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
         refetchType: 'active',

@@ -6,8 +6,11 @@ workers_dev = true
 # and point ai.offpay.app to this Worker from the DNS/frontend host.
 # routes = [{ pattern = "ai.offpay.app", custom_domain = true }]
 
+[placement]
+mode = "smart"
+
 [observability]
-enabled = false
+enabled = true
 
 [vars]
 AI_PROXY_PRIVACY_MODE = "strict"

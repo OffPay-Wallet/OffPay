@@ -13,6 +13,7 @@ import {
 } from '@/hooks/useOfflinePaymentSlots';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
@@ -291,6 +292,9 @@ export function useSettlementEngine() {
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: pendingBackupQueueStatsQueryKey(wallet, activeNetwork),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: offpayWalletDashboardBaseQueryKey(wallet, activeNetwork),
         }),
         queryClient.invalidateQueries({
           queryKey: offpayWalletBalanceQueryKey(wallet, activeNetwork),

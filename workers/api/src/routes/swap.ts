@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getAuthenticatedContext } from '../lib/auth.js';
+import { getOrSetEdgeJsonCache } from '../lib/edge-cache.js';
 import { AppError } from '../lib/errors.js';
 import {
+  SWAP_TOKENS_CACHE_TTL_MS,
   createRecurringOrder,
   createSwapQuote,
   executeRecurringOrder,
@@ -334,7 +336,16 @@ const swapRoutes = new Hono<AppEnv>();
 swapRoutes.get('/tokens', async (context) => {
   const query = readSearchParams(context.req.url, swapTokensQuerySchema);
 
-  const response = context.json(await getSwapTokens(context.env, query.network));
+  const response = context.json(
+    await getOrSetEdgeJsonCache({
+      context,
+      namespace: 'swap_tokens',
+      keyParts: [query.network],
+      freshTtlMs: SWAP_TOKENS_CACHE_TTL_MS,
+      staleTtlMs: 10 * 60 * 1000,
+      resolver: () => getSwapTokens(context.env, query.network),
+    }),
+  );
   // The response is identical for every caller and only depends on the
   // requested network, so we let Cloudflare's edge cache it for as long as
   // the in-process `SWAP_TOKENS_CACHE_TTL_MS` (5 min) holds. SWR keeps the

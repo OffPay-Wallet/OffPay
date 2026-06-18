@@ -46,7 +46,10 @@ import {
   buildUmbraTransactionNotificationIdentifier,
   presentUmbraTransactionNotification,
 } from '@/lib/notifications/local-notifications';
-import { offpayWalletBalanceQueryKey } from '@/lib/api/offpay-wallet-query-keys';
+import {
+  offpayWalletDashboardBaseQueryKey,
+  offpayWalletBalanceQueryKey,
+} from '@/lib/api/offpay-wallet-query-keys';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
@@ -888,6 +891,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
       }
       void queryClient.invalidateQueries({
         queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
       });
       void queryClient.invalidateQueries({
         queryKey: offpayWalletBalanceQueryKey(walletAddress, network),

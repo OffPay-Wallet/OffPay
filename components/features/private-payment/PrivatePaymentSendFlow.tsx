@@ -70,6 +70,7 @@ import {
   shortenWalletAddress,
 } from '@/lib/api/offpay-wallet-data';
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
@@ -1595,6 +1596,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
 
           if (!mountedRef.current) return;
           void queryClient.invalidateQueries({
+            queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+            refetchType: 'active',
+          });
+          void queryClient.invalidateQueries({
             queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
             refetchType: 'active',
           });
@@ -1750,6 +1755,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           message: result.message,
         });
         void Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+            refetchType: 'active',
+          }),
           queryClient.invalidateQueries({
             queryKey: [
               'offpay',

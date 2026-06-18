@@ -1,25 +1,20 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
-import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
-import { getCapabilities } from '@/lib/api/offpay-api-client';
+import { getWalletDashboard } from '@/lib/api/offpay-api-client';
+import { hydrateOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
 import {
-  buildUnavailableCapabilities,
-  CAPABILITIES_FAST_TIMEOUT_MS,
-  CAPABILITIES_STALE_TIME_MS,
-} from '@/lib/api/offpay-capability-fallback';
-import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+  offpayWalletDashboardQueryKey,
+  WALLET_TRANSACTIONS_PAGE_SIZE,
+} from '@/lib/api/offpay-wallet-query-keys';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import {
-  hydrateWalletDisplayCacheIntoQueryClient,
-  prefetchWalletDisplayData,
-} from '@/lib/wallet/wallet-display-cache';
+import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
 import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
 import { useWalletStore, type WalletAccount } from '@/store/walletStore';
 
-import type { CapabilitiesResponse } from '@/types/offpay-api';
+import type { WalletDashboardResponse } from '@/types/offpay-api';
 
 function getActiveWallet(
   wallets: WalletAccount[],
@@ -104,7 +99,14 @@ export function useOffpayWalletWarmStart(): void {
         hydratedKeyRef.current = null;
       }
     };
-  }, [canUseNetwork, isNetworkAccessSuspended, network, queryClient, walletAddress, walletHydrated]);
+  }, [
+    canUseNetwork,
+    isNetworkAccessSuspended,
+    network,
+    queryClient,
+    walletAddress,
+    walletHydrated,
+  ]);
 
   useEffect(() => {
     if (!walletHydrated || walletAddress == null || network == null) return;
@@ -117,35 +119,24 @@ export function useOffpayWalletWarmStart(): void {
     scheduledPrefetchRef.current?.cancel();
     let cancelled = false;
 
-    void prefetchCapabilitiesInBackground({
-      queryClient,
-      walletAddress,
-      walletId,
-      network,
-    })
-      .then((capabilitiesResponse) => {
-        if (cancelled || capabilitiesResponse == null) return;
-
-        scheduledPrefetchRef.current = scheduleUiWorkAfterFirstPaint(
-          () => {
-            void prefetchWalletDisplayInBackground({
-              queryClient,
-              walletAddress,
-              network,
-              capabilities: capabilitiesResponse.capabilities,
-            });
-          },
-          {
-            timeoutMs: 1800,
-            fallbackDelayMs: 150,
-          },
-        );
-      })
-      .catch(() => {
-        if (!cancelled && prefetchedKeyRef.current === prefetchKey) {
-          prefetchedKeyRef.current = null;
-        }
-      });
+    scheduledPrefetchRef.current = scheduleUiWorkAfterFirstPaint(
+      () => {
+        void prefetchWalletDashboardInBackground({
+          queryClient,
+          walletAddress,
+          walletId,
+          network,
+        }).catch(() => {
+          if (!cancelled && prefetchedKeyRef.current === prefetchKey) {
+            prefetchedKeyRef.current = null;
+          }
+        });
+      },
+      {
+        timeoutMs: 1800,
+        fallbackDelayMs: 150,
+      },
+    );
 
     return () => {
       cancelled = true;
@@ -166,54 +157,53 @@ export function useOffpayWalletWarmStart(): void {
   ]);
 }
 
-async function prefetchCapabilitiesInBackground(params: {
+async function prefetchWalletDashboardInBackground(params: {
   queryClient: ReturnType<typeof useQueryClient>;
   walletAddress: string;
   walletId: string | null;
   network: NonNullable<ReturnType<typeof useOffpayNetwork>['network']>;
-}): Promise<CapabilitiesResponse | null> {
+}): Promise<WalletDashboardResponse | null> {
   if (params.walletAddress.length === 0 || params.walletId == null) return null;
 
-  const cached = params.queryClient.getQueryData<CapabilitiesResponse>(
-    offpayCapabilitiesQueryKey(params.network),
-  );
-  if (cached?.network === params.network) return cached;
-
-  try {
-    return await params.queryClient.fetchQuery({
-      queryKey: offpayCapabilitiesQueryKey(params.network),
-      queryFn: ({ signal }) =>
-        getCapabilities(params.network, {
-          signal,
-          timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
-        }),
-      staleTime: CAPABILITIES_STALE_TIME_MS,
-    });
-  } catch {
-    return buildUnavailableCapabilities(
+  const cached = params.queryClient.getQueryData<WalletDashboardResponse>(
+    offpayWalletDashboardQueryKey(
+      params.walletAddress,
       params.network,
-      'OffPay API capabilities were unavailable during wallet warm start.',
-    );
-  }
-}
-
-async function prefetchWalletDisplayInBackground(params: {
-  queryClient: ReturnType<typeof useQueryClient>;
-  walletAddress: string;
-  network: NonNullable<ReturnType<typeof useOffpayNetwork>['network']>;
-  capabilities: CapabilitiesResponse['capabilities'];
-}): Promise<void> {
-  try {
-    await prefetchWalletDisplayData({
+      WALLET_TRANSACTIONS_PAGE_SIZE,
+    ),
+  );
+  if (cached?.network === params.network && cached.address === params.walletAddress) {
+    hydrateOffpayWalletDashboard({
       queryClient: params.queryClient,
-      walletAddress: params.walletAddress,
-      network: params.network,
-      canFetchBalance: isOffpayFeatureAvailable(params.capabilities, 'wallet.balance'),
-      canFetchTransactions: isOffpayFeatureAvailable(params.capabilities, 'wallet.transactions'),
-      forceRefresh: false,
+      dashboard: cached,
+      limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    });
+    return cached;
+  }
+
+  try {
+    const dashboard = await params.queryClient.fetchQuery({
+      queryKey: offpayWalletDashboardQueryKey(
+        params.walletAddress,
+        params.network,
+        WALLET_TRANSACTIONS_PAGE_SIZE,
+      ),
+      queryFn: ({ signal }) =>
+        getWalletDashboard(params.walletAddress, params.network, {
+          signal,
+          limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+        }),
+      staleTime: 10 * 1000,
+    });
+    hydrateOffpayWalletDashboard({
+      queryClient: params.queryClient,
+      dashboard,
+      limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     });
     useOffpayLaunchStore.getState().setPortfolioPreloaded(Date.now());
+    return dashboard;
   } catch {
-    // The foreground queries keep their own retry/error handling.
+    // Foreground hooks still fetch capabilities, balance, and history directly.
+    return null;
   }
 }

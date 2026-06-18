@@ -52,6 +52,7 @@ import {
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -644,6 +645,9 @@ export function AdvancedSwapScreen(): React.JSX.Element {
   const invalidateWalletData = async () => {
     if (walletAddress == null || network == null) return;
     await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+      }),
       queryClient.invalidateQueries({
         queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
       }),

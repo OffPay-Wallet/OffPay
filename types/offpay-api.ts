@@ -169,6 +169,16 @@ export interface WalletTransactionsResponse {
   fetchedAt: number;
 }
 
+export interface WalletDashboardResponse {
+  network: OffpayNetwork;
+  address: string;
+  capabilities: CapabilitiesResponse;
+  streamCapabilities: StreamCapabilitiesResponse;
+  balance: WalletBalanceResponse;
+  transactions: WalletTransactionsResponse;
+  fetchedAt: number;
+}
+
 export interface StreamCapabilitiesResponse {
   network: OffpayNetwork;
   capabilities: {

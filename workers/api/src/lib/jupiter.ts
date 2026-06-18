@@ -260,6 +260,51 @@ function buildQuoteStateKey(quoteId: string): string {
   return `${QUOTE_STATE_KEY_PREFIX}:${quoteId}`;
 }
 
+function buildSwapTokenRegistryKey(network: Network): string {
+  return `swap-tokens:${network}:verified`;
+}
+
+function isSwapToken(value: unknown): value is SwapToken {
+  return (
+    isRecord(value) &&
+    typeof value.mint === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.symbol === 'string' &&
+    (typeof value.logo === 'string' || value.logo === null) &&
+    typeof value.decimals === 'number' &&
+    Number.isInteger(value.decimals) &&
+    value.verified === true
+  );
+}
+
+function isSwapTokensResponse(value: unknown): value is SwapTokensResponse {
+  return isRecord(value) && Array.isArray(value.tokens) && value.tokens.every(isSwapToken);
+}
+
+async function readHotSwapTokens(
+  bindings: Bindings,
+  network: Network,
+): Promise<SwapTokensResponse | null> {
+  const cache = bindings.TOKEN_REGISTRY_CACHE;
+  if (cache == null) return null;
+
+  const cached = await cache.get<unknown>(buildSwapTokenRegistryKey(network), 'json');
+  return isSwapTokensResponse(cached) ? cached : null;
+}
+
+async function writeHotSwapTokens(
+  bindings: Bindings,
+  network: Network,
+  payload: SwapTokensResponse,
+): Promise<void> {
+  const cache = bindings.TOKEN_REGISTRY_CACHE;
+  if (cache == null) return;
+
+  await cache.put(buildSwapTokenRegistryKey(network), JSON.stringify(payload), {
+    expirationTtl: 24 * 60 * 60,
+  });
+}
+
 function buildQuoteExecuteLockKey(quoteId: string): string {
   return `${QUOTE_EXECUTE_LOCK_KEY_PREFIX}:${quoteId}`;
 }
@@ -527,6 +572,9 @@ async function getSwapTokens(
   const cacheKey = createNetworkCacheKey(network, 'swap-tokens', ['verified']);
 
   return memoryCache.getOrSet(cacheKey, SWAP_TOKENS_CACHE_TTL_MS, async () => {
+    const hotRegistry = await readHotSwapTokens(bindings, network).catch(() => null);
+    if (hotRegistry != null) return hotRegistry;
+
     const { response, payload } = await fetchJupiterJson(
       bindings,
       `${readJupiterApiBaseUrl(bindings)}/tokens/v2/tag?query=verified`,
@@ -578,7 +626,9 @@ async function getSwapTokens(
       })
       .sort((left, right) => left.symbol.localeCompare(right.symbol));
 
-    return { tokens };
+    const result = { tokens };
+    await writeHotSwapTokens(bindings, network, result).catch(() => undefined);
+    return result;
   });
 }
 

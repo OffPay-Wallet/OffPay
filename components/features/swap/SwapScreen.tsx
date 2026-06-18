@@ -66,6 +66,7 @@ import {
 import { useWalletModeState } from '@/hooks/useWalletModeState';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -1098,6 +1099,9 @@ export function SwapScreen(): React.JSX.Element {
 
       void Promise.all([
         queryClient.invalidateQueries({
+          queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+        }),
+        queryClient.invalidateQueries({
           queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
         }),
         queryClient.invalidateQueries({
@@ -1235,6 +1239,9 @@ export function SwapScreen(): React.JSX.Element {
 
       if (walletAddress != null && network != null) {
         void Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+          }),
           queryClient.invalidateQueries({
             queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
           }),

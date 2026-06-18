@@ -23,6 +23,7 @@ import { agenticSendOutcomeSpeech } from '@/lib/agentic-payments/send-outcome-sp
 import { validateAgenticNormalSendDraft } from '@/lib/agentic-payments/normal-send';
 import { validateAgenticPrivateSendDraft } from '@/lib/agentic-payments/private-send';
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
@@ -541,6 +542,10 @@ function invalidateAfterTransfer({
 }: InvalidateAfterTransferParams): Promise<unknown> {
   if (network == null) return Promise.resolve();
   return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+      refetchType: 'active',
+    }),
     queryClient.invalidateQueries({
       queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
       refetchType: 'active',

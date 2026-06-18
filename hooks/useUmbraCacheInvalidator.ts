@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef } from 'react';
 
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -60,6 +61,10 @@ export function useUmbraCacheInvalidator() {
     ({ walletAddress, network }: ScheduleParams) => {
       if (walletAddress == null || network == null) return;
 
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
+        refetchType: 'active',
+      });
       void queryClient.invalidateQueries({
         queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
         refetchType: 'active',

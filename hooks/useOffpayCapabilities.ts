@@ -8,6 +8,7 @@ import {
   CAPABILITIES_GC_TIME_MS,
   CAPABILITIES_STALE_TIME_MS,
 } from '@/lib/api/offpay-capability-fallback';
+import { offpayCapabilitiesCacheKey } from '@/lib/api/offpay-dashboard-cache';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { selectCapability } from '@/lib/api/offpay-capabilities';
@@ -26,8 +27,20 @@ export const offpayCapabilitiesQueryKey = (
   walletAddress?: string | null,
 ) =>
   walletAddress == null
-    ? (['offpay', 'capabilities', network] as const)
+    ? offpayCapabilitiesCacheKey(network)
     : (['offpay', 'capabilities', network, walletAddress] as const);
+
+function isCapabilityRequestCancellation(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const name = error.name.toLowerCase();
+  const message = error.message.toLowerCase();
+  return (
+    name === 'aborterror' ||
+    message.includes('canceled') ||
+    message.includes('cancelled') ||
+    message.includes('aborted')
+  );
+}
 
 export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
   const { network, unsupportedReason } = useOffpayNetwork();
@@ -89,7 +102,9 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
     retry: false,
   });
 
-  const hasCapabilityError = query.isError && !query.isFetching;
+  const isTransientCapabilityCancel =
+    query.isError && isCapabilityRequestCancellation(query.error);
+  const hasCapabilityError = query.isError && !query.isFetching && !isTransientCapabilityCancel;
   const fallbackCapabilities = useMemo(() => {
     if (!hasCapabilityError || network == null || !enabledByCaller) return null;
     const message =

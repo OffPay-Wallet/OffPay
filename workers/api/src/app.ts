@@ -10,6 +10,7 @@ import {
   requestLoggingMiddleware,
   writeOperationalLog,
 } from './lib/logging';
+import { requestTimingMiddleware } from './lib/timing';
 import { getWorkerConfigStatus, toPublicWorkerConfigStatus } from './lib/config';
 import bootstrapRoutes from './routes/bootstrap';
 import capabilitiesRoutes from './routes/capabilities';
@@ -30,6 +31,7 @@ import type { AppEnv } from './lib/types';
 const app = new Hono<AppEnv>().basePath('/api');
 
 app.use('*', requestContextMiddleware);
+app.use('*', requestTimingMiddleware);
 app.use('*', secureHeaders());
 app.use('*', requestLoggingMiddleware);
 app.use('*', corsMiddleware);

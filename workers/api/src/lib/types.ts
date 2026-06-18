@@ -27,6 +27,20 @@ export type R2Bucket = {
   ): Promise<unknown>;
 };
 
+export interface KVNamespace {
+  get(key: string, type?: 'text'): Promise<string | null>;
+  get<T = unknown>(key: string, type: 'json'): Promise<T | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+export type RequestTimingMetric = {
+  name: string;
+  durationMs: number;
+};
+
+export type RequestCacheStatus = 'bypass' | 'miss' | 'hit' | 'stale' | 'refresh';
+
 export type Bindings = {
   NODE_ENV?: string;
   OFFPAY_ALLOWED_ORIGINS?: string;
@@ -73,6 +87,8 @@ export type Bindings = {
   OFFPAY_BACKUP_HMAC_SECRET: string;
   KV_REST_API_URL: string;
   KV_REST_API_TOKEN: string;
+  PRICE_CACHE?: KVNamespace;
+  TOKEN_REGISTRY_CACHE?: KVNamespace;
   PENDING_BACKUP_BUCKET?: R2Bucket;
   MAGICBLOCK_DEVNET_VALIDATORS: string;
   MAGICBLOCK_MAINNET_VALIDATORS: string;
@@ -87,6 +103,8 @@ export type Variables = {
   deviceId?: string;
   requestId?: string;
   requestStartedAt?: number;
+  requestTimings?: RequestTimingMetric[];
+  requestCacheStatus?: RequestCacheStatus;
 };
 
 export type AppEnv = {

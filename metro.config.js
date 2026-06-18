@@ -5,6 +5,9 @@ const exclusionListModule = require('metro-config/private/defaults/exclusionList
 const exclusionList = exclusionListModule.default ?? exclusionListModule;
 
 const config = getDefaultConfig(__dirname);
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const fromProjectRoot = (relativePath) =>
+  new RegExp(`${escapeRegExp(path.resolve(__dirname, relativePath))}(?:/.*)?$`);
 const sideEffectModuleBlockList = Object.fromEntries(
   [
     path.resolve(__dirname, 'lib/crypto/polyfills.ts'),
@@ -46,28 +49,34 @@ const NOBLE_HASHES_CRYPTO_TARGET = path.resolve(
 // file map. EAS upload is guarded separately by .easignore; this guard
 // prevents accidental runtime imports from reintroducing bulky assets.
 config.resolver.blockList = exclusionList([
-  /\/\.expo\/.*/,
-  /\/coverage\/.*/,
-  /\/dist\/.*/,
-  /\/web-build\/.*/,
-  /\/android\/app\/build\/.*/,
-  /\/android\/app\/\.cxx\/.*/,
-  /\/android\/build\/.*/,
-  /\/ios\/build\/.*/,
-  /\/workers\/.*/,
-  /\/documentation\/.*/,
-  /\/backend-docs\/.*/,
-  /\/client-docs\/.*/,
-  /\/applications\/.*/,
-  /\/umbra-reference\/.*/,
-  /\/assets\/AppIcons\/Assets\.xcassets\/.*/,
-  /\/assets\/AppIcons\/android\/.*/,
-  /\/assets\/onboarding_icons\/.*/,
-  /\/assets\/lotties\/ai-loader\.lottie$/,
-  /\/assets\/fonts\/Geist\/(?:otf|webfonts|variable)\/.*/,
-  /\/assets\/fonts\/GeistMono\/(?:otf|webfonts|variable)\/.*/,
-  /\/assets\/fonts\/Quicksand\/Quicksand-VariableFont_wght\.ttf$/,
-  /\/assets\/fonts\/cirka\/Cirka-Variable\.ttf$/,
+  fromProjectRoot('.expo'),
+  fromProjectRoot('coverage'),
+  fromProjectRoot('dist'),
+  fromProjectRoot('web-build'),
+  fromProjectRoot('android/app/build'),
+  fromProjectRoot('android/app/.cxx'),
+  fromProjectRoot('android/build'),
+  fromProjectRoot('ios/build'),
+  fromProjectRoot('workers'),
+  fromProjectRoot('documentation'),
+  fromProjectRoot('backend-docs'),
+  fromProjectRoot('client-docs'),
+  fromProjectRoot('applications'),
+  fromProjectRoot('umbra-reference'),
+  fromProjectRoot('assets/AppIcons/Assets.xcassets'),
+  fromProjectRoot('assets/AppIcons/android'),
+  fromProjectRoot('assets/onboarding_icons'),
+  new RegExp(`${escapeRegExp(path.resolve(__dirname, 'assets/lotties/ai-loader.lottie'))}$`),
+  new RegExp(
+    `${escapeRegExp(path.resolve(__dirname, 'assets/fonts/Geist'))}/(?:otf|webfonts|variable)/.*`,
+  ),
+  new RegExp(
+    `${escapeRegExp(path.resolve(__dirname, 'assets/fonts/GeistMono'))}/(?:otf|webfonts|variable)/.*`,
+  ),
+  new RegExp(
+    `${escapeRegExp(path.resolve(__dirname, 'assets/fonts/Quicksand/Quicksand-VariableFont_wght.ttf'))}$`,
+  ),
+  new RegExp(`${escapeRegExp(path.resolve(__dirname, 'assets/fonts/cirka/Cirka-Variable.ttf'))}$`),
 ]);
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {

@@ -1,6 +1,7 @@
 import { fetchAlchemyTokenUsdPrice, type AlchemyTokenPriceIdentifier } from './alchemy-prices.js';
 import { createCacheKey, memoryCache } from './cache.js';
 import { fetchUsdToCurrencyRate } from './fx-rates.js';
+import { HOT_PRICE_CACHE_KEY, type HotTokenPrices } from './hot-cache.js';
 import type { Bindings, Network } from './types.js';
 import { isValidSolanaAddress } from './validation.js';
 
@@ -45,6 +46,30 @@ function normalizePriceSymbol(value: string | null | undefined): string | null {
 
 function isUsdStablePriceSymbol(value: string): boolean {
   return USD_STABLE_PRICE_SYMBOLS.has(value.trim().toUpperCase());
+}
+
+function isHotTokenPrices(value: unknown): value is HotTokenPrices {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as { prices?: unknown; updatedAt?: unknown };
+  return (
+    typeof candidate.updatedAt === 'number' &&
+    typeof candidate.prices === 'object' &&
+    candidate.prices !== null &&
+    !Array.isArray(candidate.prices)
+  );
+}
+
+async function readHotUsdPrice(bindings: Bindings, symbol: string | null): Promise<number | null> {
+  const normalizedSymbol = normalizePriceSymbol(symbol);
+  if (bindings.PRICE_CACHE == null || normalizedSymbol == null) return null;
+
+  const cached = await bindings.PRICE_CACHE.get<unknown>(HOT_PRICE_CACHE_KEY, 'json').catch(
+    () => null,
+  );
+  if (!isHotTokenPrices(cached)) return null;
+
+  const price = cached.prices[normalizedSymbol];
+  return isPositiveUsdPrice(price) ? price : null;
 }
 
 function buildPriceLookups(
@@ -110,6 +135,12 @@ async function resolveTokenUsdPrice(
   if (isUsdStablePriceSymbol(token.priceSymbol)) {
     return 1;
   }
+
+  const hotPrice = await readHotUsdPrice(
+    bindings,
+    normalizePriceSymbol(token.priceSymbol) ?? normalizePriceSymbol(token.symbol),
+  );
+  if (hotPrice != null) return hotPrice;
 
   for (const lookup of buildPriceLookups({ ...token, network })) {
     try {

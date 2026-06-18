@@ -25,6 +25,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
+  offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -232,6 +233,9 @@ function HomeHeaderComponent({
         persistToNotificationCenter: false,
       });
 
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletDashboardBaseQueryKey(publicKey, 'devnet'),
+      });
       void queryClient.invalidateQueries({
         queryKey: offpayWalletBalanceQueryKey(publicKey, 'devnet'),
       });

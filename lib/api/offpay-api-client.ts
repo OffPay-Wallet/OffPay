@@ -116,6 +116,7 @@ import type {
   UmbraUtxosRequest,
   UmbraUtxosResponse,
   WalletBalanceResponse,
+  WalletDashboardResponse,
   WalletTransactionsResponse,
 } from '@/types/offpay-api';
 
@@ -1181,6 +1182,24 @@ export async function getWalletTransactions(
       address: walletAddress,
       network,
       cursor: options?.cursor,
+      limit: options?.limit,
+      useCache: options?.useCache,
+    },
+    signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
+  });
+}
+
+export async function getWalletDashboard(
+  walletAddress: string,
+  network: OffpayNetwork,
+  options?: { limit?: number; useCache?: boolean; signal?: AbortSignal },
+): Promise<WalletDashboardResponse> {
+  return offpayPublicRequest<WalletDashboardResponse>({
+    path: '/api/wallet/dashboard',
+    query: {
+      address: walletAddress,
+      network,
       limit: options?.limit,
       useCache: options?.useCache,
     },

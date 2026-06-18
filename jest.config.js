@@ -3,6 +3,7 @@ module.exports = {
   setupFiles: ['<rootDir>/jest.setup.ts'],
   setupFilesAfterEnv: ['<rootDir>/jest.after-env.ts'],
   moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
     '^@/(.*)$': '<rootDir>/$1',
     '^@solana/kit$': '<rootDir>/node_modules/@solana/kit/dist/index.node.cjs',
     '^@solana/kit/program-client-core$':

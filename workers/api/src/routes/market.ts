@@ -4,6 +4,7 @@ import {
   fetchAlchemyHistoricalTokenUsdPrices,
   fetchAlchemyTokenUsdPrice,
 } from '../lib/alchemy-prices.js';
+import { getOrSetEdgeJsonCache } from '../lib/edge-cache.js';
 import { fetchUsdToCurrencyRate } from '../lib/fx-rates.js';
 import { resolveTokenPriceBatch } from '../lib/market-valuation.js';
 import type { AppEnv } from '../lib/types.js';
@@ -54,11 +55,24 @@ const fxRateQuerySchema = z.object({
   currency: z.string().trim().min(3).max(3),
 });
 
+const FX_RATE_EDGE_FRESH_TTL_MS = 5 * 60 * 1000;
+const FX_RATE_EDGE_STALE_TTL_MS = 30 * 60 * 1000;
+
 const marketRoutes = new Hono<AppEnv>();
 
 marketRoutes.get('/fx-rate', async (context) => {
   const query = readSearchParams(context.req.url, fxRateQuerySchema);
-  const response = context.json(await fetchUsdToCurrencyRate(query.currency));
+  const currency = query.currency.trim().toUpperCase();
+  const response = context.json(
+    await getOrSetEdgeJsonCache({
+      context,
+      namespace: 'fx_rate',
+      keyParts: [currency],
+      freshTtlMs: FX_RATE_EDGE_FRESH_TTL_MS,
+      staleTtlMs: FX_RATE_EDGE_STALE_TTL_MS,
+      resolver: () => fetchUsdToCurrencyRate(currency),
+    }),
+  );
   response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=1800');
   return response;
 });

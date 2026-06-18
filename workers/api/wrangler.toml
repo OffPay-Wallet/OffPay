@@ -17,6 +17,22 @@ mode = "smart"
 [observability]
 enabled = true
 
+[triggers]
+crons = ["* * * * *"]
+
+# Optional native KV hot caches. Create these namespaces in Cloudflare and
+# paste the generated IDs here before enabling the bindings.
+# npx wrangler kv namespace create PRICE_CACHE --config workers/api/wrangler.toml
+# npx wrangler kv namespace create TOKEN_REGISTRY_CACHE --config workers/api/wrangler.toml
+
+[[kv_namespaces]]
+binding = "PRICE_CACHE"
+id = "a774cc121b964536aeea82f42e0ff4c3"
+
+[[kv_namespaces]]
+binding = "TOKEN_REGISTRY_CACHE"
+id = "dc1e56579a7145989f69bc34a8b069d4"
+
 # Set credentials with `npx wrangler secret put <NAME>`.
 # Generate OFFPAY_* secrets with `openssl rand -hex 32`.
 # npx wrangler secret put HELIUS_DEVNET_API_KEY

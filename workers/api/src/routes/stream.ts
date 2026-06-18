@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { PublicKey } from '@solana/web3.js';
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 import { z } from 'zod';
+import { getOrSetEdgeJsonCache } from '../lib/edge-cache.js';
 import { AppError } from '../lib/errors.js';
 import {
   DEFAULT_STREAM_ACTIVITY_LIMIT,
@@ -34,6 +35,8 @@ const MAX_STREAM_ACCOUNT_SUBSCRIPTIONS = 24;
 const STREAM_SLEEP_CHUNK_MS = 2_000;
 const STREAM_WS_CONNECT_TIMEOUT_MS = 4_000;
 const STREAM_WS_ACTIVITY_DEBOUNCE_MS = 700;
+const STREAM_CAPABILITIES_EDGE_FRESH_TTL_MS = 60 * 1000;
+const STREAM_CAPABILITIES_EDGE_STALE_TTL_MS = 60 * 1000;
 
 function assertWalletAddress(value: string): void {
   if (!isValidSolanaAddress(value)) {
@@ -331,8 +334,17 @@ const streamRoutes = new Hono<AppEnv>();
 streamRoutes.get('/capabilities', async (context) => {
   const query = readSearchParams(context.req.url, streamCapabilitiesQuerySchema);
 
-  const response = context.json(await getStreamCapabilities(context.env, query.network));
-  response.headers.set('Cache-Control', 'no-store');
+  const response = context.json(
+    await getOrSetEdgeJsonCache({
+      context,
+      namespace: 'stream_capabilities',
+      keyParts: [query.network],
+      freshTtlMs: STREAM_CAPABILITIES_EDGE_FRESH_TTL_MS,
+      staleTtlMs: STREAM_CAPABILITIES_EDGE_STALE_TTL_MS,
+      resolver: () => getStreamCapabilities(context.env, query.network),
+    }),
+  );
+  response.headers.set('Cache-Control', 'public, max-age=60');
   return response;
 });
 
