@@ -21,6 +21,7 @@ const walletTransactionsQuerySchema = z.object({
   network: networkSchema,
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+  useCache: booleanQuerySchema,
 });
 
 function assertWalletAddress(value: string, message: string): void {
@@ -62,7 +63,7 @@ walletRoutes.get('/transactions', async (context) => {
       network: query.network,
       cursor: query.cursor ?? null,
       limit: query.limit,
-      useCache: query.cursor != null,
+      useCache: query.useCache ?? true,
     }),
   );
   response.headers.set('Cache-Control', 'no-store');

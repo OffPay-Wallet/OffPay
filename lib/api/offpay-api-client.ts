@@ -30,10 +30,7 @@ import {
   getWalletSigningBlocker,
   walletHasLocalSigningMaterial,
 } from '@/lib/wallet/wallet-capabilities';
-import {
-  readJsonResponseAdaptive,
-  stringifyJsonAdaptive,
-} from '@/lib/perf/ui-work-scheduler';
+import { readJsonResponseAdaptive, stringifyJsonAdaptive } from '@/lib/perf/ui-work-scheduler';
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type {
@@ -200,6 +197,10 @@ interface OffpayRequestOptions {
   reprovisionAuth?: () => Promise<void>;
 }
 
+interface OffpayAuthenticatedFetchOptions extends OffpayRequestOptions {
+  timeoutMs?: number | null;
+}
+
 interface PublicRequestOptions {
   path: `/${string}`;
   method?: OffpayApiMethod;
@@ -359,6 +360,7 @@ function throwForErrorEnvelope(status: number, payload: unknown): never {
 }
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
+const EXTERNAL_SIGNER_GET_TIMESTAMP_BUCKET_MS = 2_000;
 
 interface ScopedAbortHandle {
   signal: AbortSignal;
@@ -410,6 +412,59 @@ function withTimeout(
     signal: controller.signal,
     cleanup: () => clearTimeout(timer),
   };
+}
+
+function getExternalSignerTimestamp(method: OffpayApiMethod): number | undefined {
+  if (method !== 'GET') return undefined;
+  return (
+    Math.floor(Date.now() / EXTERNAL_SIGNER_GET_TIMESTAMP_BUCKET_MS) *
+    EXTERNAL_SIGNER_GET_TIMESTAMP_BUCKET_MS
+  );
+}
+
+async function buildAuthenticatedHeaders(params: {
+  authContext: StoredAuthContext;
+  network: OffpayNetwork;
+  method: OffpayApiMethod;
+  pathAndQuery: string;
+  body?: unknown;
+}): Promise<Record<string, string>> {
+  const timestamp =
+    params.authContext.signingSeed == null ? getExternalSignerTimestamp(params.method) : undefined;
+
+  return params.authContext.signingSeed != null
+    ? buildOffpayAuthHeadersAsync({
+        walletAddress: params.authContext.walletAddress,
+        requestSecret: params.authContext.requestSecret,
+        deviceId: params.authContext.deviceId,
+        bootstrapVersion: params.authContext.bootstrapVersion,
+        appVersion: OFFPAY_APP_VERSION,
+        network: params.network,
+        method: params.method,
+        pathAndQuery: params.pathAndQuery,
+        body: params.body,
+        signingSeed: params.authContext.signingSeed,
+      })
+    : buildOffpayAuthHeadersWithSignature({
+        walletAddress: params.authContext.walletAddress,
+        requestSecret: params.authContext.requestSecret,
+        deviceId: params.authContext.deviceId,
+        bootstrapVersion: params.authContext.bootstrapVersion,
+        appVersion: OFFPAY_APP_VERSION,
+        network: params.network,
+        method: params.method,
+        pathAndQuery: params.pathAndQuery,
+        body: params.body,
+        timestamp,
+        signCanonicalMessage: (message) =>
+          getCachedOrSign(params.authContext.walletAddress, message, (cachedMessage) =>
+            signMessageForWallet({
+              message: cachedMessage,
+              walletAddress: params.authContext.walletAddress,
+              walletId: params.authContext.walletInfo.id,
+            }),
+          ),
+      });
 }
 
 export async function offpayPublicRequest<T>(options: PublicRequestOptions): Promise<T> {
@@ -660,39 +715,13 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
   }
 
   try {
-    const authHeaders =
-      authContext.signingSeed != null
-        ? await buildOffpayAuthHeadersAsync({
-            walletAddress: authContext.walletAddress,
-            requestSecret: authContext.requestSecret,
-            deviceId: authContext.deviceId,
-            bootstrapVersion: authContext.bootstrapVersion,
-            appVersion: OFFPAY_APP_VERSION,
-            network: options.network,
-            method,
-            pathAndQuery,
-            body: options.body,
-            signingSeed: authContext.signingSeed,
-          })
-        : await buildOffpayAuthHeadersWithSignature({
-            walletAddress: authContext.walletAddress,
-            requestSecret: authContext.requestSecret,
-            deviceId: authContext.deviceId,
-            bootstrapVersion: authContext.bootstrapVersion,
-            appVersion: OFFPAY_APP_VERSION,
-            network: options.network,
-            method,
-            pathAndQuery,
-            body: options.body,
-            signCanonicalMessage: (message) =>
-              getCachedOrSign(authContext.walletAddress, message, (cachedMessage) =>
-                signMessageForWallet({
-                  message: cachedMessage,
-                  walletAddress: authContext.walletAddress,
-                  walletId: authContext.walletInfo.id,
-                }),
-              ),
-          });
+    const authHeaders = await buildAuthenticatedHeaders({
+      authContext,
+      network: options.network,
+      method,
+      pathAndQuery,
+      body: options.body,
+    });
 
     const headers: Record<string, string> = {
       Accept: options.accept ?? 'application/json',
@@ -743,6 +772,109 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
       invalidateSignCacheForWallet(authContext.walletAddress);
       if (await recoverOffpayAuth(reprovisionAuth)) {
         return offpayApiRequest<T>({
+          ...options,
+          retryAuthRecovery: false,
+        });
+      }
+    }
+
+    throw error;
+  } finally {
+    if (authContext.signingSeed != null) {
+      zeroOutBytes(authContext.signingSeed);
+    }
+  }
+}
+
+export async function offpayAuthenticatedFetch(
+  options: OffpayAuthenticatedFetchOptions,
+): Promise<Response> {
+  assertOffpayNetworkAccessAllowed();
+
+  const method = options.method ?? 'GET';
+  const pathAndQuery = appendQuery(options.path, options.query);
+  let authContext: StoredAuthContext;
+
+  try {
+    authContext = await getStoredAuthContext(options.walletId);
+  } catch (error) {
+    if (isMissingBootstrapCredentialsError(error) && options.retryAuthRecovery !== false) {
+      const reprovisionAuth = options.reprovisionAuth ?? offpayAuthRecoveryHandler;
+      if (await recoverOffpayAuth(reprovisionAuth)) {
+        return offpayAuthenticatedFetch({
+          ...options,
+          retryAuthRecovery: false,
+        });
+      }
+    }
+
+    throw error;
+  }
+
+  try {
+    const authHeaders = await buildAuthenticatedHeaders({
+      authContext,
+      network: options.network,
+      method,
+      pathAndQuery,
+      body: options.body,
+    });
+    const headers: Record<string, string> = {
+      Accept: options.accept ?? 'application/json',
+      ...authHeaders,
+      ...options.headers,
+    };
+
+    const init: RequestInit = { method, headers };
+    if (options.body !== undefined && options.body !== null) {
+      headers['Content-Type'] = 'application/json';
+      init.body = await stringifyJsonAdaptive(options.body);
+    }
+
+    const handle =
+      options.timeoutMs === null
+        ? {
+            signal: options.signal,
+            cleanup: () => undefined,
+          }
+        : withTimeout(options.signal, options.timeoutMs);
+
+    if (handle.signal != null) {
+      init.signal = handle.signal;
+    }
+
+    try {
+      const response = await fetch(buildUrl(pathAndQuery), init);
+      if (!response.ok) {
+        const payload = await parseJsonResponse(response);
+        throwForErrorEnvelope(response.status, payload);
+      }
+
+      return response;
+    } finally {
+      handle.cleanup();
+    }
+  } catch (error) {
+    if (
+      error instanceof OffpayApiError &&
+      error.code === 'SIGNATURE_INVALID' &&
+      options.retrySignature !== false
+    ) {
+      return offpayAuthenticatedFetch({
+        ...options,
+        retrySignature: false,
+      });
+    }
+
+    if (
+      error instanceof OffpayApiError &&
+      (error.code === 'SECRET_ROTATED' || error.code === 'HMAC_INVALID') &&
+      options.retryAuthRecovery !== false
+    ) {
+      const reprovisionAuth = options.reprovisionAuth ?? offpayAuthRecoveryHandler;
+      invalidateSignCacheForWallet(authContext.walletAddress);
+      if (await recoverOffpayAuth(reprovisionAuth)) {
+        return offpayAuthenticatedFetch({
           ...options,
           retryAuthRecovery: false,
         });
@@ -889,7 +1021,9 @@ export async function verifyInviteCode(
   });
 }
 
-export async function checkInviteEmail(email: string): Promise<{ verified: boolean; segment?: string }> {
+export async function checkInviteEmail(
+  email: string,
+): Promise<{ verified: boolean; segment?: string }> {
   return offpayPublicRequest<{ verified: boolean; segment?: string }>({
     path: '/api/invite/check-email',
     method: 'POST',
@@ -914,7 +1048,7 @@ export async function getWalletBalance(
 export async function getWalletTransactions(
   walletAddress: string,
   network: OffpayNetwork,
-  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+  options?: { cursor?: string; limit?: number; useCache?: boolean; signal?: AbortSignal },
 ): Promise<WalletTransactionsResponse> {
   return offpayPublicRequest<WalletTransactionsResponse>({
     path: '/api/wallet/transactions',
@@ -923,6 +1057,7 @@ export async function getWalletTransactions(
       network,
       cursor: options?.cursor,
       limit: options?.limit,
+      useCache: options?.useCache,
     },
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),

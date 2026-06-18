@@ -5,7 +5,10 @@ import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { getWalletBalance } from '@/lib/api/offpay-api-client';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import { offpayWalletBalanceQueryKey } from '@/lib/api/offpay-wallet-query-keys';
 import { observeOfflineTokenMetadataFromWalletBalance } from '@/lib/offline/offline-token-metadata';
 import { useWalletStore } from '@/store/walletStore';
@@ -66,7 +69,7 @@ export function useOffpayWalletBalance(
         throw new Error('Wallet balance requires an active wallet and supported network.');
       }
 
-      return getWalletBalance(walletAddress, network, { useCache: false, signal });
+      return getWalletBalance(walletAddress, network, { signal });
     },
     enabled,
     staleTime: WALLET_BALANCE_STALE_TIME_MS,

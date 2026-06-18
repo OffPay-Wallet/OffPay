@@ -316,6 +316,21 @@ bootstrapRoutes.get('/provision', async (context) => {
     identifier: buildBootstrapRateLimitIdentifier(query.wallet, headers.deviceId),
   });
 
+  if (rateLimit.degraded) {
+    const response = errorResponse(
+      503,
+      'UPSTREAM_UNAVAILABLE',
+      'Rate limit storage is temporarily unavailable.',
+      {
+        retryable: true,
+        retryAfterMs: rateLimit.retryAfterSec * 1000,
+      },
+    );
+    applyRateLimitHeaders(response.headers, rateLimit);
+    response.headers.set('Retry-After', rateLimit.retryAfterSec.toString());
+    return response;
+  }
+
   if (!rateLimit.allowed) {
     const response = errorResponse(429, 'RATE_LIMITED', 'Too many requests.', {
       retryable: true,
@@ -363,6 +378,21 @@ bootstrapRoutes.post('/provision', async (context) => {
     path: BOOTSTRAP_ROUTE_PATH,
     identifier: buildBootstrapRateLimitIdentifier(body.walletAddress, body.deviceId),
   });
+
+  if (rateLimit.degraded) {
+    const response = errorResponse(
+      503,
+      'UPSTREAM_UNAVAILABLE',
+      'Rate limit storage is temporarily unavailable.',
+      {
+        retryable: true,
+        retryAfterMs: rateLimit.retryAfterSec * 1000,
+      },
+    );
+    applyRateLimitHeaders(response.headers, rateLimit);
+    response.headers.set('Retry-After', rateLimit.retryAfterSec.toString());
+    return response;
+  }
 
   if (!rateLimit.allowed) {
     const response = errorResponse(429, 'RATE_LIMITED', 'Too many requests.', {

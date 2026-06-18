@@ -1,5 +1,6 @@
 import { AppError } from './errors.js';
 import { createNetworkCacheKey, memoryCache } from './cache.js';
+import { getOrSetSharedJsonCache } from './shared-cache.js';
 import { getRpcHttpUrlCandidates } from './solana-rpc-providers.js';
 import type { Bindings, Network } from './types.js';
 import { isRecord, isValidSolanaAddress } from './validation.js';
@@ -278,6 +279,12 @@ type HeliusFetchImplementation = (input: string, init: RequestInit) => Promise<R
 
 type RpcRequestParams = ReadonlyArray<unknown> | Readonly<Record<string, unknown>>;
 
+interface RpcBatchRequest {
+  id: string;
+  method: string;
+  params: RpcRequestParams;
+}
+
 interface BalanceAccumulator {
   readonly mint: string;
   readonly decimals: number;
@@ -411,6 +418,31 @@ function readNonNegativeBigInt(value: unknown): bigint | null {
 
 function readBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
+}
+
+function isWalletBalanceResponse(value: unknown): value is WalletBalanceResponse {
+  return (
+    isRecord(value) &&
+    isValidSolanaAddress(readTrimmedString(value.address) ?? '') &&
+    (value.network === 'devnet' || value.network === 'mainnet') &&
+    typeof value.solBalance === 'number' &&
+    Number.isFinite(value.solBalance) &&
+    Array.isArray(value.tokens) &&
+    typeof value.fetchedAt === 'number' &&
+    Number.isFinite(value.fetchedAt)
+  );
+}
+
+function isWalletTransactionsResponse(value: unknown): value is WalletTransactionsResponse {
+  return (
+    isRecord(value) &&
+    isValidSolanaAddress(readTrimmedString(value.address) ?? '') &&
+    (value.network === 'devnet' || value.network === 'mainnet') &&
+    Array.isArray(value.transactions) &&
+    (value.cursor === null || typeof value.cursor === 'string') &&
+    typeof value.fetchedAt === 'number' &&
+    Number.isFinite(value.fetchedAt)
+  );
 }
 
 function shortenAddress(address: string): string {
@@ -632,7 +664,12 @@ function collectSolanaAddresses(value: unknown, addresses: Set<string>, depth = 
   }
 }
 
-function collectUmbraInstructionAccounts(value: unknown, programId: string, addresses: Set<string>, depth = 0): void {
+function collectUmbraInstructionAccounts(
+  value: unknown,
+  programId: string,
+  addresses: Set<string>,
+  depth = 0,
+): void {
   if (depth > 8) {
     return;
   }
@@ -649,9 +686,9 @@ function collectUmbraInstructionAccounts(value: unknown, programId: string, addr
   }
 
   const instructionProgramId = readTrimmedString(value.programId);
-  const instructionTouchesUmbra = instructionProgramId === programId || (
-    Array.isArray(value.accounts) && containsStringValue(value.accounts, programId)
-  );
+  const instructionTouchesUmbra =
+    instructionProgramId === programId ||
+    (Array.isArray(value.accounts) && containsStringValue(value.accounts, programId));
   if (instructionTouchesUmbra && Array.isArray(value.accounts)) {
     collectSolanaAddresses(value.accounts, addresses, depth + 1);
   }
@@ -728,9 +765,7 @@ function classifyUmbraTransaction(
   if (
     normalizedInstructionNames.some(
       (name) =>
-        name.includes('register') ||
-        name.includes('registration') ||
-        name.includes('setup'),
+        name.includes('register') || name.includes('registration') || name.includes('setup'),
     ) ||
     combined.includes('registration') ||
     combined.includes('setup')
@@ -895,6 +930,100 @@ async function heliusRpcRequest(
       }
 
       return payload.result;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw toUpstreamUnavailable(
+    null,
+    'Wallet provider is temporarily unavailable.',
+    lastError ?? undefined,
+  );
+}
+
+async function heliusRpcBatchRequest(
+  bindings: Bindings,
+  network: Network,
+  requests: readonly RpcBatchRequest[],
+): Promise<unknown[]> {
+  if (requests.length === 0) {
+    return [];
+  }
+
+  const candidates = getRpcHttpUrlCandidates(bindings, network);
+  let lastError: unknown = null;
+
+  for (const candidate of candidates) {
+    try {
+      const payload = await fetchJson(
+        candidate.url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(
+            requests.map((request) => ({
+              jsonrpc: '2.0',
+              id: `${request.id}:${network}:${candidate.provider}`,
+              method: request.method,
+              params: request.params,
+            })),
+          ),
+        },
+        'Wallet provider is temporarily unavailable.',
+      );
+
+      if (!Array.isArray(payload)) {
+        lastError = new Error('RPC provider returned a malformed batch payload.');
+        continue;
+      }
+
+      const resultsById = new Map<string, unknown>();
+      let failed = false;
+
+      for (const entry of payload) {
+        if (!isRecord(entry)) {
+          failed = true;
+          lastError = new Error('RPC provider returned a malformed batch entry.');
+          break;
+        }
+
+        const responseId = readTrimmedString(entry.id);
+        if (!responseId) {
+          failed = true;
+          lastError = new Error('RPC provider returned a batch entry without an id.');
+          break;
+        }
+
+        if ('error' in entry && entry.error !== null && entry.error !== undefined) {
+          failed = true;
+          lastError = entry.error;
+          break;
+        }
+
+        resultsById.set(responseId, entry.result ?? null);
+      }
+
+      if (failed) {
+        continue;
+      }
+
+      const orderedResults: unknown[] = [];
+      for (const request of requests) {
+        const responseId = `${request.id}:${network}:${candidate.provider}`;
+        if (!resultsById.has(responseId)) {
+          lastError = new Error('RPC provider omitted a batch result.');
+          failed = true;
+          break;
+        }
+        orderedResults.push(resultsById.get(responseId));
+      }
+
+      if (!failed) {
+        return orderedResults;
+      }
     } catch (error) {
       lastError = error;
     }
@@ -2303,9 +2432,9 @@ function parseEnhancedTransactions(
     const touchesUmbra = transactionTouchesUmbraProgram(entry, network);
     const counterparties = touchesUmbra
       ? mergeCounterparties(
-        extractEnhancedCounterparties(entry, walletAddress),
-        extractUmbraPoolCounterparties(entry, network, walletAddress),
-      )
+          extractEnhancedCounterparties(entry, walletAddress),
+          extractUmbraPoolCounterparties(entry, network, walletAddress),
+        )
       : extractEnhancedCounterparties(entry, walletAddress);
     const tokenFields = buildEnhancedTransactionTokenFields(
       network,
@@ -2320,11 +2449,11 @@ function parseEnhancedTransactions(
     const umbraInstructionNames = touchesUmbra ? extractUmbraInstructionNames(entry) : [];
     const umbraClassification = touchesUmbra
       ? classifyUmbraTransaction(
-        tokenFields.direction,
-        providerType,
-        providerDescription,
-        umbraInstructionNames,
-      )
+          tokenFields.direction,
+          providerType,
+          providerDescription,
+          umbraInstructionNames,
+        )
       : null;
     const sender =
       findCounterpartyAddress(counterparties, /sender|source|from|payer/) ??
@@ -2831,23 +2960,15 @@ function mergeCounterparties(
   return merged;
 }
 
-async function fetchRpcTransactionRecord(
+async function buildRpcTransactionRecordFromResult(
   bindings: Bindings,
   network: Network,
   walletAddress: string,
   signature: string,
   fallbackTimestamp: number,
   fallbackStatus: 'success' | 'failed',
+  result: unknown,
 ): Promise<WalletTransactionRecord> {
-  const result = await heliusRpcRequest(bindings, network, 'getTransaction', [
-    signature,
-    {
-      commitment: 'confirmed',
-      encoding: 'jsonParsed',
-      maxSupportedTransactionVersion: 0,
-    },
-  ]);
-
   if (!isRecord(result)) {
     return {
       signature,
@@ -2897,16 +3018,16 @@ async function fetchRpcTransactionRecord(
   const touchesUmbra = transactionTouchesUmbraProgram(result, network);
   const counterparties = touchesUmbra
     ? mergeCounterparties(
-      mergeCounterparties(
+        mergeCounterparties(
+          extractTokenBalanceCounterparties(meta, walletAddress),
+          extractParsedCounterparties(parsedInstructions, walletAddress),
+        ),
+        extractUmbraPoolCounterparties(result, network, walletAddress),
+      )
+    : mergeCounterparties(
         extractTokenBalanceCounterparties(meta, walletAddress),
         extractParsedCounterparties(parsedInstructions, walletAddress),
-      ),
-      extractUmbraPoolCounterparties(result, network, walletAddress),
-    )
-    : mergeCounterparties(
-      extractTokenBalanceCounterparties(meta, walletAddress),
-      extractParsedCounterparties(parsedInstructions, walletAddress),
-    );
+      );
   const umbraInstructionNames = touchesUmbra ? extractUmbraInstructionNames(result) : [];
   const umbraClassification = touchesUmbra
     ? classifyUmbraTransaction(tokenFields.direction, type, baseDescription, umbraInstructionNames)
@@ -2933,6 +3054,91 @@ async function fetchRpcTransactionRecord(
   };
 }
 
+async function fetchRpcTransactionRecord(
+  bindings: Bindings,
+  network: Network,
+  walletAddress: string,
+  signature: string,
+  fallbackTimestamp: number,
+  fallbackStatus: 'success' | 'failed',
+): Promise<WalletTransactionRecord> {
+  const result = await heliusRpcRequest(bindings, network, 'getTransaction', [
+    signature,
+    {
+      commitment: 'confirmed',
+      encoding: 'jsonParsed',
+      maxSupportedTransactionVersion: 0,
+    },
+  ]);
+
+  return buildRpcTransactionRecordFromResult(
+    bindings,
+    network,
+    walletAddress,
+    signature,
+    fallbackTimestamp,
+    fallbackStatus,
+    result,
+  );
+}
+
+async function fetchRpcTransactionRecordsBatch(
+  bindings: Bindings,
+  network: Network,
+  walletAddress: string,
+  entries: readonly {
+    signature: string;
+    timestamp: number;
+    status: 'success' | 'failed';
+  }[],
+): Promise<WalletTransactionRecord[]> {
+  try {
+    const results = await heliusRpcBatchRequest(
+      bindings,
+      network,
+      entries.map((entry, index) => ({
+        id: `getTransaction:${index}`,
+        method: 'getTransaction',
+        params: [
+          entry.signature,
+          {
+            commitment: 'confirmed',
+            encoding: 'jsonParsed',
+            maxSupportedTransactionVersion: 0,
+          },
+        ],
+      })),
+    );
+
+    return Promise.all(
+      entries.map((entry, index) =>
+        buildRpcTransactionRecordFromResult(
+          bindings,
+          network,
+          walletAddress,
+          entry.signature,
+          entry.timestamp,
+          entry.status,
+          results[index],
+        ),
+      ),
+    );
+  } catch {
+    return Promise.all(
+      entries.map((entry) =>
+        fetchRpcTransactionRecord(
+          bindings,
+          network,
+          walletAddress,
+          entry.signature,
+          entry.timestamp,
+          entry.status,
+        ),
+      ),
+    );
+  }
+}
+
 async function fetchWalletTransactionsViaRpc(
   bindings: Bindings,
   address: string,
@@ -2952,30 +3158,30 @@ async function fetchWalletTransactionsViaRpc(
   const signatureEntries = Array.isArray(signaturesResult) ? signaturesResult : [];
   const validSignatures = signatureEntries.filter(isRecord);
 
-  const transactions = await Promise.all(
-    validSignatures.map(async (entry) => {
-      const signature = readTrimmedString(entry.signature);
-      if (!signature) {
-        return null;
-      }
+  const transactionRequests = validSignatures.flatMap((entry) => {
+    const signature = readTrimmedString(entry.signature);
+    if (!signature) {
+      return [];
+    }
 
-      const timestamp = readFiniteNumber(entry.blockTime);
-      const status: 'success' | 'failed' =
-        entry.err === null || entry.err === undefined ? 'success' : 'failed';
+    const timestamp = readFiniteNumber(entry.blockTime);
+    const status: 'success' | 'failed' =
+      entry.err === null || entry.err === undefined ? 'success' : 'failed';
 
-      return fetchRpcTransactionRecord(
-        bindings,
-        network,
-        address,
+    return [
+      {
         signature,
-        timestamp !== null && timestamp > 0 ? timestamp : Math.floor(Date.now() / 1000),
+        timestamp: timestamp !== null && timestamp > 0 ? timestamp : Math.floor(Date.now() / 1000),
         status,
-      );
-    }),
-  );
+      },
+    ];
+  });
 
-  const filteredTransactions = transactions.filter(
-    (entry): entry is WalletTransactionRecord => entry !== null,
+  const filteredTransactions = await fetchRpcTransactionRecordsBatch(
+    bindings,
+    network,
+    address,
+    transactionRequests,
   );
 
   const lastEntry = validSignatures.at(-1);
@@ -3015,7 +3221,16 @@ async function getWalletBalance(
   };
 
   return useCache
-    ? memoryCache.getOrSet(cacheKey, WALLET_BALANCE_CACHE_TTL_MS, resolver)
+    ? memoryCache.getOrSet(cacheKey, WALLET_BALANCE_CACHE_TTL_MS, () =>
+        getOrSetSharedJsonCache({
+          bindings,
+          namespace: 'wallet-balance-v1',
+          key: cacheKey,
+          ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
+          isValid: isWalletBalanceResponse,
+          resolver,
+        }),
+      )
     : resolver();
 }
 
@@ -3066,7 +3281,16 @@ async function getWalletTransactions(
   };
 
   return useCache
-    ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, resolver)
+    ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
+        getOrSetSharedJsonCache({
+          bindings,
+          namespace: 'wallet-transactions-v1',
+          key: cacheKey,
+          ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
+          isValid: isWalletTransactionsResponse,
+          resolver,
+        }),
+      )
     : resolver();
 }
 

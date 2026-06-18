@@ -11,6 +11,9 @@ workers_dev = true
 binding = "PENDING_BACKUP_BUCKET"
 bucket_name = "offpay-pending-backups"
 
+[placement]
+mode = "smart"
+
 [observability]
 enabled = true
 

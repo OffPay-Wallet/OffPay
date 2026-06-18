@@ -1,5 +1,4 @@
 import {
-  getStreamCapabilities,
   STREAM_DEFAULTS,
 } from './helius.js';
 import { getSupportedStablecoins, type SupportedStablecoin } from './offline.js';
@@ -91,14 +90,6 @@ function unsupportedNetwork(message: string): CapabilityStatus {
   };
 }
 
-function temporarilyUnavailable(message: string): CapabilityStatus {
-  return {
-    available: false,
-    reason: 'temporarily_unavailable',
-    message,
-  };
-}
-
 function notImplemented(message: string): CapabilityStatus {
   return {
     available: false,
@@ -185,14 +176,11 @@ async function getCapabilities(
   const umbraMetadataAvailable = umbraExecutionAvailable;
   const supportedStablecoins = getSupportedStablecoins(bindings, network);
   const hasEnabledStablecoin = supportedStablecoins.some((stablecoin) => stablecoin.enabled);
-  const streamCapabilities = walletRpcConfigured ? await getStreamCapabilities(bindings, network) : null;
   const walletActivity =
     !walletRpcConfigured
       ? notImplemented('Live wallet activity streaming is not enabled for this network in this deployment.')
-      : streamCapabilities?.capabilities.walletActivity
-      ? available('Live wallet activity streaming is available for this network.')
       : STREAM_DEFAULTS[network].walletActivity
-        ? temporarilyUnavailable('Live wallet activity streaming is temporarily unavailable.')
+        ? available('Live wallet activity streaming is available for this network.')
         : unsupportedNetwork('Live wallet activity streaming is not supported on this network.');
 
   return {

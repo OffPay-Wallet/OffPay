@@ -53,6 +53,11 @@ const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/wallet/balance',
   'GET /api/wallet/transactions',
 ]);
+const PUBLIC_RATE_LIMIT_FAIL_CLOSED_ROUTES = new Set([
+  'GET /api/bootstrap/provision',
+  'POST /api/bootstrap/provision',
+  'POST /api/invite/verify',
+]);
 
 interface AuthHeaders {
   walletAddress: string;
@@ -92,6 +97,14 @@ function shouldRateLimitPublicRoute(method: string, path: string): boolean {
   return PUBLIC_RATE_LIMITED_ROUTES.has(normalizeRouteKey(method, path));
 }
 
+function shouldFailClosedWhenRateLimitDegraded(method: string, path: string): boolean {
+  if (requiresAuthentication(method, path)) {
+    return true;
+  }
+
+  return PUBLIC_RATE_LIMIT_FAIL_CLOSED_ROUTES.has(normalizeRouteKey(method, path));
+}
+
 function getPublicRateLimitIdentifier(context: Context<AppEnv>): string {
   return (
     context.req.header('X-Device-Id')?.trim() ||
@@ -121,6 +134,23 @@ async function checkRequestRateLimit(
   }
 
   return rateLimit;
+}
+
+function rateLimitStorageUnavailableResponse(
+  rateLimit: Awaited<ReturnType<typeof checkRateLimit>>,
+): Response {
+  const response = errorResponse(
+    503,
+    'UPSTREAM_UNAVAILABLE',
+    'Rate limit storage is temporarily unavailable.',
+    {
+      retryable: true,
+      retryAfterMs: rateLimit.retryAfterSec * 1000,
+    },
+  );
+  applyRateLimitHeaders(response.headers, rateLimit);
+  response.headers.set('Retry-After', rateLimit.retryAfterSec.toString());
+  return response;
 }
 
 function getRequiredBinding(bindings: Bindings, key: keyof Bindings): string {
@@ -536,6 +566,12 @@ const authenticationMiddleware: MiddlewareHandler<AppEnv> = async (context, next
     if (shouldRateLimitPublicRoute(context.req.method, context.req.path)) {
       const rateLimit = await checkRequestRateLimit(context, getPublicRateLimitIdentifier(context));
       if (rateLimit instanceof Response) return rateLimit;
+      if (
+        rateLimit.degraded &&
+        shouldFailClosedWhenRateLimitDegraded(context.req.method, context.req.path)
+      ) {
+        return rateLimitStorageUnavailableResponse(rateLimit);
+      }
 
       await next();
       applyRateLimitHeaders(context.res.headers, rateLimit);
@@ -553,6 +589,12 @@ const authenticationMiddleware: MiddlewareHandler<AppEnv> = async (context, next
 
   const rateLimit = await checkRequestRateLimit(context, result.wallet);
   if (rateLimit instanceof Response) return rateLimit;
+  if (
+    rateLimit.degraded &&
+    shouldFailClosedWhenRateLimitDegraded(context.req.method, context.req.path)
+  ) {
+    return rateLimitStorageUnavailableResponse(rateLimit);
+  }
 
   await next();
   applyRateLimitHeaders(context.res.headers, rateLimit);

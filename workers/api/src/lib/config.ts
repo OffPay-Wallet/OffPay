@@ -194,6 +194,10 @@ function isAndroidPrototypeBypassEnabled(bindings: Bindings): boolean {
 function getAndroidAttestationStatus(bindings: Bindings): FeatureConfigStatus {
   const mode = bindings.OFFPAY_ANDROID_ATTESTATION_MODE?.trim().toLowerCase();
   if (mode === 'prototype_bypass') {
+    if (isProductionEnvironment(bindings)) {
+      return withConfiguredState(['OFFPAY_ANDROID_ATTESTATION_MODE_PLAY_INTEGRITY']);
+    }
+
     return withConfiguredState(
       isAndroidPrototypeBypassEnabled(bindings) ? [] : ['OFFPAY_PROTOTYPE_MODE'],
     );
@@ -230,14 +234,9 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
   );
   const marketPrices = withConfiguredState(missingStringBindings(bindings, MARKET_PRICE_BINDINGS));
   const privatePayment = withConfiguredState(
-    mergeMissing(
-      rpc.missing,
-      missingMagicBlockValidatorBindings(bindings),
-    ),
+    mergeMissing(rpc.missing, missingMagicBlockValidatorBindings(bindings)),
   );
-  const privateSwap = withConfiguredState(
-    mergeMissing(swap.missing, privatePayment.missing),
-  );
+  const privateSwap = withConfiguredState(mergeMissing(swap.missing, privatePayment.missing));
   const offline = withConfiguredState(mergeMissing(protectedAuth.missing, rpc.missing));
   const umbra = withConfiguredState(rpc.missing);
 
