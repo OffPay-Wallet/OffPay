@@ -40,7 +40,6 @@ import { SecurityRootStep } from '@/components/features/security/SecurityRootSte
 import { WalletKeysStep } from '@/components/features/security/WalletKeysStep';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { authenticateWithBiometrics, getBiometricAvailability } from '@/lib/wallet/biometric-auth';
 import {
   getSecuritySettings,
@@ -311,39 +310,26 @@ export function SecuritySettingsModal({
 
   // Animation
   useEffect(() => {
-    const startedAt = markAnimationPerf();
     if (visible) {
       setContentHeight(0);
       setMounted(true);
       opacity.value = withTiming(1, { duration: 220 });
-      translateY.value = withTiming(
-        0,
-        {
-          duration: 320,
-          easing: Easing.out(Easing.poly(4)),
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('settings.securityModal', startedAt, finished, {
-            phase: 'open',
-          });
-        },
-      );
+      translateY.value = withTiming(0, {
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+      });
     } else {
       translateY.value = withTiming(
         windowHeight,
         {
           duration: 220,
-          easing: Easing.in(Easing.ease),
+          easing: Easing.in(Easing.cubic),
         },
         (finished) => {
-          runOnJS(finishAnimationPerf)('settings.securityModal', startedAt, finished, {
-            phase: 'close',
-          });
+          if (finished) runOnJS(setMounted)(false);
         },
       );
-      opacity.value = withTiming(0, { duration: 220 }, (finished) => {
-        if (finished) runOnJS(setMounted)(false);
-      });
+      opacity.value = withTiming(0, { duration: 220 });
       setStep('root');
       setToast(null);
       setPasscodeA('');
@@ -386,15 +372,11 @@ export function SecuritySettingsModal({
   // ---------------------------------------------------------------------------
 
   const handleClose = useCallback((): void => {
-    const startedAt = markAnimationPerf();
     translateY.value = withTiming(
       windowHeight,
-      { duration: 220, easing: Easing.in(Easing.ease) },
+      { duration: 220, easing: Easing.in(Easing.cubic) },
       (finished) => {
-        runOnJS(finishAnimationPerf)('settings.securityModal', startedAt, finished, {
-          phase: 'manualClose',
-        });
-        runOnJS(onClose)();
+        if (finished) runOnJS(onClose)();
       },
     );
     opacity.value = withTiming(0, { duration: 220 });

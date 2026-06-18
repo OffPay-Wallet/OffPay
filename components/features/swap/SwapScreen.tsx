@@ -16,8 +16,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router/react-navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, {
-  runOnJS,
+  useAnimatedReaction,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withSpring,
   type WithSpringConfig,
@@ -79,7 +80,6 @@ import {
   getSwapPrice,
   getSwapTokens,
 } from '@/lib/api/offpay-api-client';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import {
   FALLBACK_SWAP_TOKENS,
@@ -214,6 +214,8 @@ function PrivateSwapToggle({
   onToggle: () => void;
 }): React.JSX.Element {
   const knobProgress = useSharedValue(enabled ? 1 : 0);
+  const targetKnobProgress = enabled ? 1 : 0;
+  const propKnobProgress = useDerivedValue(() => targetKnobProgress, [targetKnobProgress]);
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: knobProgress.value * 20 }],
   }));
@@ -221,27 +223,19 @@ function PrivateSwapToggle({
   // Reconcile with the prop for external changes only — the press
   // handler already moved the knob, so this is a no-op when the prop
   // catches up.
-  useEffect(() => {
-    const startedAt = markAnimationPerf();
-    knobProgress.value = withSpring(enabled ? 1 : 0, PRIVATE_TOGGLE_SPRING, (finished) => {
-      runOnJS(finishAnimationPerf)('swap.privateToggle.knob', startedAt, finished, {
-        enabled,
-        source: 'prop',
-      });
-    });
-  }, [enabled, knobProgress]);
+  useAnimatedReaction(
+    () => propKnobProgress.value,
+    (current) => {
+      knobProgress.value = withSpring(current, PRIVATE_TOGGLE_SPRING);
+    },
+    [knobProgress],
+  );
 
   // Slide the knob immediately on tap, on the UI thread, decoupled from
   // the swap screen's heavier re-render so the switch never feels laggy.
   const handlePress = (): void => {
     const next = !enabled;
-    const startedAt = markAnimationPerf();
-    knobProgress.value = withSpring(next ? 1 : 0, PRIVATE_TOGGLE_SPRING, (finished) => {
-      runOnJS(finishAnimationPerf)('swap.privateToggle.knob', startedAt, finished, {
-        enabled: next,
-        source: 'tap',
-      });
-    });
+    knobProgress.value = withSpring(next ? 1 : 0, PRIVATE_TOGGLE_SPRING);
     onToggle();
   };
 

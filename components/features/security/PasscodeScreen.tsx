@@ -11,7 +11,6 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -32,7 +31,6 @@ import {
   verifyPasscode,
 } from '@/lib/wallet/security-settings';
 import { getStoredWalletInfo } from '@/lib/wallet/secure-wallet-store';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { useWalletStore } from '@/store/walletStore';
 
 const PASSCODE_AUTO_BIOMETRIC_PROMPT_DELAY_MS = 750;
@@ -134,15 +132,12 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, []);
 
   const triggerShake = useCallback((): void => {
-    const startedAt = markAnimationPerf();
     shakeOffset.value = 0;
     shakeOffset.value = withSequence(
       withTiming(-8, { duration: 55 }),
       withTiming(8, { duration: 80 }),
       withTiming(-5, { duration: 70 }),
-      withTiming(0, { duration: 65 }, (finished) => {
-        runOnJS(finishAnimationPerf)('security.passcodeShake', startedAt, finished);
-      }),
+      withTiming(0, { duration: 65 }),
     );
   }, [shakeOffset]);
 

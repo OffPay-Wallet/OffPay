@@ -1,39 +1,26 @@
 /**
- * Global staggered "components loading in" animation.
+ * Lightweight screen reveal.
  *
- * Two ways to use it:
- *
- *   1. `<StaggerRevealItem index={n}>` — manual control. Give siblings
- *      an increasing `index` for the staggered cascade.
- *
- *   2. `<StaggerRevealGroup>` — wrap a screen's content; each direct
- *      child is revealed in order automatically (no manual indices).
- *      This is the preferred way to add the effect to a screen.
- *
- * Each item fades + lifts into place on the UI thread (opacity +
- * translateY only — cheap, no layout). Pass a `trigger` to replay the
- * reveal on an event (e.g. a tab/mode switch) without remounting the
- * children.
+ * This used to stagger every child with a 65ms step and a 340ms lift,
+ * which made tab and FAB navigations read as delayed. The public API is
+ * kept so screens do not need to change, but the implementation now
+ * reveals all children together with a short opacity/translateY tween.
  */
-import { Children, isValidElement, useEffect } from 'react';
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
-
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
+import { Children, isValidElement } from 'react';
+import Animated, { Easing, FadeIn } from 'react-native-reanimated';
 
 import type { ReactNode } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 
-const STAGGER_STEP_MS = 65;
-const REVEAL_DURATION_MS = 340;
-const REVEAL_TRANSLATE_Y = 14;
+const REVEAL_DURATION_MS = 120;
+const REVEAL_TRANSLATE_Y = 4;
 const REVEAL_EASING = Easing.out(Easing.cubic);
+const REVEAL_ENTERING = FadeIn.duration(REVEAL_DURATION_MS)
+  .easing(REVEAL_EASING)
+  .withInitialValues({
+    opacity: 0,
+    transform: [{ translateY: REVEAL_TRANSLATE_Y }],
+  });
 
 type TriggerValue = string | number | boolean;
 
@@ -58,29 +45,14 @@ export function StaggerRevealItem({
   style,
   children,
 }: StaggerRevealItemProps): React.JSX.Element {
-  const progress = useSharedValue(0);
+  void baseDelayMs;
+  const revealKey = `${String(trigger ?? 'initial')}-${index}`;
 
-  useEffect(() => {
-    const delayMs = baseDelayMs + index * STAGGER_STEP_MS;
-    const startedAt = markAnimationPerf();
-    progress.value = 0;
-    progress.value = withDelay(
-      delayMs,
-      withTiming(1, { duration: REVEAL_DURATION_MS, easing: REVEAL_EASING }, (finished) => {
-        runOnJS(finishAnimationPerf)('staggerReveal.item', startedAt, finished, {
-          delayMs,
-          index,
-        });
-      }),
-    );
-  }, [index, trigger, baseDelayMs, progress]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * REVEAL_TRANSLATE_Y }],
-  }));
-
-  return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
+  return (
+    <Animated.View key={revealKey} entering={REVEAL_ENTERING} style={style}>
+      {children}
+    </Animated.View>
+  );
 }
 
 export interface StaggerRevealGroupProps {

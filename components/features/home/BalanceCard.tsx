@@ -18,15 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  Easing,
-  FadeIn,
-  FadeOut,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, useAnimatedStyle } from 'react-native-reanimated';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { PuffyReceiveIcon } from '@/components/ui/icons/PuffyReceiveIcon';
@@ -43,7 +35,6 @@ import { CURRENCIES } from '@/constants/currencies';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,32 +255,6 @@ export function BalanceCard({
     () => QUICK_ACTIONS.filter((action) => !disabledActionIds.includes(action.id)),
     [disabledActionIds],
   );
-  const visibleActionKey = useMemo(
-    () => visibleActions.map((action) => action.id).join('|'),
-    [visibleActions],
-  );
-  const actionsOpacity = useSharedValue(1);
-
-  useEffect(() => {
-    const startedAt = markAnimationPerf();
-    actionsOpacity.value = 0.9;
-    actionsOpacity.value = withTiming(
-      1,
-      {
-        duration: 120,
-        easing: Easing.out(Easing.cubic),
-      },
-      (finished) => {
-        runOnJS(finishAnimationPerf)('home.balanceActions.fade', startedAt, finished, {
-          actionCount: visibleActions.length,
-        });
-      },
-    );
-  }, [actionsOpacity, visibleActionKey, visibleActions.length]);
-
-  const actionsRowStyle = useAnimatedStyle(() => ({
-    opacity: actionsOpacity.value,
-  }));
   const { mounted: currencyMenuMounted, progress: currencyMenuProgress } =
     useReanimatedModalProgress(currencyMenuOpen, {
       name: 'home.currencyMenu',
@@ -843,9 +808,7 @@ export function BalanceCard({
         </View>
 
         {/* Actions row — shares the solid hero shell. */}
-        <Animated.View
-          style={[styles.actionsRow, compact && styles.actionsRowCompact, actionsRowStyle]}
-        >
+        <Animated.View style={[styles.actionsRow, compact && styles.actionsRowCompact]}>
           {visibleActions.map((action) =>
             showActionSkeletons ? (
               <View

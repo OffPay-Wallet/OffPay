@@ -17,7 +17,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { useNotificationStore } from '@/store/notificationStore';
 
 import type { ComponentProps } from 'react';
@@ -246,7 +245,6 @@ export function NotificationCenterModal({
 
   useEffect(() => {
     if (!rendered) return;
-    const startedAt = markAnimationPerf();
 
     if (visible) {
       // Snap to 0 first so the entrance always animates from "below
@@ -258,21 +256,12 @@ export function NotificationCenterModal({
       } else {
         sheetProgress.value = reduceMotion ? 1 : 0;
       }
-      sheetProgress.value = withTiming(
-        1,
-        {
-          duration: reduceMotion ? 0 : MODAL_OPEN_MS,
-          // Gentle ease-in-out so the drawer glides open and settles
-          // softly instead of snapping down like a spring.
-          easing: Easing.inOut(Easing.cubic),
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('home.notificationCenter', startedAt, finished, {
-            phase: 'open',
-            reduceMotion,
-          });
-        },
-      );
+      sheetProgress.value = withTiming(1, {
+        duration: reduceMotion ? 0 : MODAL_OPEN_MS,
+        // Gentle ease-in-out so the drawer glides open and settles
+        // softly instead of snapping down like a spring.
+        easing: Easing.inOut(Easing.cubic),
+      });
       return;
     }
 
@@ -280,10 +269,6 @@ export function NotificationCenterModal({
       0,
       { duration: reduceMotion ? 0 : MODAL_CLOSE_MS, easing: Easing.inOut(Easing.cubic) },
       (finished) => {
-        runOnJS(finishAnimationPerf)('home.notificationCenter', startedAt, finished, {
-          phase: 'close',
-          reduceMotion,
-        });
         if (finished) runOnJS(setRendered)(false);
       },
     );
@@ -314,14 +299,10 @@ export function NotificationCenterModal({
     setClearRun({ ids, durationMs: runDurationMs, staggerMs: runStaggerMs });
     setClearing(true);
     clearProgress.value = 0;
-    const startedAt = markAnimationPerf();
     clearProgress.value = withTiming(
       1,
       { duration: runDurationMs, easing: Easing.inOut(Easing.cubic) },
       (finished) => {
-        runOnJS(finishAnimationPerf)('home.notificationCenter.clearRows', startedAt, finished, {
-          notificationCount: ids.length,
-        });
         if (finished) runOnJS(finishClear)();
       },
     );
@@ -358,12 +339,10 @@ export function NotificationCenterModal({
 
       setDismissingNotificationId(id);
       dismissProgress.value = 0;
-      const startedAt = markAnimationPerf();
       dismissProgress.value = withTiming(
         1,
         { duration: CLEAR_ROW_DURATION_MS, easing: Easing.in(Easing.cubic) },
         (finished) => {
-          runOnJS(finishAnimationPerf)('home.notificationCenter.dismissRow', startedAt, finished);
           if (!finished) return;
           runOnJS(removeNotification)(id);
           dismissProgress.value = 0;

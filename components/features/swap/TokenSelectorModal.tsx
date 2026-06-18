@@ -12,27 +12,29 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing,
-  runOnJS,
-} from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle } from 'react-native-reanimated';
 
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
 import { Text } from '@/components/ui/Text';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
 import type { SwapTokenOption } from './types';
 
 const TOKEN_ROW_HEIGHT = layout.avatarLg + spacing.lg;
 const EMPTY_TOKEN_LIST: SwapTokenOption[] = [];
+const MODAL_OPEN_TIMING = {
+  duration: 280,
+  easing: Easing.out(Easing.cubic),
+} as const;
+const MODAL_CLOSE_TIMING = {
+  duration: 220,
+  easing: Easing.in(Easing.cubic),
+} as const;
 
 interface TokenSelectorModalProps {
   visible: boolean;
@@ -69,56 +71,21 @@ export function TokenSelectorModal({
 }: TokenSelectorModalProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
-  const [mounted, setMounted] = useState(visible);
   const [searchQuery, setSearchQuery] = useState('');
-  const translateY = useSharedValue(-screenHeight);
-  const opacity = useSharedValue(0);
+  const { mounted, progress } = useReanimatedModalProgress(visible, {
+    name: 'swap.tokenSelectorModal',
+    timing: visible ? MODAL_OPEN_TIMING : MODAL_CLOSE_TIMING,
+  });
   const sortableTokens = mounted ? tokens : EMPTY_TOKEN_LIST;
 
   useEffect(() => {
-    let searchResetTimeout: ReturnType<typeof setTimeout> | null = null;
-    const startedAt = markAnimationPerf();
-
-    if (visible) {
-      setMounted(true);
-      opacity.value = withTiming(1, { duration: 300 });
-      translateY.value = withTiming(
-        0,
-        {
-          duration: 350,
-          easing: Easing.out(Easing.poly(3)),
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('swap.tokenSelectorModal', startedAt, finished, {
-            phase: 'open',
-          });
-        },
-      );
-    } else {
-      translateY.value = withTiming(
-        -screenHeight,
-        {
-          duration: 250,
-          easing: Easing.in(Easing.ease),
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('swap.tokenSelectorModal', startedAt, finished, {
-            phase: 'close',
-          });
-        },
-      );
-      opacity.value = withTiming(0, { duration: 250 }, (finished) => {
-        if (finished) runOnJS(setMounted)(false);
-      });
-      searchResetTimeout = setTimeout(() => setSearchQuery(''), 300);
-    }
+    if (visible) return;
+    const searchResetTimeout = setTimeout(() => setSearchQuery(''), 300);
 
     return () => {
-      if (searchResetTimeout != null) {
-        clearTimeout(searchResetTimeout);
-      }
+      clearTimeout(searchResetTimeout);
     };
-  }, [visible, opacity, screenHeight, translateY]);
+  }, [visible]);
 
   const filteredTokens = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -141,18 +108,7 @@ export function TokenSelectorModal({
   }, []);
 
   const handleClose = () => {
-    const startedAt = markAnimationPerf();
-    translateY.value = withTiming(
-      -screenHeight,
-      { duration: 250, easing: Easing.in(Easing.ease) },
-      (finished) => {
-        runOnJS(finishAnimationPerf)('swap.tokenSelectorModal', startedAt, finished, {
-          phase: 'manualClose',
-        });
-        runOnJS(onClose)();
-      },
-    );
-    opacity.value = withTiming(0, { duration: 250 });
+    onClose();
   };
 
   const handleSelect = useCallback(
@@ -222,11 +178,11 @@ export function TokenSelectorModal({
   );
 
   const backdropStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
+    opacity: progress.value,
   }));
 
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
+    transform: [{ translateY: (1 - progress.value) * -screenHeight }],
   }));
 
   if (!mounted) return null;

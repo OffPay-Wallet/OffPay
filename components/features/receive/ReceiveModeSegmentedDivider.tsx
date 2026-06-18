@@ -2,7 +2,7 @@ import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
-  runOnJS,
+  useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -13,7 +13,6 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 /**
  * Segmented Standard / Private toggle for the receive screen.
@@ -81,32 +80,26 @@ export const ReceiveModeSegmentedDivider = memo(function ReceiveModeSegmentedDiv
 
   const trackWidth = useSharedValue(0);
   const selectedIndex = useSharedValue(modeIndex(selectedMode));
+  const selectedModeIndex = modeIndex(selectedMode);
+  const propSelectedIndex = useDerivedValue(() => selectedModeIndex, [selectedModeIndex]);
 
   // Reconcile the thumb with the prop for *external* mode changes only.
   // Taps already moved the thumb in the press handler, so when the prop
   // later catches up this resolves to the same target (a no-op).
-  React.useEffect(() => {
-    const startedAt = markAnimationPerf();
-    selectedIndex.value = withTiming(modeIndex(selectedMode), THUMB_TIMING, (finished) => {
-      runOnJS(finishAnimationPerf)('receive.modeDivider.thumb', startedAt, finished, {
-        mode: selectedMode,
-        source: 'prop',
-      });
-    });
-  }, [selectedIndex, selectedMode]);
+  useAnimatedReaction(
+    () => propSelectedIndex.value,
+    (current) => {
+      selectedIndex.value = withTiming(current, THUMB_TIMING);
+    },
+    [selectedIndex],
+  );
 
   // Slide the thumb immediately on tap, on the UI thread, without
   // waiting for the parent's state commit. The parent still updates its
   // mode via `onChangeMode`; this just unblocks the visual.
   const handleSelect = useCallback(
     (mode: ReceiveMode) => {
-      const startedAt = markAnimationPerf();
-      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING, (finished) => {
-        runOnJS(finishAnimationPerf)('receive.modeDivider.thumb', startedAt, finished, {
-          mode,
-          source: 'tap',
-        });
-      });
+      selectedIndex.value = withTiming(modeIndex(mode), THUMB_TIMING);
       onChangeMode(mode);
     },
     [onChangeMode, selectedIndex],

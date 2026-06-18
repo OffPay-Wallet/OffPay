@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Easing, runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
-
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
+import {
+  Easing,
+  runOnJS,
+  useAnimatedReaction,
+  useDerivedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import type { SharedValue, WithTimingConfig } from 'react-native-reanimated';
 
@@ -17,7 +21,7 @@ interface ReanimatedModalProgressOptions {
 
 interface ReanimatedModalProgress {
   mounted: boolean;
-  progress: SharedValue<number>;
+  progress: Pick<SharedValue<number>, 'value'>;
 }
 
 export function useReanimatedModalProgress(
@@ -25,25 +29,30 @@ export function useReanimatedModalProgress(
   options: ReanimatedModalProgressOptions = {},
 ): ReanimatedModalProgress {
   const [mounted, setMounted] = useState(visible);
-  const progress = useSharedValue(visible ? 1 : 0);
   const timing = options.timing ?? DEFAULT_MODAL_TIMING;
-  const name = options.name ?? 'modalProgress';
+  const targetProgress = visible ? 1 : 0;
+  const progress = useDerivedValue(
+    () => withTiming(targetProgress, timing),
+    [targetProgress, timing],
+  );
 
   useEffect(() => {
-    const startedAt = markAnimationPerf();
+    void options.name;
     if (visible) {
       setMounted(true);
-      progress.value = withTiming(1, timing, (finished) => {
-        runOnJS(finishAnimationPerf)(name, startedAt, finished, { phase: 'open' });
-      });
-      return;
     }
+  }, [options.name, visible]);
 
-    progress.value = withTiming(0, timing, (finished) => {
-      runOnJS(finishAnimationPerf)(name, startedAt, finished, { phase: 'close' });
-      if (finished) runOnJS(setMounted)(false);
-    });
-  }, [name, progress, timing, visible]);
+  useAnimatedReaction(
+    () => progress.value,
+    (current) => {
+      if (visible || !mounted || current > 0.001) {
+        return;
+      }
+      runOnJS(setMounted)(false);
+    },
+    [mounted, visible],
+  );
 
   return { mounted, progress };
 }

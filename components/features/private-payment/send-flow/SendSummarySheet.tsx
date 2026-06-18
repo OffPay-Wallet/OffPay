@@ -21,12 +21,12 @@ import { PanResponder, Pressable, StyleSheet, useWindowDimensions, View } from '
 import LottieView from 'lottie-react-native';
 import Animated, {
   Easing,
-  cancelAnimation,
   FadeIn,
   LinearTransition,
   interpolate,
   runOnJS,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -42,7 +42,6 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import type { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import type { SendTokenOption } from './types';
@@ -137,61 +136,32 @@ export function SendSummarySheet({
 
   const progress = useSharedValue(0);
   const dragY = useSharedValue(0);
-  const ringSpin = useSharedValue(0);
+  const ringSpin = useDerivedValue(
+    () =>
+      phase === 'sending'
+        ? withRepeat(withTiming(1, { duration: 900, easing: Easing.linear }), -1, false)
+        : 0,
+    [phase],
+  );
   const sheetHeightRef = useRef(0);
   const lockedRef = useRef(phase !== 'review');
   lockedRef.current = phase !== 'review';
 
   useEffect(() => {
-    const startedAt = markAnimationPerf();
     if (visible) {
       setMounted(true);
       dragY.value = 0;
-      progress.value = withTiming(
-        1,
-        { duration: OPEN_DURATION_MS, easing: OPEN_EASING },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('privatePayment.summarySheet', startedAt, finished, {
-            phase: 'open',
-          });
-        },
-      );
+      progress.value = withTiming(1, { duration: OPEN_DURATION_MS, easing: OPEN_EASING });
       return;
     }
     progress.value = withTiming(
       0,
       { duration: CLOSE_DURATION_MS, easing: CLOSE_EASING },
       (done) => {
-        runOnJS(finishAnimationPerf)('privatePayment.summarySheet', startedAt, done, {
-          phase: 'close',
-        });
         if (done) runOnJS(setMounted)(false);
       },
     );
   }, [dragY, progress, visible]);
-
-  // Spin the progress ring only while sending.
-  useEffect(() => {
-    if (phase === 'sending') {
-      const startedAt = markAnimationPerf();
-      ringSpin.value = 0;
-      ringSpin.value = withRepeat(
-        withTiming(1, { duration: 900, easing: Easing.linear }),
-        -1,
-        false,
-      );
-      return () => {
-        cancelAnimation(ringSpin);
-        finishAnimationPerf('privatePayment.summaryRing.loop', startedAt, false);
-      };
-    }
-
-    cancelAnimation(ringSpin);
-    ringSpin.value = 0;
-    return () => {
-      cancelAnimation(ringSpin);
-    };
-  }, [phase, ringSpin]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -207,27 +177,10 @@ export function SendSummarySheet({
           runOnJS(onCancel)();
           return;
         }
-        const startedAt = markAnimationPerf();
-        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING }, (finished) => {
-          runOnJS(finishAnimationPerf)(
-            'privatePayment.summarySheet.dragReset',
-            startedAt,
-            finished,
-          );
-        });
+        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING });
       },
       onPanResponderTerminate: () => {
-        const startedAt = markAnimationPerf();
-        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING }, (finished) => {
-          runOnJS(finishAnimationPerf)(
-            'privatePayment.summarySheet.dragReset',
-            startedAt,
-            finished,
-            {
-              phase: 'terminate',
-            },
-          );
-        });
+        dragY.value = withTiming(0, { duration: 200, easing: OPEN_EASING });
       },
     }),
   ).current;
@@ -537,32 +490,18 @@ function SummaryRow({
 }
 
 function ConfettiParticle({
-  index,
   particle,
 }: {
-  index: number;
   particle: (typeof CONFETTI_PARTICLES)[number];
 }): React.JSX.Element {
-  const burst = useSharedValue(0);
-
-  useEffect(() => {
-    const startedAt = markAnimationPerf();
-    burst.value = 0;
-    burst.value = withDelay(
-      SUCCESS_CONFETTI_DELAY_MS + particle.delay,
-      withTiming(1, { duration: 680, easing: Easing.out(Easing.cubic) }, (finished) => {
-        runOnJS(finishAnimationPerf)(
-          'privatePayment.successConfetti.particle',
-          startedAt,
-          finished,
-          {
-            delayMs: SUCCESS_CONFETTI_DELAY_MS + particle.delay,
-            index,
-          },
-        );
-      }),
-    );
-  }, [burst, index, particle.delay]);
+  const burst = useDerivedValue(
+    () =>
+      withDelay(
+        SUCCESS_CONFETTI_DELAY_MS + particle.delay,
+        withTiming(1, { duration: 680, easing: Easing.out(Easing.cubic) }),
+      ),
+    [particle.delay],
+  );
 
   const particleStyle = useAnimatedStyle(() => ({
     opacity: interpolate(burst.value, [0, 0.14, 0.78, 1], [0, 1, 1, 0]),
@@ -594,11 +533,7 @@ function SuccessConfetti(): React.JSX.Element {
   return (
     <View pointerEvents="none" style={styles.confettiLayer}>
       {CONFETTI_PARTICLES.map((particle, index) => (
-        <ConfettiParticle
-          key={`${particle.x}-${particle.y}-${index}`}
-          index={index}
-          particle={particle}
-        />
+        <ConfettiParticle key={`${particle.x}-${particle.y}-${index}`} particle={particle} />
       ))}
     </View>
   );

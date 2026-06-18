@@ -13,13 +13,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
 
 import { DottedQRCode } from '@/components/ui/DottedQRCode';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
@@ -43,7 +36,6 @@ import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { useUmbraVaultRegistrationStatus } from '@/hooks/useUmbraVaultRegistrationStatus';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { buildOffpayReceiveRequestQr } from '@/lib/offline/offline-payments';
 import {
   getOffpayFeatureCapability,
@@ -92,14 +84,6 @@ const UMBRA_AUTO_SCAN_DELAY_MS = 1400;
 const UMBRA_AUTO_SCAN_TIMEOUT_MS = 5000;
 const UMBRA_MIXER_REGISTRATION_RECHECK_MS = 6 * 60 * 60 * 1000;
 const EMPTY_UMBRA_PENDING_CLAIMS: readonly UmbraPendingClaimUtxo[] = [];
-// Fade-out timing for the standard / private content swap. The
-// outgoing content fades quickly (the user has already committed to
-// the new mode); the incoming content is revealed by the per-component
-// StaggerReveal rather than a container fade-in.
-const MODE_CONTENT_FADE_OUT = {
-  duration: 140,
-  easing: Easing.in(Easing.cubic),
-} as const;
 
 function formatNetworkLabel(network: string | null): string {
   if (network === 'mainnet') return 'Mainnet';
@@ -487,41 +471,15 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   );
   const pendingClaimCount = visiblePendingClaimResult?.pendingClaimCount ?? 0;
 
-  const [renderedReceiveMode, setRenderedReceiveMode] = useState<ReceiveMode>('standard');
-  const modeContentOpacity = useSharedValue(1);
+  const renderedReceiveMode = receiveMode;
   const closingPrivateReceive = closingReceiveMode === 'private';
   const isUmbraSurfaceVisible =
     (renderedReceiveMode === 'private' || closingPrivateReceive) &&
     (closingPrivateReceive || canShowUmbraReceiveRoute || pendingClaimCount > 0);
 
-  // Crossfade the content area out on mode change. The fade-out runs
-  // first; once it lands we commit the new mode, then snap the
-  // container back to full opacity and let the per-component
-  // StaggerReveal handle the smooth entrance of the new content. Both
-  // subtrees stay mounted (display: none) so swapping back is free —
-  // the QR component never rebuilds its 700+ SVG nodes, and the Umbra
-  // hooks keep their warm React Query cache.
-  useEffect(() => {
-    if (renderedReceiveMode === receiveMode) return;
-    const startedAt = markAnimationPerf();
-    modeContentOpacity.value = withTiming(0, MODE_CONTENT_FADE_OUT, (finished) => {
-      runOnJS(finishAnimationPerf)('receive.modeContentFade', startedAt, finished, {
-        mode: receiveMode,
-      });
-      if (!finished) return;
-      runOnJS(setRenderedReceiveMode)(receiveMode);
-    });
-  }, [modeContentOpacity, receiveMode, renderedReceiveMode]);
-
-  useEffect(() => {
-    // Snap the container opaque immediately — the staggered reveal of
-    // the individual components is now the visible entrance.
-    modeContentOpacity.value = 1;
-  }, [modeContentOpacity, renderedReceiveMode]);
-
-  const modeContentStyle = useAnimatedStyle(() => ({
-    opacity: modeContentOpacity.value,
-  }));
+  // Both mode subtrees stay mounted so switching does not rebuild the
+  // heavy QR tree or restart the Umbra hooks. The lightweight reveal
+  // wrappers provide the only entrance motion after the mode changes.
 
   const handleClose = useCallback(() => {
     const modeAtClose =
@@ -1102,7 +1060,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
             />
           ) : null}
 
-          <Animated.View style={[styles.modeContent, modeContentStyle]}>
+          <View style={styles.modeContent}>
             {/* Both subtrees stay mounted across mode swaps. Toggling
                 `display` instead of conditionally rendering keeps the
                 heavy QR component (700+ SVG circles) and the Umbra
@@ -1332,7 +1290,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 revealKey={renderedReceiveMode}
               />
             </View>
-          </Animated.View>
+          </View>
         </View>
       </ScrollView>
 

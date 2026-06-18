@@ -37,7 +37,6 @@ import { PuffyTwitterXIcon } from '@/components/ui/icons/PuffyTwitterXIcon';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { resetForgottenWallet } from '@/lib/wallet/wallet-reset';
 import { useAppStore } from '@/store/app';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
@@ -165,7 +164,6 @@ export function SettingsScreenContent({
     confirmClosingRef.current = false;
     setConfirmClosing(false);
 
-    const startedAt = markAnimationPerf();
     resetConfirmScrim.value = withTiming(1, {
       duration: RESET_CONFIRM_SCRIM_DURATION_MS,
       easing: RESET_CONFIRM_IOS_EASING,
@@ -179,18 +177,10 @@ export function SettingsScreenContent({
     );
     resetConfirmMotion.value = withDelay(
       RESET_CONFIRM_CONTENT_DELAY_MS,
-      withTiming(
-        1,
-        {
-          duration: RESET_CONFIRM_CARD_DURATION_MS,
-          easing: RESET_CONFIRM_IOS_EASING,
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('settings.resetConfirmDialog', startedAt, finished, {
-            phase: 'open',
-          });
-        },
-      ),
+      withTiming(1, {
+        duration: RESET_CONFIRM_CARD_DURATION_MS,
+        easing: RESET_CONFIRM_IOS_EASING,
+      }),
     );
     resetConfirmBlur.value = withDelay(
       RESET_CONFIRM_CONTENT_DELAY_MS,
@@ -230,7 +220,6 @@ export function SettingsScreenContent({
 
     confirmClosingRef.current = true;
     setConfirmClosing(true);
-    const startedAt = markAnimationPerf();
     resetConfirmScrim.value = withTiming(0, {
       duration: RESET_CONFIRM_CLOSE_DURATION_MS,
       easing: RESET_CONFIRM_CLOSE_EASING,
@@ -250,9 +239,6 @@ export function SettingsScreenContent({
         easing: RESET_CONFIRM_CLOSE_EASING,
       },
       (finished) => {
-        runOnJS(finishAnimationPerf)('settings.resetConfirmDialog', startedAt, finished, {
-          phase: 'close',
-        });
         if (finished) runOnJS(finishConfirmClose)();
       },
     );

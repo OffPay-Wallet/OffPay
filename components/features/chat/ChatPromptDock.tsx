@@ -13,16 +13,15 @@
  * text composer.
  */
 
-import React, { useEffect, type RefObject } from 'react';
+import React, { type RefObject } from 'react';
 import { type LayoutChangeEvent, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
   FadeOut,
   LinearTransition,
-  runOnJS,
   useAnimatedStyle,
-  useSharedValue,
+  useDerivedValue,
   withTiming,
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -31,7 +30,6 @@ import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 import { Text } from '@/components/ui/Text';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import { AiLoaderLottie } from './AiLoaderLottie';
 import { VoiceWaveform } from './VoiceWaveform';
@@ -133,16 +131,10 @@ export function ChatPromptDock({
 }: ChatPromptDockProps): React.JSX.Element {
   const voiceCardActive =
     voice != null && (voice.state === 'recording' || voice.state === 'review');
-  const keyboardShift = useSharedValue(keyboardOffset);
-
-  useEffect(() => {
-    const startedAt = markAnimationPerf();
-    keyboardShift.value = withTiming(keyboardOffset, KEYBOARD_DOCK_TIMING, (finished) => {
-      runOnJS(finishAnimationPerf)('chat.promptDock.keyboardShift', startedAt, finished, {
-        keyboardOffset: Math.round(keyboardOffset),
-      });
-    });
-  }, [keyboardOffset, keyboardShift]);
+  const keyboardShift = useDerivedValue(
+    () => withTiming(keyboardOffset, KEYBOARD_DOCK_TIMING),
+    [keyboardOffset],
+  );
 
   const dockStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: -keyboardShift.value }],

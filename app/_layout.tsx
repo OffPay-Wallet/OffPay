@@ -23,9 +23,8 @@ import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   Easing,
-  runOnJS,
   useAnimatedStyle,
-  useSharedValue,
+  useDerivedValue,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -50,7 +49,6 @@ import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 import type { Theme } from 'expo-router/react-navigation';
 
@@ -147,7 +145,10 @@ export default function RootLayout(): React.JSX.Element | null {
   const [rootLayoutReady, setRootLayoutReady] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [mmkvReady, setMmkvReady] = useState(false);
-  const rootReveal = useSharedValue(0);
+  const rootReveal = useDerivedValue(
+    () => withTiming(hasHiddenSplash ? 1 : 0, ROOT_REVEAL_TIMING),
+    [hasHiddenSplash],
+  );
   const rootRevealStyle = useAnimatedStyle(() => ({
     opacity: rootReveal.value,
   }));
@@ -161,14 +162,6 @@ export default function RootLayout(): React.JSX.Element | null {
       cancelAnimationFrame(frame);
     };
   }, []);
-
-  useEffect(() => {
-    if (!hasHiddenSplash) return;
-    const startedAt = markAnimationPerf();
-    rootReveal.value = withTiming(1, ROOT_REVEAL_TIMING, (finished) => {
-      runOnJS(finishAnimationPerf)('root.appShellReveal', startedAt, finished);
-    });
-  }, [hasHiddenSplash, rootReveal]);
 
   useEffect(() => {
     const unsubscribe = usePreferencesStore.persist.onFinishHydration(() => {

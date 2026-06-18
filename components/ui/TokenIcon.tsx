@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
-import Animated, { FadeIn, runOnJS } from 'react-native-reanimated';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SvgUri } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
 import { Text } from '@/components/ui/Text';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { usePreferencesStore } from '@/store/preferencesStore';
 
 function getTokenFallbackLabel(symbol?: string | null, name?: string | null): string {
@@ -83,20 +82,6 @@ export function TokenIcon({
   const useSvgLogo = normalizedLogoUri != null && isSvgLogoUri(normalizedLogoUri);
   const [remoteFailed, setRemoteFailed] = useState(false);
   const fallbackPalette = useMemo(() => getTokenFallbackPalette(symbol), [symbol]);
-  const logoIdentity = recyclingKey ?? normalizedLogoUri ?? 'fallback';
-  const logoFadeStartedAt = useMemo(() => {
-    void logoIdentity;
-    return markAnimationPerf();
-  }, [logoIdentity]);
-  const logoEntering = useMemo(
-    () =>
-      FadeIn.duration(120).withCallback((finished) => {
-        runOnJS(finishAnimationPerf)('tokenIcon.remoteImageFade', logoFadeStartedAt, finished, {
-          size,
-        });
-      }),
-    [logoFadeStartedAt, size],
-  );
 
   useEffect(() => {
     setRemoteFailed(false);
@@ -148,7 +133,7 @@ export function TokenIcon({
       {normalizedLogoUri != null && !remoteFailed && !useSvgLogo ? (
         <Animated.View
           key={recyclingKey ?? normalizedLogoUri}
-          entering={logoEntering}
+          entering={FadeIn.duration(90)}
           style={styles.fill}
         >
           <Image

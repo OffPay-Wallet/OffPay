@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanResponder, StyleSheet, type StyleProp, View, type ViewStyle } from 'react-native';
 import Animated, {
   Easing,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -14,7 +13,6 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 const TRACK_HEIGHT = layout.buttonHeightLg;
 const TRACK_PADDING = 3;
@@ -62,14 +60,8 @@ export function GlassSliderButton({
   const inactive = disabled || effectiveLoading || maxTravel <= 0;
   const showDangerFeedback = feedbackTone === 'danger' && disabled && !effectiveLoading;
   const animateThumb = useCallback(
-    (toValue: number, phase: string): void => {
-      const startedAt = markAnimationPerf();
-      translateX.value = withTiming(toValue, SLIDE_TIMING, (finished) => {
-        runOnJS(finishAnimationPerf)('ui.glassSlider.thumb', startedAt, finished, {
-          phase,
-          target: Math.round(toValue),
-        });
-      });
+    (toValue: number): void => {
+      translateX.value = withTiming(toValue, SLIDE_TIMING);
     },
     [translateX],
   );
@@ -92,20 +84,20 @@ export function GlassSliderButton({
     dragXRef.current = 0;
     startXRef.current = 0;
     if (!loading) {
-      animateThumb(0, 'reset');
+      animateThumb(0);
     }
   }, [animateThumb, loading, resetSignal]);
 
   useEffect(() => {
     if (effectiveLoading) {
-      animateThumb(maxTravel, 'loading');
+      animateThumb(maxTravel);
       return;
     }
 
     completedRef.current = false;
     dragXRef.current = 0;
     startXRef.current = 0;
-    animateThumb(0, 'idle');
+    animateThumb(0);
   }, [animateThumb, effectiveLoading, maxTravel]);
 
   const complete = useCallback((): void => {
@@ -113,7 +105,7 @@ export function GlassSliderButton({
     completedRef.current = true;
     dragXRef.current = maxTravel;
     setCompletionPending(true);
-    animateThumb(maxTravel, 'complete');
+    animateThumb(maxTravel);
     onComplete();
   }, [animateThumb, maxTravel, onComplete]);
 
@@ -143,12 +135,12 @@ export function GlassSliderButton({
           }
 
           dragXRef.current = 0;
-          animateThumb(0, 'releaseReset');
+          animateThumb(0);
         },
         onPanResponderTerminate: () => {
           if (completedRef.current) return;
           dragXRef.current = 0;
-          animateThumb(0, 'terminateReset');
+          animateThumb(0);
         },
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,

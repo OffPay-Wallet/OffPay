@@ -9,9 +9,8 @@ import Animated, {
   Easing,
   interpolate,
   interpolateColor,
-  runOnJS,
   useAnimatedStyle,
-  useSharedValue,
+  useDerivedValue,
   withTiming,
 } from 'react-native-reanimated';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
@@ -32,7 +31,6 @@ import {
 import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import {
   deleteManagedProfileImage,
   resolveStoredProfileImageUri,
@@ -120,7 +118,10 @@ function HomeHeaderComponent({
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Animation values
-  const toggleProgress = useSharedValue(isOffline ? 1 : 0);
+  const toggleProgress = useDerivedValue(
+    () => withTiming(isOffline ? 1 : 0, TOGGLE_TIMING),
+    [isOffline],
+  );
   const ultraCompactHeader = windowWidth < 360 || fontScale > 1.22;
   const compactHeader = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
   const denseHeader = windowWidth < 340 || fontScale > 1.18;
@@ -171,16 +172,6 @@ function HomeHeaderComponent({
     headerTopPadding + layout.minTouchTarget + spacing.xs + headerBottomGap + spacing.xs;
   const walletDisplayName = username != null ? `@${username}` : accountName;
 
-  useEffect(() => {
-    const startedAt = markAnimationPerf();
-    toggleProgress.value = withTiming(isOffline ? 1 : 0, TOGGLE_TIMING, (finished) => {
-      runOnJS(finishAnimationPerf)('home.walletModeToggle', startedAt, finished, {
-        offline: isOffline,
-        source: 'prop',
-      });
-    });
-  }, [isOffline, toggleProgress]);
-
   useEffect(
     () => () => {
       if (markReadTimerRef.current != null) {
@@ -196,16 +187,9 @@ function HomeHeaderComponent({
     if (onToggleOffline != null) {
       onToggleOffline(next);
     } else {
-      const startedAt = markAnimationPerf();
-      toggleProgress.value = withTiming(next ? 1 : 0, TOGGLE_TIMING, (finished) => {
-        runOnJS(finishAnimationPerf)('home.walletModeToggle', startedAt, finished, {
-          offline: next,
-          source: 'local',
-        });
-      });
       setInternalOffline(next);
     }
-  }, [isOffline, onToggleOffline, toggleProgress]);
+  }, [isOffline, onToggleOffline]);
 
   const handleRequestDevnetAirdrop = useCallback(async (): Promise<void> => {
     if (faucetBusy) return;

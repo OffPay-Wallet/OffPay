@@ -3,9 +3,8 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
-  runOnJS,
   useAnimatedStyle,
-  useSharedValue,
+  useDerivedValue,
   withSpring,
   withTiming,
   type WithSpringConfig,
@@ -23,7 +22,6 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useWalletModeState } from '@/hooks/useWalletModeState';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 import { useTabHistoryStore, isTabRouteName } from '@/store/tabHistoryStore';
 
@@ -186,7 +184,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const recordTabSwitch = useTabHistoryStore((s) => s.recordTabSwitch);
   const [offlineSwapNoticeVisible, setOfflineSwapNoticeVisible] = useState(false);
   const [fabExpanded, setFabExpanded] = useState(false);
-  const hasPositionedSliderRef = useRef(false);
   const lastVisibleTabIndexRef = useRef(state.index);
 
   const primaryRoutes = useMemo(
@@ -222,27 +219,17 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     }
   }
 
-  const translateX = useSharedValue(0);
-  const sliderOpacity = useSharedValue(1);
-  const barVisibility = useSharedValue(tabBarHidden ? 0 : 1);
-  const fabExpansion = useSharedValue(0);
-
-  useEffect(() => {
-    const startedAt = markAnimationPerf();
-    barVisibility.value = IS_ANDROID
-      ? withTiming(tabBarHidden ? 0 : 1, TAB_VISIBILITY_TIMING, (finished) => {
-          runOnJS(finishAnimationPerf)('navigation.tabBar.visibility', startedAt, finished, {
-            hidden: tabBarHidden,
-            platform: 'android',
-          });
-        })
-      : withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING, (finished) => {
-          runOnJS(finishAnimationPerf)('navigation.tabBar.visibility', startedAt, finished, {
-            hidden: tabBarHidden,
-            platform: 'ios',
-          });
-        });
-  }, [barVisibility, tabBarHidden]);
+  const barVisibility = useDerivedValue(
+    () =>
+      IS_ANDROID
+        ? withTiming(tabBarHidden ? 0 : 1, TAB_VISIBILITY_TIMING)
+        : withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING),
+    [tabBarHidden],
+  );
+  const fabExpansion = useDerivedValue(
+    () => withTiming(fabExpanded ? 1 : 0, FAB_FADE_ANIMATION),
+    [fabExpanded],
+  );
 
   useEffect(() => {
     if (tabBarHidden) return;
@@ -256,24 +243,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   }, [tabBarHidden, fabExpanded]);
 
   useEffect(() => {
-    const startedAt = markAnimationPerf();
-    fabExpansion.value = withTiming(fabExpanded ? 1 : 0, FAB_FADE_ANIMATION, (finished) => {
-      runOnJS(finishAnimationPerf)('navigation.fabExpansion', startedAt, finished, {
-        expanded: fabExpanded,
-      });
-    });
-  }, [fabExpanded, fabExpansion]);
-
-  useEffect(() => {
     if (!offlineSwapNoticeVisible) return;
     const timeout = setTimeout(() => setOfflineSwapNoticeVisible(false), 1600);
     return () => clearTimeout(timeout);
   }, [offlineSwapNoticeVisible]);
-
-  const sliderStyle = useAnimatedStyle(() => ({
-    opacity: sliderOpacity.value,
-    transform: [{ translateX: translateX.value }],
-  }));
 
   const barStyle = useAnimatedStyle(() => ({
     opacity: barVisibility.value,
@@ -347,58 +320,22 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const actionRowRight = windowWidth - (fabCenterX + QUICK_ACTION_PUCK_SIZE / 2);
   const actionStackBottom = bottomGap + barHeight + QUICK_ACTION_ROW_GAP;
 
-  useEffect(() => {
-    if (!hasPositionedSliderRef.current) {
-      hasPositionedSliderRef.current = true;
-      translateX.value = activePillX;
-      const opacityStartedAt = markAnimationPerf();
-      sliderOpacity.value = withTiming(
-        hasPrimaryActiveRoute ? 1 : 0,
-        {
-          duration: 60,
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('navigation.tabSlider.opacity', opacityStartedAt, finished, {
-            active: hasPrimaryActiveRoute,
-            initial: true,
-          });
-        },
-      );
-      return;
-    }
-
-    // When the active route isn't a primary tab (chat / shopping / rwas),
-    // fade the pill out so Home doesn't appear highlighted by default.
-    const opacityStartedAt = markAnimationPerf();
-    sliderOpacity.value = withTiming(
-      hasPrimaryActiveRoute ? 1 : 0,
-      {
-        duration: 120,
+  const sliderOpacity = useDerivedValue(
+    () =>
+      withTiming(hasPrimaryActiveRoute ? 1 : 0, {
+        duration: 90,
         easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-      },
-      (finished) => {
-        runOnJS(finishAnimationPerf)('navigation.tabSlider.opacity', opacityStartedAt, finished, {
-          active: hasPrimaryActiveRoute,
-          initial: false,
-        });
-      },
-    );
-
-    if (hasPrimaryActiveRoute) {
-      const translateStartedAt = markAnimationPerf();
-      translateX.value = withTiming(activePillX, TAB_SLIDER_ANIMATION, (finished) => {
-        runOnJS(finishAnimationPerf)(
-          'navigation.tabSlider.translate',
-          translateStartedAt,
-          finished,
-          {
-            x: Math.round(activePillX),
-          },
-        );
-      });
-    }
-  }, [activePillX, hasPrimaryActiveRoute, sliderOpacity, translateX]);
+      }),
+    [hasPrimaryActiveRoute],
+  );
+  const sliderTranslateX = useDerivedValue(
+    () => withTiming(activePillX, TAB_SLIDER_ANIMATION),
+    [activePillX],
+  );
+  const sliderStyle = useAnimatedStyle(() => ({
+    opacity: sliderOpacity.value,
+    transform: [{ translateX: sliderTranslateX.value }],
+  }));
 
   function renderRouteIcon(
     routeName: string,

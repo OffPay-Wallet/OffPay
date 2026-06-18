@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -7,29 +7,32 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from '@/components/features/swap/swapGlass';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
+import { useReanimatedModalProgress } from '@/components/ui/useReanimatedModalProgress';
 import { Text } from '@/components/ui/Text';
 import { PuffyQRIcon } from '@/components/ui/icons/PuffyQRIcon';
 import { PuffyShieldIcon } from '@/components/ui/icons/PuffyShieldIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 
 interface ReceiveInfoModalProps {
   visible: boolean;
   networkLabel: string;
   onClose: () => void;
 }
+
+const INFO_MODAL_OPEN_TIMING = {
+  duration: 240,
+  easing: Easing.out(Easing.cubic),
+} as const;
+const INFO_MODAL_CLOSE_TIMING = {
+  duration: 220,
+  easing: Easing.in(Easing.cubic),
+} as const;
 
 export function ReceiveInfoModal({
   visible,
@@ -38,71 +41,24 @@ export function ReceiveInfoModal({
 }: ReceiveInfoModalProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
-  const [mounted, setMounted] = useState(visible);
-  const translateY = useSharedValue(height);
-  const opacity = useSharedValue(0);
+  const { mounted, progress } = useReanimatedModalProgress(visible, {
+    name: 'receive.infoModal',
+    timing: visible ? INFO_MODAL_OPEN_TIMING : INFO_MODAL_CLOSE_TIMING,
+  });
   const compactSheet = width < 380 || fontScale > 1.08;
   const sheetWidth = Math.min(Math.max(width - spacing.md * 2, 0), 430);
   const sheetPadding = compactSheet ? spacing.lg : spacing.xl;
 
-  useEffect(() => {
-    const startedAt = markAnimationPerf();
-    if (visible) {
-      setMounted(true);
-      opacity.value = withTiming(1, { duration: 240 });
-      translateY.value = withTiming(
-        0,
-        {
-          duration: 280,
-          easing: Easing.out(Easing.poly(3)),
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('receive.infoModal', startedAt, finished, {
-            phase: 'open',
-          });
-        },
-      );
-      return;
-    }
-
-    translateY.value = withTiming(
-      height,
-      {
-        duration: 220,
-        easing: Easing.in(Easing.ease),
-      },
-      (finished) => {
-        runOnJS(finishAnimationPerf)('receive.infoModal', startedAt, finished, {
-          phase: 'close',
-        });
-      },
-    );
-    opacity.value = withTiming(0, { duration: 200 }, (finished) => {
-      if (finished) runOnJS(setMounted)(false);
-    });
-  }, [height, opacity, translateY, visible]);
-
   const handleClose = () => {
-    const startedAt = markAnimationPerf();
-    translateY.value = withTiming(
-      height,
-      { duration: 220, easing: Easing.in(Easing.ease) },
-      (finished) => {
-        runOnJS(finishAnimationPerf)('receive.infoModal', startedAt, finished, {
-          phase: 'manualClose',
-        });
-        runOnJS(onClose)();
-      },
-    );
-    opacity.value = withTiming(0, { duration: 200 });
+    onClose();
   };
 
   const backdropStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
+    opacity: progress.value,
   }));
 
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
+    transform: [{ translateY: (1 - progress.value) * height }],
   }));
 
   if (!mounted) return null;

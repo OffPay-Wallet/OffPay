@@ -44,7 +44,6 @@ import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
 import { colors } from '@/constants/colors';
 import { SOLANA_NETWORKS } from '@/constants/networks';
 import { layout, radii, spacing } from '@/constants/spacing';
-import { finishAnimationPerf, markAnimationPerf } from '@/lib/perf/animation-perf';
 import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransitionStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
@@ -180,39 +179,26 @@ export function PreferencesModal({
 
   // Animation
   useEffect(() => {
-    const startedAt = markAnimationPerf();
     if (visible) {
       setContentHeight(0);
       setMounted(true);
       opacity.value = withTiming(1, { duration: 220 });
-      translateY.value = withTiming(
-        0,
-        {
-          duration: 320,
-          easing: Easing.out(Easing.poly(4)),
-        },
-        (finished) => {
-          runOnJS(finishAnimationPerf)('settings.preferencesModal', startedAt, finished, {
-            phase: 'open',
-          });
-        },
-      );
+      translateY.value = withTiming(0, {
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+      });
     } else {
       translateY.value = withTiming(
         windowHeight,
         {
           duration: 220,
-          easing: Easing.in(Easing.ease),
+          easing: Easing.in(Easing.cubic),
         },
         (finished) => {
-          runOnJS(finishAnimationPerf)('settings.preferencesModal', startedAt, finished, {
-            phase: 'close',
-          });
+          if (finished) runOnJS(setMounted)(false);
         },
       );
-      opacity.value = withTiming(0, { duration: 220 }, (finished) => {
-        if (finished) runOnJS(setMounted)(false);
-      });
+      opacity.value = withTiming(0, { duration: 220 });
       setStep('root');
     }
   }, [opacity, translateY, visible, windowHeight]);
@@ -242,15 +228,11 @@ export function PreferencesModal({
         afterClose?.();
       };
 
-      const startedAt = markAnimationPerf();
       translateY.value = withTiming(
         windowHeight,
-        { duration: 220, easing: Easing.in(Easing.ease) },
+        { duration: 220, easing: Easing.in(Easing.cubic) },
         (finished) => {
-          runOnJS(finishAnimationPerf)('settings.preferencesModal', startedAt, finished, {
-            phase: 'manualClose',
-          });
-          runOnJS(finishClose)();
+          if (finished) runOnJS(finishClose)();
         },
       );
       opacity.value = withTiming(0, { duration: 220 });
