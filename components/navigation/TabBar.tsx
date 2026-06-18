@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
-  Easing,
+  useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
+  useSharedValue,
   withSpring,
-  withTiming,
   type WithSpringConfig,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,7 +40,7 @@ const COMFORTABLE_BAR_SIDE_GUTTER = spacing['2xl'];
 const FAB_SIZE_BASE = 56;
 const FAB_SIZE_COMPACT = 50;
 const FAB_GAP = spacing.sm;
-const QUICK_ACTION_PUCK_SIZE = 40;
+const QUICK_ACTION_PUCK_SIZE = 52;
 const QUICK_ACTION_ROW_GAP = spacing.md;
 
 // ---------------------------------------------------------------------------
@@ -92,27 +92,25 @@ const PILL_SHADOW = '0 2px 6px rgba(0, 0, 0, 0.1)';
 const FAB_PUCK_SHADOW = '0 6px 16px rgba(0, 0, 0, 0.4)';
 const QUICK_ACTION_SHADOW = '0 8px 20px rgba(16, 16, 16, 0.16)';
 
-// Animations — fast, snappy, single curve for open + close so the
-// scrim, menu items, and "+" rotation all feel immediate and responsive.
-// Spring for the bar hide/show so it pops in/out with the same tactile
-// feel as the button presses. Runs on the UI thread.
+// Animations — fast UI-thread transforms/opacity. FAB expansion is driven
+// directly from a shared value in the press handler so it does not wait for a
+// React render before opening or closing.
 const TAB_VISIBILITY_SPRING: WithSpringConfig = {
   damping: 28,
   stiffness: 420,
   mass: 0.4,
 };
-const TAB_SLIDER_ANIMATION = {
-  duration: 90,
-  easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-} as const;
-const FAB_FADE_ANIMATION = {
-  duration: 90,
-  easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-} as const;
-const TAB_VISIBILITY_TIMING = {
-  duration: 70,
-  easing: Easing.out(Easing.cubic),
-} as const;
+const FAB_EXPANSION_SPRING: WithSpringConfig = {
+  damping: 18,
+  stiffness: 420,
+  mass: 0.55,
+};
+const TAB_PILL_FEEDBACK_SPRING: WithSpringConfig = {
+  damping: 22,
+  stiffness: 520,
+  mass: 0.45,
+};
+const TAB_PILL_PRESS_SCALE = 0.96;
 
 // ---------------------------------------------------------------------------
 // Tab metadata
@@ -183,8 +181,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const tabBarHidden = routeHidesTabBar || isOverlayActive;
   const recordTabSwitch = useTabHistoryStore((s) => s.recordTabSwitch);
   const [offlineSwapNoticeVisible, setOfflineSwapNoticeVisible] = useState(false);
-  const [fabExpanded, setFabExpanded] = useState(false);
+  const [fabMenuInteractive, setFabMenuInteractive] = useState(false);
   const lastVisibleTabIndexRef = useRef(state.index);
+  const fabExpandedRef = useRef(false);
+  const fabTouchHandledRef = useRef(false);
+  const fabExpansion = useSharedValue(0);
+  const activePillFeedback = useSharedValue(1);
 
   const primaryRoutes = useMemo(
     () =>
@@ -204,32 +206,23 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   // every primary tab should render in its inactive style.
   const hasPrimaryActiveRoute = visualActivePrimaryIndex >= 0;
 
-  function handleTabPress(routeName: string, isFocused: boolean): void {
-    if (isOffline && routeName === 'swap') {
-      setOfflineSwapNoticeVisible(true);
-      return;
-    }
-
-    if (!isFocused) {
-      const currentRoute = state.routes[state.index];
-      if (currentRoute != null && isTabRouteName(currentRoute.name)) {
-        recordTabSwitch(state.index, currentRoute.name);
-      }
-      navigation.navigate(routeName);
-    }
-  }
-
   const barVisibility = useDerivedValue(
-    () =>
-      IS_ANDROID
-        ? withTiming(tabBarHidden ? 0 : 1, TAB_VISIBILITY_TIMING)
-        : withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING),
+    () => withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING),
     [tabBarHidden],
   );
-  const fabExpansion = useDerivedValue(
-    () => withTiming(fabExpanded ? 1 : 0, FAB_FADE_ANIMATION),
-    [fabExpanded],
+
+  const setFabMenuExpanded = useCallback(
+    (expanded: boolean) => {
+      fabExpandedRef.current = expanded;
+      fabExpansion.value = withSpring(expanded ? 1 : 0, FAB_EXPANSION_SPRING);
+      setFabMenuInteractive(expanded);
+    },
+    [fabExpansion],
   );
+
+  const closeFabMenu = useCallback(() => {
+    setFabMenuExpanded(false);
+  }, [setFabMenuExpanded]);
 
   useEffect(() => {
     if (tabBarHidden) return;
@@ -237,10 +230,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   }, [state.index, tabBarHidden]);
 
   useEffect(() => {
-    if (tabBarHidden && fabExpanded) {
-      setFabExpanded(false);
+    if (tabBarHidden && fabExpandedRef.current) {
+      closeFabMenu();
     }
-  }, [tabBarHidden, fabExpanded]);
+  }, [closeFabMenu, tabBarHidden]);
 
   useEffect(() => {
     if (!offlineSwapNoticeVisible) return;
@@ -292,7 +285,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const iconSize = denseTabs ? 19 : compactTabs ? 20 : 22;
   const fabPlusSize = denseTabs ? 22 : 26;
   const fabPlusThickness = denseTabs ? 2.7 : 3;
-  const quickActionIconSize = denseTabs ? 18 : 20;
+  const quickActionIconSize = denseTabs ? 26 : 28;
   const bottomGap = Math.max(spacing.md, insets.bottom + spacing.xs);
   // Vertical room for the labelled action rows above the FAB.
   const stackedActionsHeight =
@@ -319,23 +312,52 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   // toward the FAB column (label on the left, puck on the right).
   const actionRowRight = windowWidth - (fabCenterX + QUICK_ACTION_PUCK_SIZE / 2);
   const actionStackBottom = bottomGap + barHeight + QUICK_ACTION_ROW_GAP;
+  const activePillTranslateX = useSharedValue(activePillX);
 
-  const sliderOpacity = useDerivedValue(
-    () =>
-      withTiming(hasPrimaryActiveRoute ? 1 : 0, {
-        duration: 90,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-      }),
-    [hasPrimaryActiveRoute],
-  );
-  const sliderTranslateX = useDerivedValue(
-    () => withTiming(activePillX, TAB_SLIDER_ANIMATION),
+  useAnimatedReaction(
+    () => activePillX,
+    (currentPillX) => {
+      activePillTranslateX.value = currentPillX;
+    },
     [activePillX],
   );
+
+  const primeActivePill = useCallback(
+    (targetPillX: number) => {
+      activePillTranslateX.value = targetPillX;
+      activePillFeedback.value = TAB_PILL_PRESS_SCALE;
+      activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
+    },
+    [activePillFeedback, activePillTranslateX],
+  );
+
+  const sliderVisibility = useDerivedValue(
+    () => withSpring(hasPrimaryActiveRoute ? 1 : 0, TAB_PILL_FEEDBACK_SPRING),
+    [hasPrimaryActiveRoute],
+  );
   const sliderStyle = useAnimatedStyle(() => ({
-    opacity: sliderOpacity.value,
-    transform: [{ translateX: sliderTranslateX.value }],
+    opacity: sliderVisibility.value,
+    transform: [
+      { translateX: activePillTranslateX.value },
+      { scaleX: activePillFeedback.value },
+      { scaleY: activePillFeedback.value },
+    ],
   }));
+
+  function handleTabPress(routeName: string, isFocused: boolean): void {
+    if (isOffline && routeName === 'swap') {
+      setOfflineSwapNoticeVisible(true);
+      return;
+    }
+
+    if (!isFocused) {
+      const currentRoute = state.routes[state.index];
+      if (currentRoute != null && isTabRouteName(currentRoute.name)) {
+        recordTabSwitch(state.index, currentRoute.name);
+      }
+      navigation.navigate(routeName);
+    }
+  }
 
   function renderRouteIcon(
     routeName: string,
@@ -355,12 +377,25 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   }
 
   const handleFabToggle = useCallback(() => {
-    setFabExpanded((current) => !current);
-  }, []);
+    setFabMenuExpanded(!fabExpandedRef.current);
+  }, [setFabMenuExpanded]);
+
+  const handleFabPressIn = useCallback(() => {
+    fabTouchHandledRef.current = true;
+    handleFabToggle();
+  }, [handleFabToggle]);
+
+  const handleFabPress = useCallback(() => {
+    if (fabTouchHandledRef.current) {
+      fabTouchHandledRef.current = false;
+      return;
+    }
+    handleFabToggle();
+  }, [handleFabToggle]);
 
   const handleQuickActionPress = useCallback(
     (action: QuickAction) => {
-      setFabExpanded(false);
+      closeFabMenu();
       const currentRoute = state.routes[state.index];
       if (
         currentRoute != null &&
@@ -369,9 +404,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       ) {
         recordTabSwitch(state.index, currentRoute.name);
       }
-      navigation.navigate(action.routeName);
+      requestAnimationFrame(() => navigation.navigate(action.routeName));
     },
-    [navigation, recordTabSwitch, state.index, state.routes],
+    [closeFabMenu, navigation, recordTabSwitch, state.index, state.routes],
   );
 
   if (tabBarHidden) {
@@ -386,14 +421,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
           the press surface above this absolute-positioned container so
           the entire screen can be tapped to close. */}
       <Animated.View
-        pointerEvents={fabExpanded ? 'auto' : 'none'}
+        pointerEvents={fabMenuInteractive ? 'auto' : 'none'}
         style={[
           styles.scrim,
           { top: -windowHeight, height: windowHeight + containerHeight },
           scrimStyle,
         ]}
       >
-        <Pressable style={StyleSheet.absoluteFill} onPress={() => setFabExpanded(false)} />
+        <Pressable style={StyleSheet.absoluteFill} onPressIn={closeFabMenu} />
       </Animated.View>
 
       {/* Floating capsule — primary tabs */}
@@ -439,6 +474,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
             const tint = visuallyFocused ? TAB_ACTIVE_TINT : TAB_INACTIVE_TINT;
             const labelColor = visuallyFocused ? TAB_ACTIVE_LABEL : TAB_INACTIVE_LABEL;
             const label = TAB_LABELS[route.name] ?? route.name;
+            const targetPillX = primaryIndex * tabSlotWidth + pillInsetX;
 
             return (
               <Pressable
@@ -453,6 +489,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   },
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
+                onPressIn={() => primeActivePill(targetPillX)}
                 onPress={() => handleTabPress(route.name, focused)}
                 unstable_pressDelay={0}
                 accessibilityRole="tab"
@@ -489,7 +526,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       {/* Quick-action stack — labelled rows ("RWAs", "Shopping", "Chat") that
           fade in/out together with the FAB toggle. */}
       <Animated.View
-        pointerEvents={fabExpanded ? 'auto' : 'none'}
+        pointerEvents={fabMenuInteractive ? 'auto' : 'none'}
         style={[
           styles.quickActionStack,
           { bottom: actionStackBottom, right: actionRowRight },
@@ -531,11 +568,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         >
           <Pressable
             style={({ pressed }) => [styles.fabPress, pressed && styles.fabPressed]}
-            onPress={handleFabToggle}
+            onPressIn={handleFabPressIn}
+            onPress={handleFabPress}
             unstable_pressDelay={0}
             accessibilityRole="button"
-            accessibilityLabel={fabExpanded ? 'Close quick actions' : 'Open quick actions'}
-            accessibilityState={{ expanded: fabExpanded }}
+            accessibilityLabel={fabMenuInteractive ? 'Close quick actions' : 'Open quick actions'}
+            accessibilityState={{ expanded: fabMenuInteractive }}
             hitSlop={6}
           >
             <Animated.View style={fabIconStyle}>

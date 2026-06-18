@@ -786,12 +786,6 @@ export function HomeScreenContent(): React.JSX.Element {
     setPrivacyHidden((current) => !current);
   }, []);
 
-  const [contentVisible, setContentVisible] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setContentVisible(true), 50);
-    return () => clearTimeout(timer);
-  }, []);
-
   useEffect(() => {
     const previous = previousSlotStatusRef.current;
     const becameReady =
@@ -1066,7 +1060,7 @@ export function HomeScreenContent(): React.JSX.Element {
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS === 'android'}
       >
-        <View style={[styles.homeContentFrame, contentVisible ? styles.contentVisible : styles.contentHidden]}>
+        <View style={styles.homeContentFrame}>
           <HomeHeader
             isOffline={isOffline}
             onToggleOffline={handleToggleOffline}
@@ -1110,7 +1104,7 @@ export function HomeScreenContent(): React.JSX.Element {
           accessibilityElementsHidden={shieldedPaneActive}
           importantForAccessibility={shieldedPaneActive ? 'no-hide-descendants' : 'auto'}
         >
-          <View style={[styles.balanceSection, { marginBottom: sectionGap }, contentVisible ? styles.contentVisible : styles.contentHidden]}>
+          <View style={[styles.balanceSection, { marginBottom: sectionGap }]}>
             <BalanceCard
               publicKey={publicKey}
               networkLabel={networkLabel}
@@ -1137,7 +1131,7 @@ export function HomeScreenContent(): React.JSX.Element {
             />
           </View>
 
-          <View style={contentVisible ? styles.contentVisible : styles.contentHidden}>
+          <View>
             <TokenHoldingsCard
               holdings={previewHoldings}
               onTokenPress={handleTokenPress}
@@ -1151,7 +1145,7 @@ export function HomeScreenContent(): React.JSX.Element {
             />
           </View>
 
-          <View style={contentVisible ? styles.contentVisible : styles.contentHidden}>
+          <View>
             <RecentActivityCard
               transactions={recentActivity}
               onTransactionPress={handleActivityPress}
@@ -1206,12 +1200,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     alignItems: 'center',
-  },
-  contentVisible: {
-    opacity: 1,
-  },
-  contentHidden: {
-    opacity: 0,
   },
   homeContentFrame: {
     width: '100%',
