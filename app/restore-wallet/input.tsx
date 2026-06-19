@@ -126,7 +126,7 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
 
     if (username != null) {
       setHasOnboarded(true);
-      router.replace('/(tabs)');
+      router.replace('/');
       return;
     }
 

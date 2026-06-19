@@ -110,6 +110,7 @@ export const usePreferencesStore = create<PreferencesState>()(
     {
       name: 'offpay-preferences',
       storage: createJSONStorage(() => mmkvStorage),
+      skipHydration: true,
       version: 5,
       migrate: (persistedState, version) => {
         if (typeof persistedState !== 'object' || persistedState === null) {

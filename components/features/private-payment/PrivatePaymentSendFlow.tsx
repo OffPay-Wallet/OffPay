@@ -57,7 +57,6 @@ import {
   setOfflinePaymentSlotsQueryData,
   useOfflinePaymentSlots,
 } from '@/hooks/useOfflinePaymentSlots';
-import { useWalletModeState } from '@/hooks/useWalletModeState';
 import { decimalInputToAtomicAmount, sanitizeDecimalInput } from '@/lib/policy/token-amounts';
 import {
   getOffpayFeatureCapability,
@@ -294,8 +293,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const walletAddress = useWalletStore((state) => state.publicKey);
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network, unsupportedReason } = useOffpayNetwork();
-  const { effectiveWalletMode, canUseNetwork } = useWalletModeState();
-  const { isNetworkSwitching } = useOffpayNetworkAccess();
+  const { effectiveWalletMode, canUseNetwork, isNetworkSwitching } = useOffpayNetworkAccess();
   const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const balanceQuery = useOffpayWalletBalance(null, {
@@ -433,10 +431,28 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   }, [query, stablecoins]);
 
   const capabilities = capabilitiesQuery.capabilities;
-  const canUseMagicBlockPrivatePayment =
-    isOffpayFeatureAvailable(capabilities, 'payment.privateInitMint') &&
-    isOffpayFeatureAvailable(capabilities, 'payment.privateSend') &&
-    isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast');
+  const magicBlockInitMintCapability = getOffpayFeatureCapability(
+    capabilities,
+    'payment.privateInitMint',
+  );
+  const magicBlockPrivateSendCapability = getOffpayFeatureCapability(
+    capabilities,
+    'payment.privateSend',
+  );
+  const magicBlockRpcBroadcastCapability = getOffpayFeatureCapability(
+    capabilities,
+    'payment.rpcBroadcast',
+  );
+  const magicBlockPrivatePaymentDisabledReason = signingBlocker
+    ? signingBlocker
+    : !magicBlockInitMintCapability.available
+      ? magicBlockInitMintCapability.message
+      : !magicBlockPrivateSendCapability.available
+        ? magicBlockPrivateSendCapability.message
+        : !magicBlockRpcBroadcastCapability.available
+          ? magicBlockRpcBroadcastCapability.message
+          : null;
+  const canUseMagicBlockPrivatePayment = magicBlockPrivatePaymentDisabledReason == null;
   const canUseUmbraNativeProver = isRnZkProverNativeModuleAvailable();
   const umbraPrivateP2pCapability = getOffpayFeatureCapability(
     capabilities,
@@ -546,11 +562,16 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       },
     ];
 
-    if (canUseMagicBlockPrivatePayment && isMagicBlockPrivateToken(network, selectedToken)) {
+    if (isMagicBlockPrivateToken(network, selectedToken)) {
       routes.push({
         id: 'magicblock',
         label: 'MagicBlock',
-        description: 'Private route',
+        description:
+          magicBlockPrivatePaymentDisabledReason == null
+            ? 'Private route'
+            : magicBlockPrivatePaymentDisabledReason,
+        disabled: !canUseMagicBlockPrivatePayment,
+        disabledReason: magicBlockPrivatePaymentDisabledReason ?? undefined,
       });
     }
     if (isUmbraPrivateP2PToken(network, selectedToken)) {
@@ -566,8 +587,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     return routes;
   }, [
     canUseMagicBlockPrivatePayment,
-    canUseUmbraPrivateP2P,
     effectiveWalletMode,
+    canUseUmbraPrivateP2P,
+    magicBlockPrivatePaymentDisabledReason,
     network,
     selectedToken,
     umbraPrivateP2pDisabledReason,
@@ -720,10 +742,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     // can't pop, so fall back to a replace — never leave the user on a
     // frozen sheet.
     if (router.canGoBack()) {
-      router.dismissTo('/(tabs)' as never);
+      router.dismissTo('/');
       return;
     }
-    router.replace('/(tabs)' as never);
+    router.replace('/');
   }, [router]);
   const handleClearRecentRecipients = useCallback(() => {
     if (walletAddress == null || recentRecipients.length === 0) return;
@@ -1235,6 +1257,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     if (isNetworkSwitching) return 'Switching network…';
     if (walletAddress == null || walletId == null) return 'Unlock a wallet before sending.';
     if (network == null) return unsupportedReason ?? 'This network is not supported.';
+    if (signingBlocker != null) return signingBlocker;
     if (effectiveWalletMode === 'offline') {
       if (offlineReadySlots <= 0) {
         return 'Offline payment slots are not ready on this device.';
@@ -1253,6 +1276,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     isNetworkSwitching,
     network,
     offlineReadySlots,
+    signingBlocker,
     stablecoins.length,
     unsupportedReason,
     walletAddress,

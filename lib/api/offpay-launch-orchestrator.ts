@@ -2,12 +2,16 @@ import { QueryClient } from '@tanstack/react-query';
 
 import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
 import { getCapabilities } from '@/lib/api/offpay-api-client';
+import { prefetchOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
 import {
   buildUnavailableCapabilities,
   CAPABILITIES_FAST_TIMEOUT_MS,
   CAPABILITIES_STALE_TIME_MS,
 } from '@/lib/api/offpay-capability-fallback';
-import { prefetchWalletDisplayData } from '@/lib/wallet/wallet-display-cache';
+import {
+  persistWalletDisplayCacheFromQueryClient,
+  prefetchWalletDisplayData,
+} from '@/lib/wallet/wallet-display-cache';
 
 import type { OffpayLaunchStep } from '@/store/offpayLaunchStore';
 import type { CapabilitiesResponse, OffpayNetwork } from '@/types/offpay-api';
@@ -90,10 +94,16 @@ export async function runOffpayLaunchSequence(
   );
 
   onStep('capabilities', 'running', 'Loading OffPay capability matrix.');
+  const dashboardPreload = await prefetchOffpayWalletDashboard({
+    queryClient: params.queryClient,
+    walletAddress,
+    network,
+  });
   const capabilitiesKey = offpayCapabilitiesQueryKey(network);
   const cachedCapabilities = params.queryClient.getQueryData<CapabilitiesResponse>(capabilitiesKey);
   const capabilities =
-    cachedCapabilities?.network === network
+    dashboardPreload?.capabilities ??
+    (cachedCapabilities?.network === network
       ? cachedCapabilities
       : await params.queryClient
           .fetchQuery({
@@ -110,20 +120,18 @@ export async function runOffpayLaunchSequence(
               network,
               'OffPay API capabilities were unavailable during launch.',
             ),
-          );
+          ));
   onStep(
     'capabilities',
     'complete',
-    cachedCapabilities?.network === network
-      ? 'Capabilities loaded from memory cache.'
-      : 'Capabilities loaded.',
+    dashboardPreload != null
+      ? 'Capabilities loaded from wallet dashboard.'
+      : cachedCapabilities?.network === network
+        ? 'Capabilities loaded from memory cache.'
+        : 'Capabilities loaded.',
   );
 
-  onStep(
-    'pendingBackups',
-    'skipped',
-    'Blob backup recovery is no longer on the startup path.',
-  );
+  onStep('pendingBackups', 'skipped', 'Blob backup recovery is no longer on the startup path.');
 
   onStep('nonce', 'running', 'Checking nonce readiness.');
   const nonceReadiness = (await params.adapters?.checkNonceReadiness?.({
@@ -149,7 +157,19 @@ export async function runOffpayLaunchSequence(
   const canFetchTransactions = capabilities.capabilities.wallet.transactions.available;
   const canPreloadPortfolio = canFetchBalance || canFetchTransactions;
 
-  if (canPreloadPortfolio) {
+  if (dashboardPreload != null) {
+    void persistWalletDisplayCacheFromQueryClient({
+      queryClient: params.queryClient,
+      walletAddress,
+      network,
+      options: {
+        includeBalance: true,
+        includeTransactions: true,
+        includePendingBackupStats: false,
+      },
+    }).catch(() => undefined);
+    onStep('portfolio', 'complete', 'Wallet overview loaded from dashboard.');
+  } else if (canPreloadPortfolio) {
     void prefetchWalletDisplayData({
       queryClient: params.queryClient,
       walletAddress,
@@ -174,6 +194,6 @@ export async function runOffpayLaunchSequence(
     capabilities,
     pendingBackupCount: 0,
     recoveredBackupCount: 0,
-    portfolioPreloaded: canPreloadPortfolio,
+    portfolioPreloaded: dashboardPreload != null || canPreloadPortfolio,
   };
 }

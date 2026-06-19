@@ -23,7 +23,7 @@ import type { Href } from 'expo-router';
  * so a missing entry produces a compile-time error at every consumer.
  */
 export const TAB_ROUTE_HREFS = {
-  index: '/(tabs)',
+  index: '/',
   chat: '/(tabs)/chat',
   history: '/(tabs)/history',
   rwas: '/(tabs)/rwas',

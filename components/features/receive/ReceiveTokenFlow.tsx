@@ -503,7 +503,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         return;
       }
 
-      router.navigate('/(tabs)' as never);
+      router.navigate('/');
     };
 
     if (modeAtClose === 'private' && renderedReceiveMode !== 'private') {

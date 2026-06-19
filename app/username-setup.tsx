@@ -49,7 +49,7 @@ export default function UsernameSetupScreen(): React.JSX.Element {
             }
 
             setHasOnboarded(true);
-            router.replace('/(tabs)');
+            router.replace('/');
           });
         });
     },

@@ -522,7 +522,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
       router.back();
       return;
     }
-    router.navigate('/(tabs)' as never);
+    router.navigate('/');
   }, [router]);
 
   const compact = width < 380 || fontScale > 1.08;

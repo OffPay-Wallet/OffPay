@@ -1,3 +1,4 @@
+import { getWalletDashboard } from '@/lib/api/offpay-api-client';
 import {
   offpayWalletBalanceQueryKey,
   offpayWalletDashboardQueryKey,
@@ -8,10 +9,13 @@ import {
 import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 import type {
   CapabilitiesResponse,
+  OffpayNetwork,
   StreamCapabilitiesResponse,
   WalletDashboardResponse,
   WalletTransactionsResponse,
 } from '@/types/offpay-api';
+
+export const WALLET_DASHBOARD_WARM_STALE_TIME_MS = 1000 * 60;
 
 export const offpayCapabilitiesCacheKey = (network: WalletDashboardResponse['network'] | null) =>
   ['offpay', 'capabilities', network] as const;
@@ -61,4 +65,51 @@ export function hydrateOffpayWalletDashboard(params: {
     },
     { updatedAt: dashboard.transactions.fetchedAt },
   );
+}
+
+export async function prefetchOffpayWalletDashboard(params: {
+  queryClient: QueryClient;
+  walletAddress: string;
+  network: OffpayNetwork;
+  limit?: number;
+  useCache?: boolean;
+}): Promise<WalletDashboardResponse | null> {
+  if (params.walletAddress.length === 0) return null;
+
+  const limit = params.limit ?? WALLET_TRANSACTIONS_PAGE_SIZE;
+  const queryKey = offpayWalletDashboardQueryKey(params.walletAddress, params.network, limit);
+  const cached = params.queryClient.getQueryData<WalletDashboardResponse>(queryKey);
+
+  if (cached?.network === params.network && cached.address === params.walletAddress) {
+    hydrateOffpayWalletDashboard({
+      queryClient: params.queryClient,
+      dashboard: cached,
+      limit,
+    });
+  }
+
+  try {
+    const dashboard = await params.queryClient.fetchQuery({
+      queryKey,
+      queryFn: ({ signal }) =>
+        getWalletDashboard(params.walletAddress, params.network, {
+          signal,
+          limit,
+          useCache: params.useCache,
+        }),
+      staleTime: WALLET_DASHBOARD_WARM_STALE_TIME_MS,
+    });
+
+    hydrateOffpayWalletDashboard({
+      queryClient: params.queryClient,
+      dashboard,
+      limit,
+    });
+
+    return dashboard;
+  } catch {
+    return cached?.network === params.network && cached.address === params.walletAddress
+      ? cached
+      : null;
+  }
 }

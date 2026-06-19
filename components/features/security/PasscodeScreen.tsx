@@ -171,7 +171,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     if (onUnlock != null) {
       onUnlock();
     } else {
-      router.replace('/(tabs)');
+      router.replace('/');
     }
   }, [onUnlock, router, setPasscodeValue]);
 

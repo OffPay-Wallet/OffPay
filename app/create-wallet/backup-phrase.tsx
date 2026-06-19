@@ -138,7 +138,7 @@ export default function BackupPhraseScreen(): React.JSX.Element {
       router.dismissTo('/accounts');
     } else if (username != null) {
       setHasOnboarded(true);
-      router.replace('/(tabs)');
+      router.replace('/');
     } else {
       router.replace({
         pathname: '/username-setup',

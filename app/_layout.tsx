@@ -162,24 +162,41 @@ export default function RootLayout(): React.JSX.Element | null {
     };
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = usePreferencesStore.persist.onFinishHydration(() => {
-      setPreferencesHydrated(true);
-    });
-    if (usePreferencesStore.persist.hasHydrated()) {
-      setPreferencesHydrated(true);
-    }
-    return unsubscribe;
-  }, []);
-
-  // Wait for MMKV encryption to be applied before reading app state.
+  // Wait for MMKV encryption to be applied before reading persisted
+  // preferences. `preferencesStore` uses manual hydration so the
+  // default mainnet value never leaks into network hooks before the
+  // previous session's persisted network is readable.
   // On physical devices, SecureStore → MMKV encryption key resolution
   // can take longer than on emulators. Without this gate, hasOnboarded
   // can read stale/unencrypted data and route the user incorrectly.
   useEffect(() => {
-    void waitForMmkvEncryption().then(() => {
+    let cancelled = false;
+    const markPreferencesHydrated = () => {
+      if (!cancelled) setPreferencesHydrated(true);
+    };
+    const unsubscribePreferencesHydration =
+      usePreferencesStore.persist.onFinishHydration(markPreferencesHydrated);
+
+    void waitForMmkvEncryption().then(async () => {
+      if (cancelled) return;
       setMmkvReady(true);
+
+      if (usePreferencesStore.persist.hasHydrated()) {
+        markPreferencesHydrated();
+        return;
+      }
+
+      try {
+        await usePreferencesStore.persist.rehydrate();
+      } finally {
+        markPreferencesHydrated();
+      }
     });
+
+    return () => {
+      cancelled = true;
+      unsubscribePreferencesHydration();
+    };
   }, []);
 
   // Hydrate wallet from SecureStore on app launch
@@ -284,6 +301,7 @@ export default function RootLayout(): React.JSX.Element | null {
   useEffect(() => {
     if (!rootLayoutReady) return;
     if (!mmkvReady) return;
+    if (hasCompletedOnboarding && !preferencesHydrated) return;
     if (!hasRepairedOnboardingFlag) return;
     if (rootNavigationState.key.length === 0) return;
 
@@ -301,11 +319,11 @@ export default function RootLayout(): React.JSX.Element | null {
     ) {
       router.replace('/onboarding');
     } else if (hasCompletedOnboarding && (inInviteCode || inOnboarding)) {
-      router.replace('/(tabs)');
+      router.replace('/');
     } else if (shouldShowAppLockRoute && !inAppLock) {
       router.replace('/app-lock/passcode');
     } else if (!appLockChecking && inAppLock && !shouldShowAppLockRoute) {
-      router.replace('/(tabs)');
+      router.replace('/');
     }
   }, [
     appLockChecking,
@@ -320,6 +338,7 @@ export default function RootLayout(): React.JSX.Element | null {
     inWalletFlow,
     inviteAccessVerified,
     mmkvReady,
+    preferencesHydrated,
     rootLayoutReady,
     rootNavigationState.key,
     router,
@@ -332,6 +351,7 @@ export default function RootLayout(): React.JSX.Element | null {
     if (hasHiddenSplash) return;
     if (!rootLayoutReady) return;
     if (!mmkvReady) return;
+    if (hasCompletedOnboarding && !preferencesHydrated) return;
     if (!hasRepairedOnboardingFlag) return;
     if (rootNavigationState.key.length === 0) return;
     if (!routeReadyForDisplay) return;
@@ -348,6 +368,7 @@ export default function RootLayout(): React.JSX.Element | null {
     hasCompletedOnboarding,
     hasHiddenSplash,
     hasRepairedOnboardingFlag,
+    preferencesHydrated,
     routeReadyForDisplay,
     rootLayoutReady,
     rootNavigationState.key,

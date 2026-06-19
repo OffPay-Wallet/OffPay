@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { usePathname } from 'expo-router';
 import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
@@ -137,6 +138,27 @@ const TAB_LABELS: Record<string, string> = {
 // in-app navigation; they just don't take up a slot here.
 const HIDDEN_ROUTES = new Set(['swap', 'scanner', 'chat']);
 
+function getRouteNameFromPathname(pathname: string): string | null {
+  const pathOnly = pathname.split(/[?#]/)[0] ?? '';
+  const normalized = pathOnly.replace(/\/+$/, '');
+  if (
+    normalized.length === 0 ||
+    normalized === '/' ||
+    normalized === '/index' ||
+    normalized === '/(tabs)' ||
+    normalized === '/(tabs)/index'
+  ) {
+    return 'index';
+  }
+
+  const firstRouteSegment = normalized
+    .split('/')
+    .filter(Boolean)
+    .filter((segment) => !(segment.startsWith('(') && segment.endsWith(')')))[0];
+
+  return firstRouteSegment === 'index' ? 'index' : (firstRouteSegment ?? null);
+}
+
 interface QuickAction {
   id: string;
   label: string;
@@ -175,10 +197,20 @@ const QUICK_ACTIONS: QuickAction[] = [
 
 export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const { effectiveWalletMode } = useWalletModeState();
   const isOffline = effectiveWalletMode === 'offline';
-  const activeRouteName = state.routes[state.index]?.name ?? '';
+  const pathnameRouteName = useMemo(() => getRouteNameFromPathname(pathname), [pathname]);
+  const pathnameRouteIndex = useMemo(
+    () =>
+      pathnameRouteName == null
+        ? -1
+        : state.routes.findIndex((route) => route.name === pathnameRouteName),
+    [pathnameRouteName, state.routes],
+  );
+  const committedActiveIndex = pathnameRouteIndex >= 0 ? pathnameRouteIndex : state.index;
+  const activeRouteName = state.routes[committedActiveIndex]?.name ?? '';
   const routeHidesTabBar = HIDDEN_ROUTES.has(activeRouteName);
   const isOverlayActive = useOverlayVisibilityStore((s) => s.isOverlayActive);
   // Hide the bar when the active route opts out OR when a full-screen
@@ -201,7 +233,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [state.routes],
   );
 
-  const visualActiveOriginalIndex = tabBarHidden ? lastVisibleTabIndexRef.current : state.index;
+  const visualActiveOriginalIndex = tabBarHidden
+    ? lastVisibleTabIndexRef.current
+    : committedActiveIndex;
   const visualActivePrimaryIndex = primaryRoutes.findIndex(
     (entry) => entry.originalIndex === visualActiveOriginalIndex,
   );
@@ -231,8 +265,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   useEffect(() => {
     if (tabBarHidden) return;
-    lastVisibleTabIndexRef.current = state.index;
-  }, [state.index, tabBarHidden]);
+    lastVisibleTabIndexRef.current = committedActiveIndex;
+  }, [committedActiveIndex, tabBarHidden]);
 
   useEffect(() => {
     if (tabBarHidden && fabExpandedRef.current) {
@@ -327,14 +361,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [activePillX],
   );
 
-  const primeActivePill = useCallback(
-    (targetPillX: number) => {
-      activePillTranslateX.value = withSpring(targetPillX, TAB_PILL_SLIDE_SPRING);
-      activePillFeedback.value = TAB_PILL_PRESS_SCALE;
-      activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
-    },
-    [activePillFeedback, activePillTranslateX],
-  );
+  const primeActivePillFeedback = useCallback(() => {
+    activePillFeedback.value = TAB_PILL_PRESS_SCALE;
+    activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
+  }, [activePillFeedback]);
 
   const sliderVisibility = useDerivedValue(
     () => withSpring(hasPrimaryActiveRoute ? 1 : 0, TAB_PILL_FEEDBACK_SPRING),
@@ -358,7 +388,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       return;
     }
 
-    const isFocused = state.index === originalIndex;
+    const isFocused = committedActiveIndex === originalIndex;
     const event = navigation.emit({
       type: 'tabPress',
       target: route.key,
@@ -368,9 +398,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     if (event.defaultPrevented) return;
 
     if (!isFocused) {
-      const currentRoute = state.routes[state.index];
+      const currentRoute = state.routes[committedActiveIndex];
       if (currentRoute != null && isTabRouteName(currentRoute.name)) {
-        recordTabSwitch(state.index, currentRoute.name);
+        recordTabSwitch(committedActiveIndex, currentRoute.name);
       }
       navigation.navigate(route.name, route.params);
     }
@@ -434,17 +464,17 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       }
 
       closeFabMenu();
-      const currentRoute = state.routes[state.index];
+      const currentRoute = state.routes[committedActiveIndex];
       if (
         currentRoute != null &&
         currentRoute.name !== action.routeName &&
         isTabRouteName(currentRoute.name)
       ) {
-        recordTabSwitch(state.index, currentRoute.name);
+        recordTabSwitch(committedActiveIndex, currentRoute.name);
       }
       navigation.navigate(action.routeName);
     },
-    [closeFabMenu, navigation, recordTabSwitch, state.index, state.routes],
+    [closeFabMenu, committedActiveIndex, navigation, recordTabSwitch, state.routes],
   );
 
   return (
@@ -507,13 +537,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
           </Animated.View>
 
           {primaryRoutes.map(({ route, originalIndex }, primaryIndex) => {
-            const focused = state.index === originalIndex;
+            const focused = committedActiveIndex === originalIndex;
             const visuallyFocused =
               hasPrimaryActiveRoute && visualActiveOriginalIndex === originalIndex;
             const tint = visuallyFocused ? TAB_ACTIVE_TINT : TAB_INACTIVE_TINT;
             const labelColor = visuallyFocused ? TAB_ACTIVE_LABEL : TAB_INACTIVE_LABEL;
             const label = TAB_LABELS[route.name] ?? route.name;
-            const targetPillX = primaryIndex * tabSlotWidth + pillInsetX;
 
             return (
               <Pressable
@@ -528,7 +557,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   },
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
-                onPressIn={() => primeActivePill(targetPillX)}
+                onPressIn={primeActivePillFeedback}
                 onPress={() => handleTabPress(route, originalIndex)}
                 onLongPress={() => handleTabLongPress(route)}
                 unstable_pressDelay={0}

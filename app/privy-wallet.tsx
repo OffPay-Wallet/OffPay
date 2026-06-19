@@ -82,7 +82,7 @@ export default function PrivyWalletRoute(): React.JSX.Element {
 
         if (username != null) {
           setHasOnboarded(true);
-          router.replace('/(tabs)');
+          router.replace('/');
           return;
         }
 

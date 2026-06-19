@@ -3,14 +3,13 @@ import { useEffect, useRef } from 'react';
 
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
-import { getWalletDashboard } from '@/lib/api/offpay-api-client';
-import { hydrateOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
-import {
-  offpayWalletDashboardQueryKey,
-  WALLET_TRANSACTIONS_PAGE_SIZE,
-} from '@/lib/api/offpay-wallet-query-keys';
+import { prefetchOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
+import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
+import {
+  hydrateWalletDisplayCacheIntoQueryClient,
+  persistWalletDisplayCacheFromQueryClient,
+} from '@/lib/wallet/wallet-display-cache';
 import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
 import { useWalletStore, type WalletAccount } from '@/store/walletStore';
 
@@ -121,12 +120,17 @@ export function useOffpayWalletWarmStart(): void {
     scheduledPrefetchRef.current?.cancel();
     scheduledPrefetchRef.current = scheduleUiWorkAfterFirstPaint(
       () => {
-        void prefetchWalletDashboardInBackground({
-          queryClient,
-          walletAddress,
-          walletId,
-          network,
-        }).catch(() => {
+        void (async () => {
+          const dashboard = await prefetchWalletDashboardInBackground({
+            queryClient,
+            walletAddress,
+            network,
+          });
+
+          if (dashboard == null && !cancelled && prefetchedKeyRef.current === prefetchKey) {
+            prefetchedKeyRef.current = null;
+          }
+        })().catch(() => {
           if (!cancelled && prefetchedKeyRef.current === prefetchKey) {
             prefetchedKeyRef.current = null;
           }
@@ -134,7 +138,7 @@ export function useOffpayWalletWarmStart(): void {
       },
       {
         timeoutMs: 5000,
-        fallbackDelayMs: 650,
+        fallbackDelayMs: 220,
       },
     );
 
@@ -160,50 +164,31 @@ export function useOffpayWalletWarmStart(): void {
 async function prefetchWalletDashboardInBackground(params: {
   queryClient: ReturnType<typeof useQueryClient>;
   walletAddress: string;
-  walletId: string | null;
   network: NonNullable<ReturnType<typeof useOffpayNetwork>['network']>;
 }): Promise<WalletDashboardResponse | null> {
-  if (params.walletAddress.length === 0 || params.walletId == null) return null;
+  if (params.walletAddress.length === 0) return null;
 
-  const cached = params.queryClient.getQueryData<WalletDashboardResponse>(
-    offpayWalletDashboardQueryKey(
-      params.walletAddress,
-      params.network,
-      WALLET_TRANSACTIONS_PAGE_SIZE,
-    ),
-  );
-  if (cached?.network === params.network && cached.address === params.walletAddress) {
-    hydrateOffpayWalletDashboard({
-      queryClient: params.queryClient,
-      dashboard: cached,
-      limit: WALLET_TRANSACTIONS_PAGE_SIZE,
-    });
-    return cached;
-  }
+  const dashboard = await prefetchOffpayWalletDashboard({
+    queryClient: params.queryClient,
+    walletAddress: params.walletAddress,
+    network: params.network,
+    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+  });
 
-  try {
-    const dashboard = await params.queryClient.fetchQuery({
-      queryKey: offpayWalletDashboardQueryKey(
-        params.walletAddress,
-        params.network,
-        WALLET_TRANSACTIONS_PAGE_SIZE,
-      ),
-      queryFn: ({ signal }) =>
-        getWalletDashboard(params.walletAddress, params.network, {
-          signal,
-          limit: WALLET_TRANSACTIONS_PAGE_SIZE,
-        }),
-      staleTime: 10 * 1000,
-    });
-    hydrateOffpayWalletDashboard({
-      queryClient: params.queryClient,
-      dashboard,
-      limit: WALLET_TRANSACTIONS_PAGE_SIZE,
-    });
+  if (dashboard != null) {
     useOffpayLaunchStore.getState().setPortfolioPreloaded(Date.now());
-    return dashboard;
-  } catch {
-    // Foreground hooks still fetch capabilities, balance, and history directly.
-    return null;
+    await persistWalletDisplayCacheFromQueryClient({
+      queryClient: params.queryClient,
+      walletAddress: params.walletAddress,
+      network: params.network,
+      options: {
+        includeBalance: true,
+        includeTransactions: true,
+        includePendingBackupStats: false,
+      },
+    });
   }
+
+  // Foreground hooks still fetch capabilities, balance, and history directly.
+  return dashboard;
 }
