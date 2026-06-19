@@ -111,10 +111,9 @@ export function useOffpayWalletTransactions(options?: {
   const canRequestTransactions =
     walletAddress != null &&
     network != null &&
-    enabledByCaller &&
     canUseNetwork &&
     isOffpayFeatureAvailable(capabilities, 'wallet.transactions');
-  const canFetchTransactions = canRequestTransactions && !dashboardFetching;
+  const canFetchTransactions = canRequestTransactions && enabledByCaller && !dashboardFetching;
   const enabled = canFetchTransactions && interactionsSettled;
 
   useEffect(() => {

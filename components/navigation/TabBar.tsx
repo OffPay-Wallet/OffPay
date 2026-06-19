@@ -361,7 +361,45 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [activePillX],
   );
 
-  const primeActivePillFeedback = useCallback(() => {
+  const primeTabPillFeedback = useCallback(
+    (targetPrimaryIndex: number) => {
+      if (targetPrimaryIndex >= 0) {
+        activePillTranslateX.value = withSpring(
+          targetPrimaryIndex * tabSlotWidth + pillInsetX,
+          TAB_PILL_SLIDE_SPRING,
+        );
+      }
+
+      activePillFeedback.value = TAB_PILL_PRESS_SCALE;
+      activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
+    },
+    [activePillFeedback, activePillTranslateX, pillInsetX, tabSlotWidth],
+  );
+
+  const restoreCommittedPillPosition = useCallback(() => {
+    activePillTranslateX.value = withSpring(activePillX, TAB_PILL_SLIDE_SPRING);
+  }, [activePillTranslateX, activePillX]);
+
+  const handlePrimaryTabPressIn = useCallback(
+    (targetPrimaryIndex: number) => {
+      primeTabPillFeedback(targetPrimaryIndex);
+    },
+    [primeTabPillFeedback],
+  );
+
+  const handlePrimaryTabResponderTerminate = useCallback(() => {
+    restoreCommittedPillPosition();
+  }, [restoreCommittedPillPosition]);
+
+  const handlePrimaryTabLongPress = useCallback(
+    (route: BottomTabBarProps['state']['routes'][number]) => {
+      restoreCommittedPillPosition();
+      handleTabLongPress(route);
+    },
+    [restoreCommittedPillPosition],
+  );
+
+  const primeFocusedPillFeedback = useCallback(() => {
     activePillFeedback.value = TAB_PILL_PRESS_SCALE;
     activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
   }, [activePillFeedback]);
@@ -395,7 +433,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       canPreventDefault: true,
     });
 
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented) {
+      restoreCommittedPillPosition();
+      return;
+    }
 
     if (!isFocused) {
       const currentRoute = state.routes[committedActiveIndex];
@@ -557,9 +598,17 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   },
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
-                onPressIn={primeActivePillFeedback}
+                onPressIn={() => {
+                  if (focused) {
+                    primeFocusedPillFeedback();
+                    return;
+                  }
+                  handlePrimaryTabPressIn(primaryIndex);
+                }}
+                onResponderTerminate={handlePrimaryTabResponderTerminate}
+                onResponderTerminationRequest={() => true}
                 onPress={() => handleTabPress(route, originalIndex)}
-                onLongPress={() => handleTabLongPress(route)}
+                onLongPress={() => handlePrimaryTabLongPress(route)}
                 unstable_pressDelay={0}
                 accessibilityRole="tab"
                 accessibilityLabel={label}
