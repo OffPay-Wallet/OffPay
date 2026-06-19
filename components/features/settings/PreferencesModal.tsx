@@ -325,7 +325,9 @@ export function PreferencesModal({
             //      land before we rotate to the new network.
             //   4. `setNetwork(id)` rotates the network. New-network
             //      queries with the same key shape will re-key and
-            //      mount fresh.
+            //      mount fresh. The awaited promise only covers the
+            //      critical recovery mirror, not the visible state
+            //      change.
             //   5. `finishNetworkSwitch(epoch)` re-enables action
             //      buttons after a fixed 700ms. The epoch guard means
             //      a stale finish from a superseded switch (rapid
@@ -341,7 +343,7 @@ export function PreferencesModal({
             // prefix match is exhaustive.
             await queryClient.cancelQueries({ queryKey: ['offpay'] });
             await yieldToUi();
-            setNetwork(id);
+            await setNetwork(id);
 
             setTimeout(() => {
               finishNetworkSwitch(epoch);

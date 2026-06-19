@@ -117,7 +117,6 @@ type SendStep = 'token' | 'recipient' | 'amount' | 'summary' | 'success';
 type SendStepTransitionDirection = 'forward' | 'backward';
 const MAX_AMOUNT_INPUT_CHARACTERS = 48;
 const SEND_CONTENT_MAX_WIDTH = 430;
-const PRIVATE_SEND_TIMEOUT_MS = 120_000;
 const UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS = 300_000;
 const SEND_HEADER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
@@ -294,7 +293,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network, unsupportedReason } = useOffpayNetwork();
   const { effectiveWalletMode, canUseNetwork, isNetworkSwitching } = useOffpayNetworkAccess();
-  const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
+  const {
+    canSignWithApp,
+    importMethod: activeWalletImportMethod,
+    signingBlocker,
+  } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: false,
@@ -630,6 +633,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     network,
     enabled: normalFeeEstimateEnabled,
   });
+  const usesInteractiveExternalSigning = activeWalletImportMethod === 'privy-embedded';
   const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
     walletAddress,
     recipient: effectiveRecipientAddress,
@@ -638,6 +642,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     network,
     enabled:
       step === 'summary' &&
+      !usesInteractiveExternalSigning &&
       effectiveWalletMode !== 'offline' &&
       effectivePaymentRoute === 'magicblock' &&
       selectedToken != null &&
@@ -661,6 +666,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       return 'Fee unavailable';
     }
     if (effectivePaymentRoute === 'magicblock') {
+      if (usesInteractiveExternalSigning) return 'Calculated on submit';
       if (magicBlockFeeEstimate.plan?.feeLamports != null) {
         return `${formatLamportsAsSol(magicBlockFeeEstimate.plan.feeLamports, 9)} SOL`;
       }
@@ -678,6 +684,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     normalFeeEstimate.estimate,
     normalFeeEstimate.isError,
     normalFeeEstimate.isFetching,
+    usesInteractiveExternalSigning,
   ]);
   const compactSend = width < 390 || height < 820 || fontScale > 1.05;
   const denseSend = width < 350 || height < 720 || fontScale > 1.18;
@@ -1700,35 +1707,39 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     runAfterLoadingPaint(() => {
       void (async () => {
         if (!mountedRef.current) return;
-        const result = await withSendTimeout<PrivateSendSubmissionResult>(
+        const result =
           submitRoute === 'umbra'
-            ? (async () => {
-                const { sendUmbraPrivateP2PFromPublicBalance } =
-                  await import('@/lib/umbra/umbra-execution');
-                const umbraResult = await sendUmbraPrivateP2PFromPublicBalance({
-                  walletAddress,
-                  walletId,
-                  recipient: effectiveRecipientAddress,
-                  amount,
-                  token: selectedToken.symbol,
-                  tokenMint: selectedToken.mint,
-                  network,
-                  autoSetupSender: true,
-                });
-                const signature = umbraResult.primarySignature ?? umbraResult.signatures[0];
-                if (signature == null) {
-                  throw new Error('Umbra private P2P did not return a transaction signature.');
-                }
+            ? await withSendTimeout<PrivateSendSubmissionResult>(
+                (async () => {
+                  const { sendUmbraPrivateP2PFromPublicBalance } =
+                    await import('@/lib/umbra/umbra-execution');
+                  const umbraResult = await sendUmbraPrivateP2PFromPublicBalance({
+                    walletAddress,
+                    walletId,
+                    recipient: effectiveRecipientAddress,
+                    amount,
+                    token: selectedToken.symbol,
+                    tokenMint: selectedToken.mint,
+                    network,
+                    autoSetupSender: true,
+                  });
+                  const signature = umbraResult.primarySignature ?? umbraResult.signatures[0];
+                  if (signature == null) {
+                    throw new Error('Umbra private P2P did not return a transaction signature.');
+                  }
 
-                return {
-                  status: 'submitted' as const,
-                  signature,
-                  txId: null,
-                  initSignature: null,
-                  message: 'Private P2P submitted',
-                };
-              })()
-            : (async () => {
+                  return {
+                    status: 'submitted' as const,
+                    signature,
+                    txId: null,
+                    initSignature: null,
+                    message: 'Private P2P submitted',
+                  };
+                })(),
+                UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS,
+                'Private P2P timed out',
+              )
+            : await (async () => {
                 const privateResult = await submitPrivatePayment({
                   walletAddress,
                   walletId,
@@ -1746,10 +1757,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
                       ? 'Private payment submitted'
                       : 'Queued for settlement',
                 };
-              })(),
-          submitRoute === 'umbra' ? UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS : PRIVATE_SEND_TIMEOUT_MS,
-          submitRoute === 'umbra' ? 'Private P2P timed out' : 'Private payment timed out',
-        );
+              })();
 
         if (!mountedRef.current) return;
         const id = result.status === 'submitted' ? result.signature : result.txId;

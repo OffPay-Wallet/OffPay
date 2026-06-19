@@ -270,6 +270,47 @@ describe('offpay-api-client', () => {
     expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
   });
 
+  it('uses HMAC-only protected API auth for external wallets', async () => {
+    mockGetStoredWalletInfo.mockResolvedValueOnce({
+      id: 'wallet-privy',
+      publicKey: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+      importMethod: 'privy-embedded',
+    });
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(buildResponse({ ok: true }));
+
+    await expect(
+      offpayApiRequest({
+        path: '/api/payment/private-balance',
+        query: {
+          wallet: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+          network: 'devnet',
+        },
+        network: 'devnet',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/payment/private-balance?'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'X-App-Auth-Mode': 'hmac-v2',
+          'X-App-HMAC': expect.any(String),
+          'X-Wallet-Address': 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          'X-Signature': expect.any(String),
+        }),
+      }),
+    );
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
+  });
+
   it('routes stream capabilities without requiring local signing material', async () => {
     const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
     fetchMock.mockResolvedValueOnce(

@@ -57,8 +57,7 @@ export function lookupSendTokenValuation(
 ): TokenValuationView | undefined {
   if (tokenValues == null) return undefined;
   return (
-    tokenValues[mint] ??
-    (mint === NATIVE_SOL_SEND_MINT ? tokenValues[NATIVE_SOL_MINT] : undefined)
+    tokenValues[mint] ?? (mint === NATIVE_SOL_SEND_MINT ? tokenValues[NATIVE_SOL_MINT] : undefined)
   );
 }
 
@@ -259,6 +258,19 @@ export function getMutationErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to send payment.';
 }
 
+function isExplicitUserCancellation(errorMessage: string): boolean {
+  return /user rejected|rejected by user|user denied|user declined|user cancel(?:led|ed)?|cancelled by user|canceled by user/i.test(
+    errorMessage,
+  );
+}
+
+function isSigningInterruption(errorMessage: string): boolean {
+  return (
+    /privy|wallet|passkey|mfa|signature|signing/i.test(errorMessage) &&
+    /cancelled|canceled|interrupted|aborted|closed|dismissed/i.test(errorMessage)
+  );
+}
+
 /**
  * Classify a send-flow failure into a user-facing process-result
  * shape. Centralized here so the same classification logic produces
@@ -274,8 +286,28 @@ export function classifySendFailure(error: unknown): {
   const errorMessage = getMutationErrorMessage(error);
 
   if (
-    /user rejected|rejected by user|user denied|cancelled|canceled|user cancel/i.test(errorMessage)
+    /network|timeout|timed out|failed to fetch|temporarily unavailable|rpc|blockhash/i.test(
+      errorMessage,
+    )
   ) {
+    return {
+      variant: 'error',
+      title: 'Network issue',
+      message: errorMessage,
+      statusLabel: 'Network failed',
+    };
+  }
+
+  if (isSigningInterruption(errorMessage) && !isExplicitUserCancellation(errorMessage)) {
+    return {
+      variant: 'error',
+      title: 'Wallet signing interrupted',
+      message: errorMessage,
+      statusLabel: 'Signing failed',
+    };
+  }
+
+  if (isExplicitUserCancellation(errorMessage)) {
     return {
       variant: 'cancelled',
       title: 'Send cancelled',
@@ -301,15 +333,6 @@ export function classifySendFailure(error: unknown): {
       title: 'Private P2P setup required',
       message: errorMessage,
       statusLabel: 'Setup required',
-    };
-  }
-
-  if (/network|timeout|failed to fetch|temporarily unavailable|rpc|blockhash/i.test(errorMessage)) {
-    return {
-      variant: 'error',
-      title: 'Network issue',
-      message: errorMessage,
-      statusLabel: 'Network failed',
     };
   }
 

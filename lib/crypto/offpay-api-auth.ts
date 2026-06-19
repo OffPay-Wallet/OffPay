@@ -76,6 +76,16 @@ export function buildHmacMessage(params: {
   return `${params.timestamp}:${params.walletAddress}:${params.method}:${params.pathAndQuery}`;
 }
 
+export function buildHmacV2Message(params: {
+  timestamp: number;
+  walletAddress: string;
+  method: OffpayApiMethod;
+  pathAndQuery: string;
+  bodyHash: string;
+}): string {
+  return `${params.timestamp}:${params.walletAddress}:${params.method}:${params.pathAndQuery}:${params.bodyHash}`;
+}
+
 function getAuthPerfPayload(params: {
   method: OffpayApiMethod;
   network: string;
@@ -259,6 +269,44 @@ export async function buildOffpayAuthHeadersWithSignature(params: {
     'X-Wallet-Address': params.walletAddress,
     'X-Timestamp': String(timestamp),
     'X-Signature': signature,
+    'X-App-HMAC': appHmac,
+    'X-App-Version': params.appVersion,
+    'X-Device-Id': params.deviceId,
+    'X-Network': params.network,
+    'X-Bootstrap-Version': String(params.bootstrapVersion),
+  };
+}
+
+export function buildOffpayHmacAuthHeaders(params: {
+  walletAddress: string;
+  requestSecret: string;
+  deviceId: string;
+  bootstrapVersion: number;
+  appVersion: string;
+  network: string;
+  method: OffpayApiMethod;
+  pathAndQuery: string;
+  body?: unknown;
+  timestamp?: number;
+}): Record<string, string> {
+  const startedAt = mark();
+  const timestamp = params.timestamp ?? Date.now();
+  const bodyHash = canonicalBodyHash(params.body);
+  const hmacMessage = buildHmacV2Message({
+    timestamp,
+    walletAddress: params.walletAddress,
+    method: params.method,
+    pathAndQuery: params.pathAndQuery,
+    bodyHash,
+  });
+  const appHmac = hmacSha256Hex(params.requestSecret, hmacMessage);
+  const perfPayload = getAuthPerfPayload(params);
+  measure('apiAuth.buildHmacHeaders', startedAt, perfPayload);
+
+  return {
+    'X-App-Auth-Mode': 'hmac-v2',
+    'X-Wallet-Address': params.walletAddress,
+    'X-Timestamp': String(timestamp),
     'X-App-HMAC': appHmac,
     'X-App-Version': params.appVersion,
     'X-Device-Id': params.deviceId,

@@ -69,9 +69,10 @@ const PUBLIC_RATE_LIMIT_FAIL_CLOSED_ROUTES = new Set([
 ]);
 
 interface AuthHeaders {
+  authMode: 'wallet-v1' | 'hmac-v2';
   walletAddress: string;
   timestamp: number;
-  signature: string;
+  signature: string | null;
   appHmac: string;
   appVersion: string;
   deviceId: string;
@@ -208,6 +209,9 @@ function getMinimumAppVersion(bindings: Bindings): string {
 }
 
 function parseAuthHeaders(context: Context<AppEnv>): AuthHeaders {
+  const authModeRaw = context.req.header('X-App-Auth-Mode')?.trim().toLowerCase();
+  const authMode = authModeRaw === 'hmac-v2' ? 'hmac-v2' : 'wallet-v1';
+
   const walletAddress = context.req.header('X-Wallet-Address')?.trim() ?? '';
   if (!isValidSolanaAddress(walletAddress)) {
     throw new AppError({
@@ -228,7 +232,7 @@ function parseAuthHeaders(context: Context<AppEnv>): AuthHeaders {
   }
 
   const signature = context.req.header('X-Signature')?.trim() ?? '';
-  if (!isValidEd25519Signature(signature)) {
+  if (authMode === 'wallet-v1' && !isValidEd25519Signature(signature)) {
     throw new AppError({
       status: 401,
       code: 'SIGNATURE_INVALID',
@@ -286,9 +290,10 @@ function parseAuthHeaders(context: Context<AppEnv>): AuthHeaders {
   }
 
   return {
+    authMode,
     walletAddress,
     timestamp,
-    signature,
+    signature: signature.length > 0 ? signature : null,
     appHmac,
     appVersion,
     deviceId,
@@ -484,8 +489,10 @@ async function verifyWalletSignature(
   request: Request,
   walletAddress: string,
   timestamp: number,
-  signature: string,
+  signature: string | null,
 ): Promise<boolean> {
+  if (signature == null) return false;
+
   const now = Date.now();
   if (timestamp < now - TIMESTAMP_MAX_AGE_MS || timestamp > now + TIMESTAMP_FUTURE_SKEW_MS) {
     return false;
@@ -500,6 +507,11 @@ async function verifyWalletSignature(
   return verifyEd25519(signatureBytes, new TextEncoder().encode(message), walletPublicKey);
 }
 
+function isTimestampFresh(timestamp: number): boolean {
+  const now = Date.now();
+  return timestamp >= now - TIMESTAMP_MAX_AGE_MS && timestamp <= now + TIMESTAMP_FUTURE_SKEW_MS;
+}
+
 async function verifyAppHmac(
   request: Request,
   bindings: Bindings,
@@ -507,11 +519,16 @@ async function verifyAppHmac(
   timestamp: number,
   deviceId: string,
   appHmac: string,
+  authMode: AuthHeaders['authMode'],
 ): Promise<boolean> {
   const bootstrapSecret = getRequiredBinding(bindings, 'OFFPAY_BOOTSTRAP_SECRET');
   const pathAndQuery = buildPathAndQuery(request.url);
   const derivedSecret = await deriveDeviceSecretHex(bootstrapSecret, walletAddress, deviceId);
-  const message = `${timestamp}:${walletAddress}:${request.method.toUpperCase()}:${pathAndQuery}`;
+  const method = request.method.toUpperCase();
+  const message =
+    authMode === 'hmac-v2'
+      ? `${timestamp}:${walletAddress}:${method}:${pathAndQuery}:${await canonicalBodyHash(request)}`
+      : `${timestamp}:${walletAddress}:${method}:${pathAndQuery}`;
   const expectedHmac = await hmacSha256Hex(derivedSecret, message);
 
   return timingSafeEqual(hexToBytes(expectedHmac), hexToBytes(appHmac));
@@ -533,14 +550,20 @@ async function authenticateRequest(
     return errorResponse(403, 'FORBIDDEN_ORIGIN', 'Origin not permitted.');
   }
 
-  const signatureValid = await verifyWalletSignature(
-    context.req.raw,
-    parsedHeaders.walletAddress,
-    parsedHeaders.timestamp,
-    parsedHeaders.signature,
-  );
-  if (!signatureValid) {
+  if (!isTimestampFresh(parsedHeaders.timestamp)) {
     return errorResponse(401, 'SIGNATURE_INVALID', 'Request signature invalid or expired.');
+  }
+
+  if (parsedHeaders.authMode === 'wallet-v1') {
+    const signatureValid = await verifyWalletSignature(
+      context.req.raw,
+      parsedHeaders.walletAddress,
+      parsedHeaders.timestamp,
+      parsedHeaders.signature,
+    );
+    if (!signatureValid) {
+      return errorResponse(401, 'SIGNATURE_INVALID', 'Request signature invalid or expired.');
+    }
   }
 
   if (parsedHeaders.bootstrapVersion !== bootstrapSecretVersion) {
@@ -554,6 +577,7 @@ async function authenticateRequest(
     parsedHeaders.timestamp,
     parsedHeaders.deviceId,
     parsedHeaders.appHmac,
+    parsedHeaders.authMode,
   );
   if (!hmacValid) {
     return errorResponse(401, 'HMAC_INVALID', 'App integrity check failed.');

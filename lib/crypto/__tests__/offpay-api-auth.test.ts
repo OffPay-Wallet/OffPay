@@ -3,7 +3,9 @@ import bs58 from 'bs58';
 import {
   buildCanonicalMessage,
   buildHmacMessage,
+  buildHmacV2Message,
   buildOffpayAuthHeaders,
+  buildOffpayHmacAuthHeaders,
   canonicalBodyHash,
   canonicalJsonStringify,
   hmacSha256Hex,
@@ -59,6 +61,36 @@ describe('offpay-api-auth', () => {
     expect(headers['X-Signature']).toBe(signOffpayMessage(canonicalMessage, signingSeed));
     expect(headers['X-Bootstrap-Version']).toBe('7');
     expect(bs58.decode(headers['X-Signature'] ?? '').length).toBe(64);
+  });
+
+  it('builds HMAC-only headers that bind the request body hash', () => {
+    const timestamp = 1_710_000_000_000;
+    const body = { outputMint: 'mint-b', inputMint: 'mint-a', amount: '1000' };
+    const bodyHash = canonicalBodyHash(body);
+    const hmacMessage = buildHmacV2Message({
+      timestamp,
+      walletAddress: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+      method: 'POST',
+      pathAndQuery: '/api/payment/private-send',
+      bodyHash,
+    });
+
+    const headers = buildOffpayHmacAuthHeaders({
+      walletAddress: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+      requestSecret: 'secret-123',
+      deviceId: 'device-1',
+      bootstrapVersion: 7,
+      appVersion: '9.9.9',
+      network: 'devnet',
+      method: 'POST',
+      pathAndQuery: '/api/payment/private-send',
+      body,
+      timestamp,
+    });
+
+    expect(headers['X-App-Auth-Mode']).toBe('hmac-v2');
+    expect(headers['X-App-HMAC']).toBe(hmacSha256Hex('secret-123', hmacMessage));
+    expect(headers['X-Signature']).toBeUndefined();
   });
 
   it('zeros sensitive byte arrays in place', () => {

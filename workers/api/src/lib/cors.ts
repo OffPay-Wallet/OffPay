@@ -2,14 +2,11 @@ import type { Handler, MiddlewareHandler } from 'hono';
 import type { AppEnv, Bindings } from './types.js';
 import { errorResponse } from './errors.js';
 
-const DEFAULT_ALLOWED_ORIGINS = [
-  'capacitor://localhost',
-  'http://localhost',
-  'https://offpay.app',
-];
+const DEFAULT_ALLOWED_ORIGINS = ['capacitor://localhost', 'http://localhost', 'https://offpay.app'];
 
 const ALLOWED_HEADERS = [
   'Content-Type',
+  'X-App-Auth-Mode',
   'X-App-HMAC',
   'X-App-Version',
   'X-Bootstrap-Version',
@@ -21,11 +18,7 @@ const ALLOWED_HEADERS = [
 ];
 
 const ALLOWED_METHODS = ['GET', 'POST', 'DELETE', 'OPTIONS'];
-const EXPOSED_HEADERS = [
-  'X-RateLimit-Limit',
-  'X-RateLimit-Remaining',
-  'X-RateLimit-Reset',
-];
+const EXPOSED_HEADERS = ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'];
 
 function readAllowedOrigins(bindings?: Bindings): string[] {
   const configured = bindings?.OFFPAY_ALLOWED_ORIGINS?.trim();

@@ -46,7 +46,7 @@ import {
 import { AppProviders } from '@/providers';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
-import { usePreferencesStore } from '@/store/preferencesStore';
+import { hydrateCriticalPreferencesFallback, usePreferencesStore } from '@/store/preferencesStore';
 import { waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
 
 import type { Theme } from 'expo-router/react-navigation';
@@ -174,28 +174,31 @@ export default function RootLayout(): React.JSX.Element | null {
     const markPreferencesHydrated = () => {
       if (!cancelled) setPreferencesHydrated(true);
     };
-    const unsubscribePreferencesHydration =
-      usePreferencesStore.persist.onFinishHydration(markPreferencesHydrated);
 
-    void waitForMmkvEncryption().then(async () => {
-      if (cancelled) return;
-      setMmkvReady(true);
-
-      if (usePreferencesStore.persist.hasHydrated()) {
-        markPreferencesHydrated();
-        return;
-      }
-
+    void (async () => {
       try {
-        await usePreferencesStore.persist.rehydrate();
+        await waitForMmkvEncryption();
+
+        if (!cancelled) {
+          setMmkvReady(true);
+        }
+
+        if (!usePreferencesStore.persist.hasHydrated()) {
+          await usePreferencesStore.persist.rehydrate();
+        }
+      } catch {
+        // Keep boot moving; the SecureStore mirror below can still
+        // recover the critical network preference if MMKV is degraded.
       } finally {
-        markPreferencesHydrated();
+        if (!cancelled) {
+          await hydrateCriticalPreferencesFallback();
+          markPreferencesHydrated();
+        }
       }
-    });
+    })();
 
     return () => {
       cancelled = true;
-      unsubscribePreferencesHydration();
     };
   }, []);
 

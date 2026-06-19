@@ -7,10 +7,10 @@
  * signatures for shorter than that window is always safe.
  *
  * The perf logs showed `txSign.signMessage.external.total` at 300-2200ms per
- * call (network round-trip to Privy). The same screens frequently fan out
- * several `offpayApiRequest` calls in parallel — each one signs the exact same
- * canonical message when they share `(wallet, method, path, body)` and land in
- * the same millisecond. Without dedup they pay the round-trip independently.
+ * call (network round-trip to Privy). The same screens can fan out or retry
+ * identical `offpayApiRequest` calls — each one signs the exact same canonical
+ * message when it shares `(wallet, method, path, body, timestamp bucket)`.
+ * Without dedup they pay the round-trip independently.
  *
  * This module:
  *
