@@ -1127,7 +1127,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                       backgroundColor={colors.brand.whiteStream}
                       logo={RECEIVE_QR_LOGO}
                       logoPlateColor={colors.brand.deepShadow}
-                      logoSize={Math.max(42, qrSize * 0.12)}
+                      logoSize={Math.max(48, qrSize * 0.14)}
                     />
                   ) : (
                     <View style={[styles.qrEmpty, { width: qrSize, height: qrSize }]}>

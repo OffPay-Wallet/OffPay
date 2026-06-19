@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -29,6 +30,7 @@ function getQueryErrorMessage(error: unknown, fallback: string): string {
 
 const HISTORY_CONTAINER_SHADOW =
   '0 16px 34px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
+const HISTORY_SKELETON_ROWS = [0, 1, 2] as const;
 
 interface HistoryListProps {
   transactionsQuery: UseOffpayWalletTransactionsResult;
@@ -120,6 +122,44 @@ const HistorySectionHeader = React.memo(function HistorySectionHeader({
   );
 });
 
+function HistoryRowSkeleton({ compact }: { compact: boolean }): React.JSX.Element {
+  const iconSize = compact ? 42 : 46;
+  return (
+    <View style={styles.skeletonRowShell}>
+      <View style={[styles.skeletonRow, compact && styles.skeletonRowCompact]}>
+        <SkeletonBlock width={iconSize} height={iconSize} radius={radii.full} />
+        <View style={styles.skeletonTextGroup}>
+          <SkeletonBlock width="58%" height={compact ? 14 : 16} radius={radii.xs} />
+          <SkeletonBlock width="72%" height={compact ? 12 : 14} radius={radii.xs} />
+        </View>
+        <View style={styles.skeletonAmountGroup}>
+          <SkeletonBlock width={compact ? 72 : 86} height={compact ? 14 : 16} radius={radii.xs} />
+          <SkeletonBlock width={compact ? 52 : 64} height={12} radius={radii.xs} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const HistoryLoadingSkeleton = React.memo(function HistoryLoadingSkeleton({
+  compact,
+  contentFrameWidth,
+}: {
+  compact: boolean;
+  contentFrameWidth: number;
+}): React.JSX.Element {
+  return (
+    <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
+      <View style={styles.skeletonHeaderFrame}>
+        <SkeletonBlock width="34%" height={compact ? 13 : 14} radius={radii.xs} />
+      </View>
+      {HISTORY_SKELETON_ROWS.map((row) => (
+        <HistoryRowSkeleton key={`history-skeleton-${row}`} compact={compact} />
+      ))}
+    </View>
+  );
+});
+
 export function HistoryList({
   transactionsQuery,
   localReceipts = [],
@@ -150,6 +190,7 @@ export function HistoryList({
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.sm : compact ? spacing.md : spacing.lg;
   const contentFrameWidth = Math.min(430, Math.max(0, windowWidth - horizontalPadding * 2));
+  const showInitialSkeleton = rows.length === 0 && transactionsQuery.isInitialDataPending;
   const emptyMessage = transactionsQuery.isCapabilityEnabled
     ? transactionsQuery.isError
       ? getQueryErrorMessage(transactionsQuery.error, 'Unable to load transaction history.')
@@ -217,37 +258,40 @@ export function HistoryList({
   ]);
 
   const ListEmpty = useMemo(
-    () => (
-      <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
-        <View style={styles.emptyStateShell}>
-          <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.emptyState]}>
-            <Text
-              variant="bodyBold"
-              color={colors.text.primary}
-              style={styles.emptyTitle}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-              minimumFontScale={0.86}
-              maxFontSizeMultiplier={1}
-            >
-              {emptyTitle}
-            </Text>
-            <Text
-              variant="small"
-              color={colors.text.secondary}
-              style={styles.emptySubtitle}
-              numberOfLines={3}
-              adjustsFontSizeToFit
-              minimumFontScale={0.86}
-              maxFontSizeMultiplier={1}
-            >
-              {emptyMessage}
-            </Text>
+    () =>
+      showInitialSkeleton ? (
+        <HistoryLoadingSkeleton compact={compact} contentFrameWidth={contentFrameWidth} />
+      ) : (
+        <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
+          <View style={styles.emptyStateShell}>
+            <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.emptyState]}>
+              <Text
+                variant="bodyBold"
+                color={colors.text.primary}
+                style={styles.emptyTitle}
+                numberOfLines={2}
+                adjustsFontSizeToFit
+                minimumFontScale={0.86}
+                maxFontSizeMultiplier={1}
+              >
+                {emptyTitle}
+              </Text>
+              <Text
+                variant="small"
+                color={colors.text.secondary}
+                style={styles.emptySubtitle}
+                numberOfLines={3}
+                adjustsFontSizeToFit
+                minimumFontScale={0.86}
+                maxFontSizeMultiplier={1}
+              >
+                {emptyMessage}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
-    ),
-    [contentFrameWidth, emptyMessage, emptyTitle],
+      ),
+    [compact, contentFrameWidth, emptyMessage, emptyTitle, showInitialSkeleton],
   );
 
   const ListFooter = useMemo(() => {
@@ -345,6 +389,48 @@ const styles = StyleSheet.create({
   sectionHeaderCompact: {
     fontSize: 13,
     lineHeight: 17,
+  },
+  skeletonHeaderFrame: {
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  skeletonRowShell: {
+    marginBottom: spacing.sm,
+    borderRadius: radii['2xl'],
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    backgroundColor: colors.glass.strongFill,
+    boxShadow: HISTORY_CONTAINER_SHADOW,
+  },
+  skeletonRow: {
+    minHeight: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.glass.strongFill,
+  },
+  skeletonRowCompact: {
+    minHeight: 74,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  skeletonTextGroup: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.sm,
+  },
+  skeletonAmountGroup: {
+    alignItems: 'flex-end',
+    gap: spacing.sm,
   },
   emptyStateShell: {
     borderRadius: radii['2xl'],

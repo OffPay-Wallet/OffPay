@@ -200,10 +200,10 @@ export function OffpayLaunchProvider({
     };
   }, [canUseNetwork]);
 
-  // Pre-warm the notification permission once per launch so the first
-  // backgrounded incoming-transfer doesn't pay for the prompt inline.
-  // Deferred behind first paint so the dynamic import of
-  // `expo-notifications` doesn't compete with the launch sequence.
+  // Request notification permission once per launch so the first
+  // wallet event doesn't pay for the OS prompt inline. Deferred
+  // behind first paint so the prompt/setup work doesn't compete with
+  // launch-orchestrator and wallet warm-start rendering.
   useEffect(() => {
     if (!firstPaintReady) return;
     prewarmWalletTransactionNotificationPermission();

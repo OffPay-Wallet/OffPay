@@ -251,7 +251,9 @@ export interface UmbraTransactionNotificationInput {
 /**
  * Schedule a local OS notification for wallet transaction activity.
  *
- * Permission is requested lazily on first call. Failures are silent;
+ * Permission is normally requested during launch prewarm. This call
+ * still guards the permission path so direct event triggers remain
+ * safe if launch prewarm has not completed yet. Failures are silent;
  * a missing notification permission is not a hard error for the rest
  * of the app.
  */
@@ -333,13 +335,15 @@ export function presentIncomingTransferNotification(
 }
 
 /**
- * Best-effort notification channel setup after first paint. Do not
- * request OS notification permission during launch; on Android this
- * can surface a permission sheet before the wallet is even set up.
+ * Best-effort notification setup after first paint. Requesting the
+ * permission here prevents the first send/receive/swap event from
+ * paying for the OS permission prompt inline.
  */
 export function prewarmWalletTransactionNotificationPermission(): void {
-  void configureNotifications()
-    .catch(() => undefined);
+  void (async () => {
+    await configureNotifications();
+    await ensurePermission();
+  })().catch(() => undefined);
 }
 
 export const prewarmIncomingTransferPermission = prewarmWalletTransactionNotificationPermission;

@@ -108,11 +108,12 @@ export function useOffpayWalletTransactions(options?: {
           message: capabilitiesQuery.errorMessage,
         }
       : getOffpayFeatureCapability(capabilities, 'wallet.transactions');
+  const transactionsFeatureAvailable = isOffpayFeatureAvailable(
+    capabilities,
+    'wallet.transactions',
+  );
   const canRequestTransactions =
-    walletAddress != null &&
-    network != null &&
-    canUseNetwork &&
-    isOffpayFeatureAvailable(capabilities, 'wallet.transactions');
+    walletAddress != null && network != null && canUseNetwork && transactionsFeatureAvailable;
   const canFetchTransactions = canRequestTransactions && enabledByCaller && !dashboardFetching;
   const enabled = canFetchTransactions && interactionsSettled;
 
@@ -259,8 +260,8 @@ export function useOffpayWalletTransactions(options?: {
         });
 
         const fallback =
-          queryClient.getQueryData<WalletTransactionsInfiniteData>(transactionsQueryKey)?.pages[0] ??
-          null;
+          queryClient.getQueryData<WalletTransactionsInfiniteData>(transactionsQueryKey)
+            ?.pages[0] ?? null;
         const page = await getWalletTransactions(walletAddress, network, {
           limit,
           useCache: false,
@@ -320,6 +321,18 @@ export function useOffpayWalletTransactions(options?: {
     ],
   );
 
+  const isInitialDataPending =
+    enabledByCaller &&
+    walletAddress != null &&
+    network != null &&
+    canUseNetwork &&
+    !query.isError &&
+    transactions.length === 0 &&
+    (capabilitiesQuery.isCapabilitiesPending ||
+      dashboardFetching ||
+      (transactionsFeatureAvailable &&
+        (!interactionsSettled || query.isLoading || query.isFetching || freshRefetching)));
+
   return {
     ...query,
     isFetching: query.isFetching || freshRefetching,
@@ -329,6 +342,7 @@ export function useOffpayWalletTransactions(options?: {
     capability,
     transactions,
     refetchFresh,
+    isInitialDataPending,
     isCapabilitiesPending:
       canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardFetching),
     isCapabilityEnabled: canRequestTransactions,

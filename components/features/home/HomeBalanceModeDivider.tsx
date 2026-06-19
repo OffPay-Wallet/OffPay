@@ -143,7 +143,8 @@ export function HomeBalanceModeDivider({
   const segmentHeight = trackHeight - TRACK_VERTICAL_PADDING * 2;
   const labelFontSize = compact ? 14 : 15;
   const labelLineHeight = compact ? 18 : 20;
-  const trackWidth = useSharedValue(0);
+  const estimatedTrackWidth = Math.max(0, Math.min(width, 430));
+  const trackWidth = useSharedValue(estimatedTrackWidth);
   const selectedIndex = useSharedValue(modeIndex(selectedMode));
   const selectedModeIndex = modeIndex(selectedMode);
   const propSelectedIndex = useDerivedValue(() => selectedModeIndex, [selectedModeIndex]);
@@ -192,6 +193,7 @@ export function HomeBalanceModeDivider({
   const handleTrackLayout = useCallback(
     (event: { nativeEvent: { layout: { width: number } } }) => {
       const nextWidth = event.nativeEvent.layout.width;
+      if (!Number.isFinite(nextWidth) || nextWidth <= 0) return;
       if (Math.abs(trackWidth.value - nextWidth) > 0.5) {
         trackWidth.value = nextWidth;
       }
@@ -291,15 +293,21 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
-    backgroundColor: 'rgba(62, 62, 62, 0.95)',
+    zIndex: 0,
+    backgroundColor: 'rgba(78, 78, 78, 0.96)',
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.28)',
+    borderColor: 'rgba(255, 255, 255, 0.34)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.32,
+    shadowRadius: 10,
+    elevation: 3,
     boxShadow: [
-      'inset 0 1px 2px rgba(255, 255, 255, 0.38)',
-      'inset 0 0 10px rgba(255, 255, 255, 0.08)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.44)',
+      'inset 0 0 10px rgba(255, 255, 255, 0.1)',
       'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
       '0 4px 12px rgba(0, 0, 0, 0.4)',
     ].join(', '),
@@ -308,6 +316,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     gap: SEGMENT_GAP,
+    zIndex: 1,
   },
   segment: {
     flex: 1,

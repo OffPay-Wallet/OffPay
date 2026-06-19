@@ -6,12 +6,17 @@ import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { getSwapTokens } from '@/lib/api/offpay-api-client';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import {
   getCachedOfflineTokenMetadataEntries,
   getOfflineTokenMetadataEntries,
   observeOfflineTokenMetadataFromSwapTokens,
 } from '@/lib/offline/offline-token-metadata';
+
+import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
 
 interface TokenLogoMap {
   byMint: ReadonlyMap<string, string>;
@@ -25,6 +30,8 @@ export const TOKEN_LOGO_CACHE_STALE_MS = 30 * 60_000;
 export const TOKEN_LOGO_CACHE_GC_MS = 60 * 60_000;
 
 interface UseOffpayTokenLogoMapOptions {
+  balanceData?: WalletBalanceResponse | null;
+  capabilities?: CapabilitiesResponse['capabilities'] | null;
   deferCapabilitiesUntilAfterInteractions?: boolean;
   enabled?: boolean;
 }
@@ -37,15 +44,20 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
   const { network } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
   const enabledByCaller = options?.enabled ?? true;
+  const hasExternalBalanceData = options != null && 'balanceData' in options;
+  const hasExternalCapabilities = options != null && 'capabilities' in options;
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: options?.deferCapabilitiesUntilAfterInteractions,
-    enabled: enabledByCaller,
+    enabled: enabledByCaller && !hasExternalBalanceData,
   });
   const capabilitiesQuery = useOffpayCapabilities({
     deferUntilAfterInteractions: options?.deferCapabilitiesUntilAfterInteractions,
-    enabled: enabledByCaller,
+    enabled: enabledByCaller && !hasExternalCapabilities,
   });
-  const { capabilities } = capabilitiesQuery;
+  const capabilities = hasExternalCapabilities
+    ? (options?.capabilities ?? null)
+    : capabilitiesQuery.capabilities;
+  const balanceData = hasExternalBalanceData ? options?.balanceData : balanceQuery.data;
   const capability = getOffpayFeatureCapability(capabilities, 'swap.tokens');
   const enabled =
     network != null &&
@@ -118,7 +130,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
       bySymbol.set(normalizeSymbol(token.symbol), logo);
     }
 
-    for (const token of balanceQuery.data?.tokens ?? []) {
+    for (const token of balanceData?.tokens ?? []) {
       const logo = token.logo?.trim();
       if (!logo) continue;
 
@@ -127,5 +139,5 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     }
 
     return { byMint, bySymbol };
-  }, [balanceQuery.data?.tokens, persistedLogoQuery.data, query.data]);
+  }, [balanceData?.tokens, persistedLogoQuery.data, query.data]);
 }

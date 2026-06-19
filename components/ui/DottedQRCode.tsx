@@ -19,16 +19,9 @@
  * The error-correction level is `H` (≈30%) so we can punch out the
  * centre for the optional logo without breaking scanability.
  */
-import React, { memo, useId, useMemo } from 'react';
-import { Image as RNImage, View, type StyleProp, type ViewStyle } from 'react-native';
-import Svg, {
-  Circle as SvgCircle,
-  ClipPath,
-  Defs,
-  Image as SvgImage,
-  Path,
-  Rect,
-} from 'react-native-svg';
+import React, { memo, useMemo } from 'react';
+import { Image as RNImage, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import Svg, { Circle as SvgCircle, Path, Rect } from 'react-native-svg';
 // `qrcode` ships JS only and has no ESM build, so a `require()`
 // keeps the bundle smaller than a wildcard interop import.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -247,20 +240,6 @@ function DottedQRCodeImpl({
     });
   }, [logo, matrix, resolvedLogoSize, size]);
 
-  // Resolve the `require(...)` asset to a URI so the SVG `<Image>`
-  // can render it. Falling back to an empty string keeps the SVG
-  // valid if the resolver returns null on a given platform.
-  const logoUri = useMemo(() => {
-    if (logo == null) return null;
-    const resolved = RNImage.resolveAssetSource(logo);
-    return resolved?.uri ?? null;
-  }, [logo]);
-  const rawLogoClipId = useId();
-  const logoClipId = useMemo(
-    () => `dotted-qr-logo-clip-${rawLogoClipId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
-    [rawLogoClipId],
-  );
-
   if (matrix == null || paths == null) return null;
 
   const moduleSize = size / matrix.size;
@@ -283,11 +262,6 @@ function DottedQRCodeImpl({
       ]}
     >
       <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <Defs>
-          <ClipPath id={logoClipId}>
-            <SvgCircle cx={logoCenter} cy={logoCenter} r={logoRadius} />
-          </ClipPath>
-        </Defs>
         <Rect x={0} y={0} width={size} height={size} fill={backgroundColor} />
         {/* Single-path rendering: every body dot rolled into one
             `<Path>` element so the SVG ships a single native node
@@ -303,31 +277,47 @@ function DottedQRCodeImpl({
         ) : null}
         {paths.finderFillPath.length > 0 ? <Path d={paths.finderFillPath} fill={color} /> : null}
         {logo != null ? (
-          <>
-            {/* White circular plate behind the logo so the punched-out QR area
-                reads cleanly even before the bitmap loads. */}
-            <SvgCircle
-              cx={logoCenter}
-              cy={logoCenter}
-              r={logoRadius}
-              fill={logoPlateColor ?? backgroundColor}
-            />
-            {logoUri != null ? (
-              <SvgImage
-                href={{ uri: logoUri }}
-                x={logoOrigin}
-                y={logoOrigin}
-                width={resolvedLogoSize}
-                height={resolvedLogoSize}
-                preserveAspectRatio="xMidYMid slice"
-                clipPath={`url(#${logoClipId})`}
-              />
-            ) : null}
-          </>
+          <SvgCircle
+            cx={logoCenter}
+            cy={logoCenter}
+            r={logoRadius}
+            fill={logoPlateColor ?? backgroundColor}
+          />
         ) : null}
       </Svg>
+      {logo != null ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.logoOverlay,
+            {
+              width: resolvedLogoSize,
+              height: resolvedLogoSize,
+              borderRadius: logoRadius,
+              left: logoOrigin,
+              top: logoOrigin,
+              backgroundColor: logoPlateColor ?? backgroundColor,
+            },
+          ]}
+        >
+          <RNImage source={logo} resizeMode="cover" style={styles.logoImage} />
+        </View>
+      ) : null}
     </View>
   );
 }
 
 export const DottedQRCode = memo(DottedQRCodeImpl);
+
+const styles = StyleSheet.create({
+  logoOverlay: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
+  },
+});

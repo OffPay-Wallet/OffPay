@@ -361,7 +361,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [activePillX],
   );
 
-  const primeTabPillFeedback = useCallback(
+  const previewInactiveTabPill = useCallback(
     (targetPrimaryIndex: number) => {
       if (targetPrimaryIndex >= 0) {
         activePillTranslateX.value = withSpring(
@@ -370,7 +370,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         );
       }
 
-      activePillFeedback.value = TAB_PILL_PRESS_SCALE;
       activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
     },
     [activePillFeedback, activePillTranslateX, pillInsetX, tabSlotWidth],
@@ -382,21 +381,31 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const handlePrimaryTabPressIn = useCallback(
     (targetPrimaryIndex: number) => {
-      primeTabPillFeedback(targetPrimaryIndex);
+      previewInactiveTabPill(targetPrimaryIndex);
     },
-    [primeTabPillFeedback],
+    [previewInactiveTabPill],
   );
 
   const handlePrimaryTabResponderTerminate = useCallback(() => {
     restoreCommittedPillPosition();
   }, [restoreCommittedPillPosition]);
 
+  const handleTabLongPress = useCallback(
+    (route: BottomTabBarProps['state']['routes'][number]): void => {
+      navigation.emit({
+        type: 'tabLongPress',
+        target: route.key,
+      });
+    },
+    [navigation],
+  );
+
   const handlePrimaryTabLongPress = useCallback(
     (route: BottomTabBarProps['state']['routes'][number]) => {
       restoreCommittedPillPosition();
       handleTabLongPress(route);
     },
-    [restoreCommittedPillPosition],
+    [handleTabLongPress, restoreCommittedPillPosition],
   );
 
   const primeFocusedPillFeedback = useCallback(() => {
@@ -445,13 +454,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       }
       navigation.navigate(route.name, route.params);
     }
-  }
-
-  function handleTabLongPress(route: BottomTabBarProps['state']['routes'][number]): void {
-    navigation.emit({
-      type: 'tabLongPress',
-      target: route.key,
-    });
   }
 
   function renderRouteIcon(

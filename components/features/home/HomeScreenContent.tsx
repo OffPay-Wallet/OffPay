@@ -43,7 +43,7 @@ import { useOfflinePaymentSlots } from '@/hooks/useOfflinePaymentSlots';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { formatFiatCurrency } from '@/lib/currency-rates';
 import { formatLamportsAsExactSol } from '@/lib/crypto/solana-amounts';
-import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
 import {
@@ -66,6 +66,7 @@ import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
+import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
 import type { OffpayRecentActivityView } from '@/lib/api/offpay-wallet-data';
 import type { ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import type { WalletMode } from '@/store/preferencesStore';
@@ -110,8 +111,8 @@ const MAX_HOME_ACTIVITY_ITEMS = 4;
 const MAX_HOME_HOLDINGS_ITEMS = 3;
 const EMPTY_DISABLED_ACTION_IDS: readonly string[] = [];
 const OFFLINE_DISABLED_ACTION_IDS: readonly string[] = ['swap'];
-const HOME_DATA_STAGE_COUNT = 5;
 const HOME_REFRESH_SPINNER_MIN_MS = 360;
+const EMPTY_TOKEN_VALUATIONS: Readonly<Record<string, TokenValuationView>> = {};
 
 const SHIELDED_SKELETON_TOKEN_ROWS = ['usdc', 'usdt', 'wsol', 'umbra'] as const;
 const SHIELDED_SKELETON_CHIPS = ['shield', 'withdraw', 'token-a', 'token-b'] as const;
@@ -121,15 +122,6 @@ interface HomeBalanceModeState {
   mode: HomeBalanceMode;
   shieldedPaneMounted: boolean;
 }
-
-/**
- * Identities (`network:wallet:online|offline`) for which the staged
- * data ramp has already run to completion. Module-scoped so it
- * survives a Home unmount — without this, the 5-stage ramp would
- * replay on every cold start of the screen even when React Query has
- * the data warm in cache.
- */
-const completedHomeStageIdentities = new Set<string>();
 
 function getQueryErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -266,49 +258,40 @@ export function HomeScreenContent(): React.JSX.Element {
     homeBalanceModeState.scopeKey === homeBalanceModeScopeKey
       ? homeBalanceModeState.shieldedPaneMounted
       : false;
-  const homeDataIdentity =
-    publicKey != null && network != null
-      ? `${network}:${publicKey}:${canUseNetwork ? 'online' : 'offline'}`
-      : null;
-  const [homeDataStage, setHomeDataStage] = useState(0);
+  const homeDataReady = publicKey != null && network != null;
   const isOffline = effectiveWalletMode === 'offline';
-  const capabilitiesReady = homeDataStage >= 1;
-  const balanceReady = homeDataStage >= 2;
-  const slotsStatusReady = homeDataStage >= 3;
-  const tokenLogoReady = homeDataStage >= 3;
-  const transactionsReady = homeDataStage >= 4;
-  const backgroundStatsReady = homeDataStage >= 5;
   const promptRentEstimateTargetSlotCount = slotPromptVisible
     ? Math.max(offlinePaymentPoolSize, OFFLINE_PAYMENT_SLOT_DEFAULT)
     : undefined;
+  const capabilitiesQuery = useOffpayCapabilities({
+    enabled: homeDataReady,
+  });
   const balanceQuery = useOffpayWalletBalance(null, {
-    enabled: balanceReady,
+    enabled: homeDataReady,
     // Capabilities are pre-warmed by the launch warm-start hook, so
-    // there's no need to defer the capabilities probe here. Also fire
-    // the balance request as soon as the wallet identity resolves —
-    // the staged loader already gates this behind stage 2 of the
-    // ramp, so we won't burst the JS thread.
+    // there's no need to defer the capabilities probe here. Subscribe
+    // as soon as the wallet identity resolves so hydrated dashboard
+    // cache can paint without replaying the old staged ramp.
     eagerWithoutCapabilities: true,
   });
   const offlinePaymentSlots = useOfflinePaymentSlots({
-    enabled: capabilitiesReady,
+    enabled: homeDataReady,
     targetSlotCount: promptRentEstimateTargetSlotCount,
-    statusEnabled: slotsStatusReady,
-    rentEstimateEnabled: slotPromptVisible && backgroundStatsReady,
+    statusEnabled: homeDataReady,
+    rentEstimateEnabled: slotPromptVisible && homeDataReady,
   });
   const transactionsQuery = useOffpayWalletTransactions({
-    enabled: transactionsReady,
+    enabled: homeDataReady,
   });
   const refetchFreshTransactions = transactionsQuery.refetchFresh;
   const pendingBackupStatsQuery = usePendingBackupQueueStats({
     walletAddress: publicKey,
-    enabled: backgroundStatsReady,
+    enabled: homeDataReady,
   });
   const tokenLogoMap = useOffpayTokenLogoMap({
-    enabled: tokenLogoReady,
-  });
-  const capabilitiesQuery = useOffpayCapabilities({
-    enabled: capabilitiesReady,
+    enabled: homeDataReady,
+    balanceData: balanceQuery.data,
+    capabilities: capabilitiesQuery.capabilities,
   });
   const settlementStatus = useSettlementEngineStore((state) => state.status);
   const settlementError = useSettlementEngineStore((state) => state.error);
@@ -330,8 +313,9 @@ export function HomeScreenContent(): React.JSX.Element {
   const portfolioValuationQuery = useOffpayPortfolioValuation({
     holdings: allVisibleHoldings,
     currency,
-    enabled: backgroundStatsReady,
+    enabled: homeDataReady,
   });
+  const tokenValuations = portfolioValuationQuery.data?.tokenValues ?? EMPTY_TOKEN_VALUATIONS;
   const recentActivity = useMemo(() => {
     const localReceiptsForNetwork = buildLocalHistoryReceiptInputs({
       network,
@@ -399,50 +383,6 @@ export function HomeScreenContent(): React.JSX.Element {
     },
     [],
   );
-
-  // The completed-identity cache lives at module scope (see
-  // `completedHomeStageIdentities` above) so it survives Home
-  // unmounts — without that, every cold start of this screen would
-  // replay the 5-stage ramp even when React Query has the data warm.
-
-  useEffect(() => {
-    if (homeDataIdentity == null) {
-      setHomeDataStage(0);
-      return undefined;
-    }
-
-    if (completedHomeStageIdentities.has(homeDataIdentity)) {
-      setHomeDataStage(HOME_DATA_STAGE_COUNT);
-      return undefined;
-    }
-
-    setHomeDataStage(0);
-
-    let cancelled = false;
-
-    // Start the ramp on the next animation frame so the first stage
-    // doesn't fire on the same frame as the screen mount, but DON'T
-    // wait for an idle callback first — that can hit the fallback
-    // under load and feel like lag after unlock. The `yieldToUi()`
-    // between each stage already keeps the JS thread responsive.
-    const frameHandle = requestAnimationFrame(() => {
-      void (async () => {
-        for (let stage = 1; stage <= HOME_DATA_STAGE_COUNT; stage += 1) {
-          if (cancelled) return;
-          setHomeDataStage(stage);
-          await yieldToUi();
-        }
-        if (!cancelled) {
-          completedHomeStageIdentities.add(homeDataIdentity);
-        }
-      })();
-    });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frameHandle);
-    };
-  }, [homeDataIdentity]);
 
   const offlineToggleContextRef = useRef<{
     promptKey: string | null;
@@ -533,19 +473,9 @@ export function HomeScreenContent(): React.JSX.Element {
                   pendingUploadCount === 1 ? '' : 's'
                 } waiting to sync.`
               : null;
-  // During the staged data ramp the balance/transactions queries are
-  // intentionally disabled until their stage is reached. A disabled
-  // query reports neither "loading" nor "capabilities pending", so the
-  // empty-state logic would otherwise fall through to "unavailable" for
-  // the ~0.5-1s warm-up window on cold open / resume. Treat that
-  // pre-enablement window (online + wallet present, stage not yet
-  // reached) as loading so the skeleton shows instead of a misleading
-  // "unavailable" flash.
   const hasWallet = publicKey != null;
-  const balanceWarmingUp =
-    hasWallet && canUseNetwork && (!balanceReady || balanceQuery.isCapabilitiesPending);
-  const activityWarmingUp =
-    hasWallet && canUseNetwork && (!transactionsReady || transactionsQuery.isCapabilitiesPending);
+  const balanceWarmingUp = hasWallet && canUseNetwork && balanceQuery.isCapabilitiesPending;
+  const activityWarmingUp = hasWallet && canUseNetwork && transactionsQuery.isCapabilitiesPending;
   const holdingsLoading =
     previewHoldings.length === 0 &&
     (balanceWarmingUp || balanceQuery.isLoading || balanceQuery.isCapabilitiesPending);
@@ -1065,6 +995,10 @@ export function HomeScreenContent(): React.JSX.Element {
     router.push('/holdings' as never);
   }, [router]);
 
+  const handleViewAllActivity = useCallback((): void => {
+    navigateToTab('/(tabs)/history');
+  }, [navigateToTab]);
+
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + layout.tabBarHeight + spacing.md;
   const compactHome = windowWidth < 380 || windowHeight < 760 || fontScale > 1.08;
   const denseHome = windowWidth < 340 || fontScale > 1.18;
@@ -1177,7 +1111,7 @@ export function HomeScreenContent(): React.JSX.Element {
               emptySubtitle={holdingsEmptySubtitle}
               hiddenSpamTokenCount={countSpamTokens(balanceQuery.data)}
               privacyHidden={privacyHidden}
-              valuations={portfolioValuationQuery.data?.tokenValues}
+              valuations={tokenValuations}
               loading={holdingsLoading}
             />
           </View>
@@ -1186,7 +1120,7 @@ export function HomeScreenContent(): React.JSX.Element {
             <RecentActivityCard
               transactions={recentActivity}
               onTransactionPress={handleActivityPress}
-              onViewAll={() => navigateToTab('/(tabs)/history')}
+              onViewAll={handleViewAllActivity}
               statusLabel={streamStatusLabel}
               emptyTitle={activityEmptyTitle}
               emptySubtitle={activityEmptySubtitle}

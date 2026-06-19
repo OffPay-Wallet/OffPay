@@ -151,6 +151,23 @@ export function useOffpayPortfolioValuation({
   }, [holdings]);
 
   const enabled = network != null && enabledByCaller && priceInputs.length > 0;
+  const providerFallbackData = useMemo(() => {
+    if (!enabledByCaller || normalizedCurrency !== 'USD' || priceInputs.length === 0) {
+      return null;
+    }
+
+    const data = buildPortfolioValuationData({
+      holdings,
+      priceInputs,
+      currency: normalizedCurrency,
+      rate: 1,
+      unitUsdPrices: {},
+      fetchedAt: Date.now(),
+      allowProviderUsdPriceFallback: true,
+    });
+
+    return data.pricedCount > 0 ? data : null;
+  }, [enabledByCaller, holdings, normalizedCurrency, priceInputs]);
 
   useEffect(() => {
     if (
@@ -165,7 +182,6 @@ export function useOffpayPortfolioValuation({
 
     let cancelled = false;
     void (async () => {
-      await yieldToUi();
       const [cachedRate, cachedPrices] = await Promise.all([
         readCachedUsdToCurrencyRate(normalizedCurrency),
         readCachedTokenUsdPrices(network),
@@ -177,7 +193,6 @@ export function useOffpayPortfolioValuation({
         return;
       }
 
-      await yieldToUi();
       if (cancelled) return;
       const nextData = buildPortfolioValuationData({
         holdings,
@@ -248,7 +263,6 @@ export function useOffpayPortfolioValuation({
           await writeCachedTokenUsdPrices(network, valuation.unitUsdPrices);
         })().catch(() => undefined);
 
-        await yieldToUi();
         return buildPortfolioValuationData({
           holdings,
           priceInputs,
@@ -269,7 +283,6 @@ export function useOffpayPortfolioValuation({
         throw new Error(`Cached USD/${normalizedCurrency} rate is unavailable.`);
       }
 
-      await yieldToUi();
       return buildPortfolioValuationData({
         holdings,
         priceInputs,
@@ -315,6 +328,6 @@ export function useOffpayPortfolioValuation({
 
   return {
     ...query,
-    data: query.data ?? fallbackData ?? cachedData ?? undefined,
+    data: query.data ?? fallbackData ?? cachedData ?? providerFallbackData ?? undefined,
   };
 }

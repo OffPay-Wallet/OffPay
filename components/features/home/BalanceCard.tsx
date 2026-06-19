@@ -254,7 +254,7 @@ interface BalanceCardProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function BalanceCard({
+export const BalanceCard = memo(function BalanceCard({
   publicKey,
   networkLabel,
   offlineSlotsLabel,
@@ -887,7 +887,7 @@ export function BalanceCard({
       </View>
     </View>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Styles

@@ -263,7 +263,7 @@ export function TokenRowSkeleton({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function TokenHoldingsCard({
+export const TokenHoldingsCard = memo(function TokenHoldingsCard({
   title = 'Holdings',
   holdings,
   onTokenPress,
@@ -424,7 +424,7 @@ export function TokenHoldingsCard({
       </View>
     </View>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Styles

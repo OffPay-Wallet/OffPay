@@ -126,7 +126,7 @@ function ActivityRowSkeleton({ compact }: { compact: boolean }): React.JSX.Eleme
 // Main component
 // ---------------------------------------------------------------------------
 
-export function RecentActivityCard({
+export const RecentActivityCard = memo(function RecentActivityCard({
   title = 'Recent Activity',
   transactions,
   onTransactionPress,
@@ -236,7 +236,7 @@ export function RecentActivityCard({
       )}
     </View>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Styles
