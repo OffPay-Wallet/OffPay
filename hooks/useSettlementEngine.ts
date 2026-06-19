@@ -317,7 +317,7 @@ export function useSettlementEngine() {
         }),
         queryClient.invalidateQueries({
           queryKey: offpayWalletTransactionsBaseQueryKey(wallet, activeNetwork),
-          refetchType: 'all',
+          refetchType: 'active',
         }),
         queryClient.invalidateQueries({
           queryKey: offlineNonceStateQueryKey(wallet, activeNetwork),

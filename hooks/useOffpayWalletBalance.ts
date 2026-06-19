@@ -18,7 +18,7 @@ import { useWalletStore } from '@/store/walletStore';
 
 import type { CapabilityStatus, WalletBalanceResponse } from '@/types/offpay-api';
 
-const WALLET_BALANCE_STALE_TIME_MS = 1000 * 15;
+const WALLET_BALANCE_STALE_TIME_MS = 1000 * 60;
 const WALLET_BALANCE_GC_TIME_MS = 1000 * 60 * 30;
 
 interface UseOffpayWalletBalanceOptions {

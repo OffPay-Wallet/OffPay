@@ -15,16 +15,16 @@ export function useOffpayNetworkAccess() {
 
   return {
     ...walletModeState,
-    canUseNetwork: walletModeState.canUseNetwork && !isNetworkAccessSuspended,
+    canUseNetwork:
+      walletModeState.canUseNetwork && !isNetworkAccessSuspended && !isNetworkSwitching,
     isNetworkAccessSuspended,
     /**
      * True from the moment the user picks a new network until the
      * staged switch lifecycle finishes. Action buttons (swap, send,
      * advanced swap) gate on this for visible "Switching network…"
-     * feedback. Background read-only queries should NOT gate on this
-     * — they only need `canUseNetwork`, which lifts sooner so balances
-     * and capabilities can begin refetching while the longer UX
-     * lockout still holds.
+     * feedback. `canUseNetwork` also remains false during this window
+     * so new-network read queries do not fan out while navigation and
+     * tab state are still settling.
      */
     isNetworkSwitching,
     networkTransitionVersion,

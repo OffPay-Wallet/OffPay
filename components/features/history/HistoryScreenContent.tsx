@@ -66,11 +66,11 @@ export function HistoryScreenContent(): React.JSX.Element {
   const transactionsQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
     deferUntilAfterInteractions: true,
-    // Let React Query's stale window decide whether the entry needs a
-    // network refresh. The activity stream invalidates this query when
-    // new transactions arrive, so forcing every tab entry to refetch
-    // competes with navigation and price queries.
-    refetchOnMount: true,
+    // History is the canonical transaction view. Do not let the
+    // worker-side wallet cache or the shared warm-start TTL keep this
+    // screen stale after a user explicitly opens it.
+    refetchOnMount: 'always',
+    useCache: false,
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
@@ -79,7 +79,7 @@ export function HistoryScreenContent(): React.JSX.Element {
   const refreshIconSize = dense ? 15 : compact ? 16 : 18;
   const canRefreshHistory = transactionsQuery.isCapabilityEnabled;
   const isHistoryStale = transactionsQuery.isStale;
-  const refetchHistoryQuery = transactionsQuery.refetch;
+  const refetchFreshHistoryQuery = transactionsQuery.refetchFresh;
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
 
@@ -106,10 +106,10 @@ export function HistoryScreenContent(): React.JSX.Element {
       const signal = getScreenSignal();
       runAfterTapFrame(() => {
         if (signal.aborted) return;
-        void refetchHistoryQuery();
+        void refetchFreshHistoryQuery({ signal }).catch(() => undefined);
       });
     },
-    [canRefreshHistory, getScreenSignal, isHistoryStale, refetchHistoryQuery],
+    [canRefreshHistory, getScreenSignal, isHistoryStale, refetchFreshHistoryQuery],
   );
 
   // First focus is already covered by the initial query mount — only
@@ -123,7 +123,7 @@ export function HistoryScreenContent(): React.JSX.Element {
         hasFocusedOnceRef.current = true;
         return undefined;
       }
-      refreshHistory();
+      refreshHistory({ force: true });
       return undefined;
     }, [refreshHistory]),
   );

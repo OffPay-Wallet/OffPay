@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OffPay - Pitch Deck</title>
+  <style>
+    :root {
+      --c-bg: #0b1217;
+      --c-bg-alt: #0f1d22;
+      --c-bg-card: #13242b;
+      --c-surface: #193139;
+      --c-border: rgba(238, 247, 244, 0.1);
+      --c-primary: #1fb6a6;
+      --c-primary-dim: rgba(31, 182, 166, 0.14);
+      --c-accent: #f2b84b;
+      --c-accent-dim: rgba(242, 184, 75, 0.12);
+      --c-danger: #f87171;
+      --c-text: #eef7f4;
+      --c-text-secondary: rgba(238, 247, 244, 0.72);
+      --c-text-muted: rgba(238, 247, 244, 0.45);
+      --font-display: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: var(--c-bg); color: var(--c-text); }
+    body { font-family: var(--font-display); }
+    .deck { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 76px 96px;
+      opacity: 0;
+      pointer-events: none;
+      background: var(--c-bg);
+      transition: opacity 0.45s var(--ease-out);
+    }
+    .slide.active { opacity: 1; pointer-events: auto; }
+    .slide.bg-alt { background: var(--c-bg-alt); }
+    .slide.active .animate-in { animation: slideUp 0.56s var(--ease-out) both; }
+    .slide.active .animate-in:nth-child(2) { animation-delay: 0.06s; }
+    .slide.active .animate-in:nth-child(3) { animation-delay: 0.12s; }
+    .slide.active .animate-in:nth-child(4) { animation-delay: 0.18s; }
+    .slide.active .animate-in:nth-child(5) { animation-delay: 0.24s; }
+    .slide.active .animate-in:nth-child(6) { animation-delay: 0.3s; }
+    .slide.active .animate-in:nth-child(7) { animation-delay: 0.36s; }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(22px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .caption {
+      font-size: 18px;
+      font-weight: 750;
+      color: var(--c-text-muted);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .hero { font-size: 104px; font-weight: 900; line-height: 0.98; letter-spacing: 0; }
+    .h1 { font-size: 66px; font-weight: 860; line-height: 1.05; letter-spacing: 0; }
+    .h2 { font-size: 46px; font-weight: 780; line-height: 1.12; letter-spacing: 0; }
+    .h3 { font-size: 32px; font-weight: 720; line-height: 1.2; letter-spacing: 0; }
+    .body { font-size: 27px; line-height: 1.4; color: var(--c-text-secondary); }
+    .small { font-size: 21px; line-height: 1.45; color: var(--c-text-secondary); }
+    .micro { font-size: 15px; line-height: 1.45; color: var(--c-text-muted); }
+    .mono { font-family: var(--font-mono); }
+    .accent { color: var(--c-accent); }
+    .primary { color: var(--c-primary); }
+    .muted { color: var(--c-text-muted); }
+    .divider { width: 76px; height: 4px; margin: 28px 0 34px; border-radius: 4px; background: var(--c-primary); }
+
+    .row { display: flex; gap: 28px; align-items: stretch; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+    .card {
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      border-radius: 10px;
+      padding: 28px;
+      min-height: 150px;
+    }
+    .card.featured { border-color: rgba(31, 182, 166, 0.42); background: #142d32; }
+    .card.warning { border-color: rgba(248, 113, 113, 0.28); }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 12px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 15px;
+      border-radius: 999px;
+      border: 1px solid var(--c-border);
+      color: var(--c-text-secondary);
+      background: rgba(255,255,255,0.03);
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .badge.primary { color: var(--c-primary); background: var(--c-primary-dim); border-color: rgba(31, 182, 166, 0.25); }
+    .badge.accent { color: var(--c-accent); background: var(--c-accent-dim); border-color: rgba(242, 184, 75, 0.25); }
+
+    .metric-card {
+      padding: 28px 22px;
+      background: var(--c-bg-card);
+      border: 1px solid var(--c-border);
+      border-radius: 10px;
+      min-height: 162px;
+    }
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 50px;
+      font-weight: 900;
+      line-height: 1;
+      color: var(--c-accent);
+      white-space: nowrap;
+    }
+    .metric-label { margin-top: 16px; color: var(--c-text-secondary); font-size: 20px; line-height: 1.3; }
+    .list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+    .list li {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      color: var(--c-text-secondary);
+      font-size: 25px;
+      line-height: 1.34;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--c-border);
+    }
+    .list li:last-child { border-bottom: 0; padding-bottom: 0; }
+    .dot {
+      flex: 0 0 auto;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-top: 12px;
+      background: var(--c-primary);
+    }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+    .flow-step {
+      position: relative;
+      min-height: 156px;
+      padding: 22px;
+      border: 1px solid var(--c-border);
+      border-radius: 10px;
+      background: var(--c-bg-card);
+    }
+    .flow-step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      right: -11px;
+      top: 50%;
+      width: 16px;
+      height: 2px;
+      background: var(--c-primary);
+      opacity: 0.7;
+    }
+    .flow-num { font-family: var(--font-mono); font-size: 18px; color: var(--c-accent); margin-bottom: 18px; }
+    .phone {
+      width: 330px;
+      height: 640px;
+      border-radius: 42px;
+      padding: 18px;
+      background: #071015;
+      border: 1px solid rgba(238, 247, 244, 0.18);
+      box-shadow: 0 28px 80px rgba(0,0,0,0.38);
+    }
+    .phone-screen {
+      height: 100%;
+      border-radius: 30px;
+      background: #102128;
+      border: 1px solid rgba(238, 247, 244, 0.09);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .app-bar { display: flex; align-items: center; justify-content: space-between; color: var(--c-text); font-weight: 780; }
+    .avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--c-primary); }
+    .pill-panel {
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(238, 247, 244, 0.06);
+      border: 1px solid rgba(238, 247, 244, 0.08);
+    }
+    .phone-nav { margin-top: auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .nav-pill { height: 34px; border-radius: 14px; background: rgba(238, 247, 244, 0.08); }
+    .nav-pill.active { background: var(--c-primary); }
+    .roadmap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .phase {
+      min-height: 365px;
+      padding: 30px;
+      border-radius: 10px;
+      border: 1px solid var(--c-border);
+      background: var(--c-bg-card);
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .phase.active { border-color: rgba(31, 182, 166, 0.48); background: #142d32; }
+    .mini-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .mini-table td { padding: 15px 0; border-bottom: 1px solid var(--c-border); font-size: 22px; color: var(--c-text-secondary); }
+    .mini-table td:last-child { text-align: right; color: var(--c-text); font-weight: 760; }
+    .source-line { position: absolute; left: 96px; right: 96px; bottom: 36px; }
+
+    .nav-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 16px 36px;
+      background: rgba(6, 12, 16, 0.88);
+      border-top: 1px solid var(--c-border);
+      opacity: 0;
+      transition: opacity 0.22s ease;
+    }
+    .deck:hover .nav-bar { opacity: 1; }
+    .nav-btn {
+      border: 1px solid var(--c-border);
+      background: rgba(255,255,255,0.03);
+      color: var(--c-text-secondary);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font: 700 14px var(--font-display);
+      cursor: pointer;
+    }
+    .nav-btn:hover { border-color: var(--c-primary); color: var(--c-text); }
+    .nav-counter { font: 700 15px var(--font-mono); color: var(--c-text-muted); }
+    .nav-progress { flex: 1; max-width: 260px; height: 4px; border-radius: 8px; background: rgba(238, 247, 244, 0.12); overflow: hidden; }
+    .nav-progress-fill { height: 100%; width: 0; background: var(--c-primary); transition: width 0.22s ease; }
+    .notes {
+      display: none;
+      position: fixed;
+      left: 40px;
+      right: 40px;
+      bottom: 68px;
+      z-index: 200;
+      padding: 18px 22px;
+      border-radius: 10px;
+      border: 1px solid var(--c-border);
+      background: rgba(4, 8, 10, 0.94);
+      color: var(--c-text-secondary);
+      font-size: 16px;
+      line-height: 1.48;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .notes.visible { display: block; }
+    .notes-label { margin-bottom: 6px; color: var(--c-accent); font: 800 12px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+
+    @media (max-width: 900px) {
+      .slide { padding: 42px 24px 72px; overflow-y: auto; justify-content: flex-start; }
+      .hero { font-size: 64px; }
+      .h1 { font-size: 42px; }
+      .h2 { font-size: 32px; }
+      .h3 { font-size: 24px; }
+      .body, .list li { font-size: 20px; }
+      .small { font-size: 17px; }
+      .grid-2, .grid-3, .grid-4, .flow, .roadmap { grid-template-columns: 1fr; }
+      .row { flex-direction: column; }
+      .phone { width: 100%; max-width: 330px; height: 560px; margin: 0 auto; }
+      .flow-step::after { display: none; }
+      .source-line { position: static; margin-top: 24px; }
+      .nav-bar { opacity: 1; padding: 12px 16px; }
+    }
+
+    @media print {
+      html, body { height: auto; overflow: visible; }
+      .deck { height: auto; overflow: visible; }
+      .slide { position: relative; opacity: 1; pointer-events: auto; page-break-after: always; min-height: 100vh; }
+      .nav-bar, .notes { display: none !important; }
+      .animate-in { animation: none !important; opacity: 1 !important; transform: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck" id="deck">
+    <section class="slide bg-alt active">
+      <div class="animate-in tag-row" style="margin-bottom: 42px;">
+        <span class="badge primary">Solana payments</span>
+        <span class="badge accent">Agentic wallet</span>
+        <span class="badge">3 minute deck</span>
+      </div>
+      <h1 class="hero animate-in">OffPay</h1>
+      <p class="h2 animate-in" style="max-width: 930px; margin-top: 26px; color: var(--c-text-secondary);">
+        Private, offline, and agentic stablecoin payments in one mobile wallet.
+      </p>
+      <div class="divider animate-in"></div>
+      <p class="body animate-in" style="max-width: 850px;">
+        From everyday payments to AI-prepared actions, OffPay turns Solana wallet UX into a payment operating system.
+      </p>
+      <div class="notes">
+        <div class="notes-label">20 seconds</div>
+        Opening line: OffPay is a Solana mobile wallet for real payments, not just holding tokens. It supports private sends, offline stablecoin payment flows, and an AI agent that prepares actions while the user keeps final signing control.
+      </div>
+    </section>
+
+    <section class="slide">
+      <span class="caption animate-in">WHY NOW</span>
+      <h1 class="h1 animate-in" style="max-width: 980px;">Stablecoins are becoming real payment rails.</h1>
+      <div class="divider animate-in"></div>
+      <div class="grid-3 animate-in">
+        <div class="metric-card">
+          <div class="metric-value">$314B</div>
+          <div class="metric-label">total stablecoin supply</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">$15.7B</div>
+          <div class="metric-label">stablecoins on Solana</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">24/7</div>
+          <div class="metric-label">merchant settlement is moving on-chain</div>
+        </div>
+      </div>
+      <div class="grid-2 animate-in" style="margin-top: 28px;">
+        <div class="card">
+          <p class="caption primary">Institutional signal</p>
+          <p class="small" style="margin-top: 12px;">Visa expanded USDC settlement over Solana with U.S. banks.</p>
+        </div>
+        <div class="card">
+          <p class="caption primary">Merchant signal</p>
+          <p class="small" style="margin-top: 12px;">Payment processors are adding stablecoin settlement for global commerce.</p>
+        </div>
+      </div>
+      <p class="micro source-line">Sources: DefiLlama stablecoins API, Barron's, Investor's Business Daily. Numbers pulled June 19, 2026.</p>
+      <div class="notes">
+        <div class="notes-label">22 seconds</div>
+        This is the timing slide. Stablecoins are no longer only a trading asset. Banks and merchant processors are adding settlement, and Solana already has meaningful stablecoin liquidity. The gap is a wallet experience built for actual payment behavior.
+      </div>
+    </section>
+
+    <section class="slide bg-alt">
+      <span class="caption animate-in">THE PROBLEM</span>
+      <h1 class="h1 animate-in" style="max-width: 990px;">Crypto wallets still behave like manual trading terminals.</h1>
+      <div class="divider animate-in"></div>
+      <div class="grid-3 animate-in">
+        <div class="card warning">
+          <p class="h3">Payments leak context</p>
+          <p class="small" style="margin-top: 14px;">Addresses, balances, and payment trails are exposed by default.</p>
+        </div>
+        <div class="card warning">
+          <p class="h3">Real-world checkout breaks</p>
+          <p class="small" style="margin-top: 14px;">Bad connectivity should not stop stablecoin payment flows.</p>
+        </div>
+        <div class="card warning">
+          <p class="h3">AI is stuck at advice</p>
+          <p class="small" style="margin-top: 14px;">Agents can suggest actions but users still assemble every transaction.</p>
+        </div>
+      </div>
+      <p class="body animate-in" style="max-width: 900px; margin-top: 36px;">
+        The result: payments, payroll, swaps, and trading all happen in separate flows with no safe automation layer.
+      </p>
+      <div class="notes">
+        <div class="notes-label">22 seconds</div>
+        Keep this blunt. Wallets are good for holding and clicking, but real payment users need privacy, fallback when the network is weak, and help preparing complex actions. That is the opening for OffPay.
+      </div>
+    </section>
+
+    <section class="slide">
+      <span class="caption animate-in">THE PRODUCT</span>
+      <h1 class="h1 animate-in" style="max-width: 880px;">One wallet for every payment mode.</h1>
+      <div class="divider animate-in"></div>
+      <div class="row animate-in" style="align-items: center;">
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="app-bar">
+              <span>OffPay</span>
+              <span class="avatar"></span>
+            </div>
+            <div class="pill-panel">
+              <p class="micro">BALANCE</p>
+              <p class="h2 accent mono" style="margin-top: 8px;">$2,480.20</p>
+              <p class="small" style="margin-top: 10px;">USDC ready for pay, swap, trade, or payroll.</p>
+            </div>
+            <div class="pill-panel">
+              <p class="h3">Agent draft</p>
+              <p class="small" style="margin-top: 8px;">"Pay payroll, keep $500 buffer, route surplus to SOL."</p>
+            </div>
+            <div class="grid-2" style="gap: 10px;">
+              <div class="pill-panel"><p class="small">Private pay</p></div>
+              <div class="pill-panel"><p class="small">Offline QR</p></div>
+              <div class="pill-panel"><p class="small">Flash Trade</p></div>
+              <div class="pill-panel"><p class="small">Payroll</p></div>
+            </div>
+            <div class="phone-nav">
+              <div class="nav-pill active"></div>
+              <div class="nav-pill"></div>
+              <div class="nav-pill"></div>
+              <div class="nav-pill"></div>
+            </div>
+          </div>
+        </div>
+        <div style="flex: 1;">
+          <div class="grid-2" style="gap: 18px;">
+            <div class="card">
+              <p class="caption primary">Private</p>
+              <p class="small" style="margin-top: 12px;">Shielded payment paths for sensitive transfers.</p>
+            </div>
+            <div class="card">
+              <p class="caption primary">Offline</p>
+              <p class="small" style="margin-top: 12px;">Stablecoin flow through QR/BLE style handoff.</p>
+            </div>
+            <div class="card">
+              <p class="caption primary">Swap</p>
+              <p class="small" style="margin-top: 12px;">Advanced modes for recurring, trigger, and privacy swaps.</p>
+            </div>
+            <div class="card">
+              <p class="caption primary">Payroll</p>
+              <p class="small" style="margin-top: 12px;">Batch payment workflows for recurring obligations.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="notes-label">25 seconds</div>
+        Product slide. This is not a generic wallet. The first wedge is payments: private, offline, swaps, payroll. The same wallet then becomes the control surface for agentic actions.
+      </div>
+    </section>
+
+    <section class="slide bg-alt">
+      <span class="caption animate-in">AGENTIC PAYMENTS</span>
+      <h1 class="h1 animate-in" style="max-width: 980px;">The agent prepares. The user signs.</h1>
+      <div class="divider animate-in"></div>
+      <div class="flow animate-in">
+        <div class="flow-step">
+          <p class="flow-num">01</p>
+          <p class="h3">Intent</p>
+          <p class="small" style="margin-top: 10px;">Natural language request</p>
+        </div>
+        <div class="flow-step">
+          <p class="flow-num">02</p>
+          <p class="h3">Plan</p>
+          <p class="small" style="margin-top: 10px;">Balances, routes, limits</p>
+        </div>
+        <div class="flow-step">
+          <p class="flow-num">03</p>
+          <p class="h3">Preview</p>
+          <p class="small" style="margin-top: 10px;">Fees and risk checks</p>
+        </div>
+        <div class="flow-step">
+          <p class="flow-num">04</p>
+          <p class="h3">Approve</p>
+          <p class="small" style="margin-top: 10px;">Explicit local signing</p>
+        </div>
+        <div class="flow-step">
+          <p class="flow-num">05</p>
+          <p class="h3">Settle</p>
+          <p class="small" style="margin-top: 10px;">Payment or transaction</p>
+        </div>
+      </div>
+      <div class="grid-3 animate-in" style="margin-top: 30px;">
+        <div class="card featured">
+          <p class="h3">Payments</p>
+          <p class="small" style="margin-top: 10px;">Private send, receive, reminders.</p>
+        </div>
+        <div class="card featured">
+          <p class="h3">Operations</p>
+          <p class="small" style="margin-top: 10px;">Payroll, recurring flows, buffers.</p>
+        </div>
+        <div class="card featured">
+          <p class="h3">Trading</p>
+          <p class="small" style="margin-top: 10px;">Swap and Flash Trade drafts.</p>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="notes-label">25 seconds</div>
+        Make the control model clear. OffPay is not pitching uncontrolled autonomous spending. The agent reduces user work by drafting payments, swaps, payroll, and trades. Final approval and signing stay local with the user.
+      </div>
+    </section>
+
+    <section class="slide">
+      <span class="caption animate-in">FLASH TRADE INTEGRATION</span>
+      <h1 class="h1 animate-in" style="max-width: 980px;">Payment wallet becomes action wallet.</h1>
+      <div class="divider animate-in"></div>
+      <div class="grid-4 animate-in">
+        <div class="card">
+          <p class="caption accent">Markets</p>
+          <p class="h3" style="margin-top: 14px;">Prices and pairs</p>
+          <p class="small" style="margin-top: 12px;">Agent can fetch context before proposing a trade.</p>
+        </div>
+        <div class="card">
+          <p class="caption accent">Positions</p>
+          <p class="h3" style="margin-top: 14px;">Open and close</p>
+          <p class="small" style="margin-top: 12px;">Prepare position actions from the wallet.</p>
+        </div>
+        <div class="card">
+          <p class="caption accent">Orders</p>
+          <p class="h3" style="margin-top: 14px;">Trigger orders</p>
+          <p class="small" style="margin-top: 12px;">Draft limit and trigger flows with review.</p>
+        </div>
+        <div class="card">
+          <p class="caption accent">Guardrails</p>
+          <p class="h3" style="margin-top: 14px;">Previews first</p>
+          <p class="small" style="margin-top: 12px;">Show risk, fees, collateral, and exit logic.</p>
+        </div>
+      </div>
+      <table class="mini-table animate-in">
+        <tr><td>Current integration surface</td><td>Flash API client + agentic tools</td></tr>
+        <tr><td>User safety stance</td><td>Draft, preview, explicit approval</td></tr>
+        <tr><td>Wedge</td><td>Power users managing money in one place</td></tr>
+      </table>
+      <div class="notes">
+        <div class="notes-label">25 seconds</div>
+        This slide answers the specific Flash Trade angle. It extends OffPay beyond payment execution into financial actions, but the differentiator is not "AI trades for you." It is "AI prepares the action with guardrails and the wallet remains the signing layer."
+      </div>
+    </section>
+
+    <section class="slide bg-alt">
+      <span class="caption animate-in">GROWTH AND MONETIZATION</span>
+      <h1 class="h1 animate-in" style="max-width: 980px;">AI credits create the growth loop.</h1>
+      <div class="divider animate-in"></div>
+      <div class="grid-2 animate-in">
+        <div class="card featured">
+          <p class="caption primary">Earn credits</p>
+          <ul class="list" style="margin-top: 22px;">
+            <li><span class="dot"></span><span>Referral rewards</span></li>
+            <li><span class="dot"></span><span>Payment streaks</span></li>
+            <li><span class="dot"></span><span>Merchant quests</span></li>
+            <li><span class="dot"></span><span>Verified activity</span></li>
+          </ul>
+        </div>
+        <div class="card featured">
+          <p class="caption primary">Monetize usage</p>
+          <ul class="list" style="margin-top: 22px;">
+            <li><span class="dot"></span><span>AI credit packs</span></li>
+            <li><span class="dot"></span><span>Pro agent limits</span></li>
+            <li><span class="dot"></span><span>Payroll automation</span></li>
+            <li><span class="dot"></span><span>Trading power tools</span></li>
+          </ul>
+        </div>
+      </div>
+      <p class="body animate-in" style="max-width: 980px; margin-top: 34px;">
+        Users can earn agent time through useful behavior, then pay when OffPay becomes part of their daily money workflow.
+      </p>
+      <div class="notes">
+        <div class="notes-label">23 seconds</div>
+        The business model is simple: the AI layer costs money, so make it a credit economy. Users earn credits through activity that helps distribution, then pay for more advanced or higher-volume agentic workflows.
+      </div>
+    </section>
+
+    <section class="slide">
+      <span class="caption animate-in">ROADMAP</span>
+      <h1 class="h1 animate-in" style="max-width: 960px;">Payments first, commerce next.</h1>
+      <div class="divider animate-in"></div>
+      <div class="roadmap animate-in">
+        <div class="phase active">
+          <p class="caption primary">Now</p>
+          <p class="h3">Payment OS</p>
+          <p class="small">Private transfers, offline stablecoin flows, swaps, payroll surfaces, and agentic drafting.</p>
+          <span class="badge primary">Build and harden</span>
+        </div>
+        <div class="phase">
+          <p class="caption primary">Next</p>
+          <p class="h3">Action layer</p>
+          <p class="small">Flash Trade flows, user guardrails, credit economy, and mainnet-ready review UX.</p>
+          <span class="badge accent">Pilot power users</span>
+        </div>
+        <div class="phase">
+          <p class="caption primary">Future</p>
+          <p class="h3">Commerce rails</p>
+          <p class="small">RWA discovery, shopping, merchant quests, partner rewards, and credit-funded agent actions.</p>
+          <span class="badge">RWAs + shopping</span>
+        </div>
+      </div>
+      <p class="body animate-in" style="margin-top: 34px; max-width: 1020px;">
+        Ask: <span class="accent">TBD</span> pre-seed or grant support to ship mainnet hardening, audits, partnerships, and AI credit monetization.
+      </p>
+      <div class="notes">
+        <div class="notes-label">25 seconds</div>
+        Close with a clear path. Do not over-promise a shopping super-app today. The credible sequence is payments, then agentic action, then commerce surfaces like RWAs and shopping. The exact raise amount, instrument, and metrics should be filled before investor use.
+      </div>
+    </section>
+
+    <div class="nav-bar">
+      <button class="nav-btn" type="button" onclick="prev()">Prev</button>
+      <span class="nav-counter"><span id="current">1</span> / <span id="total">8</span></span>
+      <div class="nav-progress"><div class="nav-progress-fill" id="progress"></div></div>
+      <button class="nav-btn" type="button" onclick="next()">Next</button>
+    </div>
+  </div>
+
+  <script>
+    let current = 0;
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const total = slides.length;
+    let notesVisible = false;
+
+    document.getElementById("total").textContent = total;
+
+    function show(index) {
+      slides.forEach((slide) => slide.classList.remove("active"));
+      current = Math.max(0, Math.min(index, total - 1));
+      slides[current].classList.add("active");
+      document.getElementById("current").textContent = current + 1;
+      document.getElementById("progress").style.width = ((current + 1) / total * 100) + "%";
+      document.querySelectorAll(".notes").forEach((note) => note.classList.remove("visible"));
+      const note = slides[current].querySelector(".notes");
+      if (note && notesVisible) note.classList.add("visible");
+    }
+
+    function next() { show(current + 1); }
+    function prev() { show(current - 1); }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === " ") {
+        event.preventDefault();
+        next();
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        prev();
+      }
+      if (event.key === "n" || event.key === "N") {
+        notesVisible = !notesVisible;
+        const note = slides[current].querySelector(".notes");
+        document.querySelectorAll(".notes").forEach((item) => item.classList.remove("visible"));
+        if (note && notesVisible) note.classList.add("visible");
+      }
+    });
+
+    document.getElementById("deck").addEventListener("click", (event) => {
+      if (event.target.closest(".nav-bar")) return;
+      if (event.clientX > window.innerWidth / 2) next();
+      else prev();
+    });
+
+    show(0);
+  </script>
+</body>
+</html>

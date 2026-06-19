@@ -4,7 +4,10 @@ import { useEffect, useRef } from 'react';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { prefetchOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
-import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import {
+  offpayWalletDashboardBaseQueryKey,
+  WALLET_TRANSACTIONS_PAGE_SIZE,
+} from '@/lib/api/offpay-wallet-query-keys';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import {
   hydrateWalletDisplayCacheIntoQueryClient,
@@ -167,6 +170,13 @@ async function prefetchWalletDashboardInBackground(params: {
   network: NonNullable<ReturnType<typeof useOffpayNetwork>['network']>;
 }): Promise<WalletDashboardResponse | null> {
   if (params.walletAddress.length === 0) return null;
+  if (
+    params.queryClient.isFetching({
+      queryKey: offpayWalletDashboardBaseQueryKey(params.walletAddress, params.network),
+    }) > 0
+  ) {
+    return null;
+  }
 
   const dashboard = await prefetchOffpayWalletDashboard({
     queryClient: params.queryClient,

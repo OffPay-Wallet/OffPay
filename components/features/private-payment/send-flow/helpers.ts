@@ -254,6 +254,25 @@ export function isAmountWithinBalance(
   return BigInt(amountRaw) <= BigInt(balanceRaw);
 }
 
+export function getRecipientStepDisabledReason(params: {
+  walletAddress: string | null;
+  walletId: string | null;
+  network: ReturnType<typeof useOffpayNetwork>['network'];
+  unsupportedReason: string | null;
+  selectedToken: SendTokenOption | null;
+}): string | null {
+  if (params.walletAddress == null || params.walletId == null) {
+    return 'Unlock a wallet before sending.';
+  }
+  if (params.network == null) {
+    return params.unsupportedReason ?? 'This network is not supported.';
+  }
+  if (params.selectedToken == null) {
+    return 'Choose a token first.';
+  }
+  return null;
+}
+
 export function getMutationErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to send payment.';
 }
@@ -286,7 +305,7 @@ export function classifySendFailure(error: unknown): {
   const errorMessage = getMutationErrorMessage(error);
 
   if (
-    /network|timeout|timed out|failed to fetch|temporarily unavailable|rpc|blockhash/i.test(
+    /network|timeout|timed out|failed to fetch|fetch failed|request.*cancelled|request.*canceled|temporarily unavailable|rpc|blockhash/i.test(
       errorMessage,
     )
   ) {

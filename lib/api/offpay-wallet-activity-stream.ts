@@ -36,6 +36,8 @@ interface WalletActivityStreamConnectOptions extends WalletActivityStreamHandler
 const POLL_INTERVAL_MS = 4_000;
 const MIN_REFRESH_POLL_INTERVAL_MS = 10_000;
 const SSE_OPEN_TIMEOUT_MS = 15_000;
+const SSE_MAX_BUFFER_CHARS = 64 * 1024;
+const SSE_PARTIAL_EVENT_TIMEOUT_MS = 15_000;
 const ACTIVITY_LIMIT = 10;
 const MAX_TRACKED_SIGNATURES = 200;
 
@@ -200,14 +202,29 @@ async function readSseStream(
 ): Promise<void> {
   const decoder = new TextDecoder();
   let buffer = '';
+  let partialEventStartedAt: number | null = null;
 
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
+    if (buffer.length > SSE_MAX_BUFFER_CHARS) {
+      handlers.onStreamError?.({ code: 'STREAM_ERROR', retryable: true });
+      throw new Error('Wallet activity stream buffer exceeded its safety limit.');
+    }
+
     const parsed = consumeSseBuffer(buffer);
     buffer = parsed.remainder;
+    if (parsed.events.length > 0 || buffer.length === 0) {
+      partialEventStartedAt = buffer.length > 0 ? Date.now() : null;
+    } else {
+      partialEventStartedAt ??= Date.now();
+      if (Date.now() - partialEventStartedAt > SSE_PARTIAL_EVENT_TIMEOUT_MS) {
+        handlers.onStreamError?.({ code: 'STREAM_ERROR', retryable: true });
+        throw new Error('Wallet activity stream partial event timed out.');
+      }
+    }
 
     for (const event of parsed.events) {
       dispatchSseEvent(event, handlers);

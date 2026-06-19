@@ -1020,10 +1020,7 @@ export function HomeScreenContent(): React.JSX.Element {
         requestAnimationFrame(() => {
           if (signal.aborted) return;
           if (transactionsKey != null) {
-            void queryClient.invalidateQueries(
-              { queryKey: transactionsKey, refetchType: 'active' },
-              { cancelRefetch: true },
-            );
+            void transactionsQuery.refetchFresh({ signal }).catch(() => undefined);
           }
           if (backupStatsKey != null) {
             void queryClient.invalidateQueries(
@@ -1044,6 +1041,7 @@ export function HomeScreenContent(): React.JSX.Element {
     currency,
     queryClient,
     getScreenSignal,
+    transactionsQuery.refetchFresh,
   ]);
 
   const handleTokenPress = useCallback(

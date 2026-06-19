@@ -4,11 +4,16 @@ import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { getPrivatePaymentBalance } from '@/lib/api/offpay-api-client';
-import { getOffpayFeatureCapability, isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import {
+  getOffpayFeatureCapability,
+  isOffpayFeatureAvailable,
+} from '@/lib/api/offpay-capabilities';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { OffpayNetwork, PrivateBalanceResponse } from '@/types/offpay-api';
+
+const PRIVATE_PAYMENT_BALANCE_STALE_TIME_MS = 1000 * 30;
 
 export const privatePaymentBalanceQueryKey = (
   walletAddress: string | null,
@@ -50,7 +55,7 @@ export function usePrivatePaymentBalance(options?: UsePrivatePaymentBalanceOptio
       return getPrivatePaymentBalance(walletAddress, network, mint.length > 0 ? mint : undefined);
     },
     enabled,
-    staleTime: 0,
+    staleTime: PRIVATE_PAYMENT_BALANCE_STALE_TIME_MS,
     refetchOnMount: true,
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey;

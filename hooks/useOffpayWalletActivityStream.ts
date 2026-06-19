@@ -451,6 +451,7 @@ export function useOffpayWalletActivityStream(options?: {
       }
 
       if (refreshDelayMs > 0) {
+        clearRetryTimer();
         retryTimerRef.current = setTimeout(invalidateWalletData, refreshDelayMs);
         return;
       }
@@ -479,6 +480,7 @@ export function useOffpayWalletActivityStream(options?: {
       }
 
       setStatus('reconnecting');
+      clearRetryTimer();
       retryTimerRef.current = setTimeout(() => {
         reconnectPending = false;
         void openStream();

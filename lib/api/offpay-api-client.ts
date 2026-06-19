@@ -15,6 +15,7 @@ import {
   clearOffpayBootstrapCredentials,
   getOffpayBootstrapVersion,
   getOffpayRequestSecret,
+  getOffpayRequestWalletAddress,
   getOrCreateOffpayDeviceId,
   storeOffpayBootstrapCredentials,
 } from '@/lib/api/offpay-api-storage';
@@ -248,6 +249,12 @@ let signingSessionPromise: Promise<SigningSession> | null = null;
 let signingSessionEpoch = 0;
 let offpayAuthRecoveryHandler: (() => Promise<void>) | null = null;
 let offpayNetworkAccessAllowed = true;
+let authRecoveryPromise: Promise<boolean> | null = null;
+let authRecoveryFailureCount = 0;
+let authRecoveryBlockedUntil = 0;
+
+const AUTH_RECOVERY_FAILURE_LIMIT = 3;
+const AUTH_RECOVERY_COOLDOWN_MS = 30_000;
 
 export class OffpayApiError extends Error {
   readonly code: BackendErrorCode;
@@ -268,6 +275,62 @@ export class OffpayApiError extends Error {
     this.status = params.status;
     this.retryable = params.retryable;
     this.retryAfterMs = params.retryAfterMs;
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getAbortReasonMessage(signal?: AbortSignal): string | null {
+  if (signal?.aborted !== true) return null;
+
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason.message;
+  return typeof reason === 'string' ? reason : null;
+}
+
+function isTimeoutMessage(message: string): boolean {
+  return /timed out|timeout/i.test(message);
+}
+
+function normalizeFetchError(error: unknown, signal?: AbortSignal): never {
+  if (error instanceof OffpayApiError) throw error;
+
+  const abortReason = getAbortReasonMessage(signal);
+  if (abortReason != null) {
+    throw new OffpayApiError({
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: isTimeoutMessage(abortReason)
+        ? abortReason
+        : 'The request was cancelled before it completed.',
+      status: 0,
+      retryable: isTimeoutMessage(abortReason),
+      retryAfterMs: 0,
+    });
+  }
+
+  const message = getErrorMessage(error);
+  throw new OffpayApiError({
+    code: 'UPSTREAM_UNAVAILABLE',
+    message: /fetch failed|failed to fetch|network request failed/i.test(message)
+      ? 'Network request failed. Check your connection and try again.'
+      : message,
+    status: 0,
+    retryable: true,
+    retryAfterMs: 0,
+  });
+}
+
+async function fetchWithNormalizedErrors(
+  input: Parameters<typeof fetch>[0],
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    normalizeFetchError(error, signal);
   }
 }
 
@@ -433,10 +496,14 @@ export async function fetchWithTimeout(
   const { signal: _signal, ...restInit } = init;
 
   try {
-    return await fetch(url, {
-      ...restInit,
-      signal: handle.signal,
-    });
+    return await fetchWithNormalizedErrors(
+      url,
+      {
+        ...restInit,
+        signal: handle.signal,
+      },
+      handle.signal,
+    );
   } finally {
     handle.cleanup();
   }
@@ -543,7 +610,7 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
   }
 
   try {
-    const response = await fetch(buildUrl(pathAndQuery), init);
+    const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
     responseStatus = response.status;
     const payload = await parseJsonResponse(response);
     if (!response.ok) throwForErrorEnvelope(response.status, payload);
@@ -591,7 +658,7 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
   }
 
   try {
-    const response = await fetch(buildUrl(pathAndQuery), init);
+    const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
     responseStatus = response.status;
     if (!response.ok) {
       const payload = await parseJsonResponse(response);
@@ -637,11 +704,29 @@ async function recoverOffpayAuth(
   reprovisionAuth: (() => Promise<void>) | null | undefined,
 ): Promise<boolean> {
   if (reprovisionAuth == null) return false;
+  if (Date.now() < authRecoveryBlockedUntil) return false;
+  if (authRecoveryPromise != null) return authRecoveryPromise;
 
-  await clearOffpayBootstrapCredentials();
-  clearOffpaySigningSession();
-  await reprovisionAuth();
-  return true;
+  authRecoveryPromise = (async () => {
+    await clearOffpayBootstrapCredentials();
+    clearOffpaySigningSession();
+    await reprovisionAuth();
+    authRecoveryFailureCount = 0;
+    authRecoveryBlockedUntil = 0;
+    return true;
+  })()
+    .catch((error: unknown) => {
+      authRecoveryFailureCount += 1;
+      if (authRecoveryFailureCount >= AUTH_RECOVERY_FAILURE_LIMIT) {
+        authRecoveryBlockedUntil = Date.now() + AUTH_RECOVERY_COOLDOWN_MS;
+      }
+      throw error;
+    })
+    .finally(() => {
+      authRecoveryPromise = null;
+    });
+
+  return authRecoveryPromise;
 }
 
 async function deriveSigningSeedWithAuth(params: {
@@ -768,18 +853,24 @@ async function getSigningSeed(walletInfo: SigningWalletInfo): Promise<Uint8Array
 }
 
 async function getStoredAuthContext(walletId?: string): Promise<StoredAuthContext> {
-  const [walletInfo, requestSecret, deviceId, bootstrapVersion] = await Promise.all([
-    getStoredWalletInfo(walletId),
-    getOffpayRequestSecret(),
-    getOrCreateOffpayDeviceId(),
-    getOffpayBootstrapVersion(),
-  ]);
+  const [walletInfo, requestSecret, requestWalletAddress, deviceId, bootstrapVersion] =
+    await Promise.all([
+      getStoredWalletInfo(walletId),
+      getOffpayRequestSecret(),
+      getOffpayRequestWalletAddress(),
+      getOrCreateOffpayDeviceId(),
+      getOffpayBootstrapVersion(),
+    ]);
 
   if (walletInfo == null) {
     throw new Error('No active wallet is available for OffPay API authentication.');
   }
 
   if (requestSecret == null || bootstrapVersion == null) {
+    throw new Error('OffPay API bootstrap is required before this request.');
+  }
+
+  if (requestWalletAddress != null && requestWalletAddress !== walletInfo.publicKey) {
     throw new Error('OffPay API bootstrap is required before this request.');
   }
 
@@ -856,7 +947,7 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
 
     const fetchStartedAt = mark();
     try {
-      const response = await fetch(buildUrl(pathAndQuery), init);
+      const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
       responseStatus = response.status;
       const payload = await parseJsonResponse(response);
       if (!response.ok) throwForErrorEnvelope(response.status, payload);
@@ -982,7 +1073,7 @@ export async function offpayAuthenticatedFetch(
 
     const fetchStartedAt = mark();
     try {
-      const response = await fetch(buildUrl(pathAndQuery), init);
+      const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
       responseStatus = response.status;
       if (!response.ok) {
         const payload = await parseJsonResponse(response);

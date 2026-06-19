@@ -3,6 +3,9 @@ const mockGetOffpayBootstrapVersion = jest.fn<Promise<number | null>, []>(async 
 const mockGetOffpayRequestSecret = jest.fn<Promise<string | null>, []>(
   async () => 'request-secret',
 );
+const mockGetOffpayRequestWalletAddress = jest.fn<Promise<string | null>, []>(
+  async () => 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+);
 const mockGetOrCreateOffpayDeviceId = jest.fn(async () => 'device-1');
 
 const mockGetStoredWalletInfo = jest.fn(async () => ({
@@ -23,6 +26,7 @@ jest.mock('@/lib/api/offpay-api-storage', () => ({
   clearOffpayBootstrapCredentials: mockClearOffpayBootstrapCredentials,
   getOffpayBootstrapVersion: mockGetOffpayBootstrapVersion,
   getOffpayRequestSecret: mockGetOffpayRequestSecret,
+  getOffpayRequestWalletAddress: mockGetOffpayRequestWalletAddress,
   getOrCreateOffpayDeviceId: mockGetOrCreateOffpayDeviceId,
   storeOffpayBootstrapCredentials: jest.fn(async () => undefined),
 }));
@@ -86,6 +90,10 @@ function buildResponse(body: unknown, status = 200): Response {
 describe('offpay-api-client', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetOffpayRequestSecret.mockResolvedValue('request-secret');
+    mockGetOffpayRequestWalletAddress.mockResolvedValue(
+      'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+    );
     clearOffpaySigningSession();
     setOffpayAuthRecoveryHandler(null);
     setOffpayNetworkAccessAllowed(true);
@@ -140,6 +148,40 @@ describe('offpay-api-client', () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes native fetch failures into retryable OffPay API errors', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockRejectedValueOnce(new Error('fetch failed: Fetch request has been canceled'));
+
+    await expect(
+      getWalletBalance('Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw', 'devnet'),
+    ).rejects.toMatchObject({
+      name: 'OffpayApiError',
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Network request failed. Check your connection and try again.',
+      retryable: true,
+    });
+  });
+
+  it('forces bootstrap recovery when stored credentials belong to another wallet', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    const recovery = jest.fn(async () => undefined);
+    setOffpayAuthRecoveryHandler(recovery);
+    mockGetOffpayRequestWalletAddress
+      .mockResolvedValueOnce('DifferentWallet111111111111111111111111111111')
+      .mockResolvedValueOnce('Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw');
+    fetchMock.mockResolvedValueOnce(buildResponse({ ok: true }));
+
+    await expect(
+      offpayApiRequest<{ ok: true }>({
+        path: '/api/payment/private-balance',
+        network: 'devnet',
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(recovery).toHaveBeenCalledTimes(1);
+    expect(mockClearOffpayBootstrapCredentials).toHaveBeenCalledTimes(1);
   });
 
   it('routes wallet balance requests through the API Worker', async () => {

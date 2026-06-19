@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useIsFetching, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
@@ -11,6 +11,7 @@ import {
 } from '@/lib/api/offpay-capabilities';
 import {
   offpayWalletDashboardBaseQueryKey,
+  offpayWalletTransactionsBaseQueryKey,
   offpayWalletTransactionsQueryKey,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -34,6 +35,8 @@ const TRANSACTION_GC_TIME_MS = 1000 * 60 * 30;
 
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_PAGES: WalletTransactionsResponse[] = [];
+
+type WalletTransactionsInfiniteData = InfiniteData<WalletTransactionsResponse, string | undefined>;
 
 interface WalletTransactionsSelectResult {
   pages: WalletTransactionsResponse[];
@@ -72,6 +75,7 @@ export function useOffpayWalletTransactions(options?: {
   const useCache = options?.useCache;
   const enabledByCaller = options?.enabled ?? true;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
+  const [freshRefetching, setFreshRefetching] = useState(false);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
   const dashboardFetching =
@@ -100,13 +104,13 @@ export function useOffpayWalletTransactions(options?: {
           message: capabilitiesQuery.errorMessage,
         }
       : getOffpayFeatureCapability(capabilities, 'wallet.transactions');
-  const canFetchTransactions =
+  const canRequestTransactions =
     walletAddress != null &&
     network != null &&
     enabledByCaller &&
     canUseNetwork &&
-    !dashboardFetching &&
     isOffpayFeatureAvailable(capabilities, 'wallet.transactions');
+  const canFetchTransactions = canRequestTransactions && !dashboardFetching;
   const enabled = canFetchTransactions && interactionsSettled;
 
   useEffect(() => {
@@ -237,15 +241,92 @@ export function useOffpayWalletTransactions(options?: {
     }).catch(() => undefined);
   }, [displayCachePage]);
 
+  const refetchFresh = useCallback(
+    async (options?: { signal?: AbortSignal }): Promise<void> => {
+      if (walletAddress == null || network == null || !canRequestTransactions) {
+        await query.refetch();
+        return;
+      }
+
+      setFreshRefetching(true);
+      try {
+        await queryClient.cancelQueries({
+          queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+        });
+
+        const fallback =
+          queryClient.getQueryData<WalletTransactionsInfiniteData>(transactionsQueryKey)?.pages[0] ??
+          null;
+        const page = await getWalletTransactions(walletAddress, network, {
+          limit,
+          useCache: false,
+          signal: options?.signal,
+        });
+        const mergedPage = mergeWalletTransactionsWithDisplayCache({
+          walletAddress,
+          network,
+          transactions: page,
+          fallback,
+        });
+        const updatedAt = Date.now();
+        const queryKeys = [
+          transactionsQueryKey,
+          offpayWalletTransactionsQueryKey(walletAddress, network, limit, 'cached'),
+          offpayWalletTransactionsQueryKey(walletAddress, network, limit, 'network'),
+        ];
+        const seenKeys = new Set<string>();
+
+        for (const queryKey of queryKeys) {
+          const keyId = JSON.stringify(queryKey);
+          if (seenKeys.has(keyId)) continue;
+          seenKeys.add(keyId);
+
+          const existing = queryClient.getQueryData<WalletTransactionsInfiniteData>(queryKey);
+          if (existing == null && keyId !== JSON.stringify(transactionsQueryKey)) continue;
+
+          queryClient.setQueryData<WalletTransactionsInfiniteData>(
+            queryKey,
+            {
+              pages: [mergedPage, ...(existing?.pages.slice(1) ?? [])],
+              pageParams: existing?.pageParams.length ? existing.pageParams : [undefined],
+            },
+            { updatedAt },
+          );
+        }
+
+        await writeWalletDisplayCacheSlice({
+          walletAddress: mergedPage.address,
+          network: mergedPage.network,
+          transactions: mergedPage,
+          replaceTransactions: true,
+        }).catch(() => undefined);
+      } finally {
+        setFreshRefetching(false);
+      }
+    },
+    [
+      canRequestTransactions,
+      limit,
+      network,
+      query,
+      queryClient,
+      transactionsQueryKey,
+      walletAddress,
+    ],
+  );
+
   return {
     ...query,
+    isFetching: query.isFetching || freshRefetching,
+    isRefetching: query.isRefetching || freshRefetching,
     walletAddress,
     network,
     capability,
     transactions,
+    refetchFresh,
     isCapabilitiesPending:
       canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardFetching),
-    isCapabilityEnabled: canFetchTransactions,
+    isCapabilityEnabled: canRequestTransactions,
   };
 }
 

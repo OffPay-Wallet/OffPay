@@ -201,7 +201,7 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
           resultNetwork,
           mutationTargetSlotCount,
         ),
-        refetchType: 'none',
+        refetchType: 'active',
       });
     },
   });

@@ -4,7 +4,10 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
-import { clearOffpaySigningSession, setOffpayAuthRecoveryHandler } from '@/lib/api/offpay-api-client';
+import {
+  clearOffpaySigningSession,
+  setOffpayAuthRecoveryHandler,
+} from '@/lib/api/offpay-api-client';
 import { bootstrapOffpayRequestSecret } from '@/lib/bootstrap/offpay-bootstrap';
 import { unsupportedOffpayAttestationAdapter } from '@/lib/bootstrap/attestation';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
@@ -50,11 +53,12 @@ export function OffpayBootstrapProvider({
     previousIdentityRef.current = identity;
     if (previousIdentity == null) return;
 
+    clearOffpaySigningSession();
+    resetAuthState();
+    useOffpayLaunchStore.getState().reset();
+
     const scheduledReset = scheduleUiWorkAfterFirstPaint(
       () => {
-        clearOffpaySigningSession();
-        resetAuthState();
-        useOffpayLaunchStore.getState().reset();
         void queryClient.invalidateQueries({ queryKey: ['offpay'], refetchType: 'none' });
       },
       {

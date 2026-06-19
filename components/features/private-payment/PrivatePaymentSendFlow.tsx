@@ -100,6 +100,7 @@ import {
   buildExplorerUrl,
   classifySendFailure,
   getMutationErrorMessage,
+  getRecipientStepDisabledReason,
   getStablecoinOptions,
   isAmountWithinBalance,
   isMagicBlockPrivateToken,
@@ -293,11 +294,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const walletId = useWalletStore((state) => state.activeWalletId);
   const { network, unsupportedReason } = useOffpayNetwork();
   const { effectiveWalletMode, canUseNetwork, isNetworkSwitching } = useOffpayNetworkAccess();
-  const {
-    canSignWithApp,
-    importMethod: activeWalletImportMethod,
-    signingBlocker,
-  } = useActiveWalletSigningCapability();
+  const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: false,
@@ -633,7 +630,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     network,
     enabled: normalFeeEstimateEnabled,
   });
-  const usesInteractiveExternalSigning = activeWalletImportMethod === 'privy-embedded';
   const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
     walletAddress,
     recipient: effectiveRecipientAddress,
@@ -642,7 +638,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     network,
     enabled:
       step === 'summary' &&
-      !usesInteractiveExternalSigning &&
       effectiveWalletMode !== 'offline' &&
       effectivePaymentRoute === 'magicblock' &&
       selectedToken != null &&
@@ -666,7 +661,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       return 'Fee unavailable';
     }
     if (effectivePaymentRoute === 'magicblock') {
-      if (usesInteractiveExternalSigning) return 'Calculated on submit';
       if (magicBlockFeeEstimate.plan?.feeLamports != null) {
         return `${formatLamportsAsSol(magicBlockFeeEstimate.plan.feeLamports, 9)} SOL`;
       }
@@ -684,7 +678,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     normalFeeEstimate.estimate,
     normalFeeEstimate.isError,
     normalFeeEstimate.isFetching,
-    usesInteractiveExternalSigning,
   ]);
   const compactSend = width < 390 || height < 820 || fontScale > 1.05;
   const denseSend = width < 350 || height < 720 || fontScale > 1.18;
@@ -1302,6 +1295,18 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     return null;
   }, [amount, amountRaw, amountValid, baseDisabledReason, selectedToken]);
 
+  const recipientStepDisabledReason = useMemo(
+    () =>
+      getRecipientStepDisabledReason({
+        walletAddress,
+        walletId,
+        network,
+        unsupportedReason,
+        selectedToken,
+      }),
+    [network, selectedToken, unsupportedReason, walletAddress, walletId],
+  );
+
   const recipientHelper = useMemo(() => {
     if (normalizedRecipient.length === 0) return null;
     if (recipientCandidate.kind === 'address') return null;
@@ -1339,11 +1344,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
 
   const sendingPending = offlineSending || normalSending || privateSending;
   const canContinueRecipient =
-    baseDisabledReason == null &&
-    selectedToken != null &&
+    recipientStepDisabledReason == null &&
     (recipientIsAddress || recipientCanResolveOnline) &&
     !recipientResolving;
-  const canSubmit =
+  const baseCanSubmit =
     baseDisabledReason == null &&
     selectedToken != null &&
     effectiveRecipientAddress != null &&
@@ -1353,11 +1357,24 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     walletId != null &&
     network != null &&
     !sendingPending;
+  const magicBlockPlanBlockedReason =
+    step === 'summary' &&
+    effectiveWalletMode !== 'offline' &&
+    effectivePaymentRoute === 'magicblock'
+      ? magicBlockFeeEstimate.plan != null
+        ? null
+        : magicBlockFeeEstimate.isFetching
+          ? 'Preparing private transfer.'
+          : magicBlockFeeEstimate.isError
+            ? 'Private transfer plan is unavailable.'
+            : 'Preparing private transfer.'
+      : null;
+  const canSubmit = baseCanSubmit && magicBlockPlanBlockedReason == null;
   const handleContinueAmount = useCallback(() => {
-    if (!canSubmit) return;
+    if (!baseCanSubmit) return;
     Keyboard.dismiss();
     transitionToStep('summary', 'forward');
-  }, [canSubmit, transitionToStep]);
+  }, [baseCanSubmit, transitionToStep]);
 
   // Phase for the draggable summary sheet. The sheet owns the whole
   // review → sending → success lifecycle in one card, so there is no
@@ -1408,6 +1425,14 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       showToast({
         title: 'Umbra unavailable',
         message: umbraPrivateP2pDisabledReason ?? 'Umbra private P2P is unavailable.',
+        variant: 'warning',
+      });
+      return;
+    }
+    if (submitRoute === 'magicblock' && magicBlockFeeEstimate.plan == null) {
+      showToast({
+        title: 'Preparing private transfer',
+        message: magicBlockPlanBlockedReason ?? 'Wait for the private transfer plan to finish.',
         variant: 'warning',
       });
       return;
@@ -1806,7 +1831,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           }),
           queryClient.invalidateQueries({
             queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
-            refetchType: 'all',
+            refetchType: 'active',
           }),
           queryClient.invalidateQueries({
             queryKey: pendingBackupQueueStatsQueryKey(walletAddress, network),
@@ -1863,6 +1888,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     effectiveRecipientAddress,
     endSubmit,
     magicBlockFeeEstimate.plan,
+    magicBlockPlanBlockedReason,
     network,
     offlineRecipientBleName,
     offlinePaymentSlots.targetSlotCount,
@@ -1941,7 +1967,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         loading={recipientResolving}
       />
     ) : step === 'amount' ? (
-      <PrimaryButton label="Next" onPress={handleContinueAmount} disabled={!canSubmit} />
+      <PrimaryButton label="Next" onPress={handleContinueAmount} disabled={!baseCanSubmit} />
     ) : (
       // Summary / success are handled entirely by the draggable sheet
       // (slider + Close), so no footer button is shown underneath it.
@@ -2016,7 +2042,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
                   <HeaderTextButton
                     label="Next"
                     onPress={handleContinueAmount}
-                    disabled={!canSubmit}
+                    disabled={!baseCanSubmit}
                     accessibilityLabel="Review send summary"
                   />
                 ) : (

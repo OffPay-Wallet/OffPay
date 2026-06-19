@@ -32,7 +32,7 @@ export const offpayCapabilitiesQueryKey = (
     ? offpayCapabilitiesCacheKey(network)
     : (['offpay', 'capabilities', network, walletAddress] as const);
 
-function isCapabilityRequestCancellation(error: unknown): boolean {
+function isTransientCapabilityError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const name = error.name.toLowerCase();
   const message = error.message.toLowerCase();
@@ -40,7 +40,12 @@ function isCapabilityRequestCancellation(error: unknown): boolean {
     name === 'aborterror' ||
     message.includes('canceled') ||
     message.includes('cancelled') ||
-    message.includes('aborted')
+    message.includes('aborted') ||
+    message.includes('timed out') ||
+    message.includes('timeout') ||
+    message.includes('fetch failed') ||
+    message.includes('failed to fetch') ||
+    message.includes('network request failed')
   );
 }
 
@@ -109,11 +114,12 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
       previousData?.network === network ? previousData : undefined,
     refetchOnMount: false,
     refetchOnReconnect: true,
-    retry: false,
+    retry: (failureCount, error) => isTransientCapabilityError(error) && failureCount < 2,
+    retryDelay: (failureCount) => 600 + failureCount * 900,
   });
 
-  const isTransientCapabilityCancel = query.isError && isCapabilityRequestCancellation(query.error);
-  const hasCapabilityError = query.isError && !query.isFetching && !isTransientCapabilityCancel;
+  const isTransientCapabilityErrorState = query.isError && isTransientCapabilityError(query.error);
+  const hasCapabilityError = query.isError && !query.isFetching && !isTransientCapabilityErrorState;
   const fallbackCapabilities = useMemo(() => {
     if (!hasCapabilityError || network == null || !enabledByCaller) return null;
     const message =
