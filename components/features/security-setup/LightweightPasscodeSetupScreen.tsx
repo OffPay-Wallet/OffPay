@@ -8,6 +8,7 @@ import { LightweightKeypadButton } from '@/components/ui/LightweightKeypadButton
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
 import {
+  getCachedSecuritySettings,
   getSecuritySettings,
   setPasscode,
   setWalletLocked,
@@ -35,19 +36,25 @@ function nextRoute(intent: SecuritySetupIntent): void {
 
 export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React.JSX.Element {
   const { width, height } = useWindowDimensions();
+  const cachedSettings = getCachedSecuritySettings();
 
-  const [mode, setMode] = useState<PasscodeMode>('create');
+  const [mode, setMode] = useState<PasscodeMode>(() =>
+    cachedSettings?.hasPasscode === true ? 'unlockExisting' : 'create',
+  );
   const [entry, setEntry] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [settingsReady, setSettingsReady] = useState(false);
+  const [settingsReady, setSettingsReady] = useState(() => cachedSettings != null);
   const [processingEntry, setProcessingEntry] = useState(false);
 
-  const modeRef = useRef<PasscodeMode>('create');
+  const modeRef = useRef<PasscodeMode>(
+    cachedSettings?.hasPasscode === true ? 'unlockExisting' : 'create',
+  );
   const entryRef = useRef('');
   const firstPasscodeRef = useRef('');
   const setupTouchedRef = useRef(false);
   const completingEntryRef = useRef(false);
+  const initialSettingsAppliedRef = useRef(cachedSettings != null);
 
   const keySize = useMemo(() => {
     const maxWidth = Math.min(336, Math.max(220, width - spacing['3xl'] * 2));
@@ -83,20 +90,28 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
     void getSecuritySettings()
       .then((settings) => {
         if (cancelled) return;
-        if (!setupTouchedRef.current) {
-          setEntryValue('');
-          firstPasscodeRef.current = '';
+        if (
+          !initialSettingsAppliedRef.current &&
+          !setupTouchedRef.current &&
+          entryRef.current.length === 0 &&
+          firstPasscodeRef.current.length === 0
+        ) {
           setModeValue(settings.hasPasscode ? 'unlockExisting' : 'create');
         }
+        initialSettingsAppliedRef.current = true;
         setSettingsReady(true);
       })
       .catch(() => {
         if (cancelled) return;
-        if (!setupTouchedRef.current) {
-          setEntryValue('');
-          firstPasscodeRef.current = '';
+        if (
+          !initialSettingsAppliedRef.current &&
+          !setupTouchedRef.current &&
+          entryRef.current.length === 0 &&
+          firstPasscodeRef.current.length === 0
+        ) {
           setModeValue('create');
         }
+        initialSettingsAppliedRef.current = true;
         setSettingsReady(true);
       });
     return () => {

@@ -171,7 +171,7 @@ export function OffpayLaunchProvider({
   adapters,
 }: OffpayLaunchProviderProps): React.JSX.Element {
   const walletMode = usePreferencesStore((state) => state.walletMode);
-  const { canUseNetwork } = useOffpayNetworkAccess();
+  const { canUseNetwork, effectiveWalletMode } = useOffpayNetworkAccess();
   // Single first-paint gate for everything that doesn't need to be
   // ready before the user can see the home screen. BLE receiver and
   // notification permission prewarm both subscribe to it so they
@@ -211,11 +211,10 @@ export function OffpayLaunchProvider({
 
   useLaunchOrchestrator({ adapters: launchAdapters });
   useSettlementEngine();
-  // BLE receiver dynamic-imports the peripheral module and runs a
-  // permission round-trip on activation. Defer until after first
-  // paint; missing the first ~hundred ms of inbound BLE frames is
-  // safe because BLE pairing is multi-frame and retry-tolerant.
-  useOfflineBleReceiver({ enabled: firstPaintReady });
+  // BLE is only part of the offline payment surface. Keeping the
+  // receiver behind offline mode prevents Android Bluetooth prompts
+  // and "Bluetooth unavailable" warnings during normal online use.
+  useOfflineBleReceiver({ enabled: firstPaintReady && effectiveWalletMode === 'offline' });
   useOfflinePaymentSlotsAutoSync();
   useOffpayWalletWarmStart();
 

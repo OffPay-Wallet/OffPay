@@ -23,6 +23,8 @@ export function useOfflineBleReceiver(options?: { enabled?: boolean }): void {
   const { network } = useOffpayNetwork();
   const sessionRef = useRef<OfflineBleReceiverSession | null>(null);
   const handledTxIdsRef = useRef(new Set<string>());
+  const startupErrorToastKeyRef = useRef<string | null>(null);
+  const runtimeErrorToastKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     handledTxIdsRef.current.clear();
@@ -34,6 +36,8 @@ export function useOfflineBleReceiver(options?: { enabled?: boolean }): void {
     sessionRef.current = null;
 
     if (!enabled || walletAddress == null || walletId == null || network == null) {
+      startupErrorToastKeyRef.current = null;
+      runtimeErrorToastKeyRef.current = null;
       return undefined;
     }
 
@@ -113,6 +117,9 @@ export function useOfflineBleReceiver(options?: { enabled?: boolean }): void {
       },
       onError: (error) => {
         if (cancelled) return;
+        const toastKey = error.message;
+        if (runtimeErrorToastKeyRef.current === toastKey) return;
+        runtimeErrorToastKeyRef.current = toastKey;
         showToast({
           title: 'Offline receive failed',
           message: error.message,
@@ -129,9 +136,14 @@ export function useOfflineBleReceiver(options?: { enabled?: boolean }): void {
       })
       .catch((error: unknown) => {
         if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : 'Offline receive is not available.';
+        const toastKey = `startup:${message}`;
+        if (startupErrorToastKeyRef.current === toastKey) return;
+        startupErrorToastKeyRef.current = toastKey;
         showToast({
           title: 'Bluetooth unavailable',
-          message: error instanceof Error ? error.message : 'Offline receive is not available.',
+          message,
           variant: 'warning',
         });
       });

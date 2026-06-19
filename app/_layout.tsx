@@ -224,7 +224,15 @@ export default function RootLayout(): React.JSX.Element | null {
   const showGradient = inAuthFlow && !inFlatFlow;
 
   const storedWalletCount = walletHydrated && walletCount > 0;
-  const hasCompletedOnboarding = hasOnboarded || storedWalletCount;
+  const restoredUsernameCandidate =
+    storedWalletCount && !isGeneratedAccountName(accountName)
+      ? formatOffpayUsername(accountName)
+      : null;
+  const hasRecoverableCompletedWallet =
+    storedWalletCount && (username != null || restoredUsernameCandidate != null);
+  const needsUsernameSetup =
+    !hasOnboarded && storedWalletCount && username == null && restoredUsernameCandidate == null;
+  const hasCompletedOnboarding = hasOnboarded || hasRecoverableCompletedWallet;
 
   const shouldEnableLock = hasCompletedOnboarding && walletHydrated;
   const { locked, hasPasscode, checking } = useAppLockState(shouldEnableLock);
@@ -234,7 +242,7 @@ export default function RootLayout(): React.JSX.Element | null {
 
   const routeReadyForDisplay = hasCompletedOnboarding
     ? segments.length > 0 && !inInviteCode && !inOnboarding
-    : inviteAccessVerified
+    : inviteAccessVerified || needsUsernameSetup
       ? inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup
       : inInviteCode;
 
@@ -248,16 +256,16 @@ export default function RootLayout(): React.JSX.Element | null {
   useEffect(() => {
     if (!mmkvReady || !walletHydrated || hasRepairedOnboardingFlag) return;
 
-    if (!hasOnboarded && storedWalletCount) {
+    if (!hasOnboarded && hasRecoverableCompletedWallet) {
       setHasOnboarded(true);
     }
 
     setHasRepairedOnboardingFlag(true);
   }, [
+    hasRecoverableCompletedWallet,
     mmkvReady,
     walletHydrated,
     hasOnboarded,
-    storedWalletCount,
     setHasOnboarded,
     hasRepairedOnboardingFlag,
   ]);
@@ -308,7 +316,12 @@ export default function RootLayout(): React.JSX.Element | null {
     if (!hasRepairedOnboardingFlag) return;
     if (rootNavigationState.key.length === 0) return;
 
-    if (!hasCompletedOnboarding && !inviteAccessVerified && !inInviteCode) {
+    if (needsUsernameSetup && !inUsernameSetup && !inWalletFlow && !inSecuritySetup) {
+      router.replace({
+        pathname: '/username-setup',
+        params: { source: 'onboarding' },
+      });
+    } else if (!hasCompletedOnboarding && !inviteAccessVerified && !inInviteCode) {
       router.replace('/invite-code');
     } else if (!hasCompletedOnboarding && inviteAccessVerified && inInviteCode) {
       router.replace('/onboarding');
@@ -341,6 +354,7 @@ export default function RootLayout(): React.JSX.Element | null {
     inWalletFlow,
     inviteAccessVerified,
     mmkvReady,
+    needsUsernameSetup,
     preferencesHydrated,
     rootLayoutReady,
     rootNavigationState.key,

@@ -28,7 +28,6 @@ import { PuffyQRIcon } from '@/components/ui/icons/PuffyQRIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { useOfflineBleReceiver } from '@/hooks/useOfflineBleReceiver';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
@@ -204,7 +203,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const [receiveRoute, setReceiveRoute] = useState<PrivatePaymentRoute>('normal');
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('standard');
   const [closingReceiveMode, setClosingReceiveMode] = useState<ReceiveMode | null>(null);
-  useOfflineBleReceiver({ enabled: receiveMode === 'standard' });
   const [claimingUmbra, setClaimingUmbra] = useState(false);
   const [claimResult, setClaimResult] = useState<UmbraExecutionResult | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);

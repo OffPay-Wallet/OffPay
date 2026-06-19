@@ -1,5 +1,7 @@
 import * as LocalAuthentication from 'expo-local-authentication';
 
+import { beginAppLockSuppression } from '@/lib/wallet/app-lock-suppression';
+
 export interface BiometricAvailability {
   hasHardware: boolean;
   isEnrolled: boolean;
@@ -52,9 +54,9 @@ async function probeBiometricAvailability(): Promise<BiometricAvailability> {
       ? 'This device does not expose fingerprint authentication.'
       : !hasFingerprint
         ? 'Fingerprint unlock is not available on this device.'
-      : !isEnrolled
-        ? 'No fingerprint is enrolled on this device.'
-        : null;
+        : !isEnrolled
+          ? 'No fingerprint is enrolled on this device.'
+          : null;
 
     return {
       hasHardware,
@@ -98,20 +100,26 @@ export async function authenticateWithBiometrics(params: {
     };
   }
 
-  const result = await LocalAuthentication.authenticateAsync({
-    promptMessage: params.promptMessage,
-    promptSubtitle: params.promptSubtitle,
-    promptDescription: params.promptDescription,
-    cancelLabel: 'Cancel',
-    fallbackLabel: 'Use passcode',
-    disableDeviceFallback: true,
-    // Android shows an extra "Confirm" tap after the fingerprint
-    // matches when `requireConfirmation` is true. Disabling it makes
-    // the unlock feel instant. Strong-class biometrics still apply
-    // because `biometricsSecurityLevel` is unchanged.
-    requireConfirmation: false,
-    biometricsSecurityLevel: 'strong',
-  });
+  const releaseAppLockSuppression = beginAppLockSuppression();
+  let result: LocalAuthentication.LocalAuthenticationResult;
+  try {
+    result = await LocalAuthentication.authenticateAsync({
+      promptMessage: params.promptMessage,
+      promptSubtitle: params.promptSubtitle,
+      promptDescription: params.promptDescription,
+      cancelLabel: 'Cancel',
+      fallbackLabel: 'Use passcode',
+      disableDeviceFallback: true,
+      // Android shows an extra "Confirm" tap after the fingerprint
+      // matches when `requireConfirmation` is true. Disabling it makes
+      // the unlock feel instant. Strong-class biometrics still apply
+      // because `biometricsSecurityLevel` is unchanged.
+      requireConfirmation: false,
+      biometricsSecurityLevel: 'strong',
+    });
+  } finally {
+    releaseAppLockSuppression();
+  }
 
   if (result.success) {
     return { success: true, message: null };

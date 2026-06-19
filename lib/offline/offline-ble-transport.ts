@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 import { PermissionsAndroid, Platform } from 'react-native';
 
+import { beginAppLockSuppression } from '@/lib/wallet/app-lock-suppression';
 import {
   OFFPAY_BLE_IDENTITY_CHARACTERISTIC_UUID,
   OFFPAY_BLE_PAYLOAD_CHARACTERISTIC_UUID,
@@ -14,10 +15,7 @@ import {
 } from '@/lib/offline/offline-ble-protocol';
 import { sanitizeBleDisplayName } from '@/lib/api/offpay-username';
 
-import type {
-  OfflineBleFrame,
-  OfflineBlePaymentPayload,
-} from '@/lib/offline/offline-ble-protocol';
+import type { OfflineBleFrame, OfflineBlePaymentPayload } from '@/lib/offline/offline-ble-protocol';
 
 const OFFPAY_BLE_SCAN_SECONDS = 8;
 const OFFPAY_BLE_FAST_SCAN_SECONDS = 4;
@@ -62,13 +60,20 @@ interface BleManagerModule {
   requestMTU?(peripheralId: string, mtu: number): Promise<number>;
   getBondedPeripherals?(): Promise<DiscoveredPeripheral[]>;
   getDiscoveredPeripherals?(): Promise<DiscoveredPeripheral[]>;
-  onDiscoverPeripheral(callback: (peripheral: DiscoveredPeripheral) => void): { remove: () => void };
+  onDiscoverPeripheral(callback: (peripheral: DiscoveredPeripheral) => void): {
+    remove: () => void;
+  };
 }
 
 interface PeripheralBleModule {
   requestBluetoothPermission(): Promise<boolean>;
   isBluetoothEnabled(): Promise<boolean>;
-  setServices(services: Array<{ uuid: string; characteristics: Array<{ uuid: string; properties: string[]; value?: string }> }>): void;
+  setServices(
+    services: Array<{
+      uuid: string;
+      characteristics: Array<{ uuid: string; properties: string[]; value?: string }>;
+    }>,
+  ): void;
   startAdvertising(options: {
     serviceUUIDs: string[];
     localName?: string;
@@ -137,7 +142,9 @@ function bytesToUtf8(bytes: number[]): string {
 
 function createReceiverBleName(walletAddress: string, displayName?: string | null): string {
   const username = sanitizeBleDisplayName(displayName);
-  return username == null ? createOfflineBleDeviceName(walletAddress) : `${OFFPAY_BLE_NAME_PREFIX}${username}`;
+  return username == null
+    ? createOfflineBleDeviceName(walletAddress)
+    : `${OFFPAY_BLE_NAME_PREFIX}${username}`;
 }
 
 function getPeripheralName(peripheral: DiscoveredPeripheral): string | null {
@@ -190,8 +197,7 @@ function mergePeripheral(
     advertising: {
       ...current?.advertising,
       ...peripheral.advertising,
-      serviceUUIDs:
-        peripheral.advertising?.serviceUUIDs ?? current?.advertising?.serviceUUIDs,
+      serviceUUIDs: peripheral.advertising?.serviceUUIDs ?? current?.advertising?.serviceUUIDs,
     },
   });
 }
@@ -224,7 +230,13 @@ async function requestAndroidBlePermissions(): Promise<boolean> {
         ]
       : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
 
-  const results = await PermissionsAndroid.requestMultiple(permissions);
+  const releaseAppLockSuppression = beginAppLockSuppression();
+  let results: Record<string, string>;
+  try {
+    results = await PermissionsAndroid.requestMultiple(permissions);
+  } finally {
+    releaseAppLockSuppression();
+  }
   return permissions.every(
     (permission) => results[permission] === PermissionsAndroid.RESULTS.GRANTED,
   );
@@ -244,7 +256,11 @@ async function connectAndReadReceiverIdentity(params: {
   ble: BleManagerModule;
   peripheralId: string;
 }): Promise<string> {
-  await createTimeout(params.ble.connect(params.peripheralId), 4500, 'Bluetooth connection timed out.');
+  await createTimeout(
+    params.ble.connect(params.peripheralId),
+    4500,
+    'Bluetooth connection timed out.',
+  );
   await params.ble.requestMTU?.(params.peripheralId, 512).catch(() => 0);
   await params.ble.retrieveServices(params.peripheralId, [OFFPAY_BLE_SERVICE_UUID]);
   const identityBytes = await params.ble.read(
@@ -307,7 +323,13 @@ export async function startOfflineBleReceiver(params: {
   if (!permissionsGranted) throw new Error('Bluetooth permission is required for offline receive.');
 
   const ble = await loadPeripheralBleModule();
-  const nativePermission = await ble.requestBluetoothPermission();
+  const releaseAppLockSuppression = beginAppLockSuppression();
+  let nativePermission: boolean;
+  try {
+    nativePermission = await ble.requestBluetoothPermission();
+  } finally {
+    releaseAppLockSuppression();
+  }
   if (!nativePermission) throw new Error('Bluetooth permission is required for offline receive.');
   const enabled = await ble.isBluetoothEnabled();
   if (!enabled) throw new Error('Turn on Bluetooth to receive offline payments.');
@@ -346,7 +368,10 @@ export async function startOfflineBleReceiver(params: {
         frame = parseOfflineBleFrame(frameHex);
         pendingFrameWrites.delete(key);
       } catch (parseError) {
-        if (parseError instanceof SyntaxError && (pending != null || looksLikeJsonStart(frameHex))) {
+        if (
+          parseError instanceof SyntaxError &&
+          (pending != null || looksLikeJsonStart(frameHex))
+        ) {
           pendingFrameWrites.set(key, {
             hexValue: frameHex,
             updatedAt: Date.now(),
@@ -411,7 +436,8 @@ export async function discoverOfflineBleReceivers(options?: {
   onUpdate?: (receivers: OfflineBleDiscoveredReceiver[]) => void;
 }): Promise<OfflineBleDiscoveredReceiver[]> {
   const permissionsGranted = await requestAndroidBlePermissions();
-  if (!permissionsGranted) throw new Error('Bluetooth permission is required for nearby discovery.');
+  if (!permissionsGranted)
+    throw new Error('Bluetooth permission is required for nearby discovery.');
 
   const ble = await loadCentralBleManager();
   await ble.start({ showAlert: false });
@@ -481,7 +507,8 @@ export async function discoverOfflineBleReceivers(options?: {
     }
 
     const receivers = Array.from(receiversByWallet.values()).sort(
-      (left, right) => (right.rssi ?? Number.NEGATIVE_INFINITY) - (left.rssi ?? Number.NEGATIVE_INFINITY),
+      (left, right) =>
+        (right.rssi ?? Number.NEGATIVE_INFINITY) - (left.rssi ?? Number.NEGATIVE_INFINITY),
     );
     options?.onUpdate?.(receivers);
     return receivers;
@@ -490,7 +517,10 @@ export async function discoverOfflineBleReceivers(options?: {
   const bondedReceivers = await verifyCandidates();
   if (bondedReceivers.length > 0) return bondedReceivers;
 
-  async function collectScan(options: Parameters<BleManagerModule['scan']>[0], trusted: boolean): Promise<void> {
+  async function collectScan(
+    options: Parameters<BleManagerModule['scan']>[0],
+    trusted: boolean,
+  ): Promise<void> {
     if (!hasTimeRemaining()) return;
 
     const requestedSeconds = options?.seconds ?? scanSeconds;
@@ -512,7 +542,7 @@ export async function discoverOfflineBleReceivers(options?: {
 
     try {
       await ble.scan(scanOptions);
-      await delay((limitedSeconds * 1000) + 350);
+      await delay(limitedSeconds * 1000 + 350);
       const listed = await ble.getDiscoveredPeripherals?.().catch(() => []);
       for (const peripheral of listed ?? []) {
         if (trusted) {
@@ -645,7 +675,10 @@ async function findRecipientPeripheral(params: {
   const bondedMatch = await tryConnectCandidates();
   if (bondedMatch != null) return bondedMatch;
 
-  async function collectScan(options: Parameters<BleManagerModule['scan']>[0], trusted: boolean): Promise<void> {
+  async function collectScan(
+    options: Parameters<BleManagerModule['scan']>[0],
+    trusted: boolean,
+  ): Promise<void> {
     const subscription = params.ble.onDiscoverPeripheral((peripheral) => {
       if (trusted) {
         addCandidate(peripheral);
@@ -656,7 +689,7 @@ async function findRecipientPeripheral(params: {
 
     try {
       await params.ble.scan(options);
-      await delay(((options?.seconds ?? OFFPAY_BLE_FAST_SCAN_SECONDS) * 1000) + 350);
+      await delay((options?.seconds ?? OFFPAY_BLE_FAST_SCAN_SECONDS) * 1000 + 350);
       const listed = await params.ble.getDiscoveredPeripherals?.().catch(() => []);
       for (const peripheral of listed ?? []) {
         if (trusted) {
