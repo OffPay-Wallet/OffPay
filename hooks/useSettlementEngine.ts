@@ -50,6 +50,20 @@ import type { OfflinePaymentReceipt } from '@/store/offlinePaymentStore';
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
+const FOREGROUND_SETTLEMENT_DELAY_MS = 2_000;
+
+function canBypassSettlementBackoff(trigger: SettlementEngineTrigger): boolean {
+  return trigger === 'manual' || trigger === 'retry';
+}
+
+function getActiveSettlementBackoffDelayMs(trigger: SettlementEngineTrigger): number {
+  if (canBypassSettlementBackoff(trigger)) return 0;
+
+  const { status, nextRetryAt } = useSettlementEngineStore.getState();
+  if (status !== 'backoff' || nextRetryAt == null) return 0;
+
+  return Math.max(nextRetryAt - Date.now(), 0);
+}
 
 interface SettlementEngineContext {
   walletAddress: string | null;
@@ -258,6 +272,7 @@ export function useSettlementEngine() {
   });
   const runningRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const foregroundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const backoffMsRef = useRef(INITIAL_BACKOFF_MS);
 
@@ -283,6 +298,7 @@ export function useSettlementEngine() {
     () => () => {
       mountedRef.current = false;
       if (timerRef.current != null) clearTimeout(timerRef.current);
+      if (foregroundTimerRef.current != null) clearTimeout(foregroundTimerRef.current);
     },
     [],
   );
@@ -325,6 +341,10 @@ export function useSettlementEngine() {
         context.network == null ||
         runningRef.current
       ) {
+        return;
+      }
+
+      if (getActiveSettlementBackoffDelayMs(trigger) > 0) {
         return;
       }
 
@@ -536,11 +556,24 @@ export function useSettlementEngine() {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        void runSettlement('foreground');
+        if (foregroundTimerRef.current != null) clearTimeout(foregroundTimerRef.current);
+        foregroundTimerRef.current = setTimeout(() => {
+          foregroundTimerRef.current = null;
+          void runSettlement('foreground');
+        }, FOREGROUND_SETTLEMENT_DELAY_MS);
+      } else if (foregroundTimerRef.current != null) {
+        clearTimeout(foregroundTimerRef.current);
+        foregroundTimerRef.current = null;
       }
     });
 
-    return () => subscription.remove();
+    return () => {
+      subscription.remove();
+      if (foregroundTimerRef.current != null) {
+        clearTimeout(foregroundTimerRef.current);
+        foregroundTimerRef.current = null;
+      }
+    };
   }, [runSettlement]);
 
   return {

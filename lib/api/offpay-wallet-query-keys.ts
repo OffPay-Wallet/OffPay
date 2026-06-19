@@ -27,7 +27,9 @@ export const offpayWalletTransactionsQueryKey = (
   walletAddress: string | null,
   network: OffpayNetwork | null,
   limit: number,
-) => [...offpayWalletTransactionsBaseQueryKey(walletAddress, network), { limit }] as const;
+  cacheMode: 'cached' | 'network' = 'cached',
+) =>
+  [...offpayWalletTransactionsBaseQueryKey(walletAddress, network), { limit, cacheMode }] as const;
 
 export const pendingBackupQueueStatsQueryKey = (
   walletAddress: string | null,

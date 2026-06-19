@@ -14,6 +14,9 @@ let preferencesUnsubscribe: (() => void) | null = null;
 let netInfoUnsubscribe: (() => void) | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
 let lastReachableOnline = true;
+let focusRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+
+const FOCUS_RESTORE_DELAY_MS = 500;
 
 export class OfflineNetworkBlockedError extends Error {
   constructor(message = 'Offline mode is active. Internet requests are disabled.') {
@@ -121,7 +124,20 @@ function syncQueryFocusState(): void {
   focusManager.setFocused(AppState.currentState === 'active');
 
   appStateSubscription = AppState.addEventListener('change', (status: AppStateStatus) => {
-    focusManager.setFocused(status === 'active');
+    if (focusRestoreTimer != null) {
+      clearTimeout(focusRestoreTimer);
+      focusRestoreTimer = null;
+    }
+
+    if (status !== 'active') {
+      focusManager.setFocused(false);
+      return;
+    }
+
+    focusRestoreTimer = setTimeout(() => {
+      focusRestoreTimer = null;
+      focusManager.setFocused(true);
+    }, FOCUS_RESTORE_DELAY_MS);
   });
 }
 

@@ -9,28 +9,14 @@ const ANDROID_PACKAGE = 'com.offpay.app';
 const APP_ICON_PATH = './assets/AppIcons/appstore.png';
 const ANDROID_ICON_PATH = './assets/AppIcons/playstore.png';
 const ANDROID_ADAPTIVE_ICON_FOREGROUND_PATH = './assets/AppIcons/playstore.png';
+const ANDROID_SPLASH_DRAWABLE_PATH = './assets/splash-transparent.xml';
 /** Matches colors.backgroundGradient.base from constants/colors.ts. */
 const BRAND_BACKGROUND_COLOR = '#050505';
 const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = '#000000';
 const ANDROID_NOTIFICATION_COLOR = '#F7F7F2';
-const DEFAULT_ANDROID_BUILD_ARCHS = ['arm64-v8a'];
-
-function resolveAndroidBuildArchs(): string[] {
-  const raw =
-    process.env.OFFPAY_ANDROID_BUILD_ARCHS ??
-    process.env.ORG_GRADLE_PROJECT_reactNativeArchitectures ??
-    '';
-  const archs = raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  return archs.length > 0 ? archs : DEFAULT_ANDROID_BUILD_ARCHS;
-}
+const ANDROID_PHONE_BUILD_ARCHS = ['armeabi-v7a', 'arm64-v8a'];
 
 export default function appConfig(_context: ConfigContext): ExpoConfig {
-  const androidBuildArchs = resolveAndroidBuildArchs();
-
   return {
     name: APP_NAME,
     slug: APP_SLUG,
@@ -129,19 +115,6 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
           ],
         },
       ],
-      // expo-splash-screen is a versioned default plugin: even when not
-      // listed here, @expo/prebuild-config applies it during prebuild and
-      // writes `Theme.App.SplashScreen` + a `splashscreen_logo` drawable.
-      // We declare it explicitly so the brand background color is wired
-      // consistently; the transparent icon and MainActivity overrides
-      // are owned by the custom plugin below.
-      //
-      // ORDERING: our custom plugin must come AFTER `expo-splash-screen`
-      // here because the `withMod` chain wraps in registration order:
-      // the LATEST-registered mod runs FIRST, with the previous mod
-      // exposed as `nextMod`. By being last in this list, our mod runs
-      // last in the resolved chain and gets the final say on the splash
-      // style and MainActivity contents.
       [
         'expo-splash-screen',
         {
@@ -149,7 +122,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
           android: {
             backgroundColor: BRAND_BACKGROUND_COLOR,
             drawable: {
-              icon: './assets/splash-transparent.xml',
+              icon: ANDROID_SPLASH_DRAWABLE_PATH,
             },
           },
           dark: {
@@ -157,7 +130,6 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
           },
         },
       ],
-      './plugins/with-transparent-android-splash-icon',
       [
         'expo-local-authentication',
         {
@@ -183,48 +155,20 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
             'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',
         },
       ],
-      './plugins/with-ble-scan-location-permission',
       // Required by `@privy-io/expo` so the SDK can open the OAuth
       // flow in a Custom Tab on Android. The plugin wires up the
       // intent filter on the Android manifest side.
       'expo-web-browser',
-      // Pins the Android compile/min SDK and AndroidX flags Privy's
-      // native modules expect. Privy's installation guide says this
-      // is the easiest way to keep the manifest in sync without
-      // manually editing the prebuild output.
       [
         'expo-build-properties',
         {
           android: {
-            // Privy/react-native-passkeys rely on Android Credential
-            // Manager APIs. Keep this explicit so prebuilds do not
-            // fall below the SDK level required by the native module.
-            compileSdkVersion: 36,
-            // APK builds should not ship unused emulator/legacy ABI
-            // slices. EAS profiles can override this with
-            // OFFPAY_ANDROID_BUILD_ARCHS when a universal test APK is
-            // intentionally needed.
-            buildArchs: androidBuildArchs,
-            enableMinifyInReleaseBuilds: true,
-            enableShrinkResourcesInReleaseBuilds: true,
-            enablePngCrunchInReleaseBuilds: true,
-            packagingOptions: {
-              exclude: [
-                'META-INF/LICENSE',
-                'META-INF/LICENSE.txt',
-                'META-INF/LICENSE.md',
-                'META-INF/NOTICE',
-                'META-INF/NOTICE.txt',
-                'META-INF/NOTICE.md',
-                'META-INF/DEPENDENCIES',
-                'META-INF/INDEX.LIST',
-              ],
-            },
-            // react-native-passkeys requires Credential Manager,
-            // which lives in androidx.credentials. The 1.2.x line
-            // matches the version Privy's SDK is built against.
-            extraMavenRepos: [],
-            usePrecompiledHeaders: true,
+            // Build physical-device ARM slices only. Google Play gets an
+            // AAB and serves device-specific APKs from it; local APKs use
+            // this same ARM set for broad phone compatibility without
+            // shipping emulator-only x86/x86_64 native binaries.
+            buildArchs: ANDROID_PHONE_BUILD_ARCHS,
+            networkInspector: false,
           },
         },
       ],

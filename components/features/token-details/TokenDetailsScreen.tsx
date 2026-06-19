@@ -743,6 +743,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const transactionsQuery = useOffpayWalletTransactions({
     deferUntilAfterInteractions: true,
     refetchOnMount: 'always',
+    useCache: false,
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
   const capabilitiesQuery = useOffpayCapabilities();

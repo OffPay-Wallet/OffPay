@@ -183,7 +183,12 @@ async function configureNotifications(): Promise<void> {
     }
   })();
 
-  return configurePromise;
+  try {
+    return await configurePromise;
+  } catch (error) {
+    configurePromise = null;
+    throw error;
+  }
 }
 
 async function ensurePermission(): Promise<boolean> {
@@ -328,13 +333,12 @@ export function presentIncomingTransferNotification(
 }
 
 /**
- * Best-effort permission pre-warm during the splash window so the
- * first wallet-activity notification doesn't pay for the prompt
- * inline.
+ * Best-effort notification channel setup after first paint. Do not
+ * request OS notification permission during launch; on Android this
+ * can surface a permission sheet before the wallet is even set up.
  */
 export function prewarmWalletTransactionNotificationPermission(): void {
   void configureNotifications()
-    .then(ensurePermission)
     .catch(() => undefined);
 }
 

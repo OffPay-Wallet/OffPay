@@ -80,7 +80,7 @@ describe('getWalletTransactions RPC fallback', () => {
                   accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
                   instructions: [
                     {
-                      program: 'system',
+                      programId: '11111111111111111111111111111111',
                       parsed: {
                         type: 'transfer',
                         info: {

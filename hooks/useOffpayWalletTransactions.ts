@@ -61,6 +61,7 @@ export function useOffpayWalletTransactions(options?: {
   deferUntilAfterInteractions?: boolean;
   autoFetchAllPages?: boolean;
   refetchOnMount?: boolean | 'always';
+  useCache?: boolean;
   enabled?: boolean;
 }) {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
@@ -68,6 +69,7 @@ export function useOffpayWalletTransactions(options?: {
   const limit = options?.limit ?? WALLET_TRANSACTIONS_PAGE_SIZE;
   const deferUntilAfterInteractions = options?.deferUntilAfterInteractions ?? false;
   const autoFetchAllPages = options?.autoFetchAllPages ?? false;
+  const useCache = options?.useCache;
   const enabledByCaller = options?.enabled ?? true;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const { network } = useOffpayNetwork();
@@ -79,7 +81,12 @@ export function useOffpayWalletTransactions(options?: {
   const capabilitiesQuery = useOffpayCapabilities({ enabled: enabledByCaller });
   const { capabilities } = capabilitiesQuery;
   const queryClient = useQueryClient();
-  const transactionsQueryKey = offpayWalletTransactionsQueryKey(walletAddress, network, limit);
+  const transactionsQueryKey = offpayWalletTransactionsQueryKey(
+    walletAddress,
+    network,
+    limit,
+    useCache === false ? 'network' : 'cached',
+  );
   const capability: CapabilityStatus = !canUseNetwork
     ? {
         available: false,
@@ -139,6 +146,7 @@ export function useOffpayWalletTransactions(options?: {
       const page = await getWalletTransactions(walletAddress, network, {
         cursor: pageParam,
         limit,
+        useCache,
         signal,
       });
 

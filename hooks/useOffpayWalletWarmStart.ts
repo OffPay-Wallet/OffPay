@@ -48,6 +48,9 @@ export function useOffpayWalletWarmStart(): void {
   const scheduledHydrationRef = useRef<ReturnType<typeof scheduleUiWorkAfterFirstPaint> | null>(
     null,
   );
+  const scheduledPrefetchRef = useRef<ReturnType<typeof scheduleUiWorkAfterFirstPaint> | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!walletHydrated || walletAddress == null || network == null || isNetworkAccessSuspended) {
@@ -115,19 +118,30 @@ export function useOffpayWalletWarmStart(): void {
 
     let cancelled = false;
 
-    void prefetchWalletDashboardInBackground({
-      queryClient,
-      walletAddress,
-      walletId,
-      network,
-    }).catch(() => {
-      if (!cancelled && prefetchedKeyRef.current === prefetchKey) {
-        prefetchedKeyRef.current = null;
-      }
-    });
+    scheduledPrefetchRef.current?.cancel();
+    scheduledPrefetchRef.current = scheduleUiWorkAfterFirstPaint(
+      () => {
+        void prefetchWalletDashboardInBackground({
+          queryClient,
+          walletAddress,
+          walletId,
+          network,
+        }).catch(() => {
+          if (!cancelled && prefetchedKeyRef.current === prefetchKey) {
+            prefetchedKeyRef.current = null;
+          }
+        });
+      },
+      {
+        timeoutMs: 5000,
+        fallbackDelayMs: 650,
+      },
+    );
 
     return () => {
       cancelled = true;
+      scheduledPrefetchRef.current?.cancel();
+      scheduledPrefetchRef.current = null;
       if (prefetchedKeyRef.current === prefetchKey) {
         prefetchedKeyRef.current = null;
       }

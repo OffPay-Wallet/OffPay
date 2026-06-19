@@ -45,6 +45,23 @@ const NOBLE_HASHES_CRYPTO_TARGET = path.resolve(
   'node_modules/@solana/web3.js/node_modules/@noble/hashes/crypto.js',
 );
 
+// Release bundles are minified by Metro/Terser. Strip development telemetry
+// calls from APK bundles while keeping warnings/errors available for real
+// failure paths. Dev builds are not minified, so local perf logs still show up
+// while iterating with Metro.
+config.transformer.minifierConfig = {
+  ...(config.transformer.minifierConfig ?? {}),
+  compress: {
+    ...((config.transformer.minifierConfig ?? {}).compress ?? {}),
+    pure_funcs: [
+      ...(((config.transformer.minifierConfig ?? {}).compress ?? {}).pure_funcs ?? []),
+      'console.debug',
+      'console.info',
+      'console.log',
+    ],
+  },
+};
+
 // Keep source-only folders and unused binary variants out of Metro's
 // file map. EAS upload is guarded separately by .easignore; this guard
 // prevents accidental runtime imports from reintroducing bulky assets.

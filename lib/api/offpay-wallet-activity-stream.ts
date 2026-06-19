@@ -29,7 +29,12 @@ export interface WalletActivityStreamConnection {
   refreshAccounts: () => void;
 }
 
+interface WalletActivityStreamConnectOptions extends WalletActivityStreamHandlers {
+  signal?: AbortSignal;
+}
+
 const POLL_INTERVAL_MS = 4_000;
+const MIN_REFRESH_POLL_INTERVAL_MS = 10_000;
 const SSE_OPEN_TIMEOUT_MS = 15_000;
 const ACTIVITY_LIMIT = 10;
 const MAX_TRACKED_SIGNATURES = 200;
@@ -72,6 +77,16 @@ function rememberSignature(trackedSignatures: Set<string>, signature: string): v
     if (!oldestSignature) break;
     trackedSignatures.delete(oldestSignature);
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted !== true) return;
+
+  if (signal.reason instanceof Error) {
+    throw signal.reason;
+  }
+
+  throw new Error('Wallet activity stream connection was aborted.');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -209,8 +224,9 @@ async function readSseStream(
 async function connectWalletActivitySse(
   walletAddress: string,
   network: OffpayNetwork,
-  handlers: WalletActivityStreamHandlers = {},
+  options: WalletActivityStreamConnectOptions = {},
 ): Promise<WalletActivityStreamConnection | null> {
+  const { signal, ...handlers } = options;
   const startedAt = mark();
   let result: 'connected' | 'unsupported' | 'error' = 'error';
   const controller = new AbortController();
@@ -220,6 +236,33 @@ async function connectWalletActivitySse(
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let closed = false;
+  let removeAbortListener: (() => void) | null = null;
+
+  if (signal != null) {
+    if (signal.aborted) {
+      clearTimeout(openTimeout);
+      controller.abort(signal.reason);
+      return null;
+    }
+
+    const abortFromParent = () => {
+      controller.abort(signal.reason);
+    };
+    signal.addEventListener('abort', abortFromParent, { once: true });
+    removeAbortListener = () => {
+      signal.removeEventListener('abort', abortFromParent);
+      removeAbortListener = null;
+    };
+  }
+
+  const closeConnection = (reason: string): void => {
+    if (closed) return;
+    closed = true;
+    removeAbortListener?.();
+    controller.abort();
+    void reader?.cancel().catch(() => undefined);
+    handlers.onClose?.(reason);
+  };
 
   try {
     const response = await offpayPublicFetch({
@@ -246,12 +289,14 @@ async function connectWalletActivitySse(
       .then(() => {
         if (!closed) {
           closed = true;
+          removeAbortListener?.();
           handlers.onClose?.('ended');
         }
       })
       .catch(() => {
         if (!closed) {
           closed = true;
+          removeAbortListener?.();
           handlers.onStreamError?.({ code: 'STREAM_ERROR', retryable: true });
         }
       });
@@ -259,18 +304,10 @@ async function connectWalletActivitySse(
     return {
       supported: true,
       close: () => {
-        if (closed) return;
-        closed = true;
-        controller.abort();
-        void reader?.cancel().catch(() => undefined);
-        handlers.onClose?.('closed');
+        closeConnection('closed');
       },
       reconnect: () => {
-        if (closed) return;
-        closed = true;
-        controller.abort();
-        void reader?.cancel().catch(() => undefined);
-        handlers.onClose?.('reconnect');
+        closeConnection('reconnect');
       },
       refreshAccounts: () => {
         handlers.onPing?.({ timestamp: Date.now() });
@@ -279,8 +316,12 @@ async function connectWalletActivitySse(
   } catch {
     clearTimeout(openTimeout);
     controller.abort();
+    removeAbortListener?.();
     return null;
   } finally {
+    if (result !== 'connected') {
+      removeAbortListener?.();
+    }
     measure('walletActivity.sse.open', startedAt, {
       network,
       result,
@@ -291,13 +332,40 @@ async function connectWalletActivitySse(
 async function connectWalletActivityPoller(
   walletAddress: string,
   network: OffpayNetwork,
-  handlers: WalletActivityStreamHandlers = {},
+  options: WalletActivityStreamConnectOptions = {},
 ): Promise<WalletActivityStreamConnection> {
+  const { signal, ...handlers } = options;
   let closed = false;
   let inFlight = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let initialized = false;
+  let lastPollCompletedAt = 0;
   const trackedSignatures = new Set<string>();
+  let removeAbortListener: (() => void) | null = null;
+
+  const closePoller = (reason: string): void => {
+    if (closed) return;
+    closed = true;
+    if (timer != null) clearTimeout(timer);
+    timer = null;
+    removeAbortListener?.();
+    handlers.onClose?.(reason);
+  };
+
+  if (signal != null) {
+    if (signal.aborted) {
+      closed = true;
+    } else {
+      const abortFromParent = () => {
+        closePoller('aborted');
+      };
+      signal.addEventListener('abort', abortFromParent, { once: true });
+      removeAbortListener = () => {
+        signal.removeEventListener('abort', abortFromParent);
+        removeAbortListener = null;
+      };
+    }
+  }
 
   const schedule = (delayMs = POLL_INTERVAL_MS): void => {
     if (closed) return;
@@ -314,6 +382,7 @@ async function connectWalletActivityPoller(
       const response = await getWalletTransactions(walletAddress, network, {
         limit: ACTIVITY_LIMIT,
         useCache: false,
+        signal,
       });
       const newestFirst = response.transactions;
       if (!initialized) {
@@ -334,11 +403,24 @@ async function connectWalletActivityPoller(
       }
       handlers.onPing?.({ timestamp: Date.now() });
     } catch {
-      handlers.onStreamError?.({ code: 'STREAM_ERROR', retryable: true });
+      if (!closed) {
+        handlers.onStreamError?.({ code: 'STREAM_ERROR', retryable: true });
+      }
     } finally {
       inFlight = false;
+      lastPollCompletedAt = Date.now();
       schedule();
     }
+  };
+
+  const scheduleRefreshPoll = (): void => {
+    if (lastPollCompletedAt === 0) {
+      schedule(0);
+      return;
+    }
+
+    const elapsedMs = Date.now() - lastPollCompletedAt;
+    schedule(Math.max(MIN_REFRESH_POLL_INTERVAL_MS - elapsedMs, 0));
   };
 
   void poll();
@@ -346,19 +428,16 @@ async function connectWalletActivityPoller(
   return {
     supported: true,
     close: () => {
-      closed = true;
-      if (timer != null) clearTimeout(timer);
-      timer = null;
-      handlers.onClose?.('closed');
+      closePoller('closed');
     },
     reconnect: () => {
       if (closed) return;
       initialized = false;
       trackedSignatures.clear();
-      schedule(0);
+      scheduleRefreshPoll();
     },
     refreshAccounts: () => {
-      schedule(0);
+      scheduleRefreshPoll();
     },
   };
 }
@@ -366,10 +445,12 @@ async function connectWalletActivityPoller(
 export async function connectWalletActivityStream(
   walletAddress: string,
   network: OffpayNetwork,
-  handlers: WalletActivityStreamHandlers = {},
+  options: WalletActivityStreamConnectOptions = {},
 ): Promise<WalletActivityStreamConnection> {
+  throwIfAborted(options.signal);
   const startedAt = mark();
-  const streamConnection = await connectWalletActivitySse(walletAddress, network, handlers);
+  const streamConnection = await connectWalletActivitySse(walletAddress, network, options);
+  throwIfAborted(options.signal);
   if (streamConnection != null) {
     measure('walletActivity.stream.connect', startedAt, {
       network,
@@ -378,7 +459,7 @@ export async function connectWalletActivityStream(
     return streamConnection;
   }
 
-  const pollerConnection = await connectWalletActivityPoller(walletAddress, network, handlers);
+  const pollerConnection = await connectWalletActivityPoller(walletAddress, network, options);
   measure('walletActivity.stream.connect', startedAt, {
     network,
     transport: 'poller',

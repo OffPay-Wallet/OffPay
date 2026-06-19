@@ -32,6 +32,8 @@ const MAX_RATE_LIMIT_FALLBACK_DELAY_MS = 60_000;
 const FALLBACK_POLL_INTERVAL_MS = 60_000;
 const MIN_WALLET_DATA_INVALIDATION_INTERVAL_MS = 25_000;
 const ACTIVITY_INDEX_REFRESH_DELAYS_MS = [5_000, 30_000, 90_000] as const;
+const FOREGROUND_STREAM_RECONNECT_DELAY_MS = 350;
+const FOREGROUND_WALLET_DATA_REFRESH_DELAY_MS = 1_400;
 const SEEN_SIGNATURES_LIMIT = 200;
 const ACTIVITY_EVENTS_LIMIT = 50;
 
@@ -233,6 +235,9 @@ export function useOffpayWalletActivityStream(options?: {
   const fallbackPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activityRefreshTimerRefs = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const walletDataInvalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const foregroundReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const foregroundInvalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const lastWalletDataInvalidatedAtRef = useRef(0);
   const gateLogAtRef = useRef(Date.now());
 
@@ -264,6 +269,17 @@ export function useOffpayWalletActivityStream(options?: {
   ]);
 
   useEffect(() => {
+    const clearForegroundTimers = () => {
+      if (foregroundReconnectTimerRef.current != null) {
+        clearTimeout(foregroundReconnectTimerRef.current);
+        foregroundReconnectTimerRef.current = null;
+      }
+      if (foregroundInvalidationTimerRef.current != null) {
+        clearTimeout(foregroundInvalidationTimerRef.current);
+        foregroundInvalidationTimerRef.current = null;
+      }
+    };
+
     if (retryTimerRef.current != null) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -276,8 +292,11 @@ export function useOffpayWalletActivityStream(options?: {
       clearTimeout(walletDataInvalidationTimerRef.current);
       walletDataInvalidationTimerRef.current = null;
     }
+    clearForegroundTimers();
     activityRefreshTimerRefs.current.forEach((timer) => clearTimeout(timer));
     activityRefreshTimerRefs.current = [];
+    streamAbortControllerRef.current?.abort();
+    streamAbortControllerRef.current = null;
     connectionRef.current?.close();
     connectionRef.current = null;
     setFailureCount(0);
@@ -304,10 +323,87 @@ export function useOffpayWalletActivityStream(options?: {
     let reconnectAttempts = 0;
     let reconnectPending = false;
     let openStreamPending = false;
+    let streamEpoch = 0;
+    let streamPaused = AppState.currentState !== 'active';
+    if (streamPaused) setStatus('idle');
     const seenSignatures = getSeenSignaturesScope(walletAddress, network) ?? new Set<string>();
+    const walletDataQueryFilters = [
+      { queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network) },
+      { queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network) },
+      { queryKey: offpayWalletBalanceQueryKey(walletAddress, network) },
+    ] as const;
+
+    const clearRetryTimer = () => {
+      if (retryTimerRef.current == null) return;
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    };
+
+    const clearFallbackTimer = () => {
+      if (fallbackPollTimerRef.current == null) return;
+      clearInterval(fallbackPollTimerRef.current);
+      fallbackPollTimerRef.current = null;
+    };
+
+    const clearWalletDataInvalidationTimer = () => {
+      if (walletDataInvalidationTimerRef.current == null) return;
+      clearTimeout(walletDataInvalidationTimerRef.current);
+      walletDataInvalidationTimerRef.current = null;
+    };
+
+    const clearActivityRefreshTimers = () => {
+      activityRefreshTimerRefs.current.forEach((timer) => clearTimeout(timer));
+      activityRefreshTimerRefs.current = [];
+    };
+
+    const abortStreamRequest = () => {
+      streamAbortControllerRef.current?.abort();
+      streamAbortControllerRef.current = null;
+    };
+
+    const closeConnection = () => {
+      const connection = connectionRef.current;
+      connectionRef.current = null;
+      abortStreamRequest();
+      connection?.close();
+    };
+
+    const isWalletDataFetchInFlight = () =>
+      walletDataQueryFilters.some((filter) => queryClient.isFetching(filter) > 0);
+
+    const getNewestWalletDataUpdatedAt = () =>
+      walletDataQueryFilters.reduce((newestUpdatedAt, filter) => {
+        const queries = queryClient.getQueryCache().findAll(filter);
+        return queries.reduce(
+          (newestForFilter, query) => Math.max(newestForFilter, query.state.dataUpdatedAt),
+          newestUpdatedAt,
+        );
+      }, 0);
+
+    const shouldRefreshWalletDataSnapshot = () => {
+      if (streamPaused || isWalletDataFetchInFlight()) return false;
+      const newestUpdatedAt = getNewestWalletDataUpdatedAt();
+      if (newestUpdatedAt === 0) return true;
+      return Date.now() - newestUpdatedAt >= MIN_WALLET_DATA_INVALIDATION_INTERVAL_MS;
+    };
+
+    const pauseStream = () => {
+      streamPaused = true;
+      streamEpoch += 1;
+      reconnectPending = false;
+      openStreamPending = false;
+      clearRetryTimer();
+      clearFallbackTimer();
+      clearWalletDataInvalidationTimer();
+      clearForegroundTimers();
+      clearActivityRefreshTimers();
+      closeConnection();
+      setStatus('idle');
+    };
 
     const invalidateWalletDataNow = () => {
       walletDataInvalidationTimerRef.current = null;
+      if (cancelled || streamPaused || isWalletDataFetchInFlight()) return;
       lastWalletDataInvalidatedAtRef.current = Date.now();
       void queryClient.invalidateQueries({
         queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
@@ -348,7 +444,7 @@ export function useOffpayWalletActivityStream(options?: {
     };
 
     const stopWithFallback = (refreshDelayMs = 0) => {
-      if (cancelled) return;
+      if (cancelled || streamPaused) return;
       setStatus('fallback');
       if (fallbackPollTimerRef.current == null) {
         fallbackPollTimerRef.current = setInterval(invalidateWalletData, FALLBACK_POLL_INTERVAL_MS);
@@ -363,12 +459,11 @@ export function useOffpayWalletActivityStream(options?: {
     };
 
     const scheduleReconnect = (error?: unknown) => {
-      if (cancelled || reconnectPending) return;
+      if (cancelled || streamPaused || reconnectPending) return;
 
       const rateLimitDelayMs = getRateLimitDelayMs(error);
       if (rateLimitDelayMs != null) {
-        connectionRef.current?.close();
-        connectionRef.current = null;
+        closeConnection();
         stopWithFallback(rateLimitDelayMs);
         return;
       }
@@ -376,8 +471,7 @@ export function useOffpayWalletActivityStream(options?: {
       reconnectPending = true;
       reconnectAttempts += 1;
       setFailureCount(reconnectAttempts);
-      connectionRef.current?.close();
-      connectionRef.current = null;
+      closeConnection();
 
       if (reconnectAttempts >= MAX_RECONNECT_FAILURES) {
         stopWithFallback();
@@ -392,15 +486,22 @@ export function useOffpayWalletActivityStream(options?: {
     };
 
     const openStream = async () => {
-      if (cancelled) return;
+      if (cancelled || streamPaused) return;
       if (openStreamPending || connectionRef.current != null) return;
       openStreamPending = true;
+      const openEpoch = streamEpoch;
+      const abortController = new AbortController();
+      streamAbortControllerRef.current?.abort();
+      streamAbortControllerRef.current = abortController;
+      let connectionAttached = false;
+      const isStaleOpen = () => cancelled || streamPaused || openEpoch !== streamEpoch;
       setStatus(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
 
       try {
         const connection = await connectWalletActivityStream(walletAddress, network, {
+          signal: abortController.signal,
           onOpen: () => {
-            if (cancelled) return;
+            if (isStaleOpen()) return;
             reconnectPending = false;
             reconnectAttempts = 0;
             setFailureCount(0);
@@ -412,7 +513,7 @@ export function useOffpayWalletActivityStream(options?: {
             }
           },
           onActivity: (event) => {
-            if (cancelled) return;
+            if (isStaleOpen()) return;
             if (!rememberSeenSignature(seenSignatures, event.signature)) {
               if (__DEV__) {
                 console.log('[wallet-activity-hook] dedup skip', {
@@ -444,20 +545,20 @@ export function useOffpayWalletActivityStream(options?: {
             scheduleIndexedTransactionRefreshes();
           },
           onPing: (event) => {
-            if (!cancelled) setLastPingAt(event.timestamp);
+            if (!isStaleOpen()) setLastPingAt(event.timestamp);
           },
           onStreamError: (event) => {
-            scheduleReconnect(event);
+            if (!isStaleOpen()) scheduleReconnect(event);
           },
           onClose: () => {
-            scheduleReconnect();
+            if (!isStaleOpen()) scheduleReconnect();
           },
           onUnsupported: () => {
-            stopWithFallback();
+            if (!isStaleOpen()) stopWithFallback();
           },
         });
 
-        if (cancelled) {
+        if (isStaleOpen() || abortController.signal.aborted) {
           connection.close();
           return;
         }
@@ -468,15 +569,19 @@ export function useOffpayWalletActivityStream(options?: {
         }
 
         connectionRef.current = connection;
+        connectionAttached = true;
       } catch (error: unknown) {
-        scheduleReconnect(error);
+        if (!isStaleOpen()) scheduleReconnect(error);
       } finally {
+        if (!connectionAttached && streamAbortControllerRef.current === abortController) {
+          streamAbortControllerRef.current = null;
+        }
         openStreamPending = false;
       }
     };
 
     const reconnectIfDormant = () => {
-      if (cancelled) return;
+      if (cancelled || streamPaused) return;
       if (connectionRef.current != null) {
         connectionRef.current?.refreshAccounts();
         return;
@@ -488,44 +593,60 @@ export function useOffpayWalletActivityStream(options?: {
       void openStream();
     };
 
+    const scheduleReconnectIfDormant = (delayMs = FOREGROUND_STREAM_RECONNECT_DELAY_MS) => {
+      if (cancelled) return;
+      if (foregroundReconnectTimerRef.current != null) {
+        clearTimeout(foregroundReconnectTimerRef.current);
+      }
+      foregroundReconnectTimerRef.current = setTimeout(() => {
+        foregroundReconnectTimerRef.current = null;
+        reconnectIfDormant();
+      }, delayMs);
+    };
+
+    const scheduleForegroundWalletDataRefresh = () => {
+      if (cancelled || foregroundInvalidationTimerRef.current != null) return;
+      foregroundInvalidationTimerRef.current = setTimeout(() => {
+        foregroundInvalidationTimerRef.current = null;
+        if (shouldRefreshWalletDataSnapshot()) {
+          invalidateWalletData();
+        }
+      }, FOREGROUND_WALLET_DATA_REFRESH_DELAY_MS);
+    };
+
     const appStateSubscription = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next === 'active') {
-        // Foregrounded: kick the WS back to life immediately
-        // instead of waiting for OS-level TCP timeout, and pull a
-        // fresh snapshot in case anything landed while we were
-        // backgrounded.
-        reconnectIfDormant();
-        invalidateWalletData();
+        // Foregrounding can overlap tab transitions, passcode unlock,
+        // NetInfo, and query hydration. Keep live data fresh, but let
+        // the first frames after resume settle before starting stream
+        // reconnects and wallet refetches.
+        streamPaused = false;
+        scheduleReconnectIfDormant();
+        scheduleForegroundWalletDataRefresh();
+      } else {
+        pauseStream();
       }
     });
 
     const netInfoUnsubscribe = NetInfo.addEventListener((state) => {
       const online = state.isConnected !== false && state.isInternetReachable !== false;
-      if (online) reconnectIfDormant();
+      if (online && !streamPaused) scheduleReconnectIfDormant();
     });
 
-    void openStream();
+    if (!streamPaused) {
+      void openStream();
+    }
 
     return () => {
       cancelled = true;
       appStateSubscription.remove();
       netInfoUnsubscribe();
-      if (retryTimerRef.current != null) {
-        clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = null;
-      }
-      if (walletDataInvalidationTimerRef.current != null) {
-        clearTimeout(walletDataInvalidationTimerRef.current);
-        walletDataInvalidationTimerRef.current = null;
-      }
-      if (fallbackPollTimerRef.current != null) {
-        clearInterval(fallbackPollTimerRef.current);
-        fallbackPollTimerRef.current = null;
-      }
-      activityRefreshTimerRefs.current.forEach((timer) => clearTimeout(timer));
-      activityRefreshTimerRefs.current = [];
-      connectionRef.current?.close();
-      connectionRef.current = null;
+      clearRetryTimer();
+      clearWalletDataInvalidationTimer();
+      clearForegroundTimers();
+      clearFallbackTimer();
+      clearActivityRefreshTimers();
+      closeConnection();
     };
   }, [
     aggregateAvailable,

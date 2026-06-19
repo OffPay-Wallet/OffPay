@@ -110,8 +110,9 @@ flowchart TB
 - iOS bundle identifier and Android package: `com.offpay.app`.
 - Expo new architecture is enabled.
 - Bluetooth permissions are configured for offline payment receipt transport.
-- EAS project id is `27e2bc20-d53b-4237-8123-fdc22176e56b`.
-- `development` and `preview` EAS profiles set `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE=prototype`; `preview` builds an Android APK.
+- EAS project id is `7a90d5e4-cb4d-4c23-927c-84cd72247cec`.
+- `development` uses the EAS `development` environment; `preview` uses the EAS `preview` environment and builds an internal Android APK.
+- Public client environment values such as `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE` should be configured in EAS environments, not hardcoded in the profile.
 
 ## Verification Commands
 

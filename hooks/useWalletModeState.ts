@@ -1,5 +1,4 @@
 import { useNetInfo } from '@react-native-community/netinfo';
-import { useEffect } from 'react';
 
 import { usePreferencesStore } from '@/store/preferencesStore';
 
@@ -28,12 +27,6 @@ export function useWalletModeState(): WalletModeState {
   const effectiveWalletMode: WalletMode =
     preferredWalletMode === 'offline' || isOfflineFallback ? 'offline' : 'online';
   const canUseNetwork = effectiveWalletMode === 'online' && isOnlineReachable;
-
-  useEffect(() => {
-    if (preferredWalletMode === 'online' && isOfflineFallback) {
-      setPreferredWalletMode('offline');
-    }
-  }, [isOfflineFallback, preferredWalletMode, setPreferredWalletMode]);
 
   return {
     preferredWalletMode,

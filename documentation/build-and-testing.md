@@ -43,6 +43,17 @@ Instead of Expo Go, use:
    eas build --profile preview --platform android
    ```
 
+4. **Production build** (Android App Bundle):
+   ```bash
+   eas build --profile production --platform android
+   ```
+
+5. **Local release artifacts**:
+   ```bash
+   npm run build:android:apk
+   npm run build:android:aab
+   ```
+
 ## Native Configuration
 
 `app.config.ts` defines:
@@ -52,13 +63,15 @@ Instead of Expo Go, use:
 - Android package `com.offpay.app`
 - Expo new architecture enabled
 - Bluetooth permissions for offline payment receipt transport
-- EAS project id `27e2bc20-d53b-4237-8123-fdc22176e56b`
+- EAS project id `7a90d5e4-cb4d-4c23-927c-84cd72247cec`
 
 `eas.json` defines:
 
-- `development`: internal development client with `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE=prototype`
-- `preview`: internal Android APK with the same prototype attestation mode
-- `production`: default production profile
+- `development`: internal development client using the EAS `development` environment
+- `preview`: internal Android APK using the EAS `preview` environment
+- `production`: Android app bundle for store distribution using the EAS `production` environment
+
+Public client environment values such as `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE` should be configured in EAS environments instead of hardcoded in `eas.json`.
 
 ## Build Profiles
 
@@ -91,6 +104,11 @@ Available scripts from `package.json`:
 | `npm run lint` | Expo lint |
 | `npm run typecheck` | TypeScript no-emit check |
 | `npm run verify:hardening` | client hardening guard |
+| `npm run build:android:apk` | local release APK for direct install testing |
+| `npm run build:android:apk:arm64` | local release APK for arm64-only smoke testing |
+| `npm run build:android:apk:size` | print local release APK size |
+| `npm run build:android:aab` | local Android App Bundle for Play-style release checks |
+| `npm run build:android:aab:size` | print local Android App Bundle size |
 
 Server-starting scripts exist (`npm start`, `npm run android`, `npm run ios`, `npm run web`) and should only be run when local server execution is intended.
 

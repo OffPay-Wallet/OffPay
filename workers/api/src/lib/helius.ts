@@ -2689,10 +2689,12 @@ function extractWalletNativeSolTransferDeltas(
     }
 
     const program = readTrimmedString(instruction.program)?.toLowerCase() ?? '';
+    const programId = readTrimmedString(instruction.programId);
     const parsed = isRecord(instruction.parsed) ? instruction.parsed : null;
     const parsedType = parsed ? (readTrimmedString(parsed.type)?.toLowerCase() ?? '') : '';
     const info = parsed && isRecord(parsed.info) ? parsed.info : null;
-    if (program !== 'system' || !parsedType.includes('transfer') || info === null) {
+    const isSystemProgram = program === 'system' || programId === SYSTEM_PROGRAM_ID;
+    if (!isSystemProgram || !parsedType.includes('transfer') || info === null) {
       continue;
     }
 
@@ -3314,7 +3316,7 @@ async function getWalletTransactions(
   const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v2', [
     request.address,
     normalizedCursor ?? 'first-page',
     normalizedLimit,
@@ -3357,7 +3359,7 @@ async function getWalletTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v1',
+          namespace: 'wallet-transactions-v2',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,

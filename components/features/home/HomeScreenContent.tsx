@@ -33,7 +33,7 @@ import { OFFLINE_PAYMENT_SLOT_DEFAULT } from '@/constants/offline-payment-slots'
 import { layout, radii, spacing } from '@/constants/spacing';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
-import { useWalletModeState } from '@/hooks/useWalletModeState';
+import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { usePendingBackupQueueStats } from '@/hooks/usePendingBackupQueueStats';
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
@@ -115,6 +115,12 @@ const HOME_REFRESH_SPINNER_MIN_MS = 360;
 
 const SHIELDED_SKELETON_TOKEN_ROWS = ['usdc', 'usdt', 'wsol', 'umbra'] as const;
 const SHIELDED_SKELETON_CHIPS = ['shield', 'withdraw', 'token-a', 'token-b'] as const;
+
+interface HomeBalanceModeState {
+  scopeKey: string;
+  mode: HomeBalanceMode;
+  shieldedPaneMounted: boolean;
+}
 
 /**
  * Identities (`network:wallet:online|offline`) for which the staged
@@ -223,10 +229,14 @@ export function HomeScreenContent(): React.JSX.Element {
   const privatePaymentReceipts = usePrivatePaymentStore((s) => s.receipts);
   const swapReceipts = useAdvancedSwapStore((s) => s.receipts);
   const { network } = useOffpayNetwork();
+  const homeBalanceModeScopeKey = `${network ?? 'no-network'}:${publicKey ?? 'no-wallet'}`;
   const getScreenSignal = useScreenAbortSignal();
   const [privacyHidden, setPrivacyHidden] = useState(false);
-  const [homeBalanceMode, setHomeBalanceMode] = useState<HomeBalanceMode>('default');
-  const [shieldedPaneMounted, setShieldedPaneMounted] = useState(false);
+  const [homeBalanceModeState, setHomeBalanceModeState] = useState<HomeBalanceModeState>(() => ({
+    scopeKey: homeBalanceModeScopeKey,
+    mode: 'default',
+    shieldedPaneMounted: false,
+  }));
   const [slotPromptVisible, setSlotPromptVisible] = useState(false);
   const [homeRefreshPending, setHomeRefreshPending] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<OffpayRecentActivityView | null>(
@@ -241,8 +251,21 @@ export function HomeScreenContent(): React.JSX.Element {
     pendingSlots: number;
   } | null>(null);
   const walletModeCommitRef = useRef<ScheduledUiWork | null>(null);
-  const { effectiveWalletMode, canUseNetwork, isOnlineReachable, setPreferredWalletMode } =
-    useWalletModeState();
+  const {
+    effectiveWalletMode,
+    canUseNetwork,
+    isOnlineReachable,
+    isNetworkSwitching,
+    setPreferredWalletMode,
+  } = useOffpayNetworkAccess();
+  const homeBalanceMode =
+    homeBalanceModeState.scopeKey === homeBalanceModeScopeKey
+      ? homeBalanceModeState.mode
+      : 'default';
+  const shieldedPaneMounted =
+    homeBalanceModeState.scopeKey === homeBalanceModeScopeKey
+      ? homeBalanceModeState.shieldedPaneMounted
+      : false;
   const homeDataIdentity =
     publicKey != null && network != null
       ? `${network}:${publicKey}:${canUseNetwork ? 'online' : 'offline'}`
@@ -588,19 +611,27 @@ export function HomeScreenContent(): React.JSX.Element {
     );
   }, []);
 
-  const handleChangeHomeBalanceMode = useCallback((mode: HomeBalanceMode): void => {
-    if (mode === 'shielded') {
-      setShieldedPaneMounted(true);
-    }
-    setHomeBalanceMode(mode);
-  }, []);
+  const handleChangeHomeBalanceMode = useCallback(
+    (mode: HomeBalanceMode): void => {
+      setHomeBalanceModeState((current) => {
+        const keepMounted =
+          current.scopeKey === homeBalanceModeScopeKey && current.shieldedPaneMounted;
+
+        return {
+          scopeKey: homeBalanceModeScopeKey,
+          mode,
+          shieldedPaneMounted: keepMounted || mode === 'shielded',
+        };
+      });
+    },
+    [homeBalanceModeScopeKey],
+  );
 
   // Warm the Umbra vault chunk the moment the user switches to the
   // Shielded segment. Kept in an effect (not inline in render) so the
   // dynamic `import()` side effect never runs during the render pass.
   useEffect(() => {
     if (homeBalanceMode === 'shielded') {
-      setShieldedPaneMounted(true);
       prefetchUmbraVaultContent('render');
     }
   }, [homeBalanceMode]);
@@ -1044,8 +1075,9 @@ export function HomeScreenContent(): React.JSX.Element {
       ? spacing.lg
       : spacing['2xl'];
   const sectionGap = compactHome ? spacing.lg : spacing.xl;
-  const shieldedPaneActive = homeBalanceMode === 'shielded';
-  const shouldRenderShieldedPane = shieldedPaneMounted || shieldedPaneActive;
+  const shieldedPaneActive = !isNetworkSwitching && homeBalanceMode === 'shielded';
+  const shouldRenderShieldedPane =
+    !isNetworkSwitching && (shieldedPaneMounted || shieldedPaneActive);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -1075,8 +1107,10 @@ export function HomeScreenContent(): React.JSX.Element {
 
         <View style={styles.homeContentFrame}>
           <HomeBalanceModeDivider
+            key={`home-balance-mode-${homeBalanceModeScopeKey}`}
             selectedMode={homeBalanceMode}
             onChangeMode={handleChangeHomeBalanceMode}
+            loading={isNetworkSwitching}
             onShieldedPressIn={handlePrefetchUmbraVaultContent}
           />
         </View>
