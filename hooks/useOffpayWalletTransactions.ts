@@ -85,11 +85,15 @@ export function useOffpayWalletTransactions(options?: {
   const capabilitiesQuery = useOffpayCapabilities({ enabled: enabledByCaller });
   const { capabilities } = capabilitiesQuery;
   const queryClient = useQueryClient();
-  const transactionsQueryKey = offpayWalletTransactionsQueryKey(
-    walletAddress,
-    network,
-    limit,
-    useCache === false ? 'network' : 'cached',
+  const transactionsQueryKey = useMemo(
+    () =>
+      offpayWalletTransactionsQueryKey(
+        walletAddress,
+        network,
+        limit,
+        useCache === false ? 'network' : 'cached',
+      ),
+    [limit, network, useCache, walletAddress],
   );
   const capability: CapabilityStatus = !canUseNetwork
     ? {
@@ -193,6 +197,7 @@ export function useOffpayWalletTransactions(options?: {
     refetchOnMount: options?.refetchOnMount ?? true,
     refetchOnReconnect: true,
   });
+  const refetchTransactionsQuery = query.refetch;
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
   const pages = query.data?.pages ?? EMPTY_PAGES;
   const firstPage = pages[0] ?? null;
@@ -244,7 +249,7 @@ export function useOffpayWalletTransactions(options?: {
   const refetchFresh = useCallback(
     async (options?: { signal?: AbortSignal }): Promise<void> => {
       if (walletAddress == null || network == null || !canRequestTransactions) {
-        await query.refetch();
+        await refetchTransactionsQuery();
         return;
       }
 
@@ -262,13 +267,14 @@ export function useOffpayWalletTransactions(options?: {
           useCache: false,
           signal: options?.signal,
         });
-        const mergedPage = mergeWalletTransactionsWithDisplayCache({
+        const mergedPage = await mergeWalletTransactionsWithDisplayCache({
           walletAddress,
           network,
           transactions: page,
           fallback,
         });
         const updatedAt = Date.now();
+        const transactionsQueryKeyId = JSON.stringify(transactionsQueryKey);
         const queryKeys = [
           transactionsQueryKey,
           offpayWalletTransactionsQueryKey(walletAddress, network, limit, 'cached'),
@@ -282,7 +288,7 @@ export function useOffpayWalletTransactions(options?: {
           seenKeys.add(keyId);
 
           const existing = queryClient.getQueryData<WalletTransactionsInfiniteData>(queryKey);
-          if (existing == null && keyId !== JSON.stringify(transactionsQueryKey)) continue;
+          if (existing == null && keyId !== transactionsQueryKeyId) continue;
 
           queryClient.setQueryData<WalletTransactionsInfiniteData>(
             queryKey,
@@ -308,8 +314,8 @@ export function useOffpayWalletTransactions(options?: {
       canRequestTransactions,
       limit,
       network,
-      query,
       queryClient,
+      refetchTransactionsQuery,
       transactionsQueryKey,
       walletAddress,
     ],

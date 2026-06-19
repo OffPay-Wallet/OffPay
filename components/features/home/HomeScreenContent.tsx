@@ -299,6 +299,7 @@ export function HomeScreenContent(): React.JSX.Element {
   const transactionsQuery = useOffpayWalletTransactions({
     enabled: transactionsReady,
   });
+  const refetchFreshTransactions = transactionsQuery.refetchFresh;
   const pendingBackupStatsQuery = usePendingBackupQueueStats({
     walletAddress: publicKey,
     enabled: backgroundStatsReady,
@@ -1020,7 +1021,7 @@ export function HomeScreenContent(): React.JSX.Element {
         requestAnimationFrame(() => {
           if (signal.aborted) return;
           if (transactionsKey != null) {
-            void transactionsQuery.refetchFresh({ signal }).catch(() => undefined);
+            void refetchFreshTransactions({ signal }).catch(() => undefined);
           }
           if (backupStatsKey != null) {
             void queryClient.invalidateQueries(
@@ -1041,7 +1042,7 @@ export function HomeScreenContent(): React.JSX.Element {
     currency,
     queryClient,
     getScreenSignal,
-    transactionsQuery.refetchFresh,
+    refetchFreshTransactions,
   ]);
 
   const handleTokenPress = useCallback(
