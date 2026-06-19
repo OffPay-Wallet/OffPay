@@ -16,7 +16,10 @@ import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
-import { getExternalWalletSigner } from '@/lib/wallet/external-wallet-signing';
+import {
+  getExternalWalletSigner,
+  waitForExternalWalletSigner,
+} from '@/lib/wallet/external-wallet-signing';
 import {
   getWalletSigningBlocker,
   walletHasLocalSigningMaterial,
@@ -26,6 +29,8 @@ import type {
   ExternalSignableSolanaTransaction,
   ExternalWalletSigner,
 } from '@/lib/wallet/external-wallet-signing';
+
+const EXTERNAL_SIGNER_WAIT_TIMEOUT_MS = 2500;
 
 interface SignSerializedTransactionParams {
   unsignedTransaction: string;
@@ -233,7 +238,9 @@ async function getExternalSignerForStoredWallet(
     throw new Error('The active Privy wallet does not match the requested signer.');
   }
 
-  const signer = getExternalWalletSigner(walletAddress);
+  const signer =
+    getExternalWalletSigner(walletAddress) ??
+    (await waitForExternalWalletSigner(walletAddress, EXTERNAL_SIGNER_WAIT_TIMEOUT_MS));
   if (signer == null) {
     throw new Error(
       getWalletSigningBlocker(walletInfo.importMethod, 'Privy wallet signing', walletAddress) ??

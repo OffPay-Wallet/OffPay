@@ -53,7 +53,7 @@ export function useActiveWalletSigningCapability(): {
 } {
   const importMethod = useWalletStore(selectActiveWalletImportMethod);
   const walletAddress = useWalletStore(selectActiveWalletAddress);
-  useSyncExternalStore(
+  const signingSnapshot = useSyncExternalStore(
     subscribeExternalWalletSigners,
     getExternalWalletSigningSnapshot,
     getExternalWalletSigningSnapshot,
@@ -66,6 +66,6 @@ export function useActiveWalletSigningCapability(): {
       canSignWithApp: walletCanSignWithApp({ importMethod, walletAddress }),
       signingBlocker: getWalletSigningBlocker(importMethod, 'This action', walletAddress),
     }),
-    [importMethod, walletAddress],
+    [importMethod, signingSnapshot, walletAddress],
   );
 }

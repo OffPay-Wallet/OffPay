@@ -1,7 +1,7 @@
 import { Buffer } from 'buffer';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import bs58 from 'bs58';
 
 import { registerExternalWalletSigner } from '@/lib/wallet/external-wallet-signing';
@@ -19,6 +19,59 @@ interface BridgeSolanaWallet {
   getProvider: () => Promise<PrivyEmbeddedSolanaWalletProvider>;
 }
 
+function isBridgeSolanaWallet(value: unknown): value is BridgeSolanaWallet {
+  if (value == null || typeof value !== 'object') return false;
+
+  const candidate = value as {
+    address?: unknown;
+    publicKey?: unknown;
+    walletIndex?: unknown;
+    getProvider?: unknown;
+  };
+
+  return (
+    typeof candidate.address === 'string' &&
+    candidate.address.length > 0 &&
+    typeof candidate.getProvider === 'function' &&
+    (candidate.publicKey == null || typeof candidate.publicKey === 'string') &&
+    (candidate.walletIndex == null || typeof candidate.walletIndex === 'number')
+  );
+}
+
+function readPrivySolanaWallets(state: unknown): BridgeSolanaWallet[] {
+  if (state == null || typeof state !== 'object') return [];
+
+  const candidate = state as {
+    status?: unknown;
+    publicKey?: unknown;
+    getProvider?: unknown;
+    wallets?: unknown;
+  };
+  const wallets = Array.isArray(candidate.wallets)
+    ? candidate.wallets.filter(isBridgeSolanaWallet)
+    : [];
+
+  if (wallets.length > 0) return wallets;
+
+  if (
+    candidate.status === 'connected' &&
+    typeof candidate.publicKey === 'string' &&
+    candidate.publicKey.length > 0 &&
+    typeof candidate.getProvider === 'function'
+  ) {
+    return [
+      {
+        address: candidate.publicKey,
+        publicKey: candidate.publicKey,
+        walletIndex: 0,
+        getProvider: candidate.getProvider as BridgeSolanaWallet['getProvider'],
+      },
+    ];
+  }
+
+  return [];
+}
+
 function decodePrivySignature(signature: string): Uint8Array {
   const base64 = Uint8Array.from(Buffer.from(signature, 'base64'));
   if (base64.length === 64) return base64;
@@ -34,19 +87,21 @@ function decodePrivySignature(signature: string): Uint8Array {
 }
 
 export function PrivySolanaSigningBridge(): null {
+  const { isReady: privyReady } = usePrivy();
   const solanaWallet = useEmbeddedSolanaWallet();
   const walletsRef = useRef<BridgeSolanaWallet[]>([]);
-  const walletKey =
-    solanaWallet.status === 'connected'
-      ? solanaWallet.wallets
-          .map((wallet) => `${wallet.address}:${wallet.walletIndex}`)
-          .sort()
-          .join('|')
-      : '';
+  const wallets = useMemo(
+    () => (privyReady ? readPrivySolanaWallets(solanaWallet) : []),
+    [privyReady, solanaWallet],
+  );
+  const walletKey = wallets
+    .map((wallet) => `${wallet.address}:${wallet.walletIndex ?? 0}`)
+    .sort()
+    .join('|');
 
   useEffect(() => {
-    walletsRef.current = solanaWallet.status === 'connected' ? solanaWallet.wallets : [];
-  }, [solanaWallet]);
+    walletsRef.current = wallets;
+  }, [wallets]);
 
   useEffect(() => {
     if (walletKey.length === 0) return undefined;

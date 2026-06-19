@@ -57,6 +57,40 @@ export function getExternalWalletSigner(
   return signersByAddress.get(normalizeAddress(walletAddress)) ?? null;
 }
 
+export function waitForExternalWalletSigner(
+  walletAddress: string | null | undefined,
+  timeoutMs: number,
+): Promise<ExternalWalletSigner | null> {
+  if (walletAddress == null) return Promise.resolve(null);
+
+  const normalizedWalletAddress = normalizeAddress(walletAddress);
+  const existing = signersByAddress.get(normalizedWalletAddress) ?? null;
+  if (existing != null || timeoutMs <= 0) return Promise.resolve(existing);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const settle = (signer: ExternalWalletSigner | null) => {
+      if (settled) return;
+      settled = true;
+      if (timeout != null) clearTimeout(timeout);
+      unsubscribe();
+      resolve(signer);
+    };
+
+    const unsubscribe = subscribeExternalWalletSigners(() => {
+      const signer = signersByAddress.get(normalizedWalletAddress) ?? null;
+      if (signer != null) settle(signer);
+    });
+
+    timeout = setTimeout(() => settle(null), timeoutMs);
+
+    const signerAfterSubscribe = signersByAddress.get(normalizedWalletAddress) ?? null;
+    if (signerAfterSubscribe != null) settle(signerAfterSubscribe);
+  });
+}
+
 export function hasExternalWalletSigner(walletAddress: string | null | undefined): boolean {
   return getExternalWalletSigner(walletAddress) != null;
 }
