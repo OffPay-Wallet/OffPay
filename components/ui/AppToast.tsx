@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
@@ -27,9 +28,11 @@ import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useNotificationStore } from '@/store/notificationStore';
 
+import type { ComponentProps } from 'react';
 import type { LocalNotificationVariant } from '@/store/notificationStore';
 
 export type AppToastVariant = LocalNotificationVariant;
+type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
 interface AppToastOptions {
   title: string;
@@ -56,29 +59,38 @@ const TOAST_META: Record<
   AppToastVariant,
   {
     accent: string;
+    fill: string;
+    icon: IoniconName;
   }
 > = {
   success: {
     accent: colors.semantic.success,
+    fill: colors.notificationIcon.successFill,
+    icon: 'checkmark',
   },
   error: {
     accent: colors.semantic.error,
+    fill: colors.notificationIcon.errorFill,
+    icon: 'close',
   },
   warning: {
     accent: colors.semantic.warning,
+    fill: colors.notificationIcon.warningFill,
+    icon: 'warning',
   },
   info: {
     accent: colors.semantic.info,
+    fill: colors.notificationIcon.infoFill,
+    icon: 'information',
   },
 };
 
 const DEFAULT_DURATION_MS = 2400;
 const TOAST_DEDUPE_WINDOW_MS = 4000;
-const MAX_TOAST_TITLE_CHARS = 28;
-const MAX_TOAST_MESSAGE_CHARS = 42;
-const TOAST_MAX_WIDTH = 340;
+const MAX_TOAST_TITLE_CHARS = 36;
+const MAX_TOAST_MESSAGE_CHARS = 56;
+const TOAST_MAX_WIDTH = 430;
 const TOAST_EXIT_MS = 220;
-const TOAST_MIN_WIDTH = 220;
 
 function compactToastText(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -165,16 +177,8 @@ function AppToastHost({
   const sideInset = compact ? spacing.md : spacing.xl;
   const maxToastWidth = Math.max(0, Math.min(TOAST_MAX_WIDTH, windowWidth - sideInset * 2));
   const topPadding = insets.top + (compact ? spacing.sm : spacing.md);
-  const longestLineLength = toast == null ? 0 : Math.max(toast.title.length, toast.message.length);
-  const estimatedTextWidth = Math.min(
-    compact ? 250 : 292,
-    Math.max(140, longestLineLength * (compact ? 6.9 : 7.6)),
-  );
-  const toastWidth = Math.min(
-    maxToastWidth,
-    Math.max(TOAST_MIN_WIDTH, estimatedTextWidth + (compact ? 36 : 44)),
-  );
-  const textMaxWidth = Math.max(140, toastWidth - (compact ? 32 : 40));
+  const toastWidth = maxToastWidth;
+  const textMaxWidth = Math.max(140, toastWidth - (compact ? 82 : 92));
 
   const dismiss = useCallback(() => {
     if (dismissTimerRef.current != null) {
@@ -287,10 +291,19 @@ function AppToastHost({
           }
         >
           <View style={[styles.toastSurface, compact ? styles.toastSurfaceCompact : null]}>
+            <View
+              style={[
+                styles.toastIcon,
+                compact ? styles.toastIconCompact : null,
+                { backgroundColor: toastMeta.fill },
+              ]}
+            >
+              <Ionicons name={toastMeta.icon} size={compact ? 16 : 18} color={toastMeta.accent} />
+            </View>
             <Animated.View style={[styles.toastText, { maxWidth: textMaxWidth }, textStyle]}>
               <Text
                 variant="bodyBold"
-                color={toastMeta.accent}
+                color={colors.text.primary}
                 numberOfLines={1}
                 adjustsFontSizeToFit
                 minimumFontScale={0.84}
@@ -328,8 +341,8 @@ const styles = StyleSheet.create({
   },
   toast: {
     position: 'relative',
-    minHeight: 58,
-    borderRadius: radii.full,
+    minHeight: 68,
+    borderRadius: radii.xl,
     borderCurve: 'continuous',
     overflow: 'hidden',
     borderTopWidth: 1,
@@ -344,43 +357,57 @@ const styles = StyleSheet.create({
   toastSurface: {
     flex: 1,
     width: '100%',
-    minHeight: 58,
-    borderRadius: radii.full,
+    minHeight: 68,
+    borderRadius: radii.xl,
     borderCurve: 'continuous',
     backgroundColor: colors.surface.cardElevated,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
+    justifyContent: 'flex-start',
+    gap: spacing.sm,
   },
   toastCompact: {
-    minHeight: 54,
+    minHeight: 62,
   },
   toastSurfaceCompact: {
-    minHeight: 54,
+    minHeight: 62,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
   },
   toastPressed: {
     opacity: 0.84,
   },
-  toastText: {
+  toastIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+  },
+  toastIconCompact: {
+    width: 30,
+    height: 30,
+  },
+  toastText: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
     minWidth: 0,
-    width: '100%',
     gap: 2,
+    flex: 1,
   },
   toastTitle: {
     fontFamily: fontFamily.uiSemiBold,
     letterSpacing: 0,
-    textAlign: 'center',
+    textAlign: 'left',
+    lineHeight: 20,
   },
   toastMessage: {
     fontFamily: fontFamily.ui,
-    lineHeight: 16,
+    lineHeight: 17,
     letterSpacing: 0,
-    textAlign: 'center',
+    textAlign: 'left',
   },
 });

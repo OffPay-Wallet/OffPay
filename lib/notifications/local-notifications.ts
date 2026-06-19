@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
+import { beginAppLockSuppression } from '@/lib/wallet/app-lock-suppression';
+
 import type {
   OffpayDisplayTransactionType,
   OffpayUmbraWalletActivityType,
@@ -200,14 +202,24 @@ async function ensurePermission(): Promise<boolean> {
     if (current.canAskAgain === false && current.status === Notifications.PermissionStatus.DENIED) {
       return false;
     }
-    const requested = await Notifications.requestPermissionsAsync({
-      ios: {
-        allowAlert: true,
-        allowSound: true,
-        allowBadge: false,
-      },
-    });
-    return requested.granted;
+
+    // The OS permission sheet can briefly background/inactivate the
+    // app. Suppress app-lock while it is open so approving
+    // notifications does not clear the unlocked wallet and leave the
+    // root shell blank.
+    const releaseAppLockSuppression = beginAppLockSuppression();
+    try {
+      const requested = await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowSound: true,
+          allowBadge: false,
+        },
+      });
+      return requested.granted;
+    } finally {
+      releaseAppLockSuppression();
+    }
   })();
 
   return permissionPromise;

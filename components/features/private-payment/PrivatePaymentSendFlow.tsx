@@ -119,6 +119,7 @@ type SendStepTransitionDirection = 'forward' | 'backward';
 const MAX_AMOUNT_INPUT_CHARACTERS = 48;
 const SEND_CONTENT_MAX_WIDTH = 430;
 const UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS = 300_000;
+const FEE_ESTIMATE_INPUT_DEBOUNCE_MS = 220;
 const SEND_HEADER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const SEND_STEP_TRANSITION_DURATION_MS = 260;
@@ -508,6 +509,23 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       selectedToken == null ? null : decimalInputToAtomicAmount(amount, selectedToken.decimals),
     [amount, selectedToken],
   );
+  const [feeEstimateAmountRaw, setFeeEstimateAmountRaw] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPositiveRawAmount(amountRaw)) {
+      setFeeEstimateAmountRaw(null);
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => {
+      setFeeEstimateAmountRaw(amountRaw);
+    }, FEE_ESTIMATE_INPUT_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [amountRaw]);
+
   const balanceRaw = useMemo(
     () =>
       selectedToken == null
@@ -630,19 +648,20 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     network,
     enabled: normalFeeEstimateEnabled,
   });
+  const feeEstimateMatchesAmount =
+    feeEstimateAmountRaw != null && feeEstimateAmountRaw === amountRaw;
   const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
     walletAddress,
     recipient: effectiveRecipientAddress,
     mint: selectedToken?.mint ?? null,
-    rawAmount: amountRaw,
+    rawAmount: feeEstimateAmountRaw,
     network,
     enabled:
-      step === 'summary' &&
       effectiveWalletMode !== 'offline' &&
       effectivePaymentRoute === 'magicblock' &&
       selectedToken != null &&
       effectiveRecipientAddress != null &&
-      amountRaw != null &&
+      feeEstimateAmountRaw != null &&
       walletAddress != null &&
       walletId != null &&
       network != null &&
@@ -661,10 +680,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       return 'Fee unavailable';
     }
     if (effectivePaymentRoute === 'magicblock') {
-      if (magicBlockFeeEstimate.plan?.feeLamports != null) {
+      if (feeEstimateMatchesAmount && magicBlockFeeEstimate.plan?.feeLamports != null) {
         return `${formatLamportsAsSol(magicBlockFeeEstimate.plan.feeLamports, 9)} SOL`;
       }
-      if (magicBlockFeeEstimate.isFetching) return 'Estimating';
+      if (!feeEstimateMatchesAmount || magicBlockFeeEstimate.isFetching) return 'Estimating';
       if (magicBlockFeeEstimate.isError) return 'Fee unavailable';
       return 'Fee unavailable';
     }
@@ -672,6 +691,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   }, [
     effectivePaymentRoute,
     effectiveWalletMode,
+    feeEstimateMatchesAmount,
     magicBlockFeeEstimate.isError,
     magicBlockFeeEstimate.isFetching,
     magicBlockFeeEstimate.plan,
@@ -1361,7 +1381,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     step === 'summary' &&
     effectiveWalletMode !== 'offline' &&
     effectivePaymentRoute === 'magicblock'
-      ? magicBlockFeeEstimate.plan != null
+      ? feeEstimateMatchesAmount && magicBlockFeeEstimate.plan != null
         ? null
         : magicBlockFeeEstimate.isFetching
           ? 'Preparing private transfer.'

@@ -32,6 +32,7 @@ const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_SENTINEL_MINT = 'native-sol';
 const CREATE_ASSOCIATED_TOKEN_ACCOUNT_IDEMPOTENT_INSTRUCTION = 1;
 const TRANSFER_CHECKED_INSTRUCTION = 12;
+const SENDER_TOKEN_ACCOUNT_CACHE_TTL_MS = 2 * 60_000;
 
 interface EstimateNormalTransferFeeParams {
   walletAddress: string;
@@ -48,6 +49,15 @@ export interface NormalTransferFeeEstimate {
   /** Network fee, in lamports. `null` if the cluster could not price the message. */
   lamports: number | null;
 }
+
+type SenderTokenAccountResolution = { tokenAccount: string; tokenProgramId: string } | null;
+
+interface SenderTokenAccountCacheEntry {
+  expiresAt: number;
+  promise: Promise<SenderTokenAccountResolution>;
+}
+
+const senderTokenAccountCache = new Map<string, SenderTokenAccountCacheEntry>();
 
 function u64LittleEndian(value: bigint): Buffer {
   const bytes = Buffer.alloc(8);
@@ -76,6 +86,14 @@ function isNativeSolMint(mint: string): boolean {
     normalized === NATIVE_SOL_SENTINEL_MINT ||
     normalized.toUpperCase() === 'SOL'
   );
+}
+
+function getSenderTokenAccountCacheKey(params: {
+  walletAddress: string;
+  mint: string;
+  network: OffpayNetwork;
+}): string {
+  return `${params.network}:${params.walletAddress}:${params.mint}`;
 }
 
 function createAssociatedTokenAccountIdempotentInstruction(params: {
@@ -130,6 +148,13 @@ async function resolveSenderTokenAccount(params: {
   network: OffpayNetwork;
   signal?: AbortSignal;
 }): Promise<{ tokenAccount: string; tokenProgramId: string } | null> {
+  const now = Date.now();
+  const cacheKey = getSenderTokenAccountCacheKey(params);
+  const cached = senderTokenAccountCache.get(cacheKey);
+  if (cached != null && cached.expiresAt > now) {
+    return cached.promise;
+  }
+
   const candidates = [
     {
       tokenProgramId: SPL_TOKEN_PROGRAM_ID,
@@ -149,20 +174,31 @@ async function resolveSenderTokenAccount(params: {
     },
   ];
 
-  const response = await getRpcAccounts({
+  const promise = getRpcAccounts({
     addresses: candidates.map((candidate) => candidate.tokenAccount),
     network: params.network,
+  })
+    .then(
+      (response): SenderTokenAccountResolution =>
+        candidates.find((candidate, index) => {
+          const account = response.accounts[index];
+          return (
+            account?.owner === candidate.tokenProgramId &&
+            getTokenAccountMint(account) === params.mint
+          );
+        }) ?? null,
+    )
+    .catch((error: unknown) => {
+      senderTokenAccountCache.delete(cacheKey);
+      throw error;
+    });
+
+  senderTokenAccountCache.set(cacheKey, {
+    expiresAt: now + SENDER_TOKEN_ACCOUNT_CACHE_TTL_MS,
+    promise,
   });
 
-  return (
-    candidates.find((candidate, index) => {
-      const account = response.accounts[index];
-      return (
-        account?.owner === candidate.tokenProgramId &&
-        getTokenAccountMint(account) === params.mint
-      );
-    }) ?? null
-  );
+  return promise;
 }
 
 function compileMessageBase64(transaction: Transaction): string {
@@ -180,9 +216,26 @@ export async function estimateNormalTokenTransferFee(
     return { lamports: null };
   }
 
-  const latestBlockhash = await getRpcLatestBlockhash(params.network);
   const payer = new PublicKey(params.walletAddress);
   const recipient = new PublicKey(params.recipient);
+  const latestBlockhashPromise = getRpcLatestBlockhash(params.network);
+  let latestBlockhash: Awaited<ReturnType<typeof getRpcLatestBlockhash>>;
+  let senderAccount: SenderTokenAccountResolution = null;
+
+  if (isNativeSolMint(params.mint)) {
+    latestBlockhash = await latestBlockhashPromise;
+  } else {
+    [latestBlockhash, senderAccount] = await Promise.all([
+      latestBlockhashPromise,
+      resolveSenderTokenAccount({
+        walletAddress: params.walletAddress,
+        mint: params.mint,
+        network: params.network,
+        signal: params.signal,
+      }),
+    ]);
+  }
+
   const transaction = new Transaction({
     feePayer: payer,
     recentBlockhash: latestBlockhash.blockhash,
@@ -197,12 +250,6 @@ export async function estimateNormalTokenTransferFee(
       }),
     );
   } else {
-    const senderAccount = await resolveSenderTokenAccount({
-      walletAddress: params.walletAddress,
-      mint: params.mint,
-      network: params.network,
-      signal: params.signal,
-    });
     if (senderAccount == null) {
       // Wallet does not yet hold the mint — we can't compile a real
       // transfer instruction, but a fee for an SPL transfer is still
