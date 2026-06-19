@@ -56,6 +56,7 @@ import {
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import { usePreferencesStore } from '@/store/preferencesStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
@@ -628,7 +629,7 @@ function TokenPriceHistoryCard({
             symbol={holding.symbol}
             name={holding.name}
             logoUri={holding.logo}
-            size={compact ? 36 : 42}
+            size={dense ? 32 : compact ? 36 : 42}
           />
           <View style={styles.overviewTokenCopy}>
             <View style={styles.nameRow}>
@@ -650,7 +651,11 @@ function TokenPriceHistoryCard({
           <Text
             variant="h1"
             color={colors.text.primary}
-            style={[styles.overviewBalanceValue, compact && styles.overviewBalanceValueCompact]}
+            style={[
+              styles.overviewBalanceValue,
+              compact && styles.overviewBalanceValueCompact,
+              dense && styles.overviewBalanceValueDense,
+            ]}
             numberOfLines={1}
             adjustsFontSizeToFit
             minimumFontScale={0.42}
@@ -727,8 +732,15 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width, height, fontScale } = useWindowDimensions();
-  const compact = width < 380 || height < 760 || fontScale > 1.05;
-  const dense = width < 340 || fontScale > 1.18;
+  const viewportProfile = getViewportProfile({
+    width,
+    height,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const compact = viewportProfile.compact;
+  const dense = viewportProfile.dense;
   const { showToast } = useAppToast();
   const params = useLocalSearchParams<{ mint?: string }>();
   const requestedMint = getSearchParam(params.mint);
@@ -795,7 +807,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     return items;
   }, [holding, transactionsQuery.network, transactionsQuery.transactions]);
 
-  const screenHorizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
+  const screenHorizontalPadding = viewportProfile.horizontalPadding;
   const actionCompact = dense || width < 360 || fontScale > 1.1;
 
   const handleCopyMint = (): void => {
@@ -851,7 +863,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
     setSelectedTransaction(null);
   }, []);
 
-  const bottomPadding = Math.max(insets.bottom, spacing.lg) + spacing['4xl'];
+  const bottomPadding =
+    Math.max(insets.bottom, dense ? spacing.md : spacing.lg) +
+    (dense ? spacing['2xl'] : spacing['4xl']);
+  const emptyStateMinHeight = dense ? 180 : compact ? 220 : 260;
 
   return (
     <View style={styles.container}>
@@ -896,7 +911,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
         </View>
 
         {holding == null ? (
-          <StaggerRevealItem index={0} style={[styles.contentFrame, styles.emptyState]}>
+          <StaggerRevealItem
+            index={0}
+            style={[styles.contentFrame, styles.emptyState, { minHeight: emptyStateMinHeight }]}
+          >
             <Text variant="bodyBold" color={colors.text.primary} align="center">
               {balanceQuery.isLoading || balanceQuery.isCapabilitiesPending
                 ? 'Loading token'
@@ -1132,6 +1150,10 @@ const styles = StyleSheet.create({
     fontSize: 36,
     lineHeight: 42,
   },
+  overviewBalanceValueDense: {
+    fontSize: 32,
+    lineHeight: 38,
+  },
   overviewSubRow: {
     minHeight: 24,
     flexDirection: 'row',
@@ -1239,7 +1261,6 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   emptyState: {
-    minHeight: 260,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,

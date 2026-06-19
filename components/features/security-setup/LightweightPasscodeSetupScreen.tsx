@@ -7,6 +7,7 @@ import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { LightweightKeypadButton } from '@/components/ui/LightweightKeypadButton';
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import {
   getCachedSecuritySettings,
   getSecuritySettings,
@@ -35,8 +36,13 @@ function nextRoute(intent: SecuritySetupIntent): void {
 }
 
 export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React.JSX.Element {
-  const { width, height } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
   const cachedSettings = getCachedSecuritySettings();
+  const viewportProfile = getViewportProfile({ width, height, fontScale });
+  const compact = viewportProfile.compact;
+  const dense = viewportProfile.dense;
+  const screenPadding = viewportProfile.horizontalPadding;
+  const keypadGap = dense ? spacing.sm : spacing.lg;
 
   const [mode, setMode] = useState<PasscodeMode>(() =>
     cachedSettings?.hasPasscode === true ? 'unlockExisting' : 'create',
@@ -57,14 +63,18 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
   const initialSettingsAppliedRef = useRef(cachedSettings != null);
 
   const keySize = useMemo(() => {
-    const maxWidth = Math.min(336, Math.max(220, width - spacing['3xl'] * 2));
-    const gap = spacing.lg;
-    const budget = Math.max(220, height - 430);
+    const maxWidth = Math.min(336, Math.max(220, width - screenPadding * 2));
+    const reservedHeight = dense ? 344 : compact ? 386 : 430;
+    const budget = Math.max(196, height - reservedHeight);
     return Math.max(
       layout.minTouchTarget,
-      Math.min(66, Math.floor((maxWidth - gap * 2) / 3), Math.floor((budget - gap * 3) / 4)),
+      Math.min(
+        dense ? 58 : 66,
+        Math.floor((maxWidth - keypadGap * 2) / 3),
+        Math.floor((budget - keypadGap * 3) / 4),
+      ),
     );
-  }, [width, height]);
+  }, [compact, dense, height, keypadGap, screenPadding, width]);
 
   const keyFrameStyle = useMemo(
     () => ({
@@ -305,10 +315,16 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
     <CreateWalletScreenLayout
       header={<View />}
       center={
-        <View style={styles.centerBlock}>
+        <View style={[styles.centerBlock, { gap: dense ? spacing.lg : spacing['2xl'] }]}>
           <View style={styles.copyBlock}>
             <RNText
-              style={styles.title}
+              style={[
+                styles.title,
+                {
+                  fontSize: dense ? 25 : compact ? 28 : 32,
+                  lineHeight: dense ? 31 : compact ? 34 : 38,
+                },
+              ]}
               numberOfLines={1}
               adjustsFontSizeToFit
               minimumFontScale={0.78}
@@ -327,9 +343,9 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
             <SimpleDot filled={entry.length > 5} />
           </View>
 
-          <View style={styles.keypad}>
+          <View style={[styles.keypad, { gap: keypadGap }]}>
             {keypadRows.map((row, rowIndex) => (
-              <View key={rowIndex} style={styles.keyRow}>
+              <View key={rowIndex} style={[styles.keyRow, { gap: keypadGap }]}>
                 {row.map((key) => {
                   if (key === 'clear') {
                     return (
@@ -419,7 +435,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   title: {
-    fontSize: 32,
     fontWeight: '700',
     color: colors.text.primary,
     textAlign: 'center',

@@ -10,6 +10,7 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { authenticateWithBiometrics, getBiometricAvailability } from '@/lib/wallet/biometric-auth';
 import { setFingerprintEnabled } from '@/lib/wallet/security-settings';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
 type SecuritySetupIntent = 'create-wallet' | 'restore-wallet' | 'privy-wallet';
 
@@ -33,11 +34,18 @@ function finishSetup(intent: SecuritySetupIntent): void {
 }
 
 export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): React.JSX.Element {
-  const { height, width } = useWindowDimensions();
-  const compact = height < 740;
-  const veryCompact = height < 680;
-  const contentMaxWidth = Math.min(420, Math.max(280, width - spacing['3xl'] * 2));
-  const fingerprintIconSize = Math.min(56, Math.max(42, Math.round(width * 0.13)));
+  const { height, width, fontScale } = useWindowDimensions();
+  const viewportProfile = getViewportProfile({ width, height, fontScale });
+  const compact = viewportProfile.compact;
+  const veryCompact = viewportProfile.dense;
+  const contentMaxWidth = Math.min(
+    420,
+    Math.max(260, width - viewportProfile.horizontalPadding * 2),
+  );
+  const fingerprintIconSize = Math.min(
+    veryCompact ? 46 : 56,
+    Math.max(38, Math.round(width * 0.13)),
+  );
   const [available, setAvailable] = useState(false);
   const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -116,7 +124,7 @@ export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): Rea
             styles.centerBlock,
             {
               maxWidth: contentMaxWidth,
-              transform: [{ translateY: veryCompact ? 0 : compact ? spacing.sm : spacing.lg }],
+              transform: [{ translateY: veryCompact ? 0 : compact ? spacing.xs : spacing.sm }],
             },
           ]}
         >

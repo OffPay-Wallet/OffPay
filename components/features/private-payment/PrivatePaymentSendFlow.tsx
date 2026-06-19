@@ -79,6 +79,7 @@ import { loadOfflinePaymentSlotSnapshot } from '@/lib/offline/offline-payment-sl
 import { parseRecipientInput, type RecipientCandidate } from '@/lib/identity/recipient-parser';
 import { resolveSnsName } from '@/lib/identity/sns';
 import { submitPrivatePayment } from '@/lib/magicblock/private-payment';
+import { getResponsiveFooterBottomPadding, getViewportProfile } from '@/lib/ui/responsive-layout';
 import {
   isRnZkProverNativeModuleAvailable,
   RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE,
@@ -225,47 +226,6 @@ function HeaderIconButton({
     >
       <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}>
         {children}
-      </View>
-    </Pressable>
-  );
-}
-
-function HeaderTextButton({
-  label,
-  onPress,
-  disabled,
-  accessibilityLabel,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled: boolean;
-  accessibilityLabel: string;
-}): React.JSX.Element {
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.headerTextButton,
-        disabled ? styles.headerTextButtonDisabled : null,
-        pressed && !disabled ? styles.headerControlPressed : null,
-      ]}
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={6}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled }}
-    >
-      <View
-        style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerTextButtonSurface]}
-      >
-        <Text
-          variant="bodyBold"
-          color={disabled ? colors.text.tertiary : colors.text.primary}
-          numberOfLines={1}
-          maxFontSizeMultiplier={1}
-        >
-          {label}
-        </Text>
       </View>
     </Pressable>
   );
@@ -699,14 +659,20 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     normalFeeEstimate.isError,
     normalFeeEstimate.isFetching,
   ]);
-  const compactSend = width < 390 || height < 820 || fontScale > 1.05;
-  const denseSend = width < 350 || height < 720 || fontScale > 1.18;
-  const screenHorizontalPadding = denseSend
-    ? spacing.md
-    : compactSend
-      ? spacing.lg
-      : spacing['2xl'];
-  const sectionGap = denseSend ? spacing.md : compactSend ? spacing.lg : spacing.xl;
+  const viewportProfile = getViewportProfile({
+    width,
+    height,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const compactSend = viewportProfile.compact;
+  const denseSend = viewportProfile.dense;
+  const screenHorizontalPadding = viewportProfile.horizontalPadding;
+  const sectionGap = viewportProfile.sectionGap;
+  const footerButtonHeight = viewportProfile.bottomActionHeight;
+  const footerBottomPadding = getResponsiveFooterBottomPadding(insets.bottom, denseSend);
+  const footerTopPadding = denseSend ? spacing.sm : spacing.md;
   const footerHorizontalPadding = Math.max(
     (width - SEND_CONTENT_MAX_WIDTH) / 2,
     screenHorizontalPadding,
@@ -1985,13 +1951,22 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         onPress={() => void handleContinueRecipient()}
         disabled={!canContinueRecipient}
         loading={recipientResolving}
+        compact={denseSend}
       />
     ) : step === 'amount' ? (
-      <PrimaryButton label="Next" onPress={handleContinueAmount} disabled={!baseCanSubmit} />
+      <PrimaryButton
+        label="Next"
+        onPress={handleContinueAmount}
+        disabled={!baseCanSubmit}
+        compact={denseSend}
+      />
     ) : (
       // Summary / success are handled entirely by the draggable sheet
       // (slider + Close), so no footer button is shown underneath it.
-      <View style={styles.footerPlaceholder} pointerEvents="none" />
+      <View
+        style={[styles.footerPlaceholder, denseSend && styles.footerPlaceholderCompact]}
+        pointerEvents="none"
+      />
     );
 
   return (
@@ -2019,7 +1994,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
               // Without this, scrollable content would render
               // underneath the footer button.
               paddingBottom:
-                Math.max(insets.bottom, spacing.lg) + layout.buttonHeightLg + spacing['2xl'],
+                footerBottomPadding + footerButtonHeight + footerTopPadding + sectionGap,
               paddingHorizontal: screenHorizontalPadding,
             },
           ]}
@@ -2058,16 +2033,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
                           ? `Send ${selectedToken.symbol}`
                           : 'Send'}
                 </Text>
-                {step === 'amount' ? (
-                  <HeaderTextButton
-                    label="Next"
-                    onPress={handleContinueAmount}
-                    disabled={!baseCanSubmit}
-                    accessibilityLabel="Review send summary"
-                  />
-                ) : (
-                  <View style={styles.headerButtonPlaceholder} />
-                )}
+                <View style={styles.headerButtonPlaceholder} />
               </View>
 
               {stepContent}
@@ -2090,7 +2056,8 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         style={[
           styles.footer,
           {
-            paddingBottom: Math.max(insets.bottom, spacing.lg),
+            paddingBottom: footerBottomPadding,
+            paddingTop: footerTopPadding,
             paddingHorizontal: footerHorizontalPadding,
           },
         ]}
@@ -2139,17 +2106,20 @@ function PrimaryButton({
   onPress,
   disabled = false,
   loading = false,
+  compact = false,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   loading?: boolean;
+  compact?: boolean;
 }): React.JSX.Element {
   const isDisabled = disabled || loading;
   return (
     <Pressable
       style={({ pressed }) => [
         styles.footerButton,
+        compact && styles.footerButtonCompact,
         styles.primaryButton,
         isDisabled && styles.disabledButton,
         pressed && !isDisabled && styles.buttonPressed,
@@ -2238,30 +2208,6 @@ const styles = StyleSheet.create({
   headerButtonPlaceholder: {
     width: layout.minTouchTarget + spacing.xs,
     height: layout.minTouchTarget + spacing.xs,
-  },
-  headerTextButton: {
-    minWidth: layout.minTouchTarget + spacing.lg,
-    maxWidth: 104,
-    minHeight: layout.minTouchTarget,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.strongFill,
-    boxShadow: SEND_HEADER_SHADOW,
-  },
-  headerTextButtonDisabled: {
-    opacity: 0.62,
-  },
-  headerTextButtonSurface: {
-    minHeight: layout.minTouchTarget,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   headerTitle: {
     flex: 1,
@@ -2594,6 +2540,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  footerButtonCompact: {
+    height: layout.buttonHeightMd,
+  },
   // Same dimensions as the footer button so token/summary steps
   // (which don't render a CTA in the footer) keep the footer
   // container at a constant height. This is what stops the body
@@ -2601,6 +2550,9 @@ const styles = StyleSheet.create({
   footerPlaceholder: {
     flex: 1,
     height: layout.buttonHeightLg,
+  },
+  footerPlaceholderCompact: {
+    height: layout.buttonHeightMd,
   },
   footerSlider: {
     flex: 1,

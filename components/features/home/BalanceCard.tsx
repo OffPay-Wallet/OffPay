@@ -35,6 +35,7 @@ import { CURRENCIES } from '@/constants/currencies';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -275,8 +276,15 @@ export const BalanceCard = memo(function BalanceCard({
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const wideLayout = windowWidth >= 520;
-  const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
-  const ultraCompact = windowWidth < 360 || fontScale > 1.18;
+  const viewportProfile = getViewportProfile({
+    width: windowWidth,
+    height: windowHeight,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const compact = viewportProfile.compact;
+  const ultraCompact = viewportProfile.dense;
   const hasOfflineStatus = offlineSlotsLabel != null;
   const stackFooter = windowWidth < 300 || fontScale > 1.45;
   const [copied, setCopied] = useState(false);
@@ -326,7 +334,7 @@ export const BalanceCard = memo(function BalanceCard({
   const maskedAddress = privacyHidden ? '****' : displayAddress;
   const cardHPadding = compact ? spacing.md : spacing.lg;
   const cardVPadding = compact ? spacing.md : 18;
-  const portfolioCardMinHeight = stackFooter ? 202 : compact ? 178 : 200;
+  const portfolioCardMinHeight = stackFooter ? 190 : ultraCompact ? 158 : compact ? 172 : 200;
   const topControlSize = ultraCompact ? 30 : compact ? 32 : 36;
   const footerControlHeight = ultraCompact ? 30 : 32;
   const statusPillHeight = ultraCompact ? 24 : 26;

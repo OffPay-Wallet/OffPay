@@ -44,6 +44,7 @@ import { PuffySettingsIcon } from '@/components/ui/icons/PuffySettingsIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import { SwapCard } from '@/components/features/swap/SwapCard';
 import { SwapDetailsCard } from '@/components/features/swap/SwapDetailsCard';
 import { SwapConfirmationButton } from '@/components/features/swap/SwapConfirmationButton';
@@ -1980,14 +1981,17 @@ export function SwapScreen(): React.JSX.Element {
     router.push((query.length > 0 ? `/advanced-swap?${query}` : '/advanced-swap') as never);
   }, [currentInputAmount, payToken?.mint, receiveToken?.mint, router]);
 
-  const compactSwap = windowWidth < 390 || windowHeight < 820 || fontScale > 1.05;
-  const denseSwap = windowWidth < 350 || windowHeight < 720 || fontScale > 1.18;
-  const screenHorizontalPadding = denseSwap
-    ? spacing.md
-    : compactSwap
-      ? spacing.lg
-      : spacing['2xl'];
-  const sectionGap = denseSwap ? spacing.sm : compactSwap ? 10 : spacing.md;
+  const viewportProfile = getViewportProfile({
+    width: windowWidth,
+    height: windowHeight,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const compactSwap = viewportProfile.compact;
+  const denseSwap = viewportProfile.dense;
+  const screenHorizontalPadding = viewportProfile.horizontalPadding;
+  const sectionGap = denseSwap ? spacing.sm : compactSwap ? spacing.md : spacing.lg;
   const dataStillDeferred =
     !isOfflineMode &&
     (!tabDataReady ||

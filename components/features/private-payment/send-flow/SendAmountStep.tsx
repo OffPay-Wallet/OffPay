@@ -10,6 +10,7 @@ import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { parseFormattedFiatCurrency } from '@/lib/currency-rates';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
 import { PrivateRouteSelector } from './PrivateRouteSelector';
 import type { PrivatePaymentRoute, PrivatePaymentRouteOption, SendTokenOption } from './types';
@@ -102,12 +103,26 @@ export function SendAmountStep({
   const symbol = token?.symbol ?? '';
   const recipientLabel =
     recipientAddress != null ? shortenWalletAddress(recipientAddress) : recipientInput.trim();
-  const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
-  const dense = windowWidth < 350 || fontScale > 1.18;
-  const amountBaseFontSize = dense ? 38 : compact ? 42 : 46;
-  const amountBaseLineHeight = dense ? 45 : compact ? 50 : 55;
-  const symbolFontSize = dense ? 32 : compact ? 36 : 40;
-  const symbolLineHeight = dense ? 38 : compact ? 43 : 48;
+  const viewportProfile = getViewportProfile({
+    width: windowWidth,
+    height: windowHeight,
+    fontScale,
+  });
+  const compact = viewportProfile.compact;
+  const dense = viewportProfile.dense;
+  const ultraDense = viewportProfile.ultraDense;
+  const stepGap = ultraDense ? spacing.sm : dense ? spacing.md : spacing.lg;
+  const fieldHorizontalPadding = ultraDense ? spacing.md : dense ? spacing.md : spacing.lg;
+  const cardRadius = ultraDense ? radii.xl : radii['2xl'];
+  const toRowMinHeight = ultraDense ? 46 : dense ? 50 : 54;
+  const amountHeroMinHeight = ultraDense ? 152 : dense ? 176 : compact ? 208 : 236;
+  const amountHeroGap = ultraDense ? spacing.xs : spacing.sm;
+  const availableCardMinHeight = ultraDense ? 64 : dense ? 72 : 82;
+  const maxButtonMinHeight = ultraDense ? 36 : dense ? 40 : 44;
+  const amountBaseFontSize = ultraDense ? 30 : dense ? 34 : compact ? 40 : 46;
+  const amountBaseLineHeight = ultraDense ? 36 : dense ? 41 : compact ? 48 : 55;
+  const symbolFontSize = ultraDense ? 25 : dense ? 29 : compact ? 34 : 40;
+  const symbolLineHeight = ultraDense ? 30 : dense ? 35 : compact ? 41 : 48;
   const amountTextStyle = useMemo(() => {
     return getScaledAmountTextStyle({
       value: amount,
@@ -126,9 +141,18 @@ export function SendAmountStep({
     <Animated.View
       entering={FadeIn.duration(220)}
       layout={LinearTransition.duration(220)}
-      style={styles.step}
+      style={[styles.step, { gap: stepGap }]}
     >
-      <View style={styles.toRow}>
+      <View
+        style={[
+          styles.toRow,
+          {
+            minHeight: toRowMinHeight,
+            borderRadius: cardRadius,
+            paddingHorizontal: fieldHorizontalPadding,
+          },
+        ]}
+      >
         <Text
           variant="bodyBold"
           color={colors.text.secondary}
@@ -149,7 +173,17 @@ export function SendAmountStep({
         </Pressable>
       </View>
 
-      <View style={styles.amountHero}>
+      <View
+        style={[
+          styles.amountHero,
+          {
+            minHeight: amountHeroMinHeight,
+            borderRadius: cardRadius,
+            paddingHorizontal: fieldHorizontalPadding,
+            gap: amountHeroGap,
+          },
+        ]}
+      >
         <LinearGradient
           pointerEvents="none"
           colors={[
@@ -227,7 +261,17 @@ export function SendAmountStep({
         )}
       </View>
 
-      <View style={styles.availableCard}>
+      <View
+        style={[
+          styles.availableCard,
+          {
+            minHeight: availableCardMinHeight,
+            borderRadius: cardRadius,
+            paddingHorizontal: fieldHorizontalPadding,
+            paddingVertical: ultraDense ? spacing.sm : spacing.md,
+          },
+        ]}
+      >
         <View>
           <Text variant="small" color={colors.text.secondary}>
             Available To Send
@@ -242,7 +286,14 @@ export function SendAmountStep({
           </Text>
         </View>
         <Pressable
-          style={({ pressed }) => [styles.maxButton, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.maxButton,
+            {
+              minHeight: maxButtonMinHeight,
+              paddingHorizontal: ultraDense ? spacing.md : spacing.lg,
+            },
+            pressed && styles.pressed,
+          ]}
           onPress={onMax}
           accessibilityRole="button"
           accessibilityLabel="Use maximum amount"
@@ -344,7 +395,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   amountHero: {
-    minHeight: 248,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -353,10 +403,8 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
-    paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
     boxShadow: [
       '0 20px 44px rgba(0, 0, 0, 0.46)',
       'inset 0 1px 2px rgba(255, 255, 255, 0.18)',
@@ -402,7 +450,6 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   availableCard: {
-    minHeight: 82,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     borderTopWidth: 1,
@@ -411,8 +458,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.frostFill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -424,7 +469,6 @@ const styles = StyleSheet.create({
     ].join(', '),
   },
   maxButton: {
-    minHeight: 44,
     borderRadius: radii.full,
     borderCurve: 'continuous',
     borderTopWidth: 1,
@@ -433,7 +477,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.glass.smokeWash,
-    paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },

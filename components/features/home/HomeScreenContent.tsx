@@ -44,6 +44,7 @@ import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { formatFiatCurrency } from '@/lib/currency-rates';
 import { formatLamportsAsExactSol } from '@/lib/crypto/solana-amounts';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
 import {
@@ -1000,14 +1001,15 @@ export function HomeScreenContent(): React.JSX.Element {
   }, [navigateToTab]);
 
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + layout.tabBarHeight + spacing.md;
-  const compactHome = windowWidth < 380 || windowHeight < 760 || fontScale > 1.08;
-  const denseHome = windowWidth < 340 || fontScale > 1.18;
-  const screenHorizontalPadding = denseHome
-    ? spacing.md
-    : compactHome
-      ? spacing.lg
-      : spacing['2xl'];
-  const sectionGap = compactHome ? spacing.lg : spacing.xl;
+  const viewportProfile = getViewportProfile({
+    width: windowWidth,
+    height: windowHeight,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const screenHorizontalPadding = viewportProfile.horizontalPadding;
+  const sectionGap = viewportProfile.compact ? spacing.lg : spacing.xl;
   const shieldedPaneActive = !isNetworkSwitching && homeBalanceMode === 'shielded';
   const shouldRenderShieldedPane =
     !isNetworkSwitching && (shieldedPaneMounted || shieldedPaneActive);

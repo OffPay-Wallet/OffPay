@@ -13,6 +13,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
 import { SWAP_CONTROL_SHADOW, SWAP_PANEL_SHADOW } from './swapGlass';
 
@@ -97,20 +98,26 @@ export const SwapCard = memo(function SwapCard({
   const [activePill, setActivePill] = useState<'0' | '50%' | 'Max' | null>(null);
   const [payInputWidth, setPayInputWidth] = useState(0);
   const [receiveInputWidth, setReceiveInputWidth] = useState(0);
-  const compact = windowWidth < 390 || windowHeight < 820 || fontScale > 1.05;
-  const dense = windowWidth < 350 || windowHeight < 720 || fontScale > 1.18;
-  const cardPadding = dense ? spacing.md : compact ? 14 : spacing.lg;
-  const assetBlockMinHeight = dense ? 124 : compact ? 134 : 148;
-  const receiveBlockMinHeight = dense ? 104 : compact ? 114 : 126;
+  const viewportProfile = getViewportProfile({
+    width: windowWidth,
+    height: windowHeight,
+    fontScale,
+  });
+  const compact = viewportProfile.compact;
+  const dense = viewportProfile.dense;
+  const ultraDense = viewportProfile.ultraDense;
+  const cardPadding = ultraDense ? spacing.sm : dense ? spacing.md : compact ? 14 : spacing.lg;
+  const assetBlockMinHeight = ultraDense ? 104 : dense ? 116 : compact ? 128 : 144;
+  const receiveBlockMinHeight = ultraDense ? 88 : dense ? 98 : compact ? 108 : 122;
   const tokenIconSize = dense ? 22 : compact ? 24 : 26;
-  const tokenPillMinHeight = dense ? 36 : compact ? 38 : 42;
+  const tokenPillMinHeight = ultraDense ? 34 : dense ? 36 : compact ? 38 : 42;
   const tokenCheckIconSize = dense ? 15 : compact ? 16 : 17;
   const tokenChevronSize = dense ? 17 : 18;
-  const directionSize = dense ? 38 : compact ? 42 : 46;
+  const directionSize = ultraDense ? 34 : dense ? 38 : compact ? 42 : 46;
   const directionIconSize = dense ? 15 : compact ? 16 : 18;
-  const amountBaseFontSize = dense ? 24 : compact ? 28 : 32;
-  const amountBaseLineHeight = dense ? 30 : compact ? 34 : 39;
-  const amountInputHeight = dense ? 34 : compact ? 38 : 42;
+  const amountBaseFontSize = ultraDense ? 22 : dense ? 24 : compact ? 28 : 32;
+  const amountBaseLineHeight = ultraDense ? 27 : dense ? 30 : compact ? 34 : 39;
+  const amountInputHeight = ultraDense ? 30 : dense ? 34 : compact ? 38 : 42;
   const payAmountTextStyle = getScaledAmountTextStyle({
     value: payAmount,
     fieldWidth: payInputWidth,

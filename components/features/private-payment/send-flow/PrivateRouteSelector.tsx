@@ -11,6 +11,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
 import type { PrivatePaymentRoute, PrivatePaymentRouteOption } from './types';
 
@@ -27,10 +28,12 @@ export const PrivateRouteSelector = memo(function PrivateRouteSelector({
   selectedRoute,
   onSelectRoute,
 }: PrivateRouteSelectorProps): React.JSX.Element | null {
-  const { width } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
   if (routes.length === 0 || selectedRoute == null) return null;
 
+  const viewportProfile = getViewportProfile({ width, height, fontScale });
   const stackRoutes = width < 340 || routes.length === 1;
+  const dense = viewportProfile.dense;
 
   return (
     <View style={styles.section}>
@@ -41,6 +44,7 @@ export const PrivateRouteSelector = memo(function PrivateRouteSelector({
             route={route}
             selected={route.id === selectedRoute}
             stacked={stackRoutes}
+            dense={dense}
             onSelect={onSelectRoute}
           />
         ))}
@@ -53,6 +57,7 @@ interface RouteCardProps {
   route: PrivatePaymentRouteOption;
   selected: boolean;
   stacked: boolean;
+  dense: boolean;
   onSelect: (route: PrivatePaymentRoute) => void;
 }
 
@@ -60,6 +65,7 @@ const RouteCard = memo(function RouteCard({
   route,
   selected,
   stacked,
+  dense,
   onSelect,
 }: RouteCardProps): React.JSX.Element {
   const disabled = route.disabled === true;
@@ -88,6 +94,7 @@ const RouteCard = memo(function RouteCard({
       style={({ pressed }) => [
         styles.routeCard,
         stacked && styles.routeCardStacked,
+        dense && styles.routeCardDense,
         disabled && styles.routeCardDisabled,
         pressed && !disabled && styles.routeCardPressed,
       ]}
@@ -164,6 +171,10 @@ const styles = StyleSheet.create({
   },
   routeCardStacked: {
     minHeight: 48,
+  },
+  routeCardDense: {
+    minHeight: 46,
+    paddingVertical: spacing.xs,
   },
   routeCardFill: {
     ...StyleSheet.absoluteFill,

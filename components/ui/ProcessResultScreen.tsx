@@ -21,6 +21,7 @@ import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { getResponsiveFooterBottomPadding, getViewportProfile } from '@/lib/ui/responsive-layout';
 
 export type ProcessResultVariant = 'success' | 'cancelled' | 'error';
 
@@ -213,13 +214,26 @@ export function ProcessResultScreen({
 }: ProcessResultScreenProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
-  const compact = width < 390 || height < 780 || fontScale > 1.08;
-  const dense = width < 350 || height < 700 || fontScale > 1.18;
-  const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
-  const animationSize = animationSizeOverride ?? (dense ? 160 : compact ? 188 : 220);
-  const actionBottomPadding = Math.max(insets.bottom, dense ? spacing.md : spacing.lg);
+  const viewportProfile = getViewportProfile({
+    width,
+    height,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const compact = viewportProfile.compact;
+  const dense = viewportProfile.dense;
+  const horizontalPadding = viewportProfile.horizontalPadding;
+  const animationSize =
+    animationSizeOverride ?? (viewportProfile.ultraDense ? 132 : dense ? 152 : compact ? 180 : 220);
+  const actionBottomPadding = getResponsiveFooterBottomPadding(insets.bottom, dense);
   const actionTopPadding = dense ? spacing.sm : spacing.md;
-  const actionHeight = dense ? layout.buttonHeightMd : layout.buttonHeightLg;
+  const actionHeight = viewportProfile.bottomActionHeight;
+  const minimalTitleSize = dense
+    ? { fontSize: 32, lineHeight: 40 }
+    : compact
+      ? { fontSize: 36, lineHeight: 44 }
+      : undefined;
   const resultColor = getResultLottieColor(variant);
   const statusColor = resultColor;
 
@@ -275,7 +289,11 @@ export function ProcessResultScreen({
                   adjustsFontSizeToFit
                   minimumFontScale={0.82}
                   maxFontSizeMultiplier={1}
-                  style={[styles.title, minimal ? styles.titleMinimal : undefined]}
+                  style={[
+                    styles.title,
+                    minimal ? styles.titleMinimal : undefined,
+                    minimal ? minimalTitleSize : undefined,
+                  ]}
                 >
                   {title}
                 </Text>

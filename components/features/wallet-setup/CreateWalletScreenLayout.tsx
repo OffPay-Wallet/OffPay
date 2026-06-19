@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
 import type { ReactNode } from 'react';
 import type { ScrollViewProps } from 'react-native';
@@ -35,19 +36,38 @@ export function CreateWalletScreenLayout({
   scrollViewProps,
 }: CreateWalletScreenLayoutProps): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const { height, width } = useWindowDimensions();
-  const hPad =
-    width < 360 ? spacing.xl : width < 390 ? spacing['2xl'] : layout.screenPaddingHorizontal;
-  const compactHeight = height < 720;
+  const { height, width, fontScale } = useWindowDimensions();
+  const viewportProfile = getViewportProfile({
+    width,
+    height,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const hPad = viewportProfile.ultraDense
+    ? spacing.md
+    : viewportProfile.dense
+      ? spacing.lg
+      : width < 390
+        ? spacing['2xl']
+        : layout.screenPaddingHorizontal;
+  const compactHeight = viewportProfile.dense;
   const footerBottomPadding = Math.max(
     insets.bottom + spacing.sm,
     compactHeight ? spacing.lg : spacing.xl,
   );
 
-  const body = scrollCenter ? (
+  const shouldScrollBody = scrollCenter || compactHeight;
+  const body = shouldScrollBody ? (
     <ScrollView
       style={styles.scroll}
-      contentContainerStyle={[styles.scrollContent, { paddingHorizontal: hPad }]}
+      contentContainerStyle={[
+        scrollCenter ? styles.scrollContent : styles.compactScrollContent,
+        {
+          paddingHorizontal: hPad,
+          paddingVertical: compactHeight ? spacing.sm : spacing.md,
+        },
+      ]}
       contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
@@ -94,7 +114,10 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingVertical: spacing.md,
+  },
+  compactScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   center: {
     flex: 1,

@@ -23,6 +23,7 @@ import { PuffyFingerprintIcon } from '@/components/ui/icons/PuffyFingerprintIcon
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
 import { authenticateWithBiometrics } from '@/lib/wallet/biometric-auth';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import {
   getCachedSecuritySettings,
   getSecuritySettings,
@@ -51,7 +52,17 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { width, height } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
+  const viewportProfile = getViewportProfile({
+    width,
+    height,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const compact = viewportProfile.compact;
+  const dense = viewportProfile.dense;
+  const keypadGap = dense ? spacing.sm : spacing.lg;
 
   const [passcodeLength, setPasscodeLength] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
@@ -111,12 +122,17 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, [toast]);
 
   const keyFrameStyle = useMemo(() => {
+    const reservedHeight = dense ? 340 : compact ? 380 : 430;
     const keySize = Math.max(
       layout.minTouchTarget,
       Math.min(
-        72,
-        Math.floor((Math.min(336, Math.max(220, width - spacing['3xl'] * 2)) - spacing.lg * 2) / 3),
-        Math.floor((Math.max(220, height - 430) - spacing.lg * 3) / 4),
+        dense ? 58 : compact ? 64 : 72,
+        Math.floor(
+          (Math.min(336, Math.max(220, width - viewportProfile.horizontalPadding * 2)) -
+            keypadGap * 2) /
+            3,
+        ),
+        Math.floor((Math.max(196, height - reservedHeight) - keypadGap * 3) / 4),
       ),
     );
 
@@ -125,7 +141,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
       height: keySize,
       borderRadius: keySize / 2,
     };
-  }, [height, width]);
+  }, [compact, dense, height, keypadGap, viewportProfile.horizontalPadding, width]);
 
   const setPasscodeValue = useCallback((nextPasscode: string): void => {
     passcodeRef.current = nextPasscode;
@@ -381,9 +397,27 @@ export const PasscodeScreen = memo(function PasscodeScreen({
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <View style={styles.content}>
+      <View
+        style={[
+          styles.content,
+          {
+            gap: dense ? spacing.lg : spacing['2xl'],
+            paddingHorizontal: viewportProfile.horizontalPadding,
+          },
+        ]}
+      >
         <View style={styles.copyBlock}>
-          <RNText style={styles.title}>Unlock wallet</RNText>
+          <RNText
+            style={[
+              styles.title,
+              {
+                fontSize: dense ? 27 : compact ? 30 : 34,
+                lineHeight: dense ? 33 : compact ? 37 : 42,
+              },
+            ]}
+          >
+            Unlock wallet
+          </RNText>
           <RNText style={styles.subtitle}>
             {`Enter your passcode${fingerprintEnabled ? ' or use fingerprint' : ''}.`}
           </RNText>
@@ -398,9 +432,9 @@ export const PasscodeScreen = memo(function PasscodeScreen({
           <SimpleDot filled={passcodeLength > 5} />
         </Animated.View>
 
-        <View style={styles.keypad}>
+        <View style={[styles.keypad, { gap: keypadGap }]}>
           {keypadRows.map((row, rowIndex) => (
-            <View key={rowIndex} style={styles.keyRow}>
+            <View key={rowIndex} style={[styles.keyRow, { gap: keypadGap }]}>
               {row.map((key) => {
                 if (key === 'fingerprint') {
                   return (
@@ -530,15 +564,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing['3xl'],
-    gap: spacing['2xl'],
   },
   copyBlock: {
     alignItems: 'center',
     gap: spacing.sm,
   },
   title: {
-    fontSize: 34,
     fontWeight: '700',
     color: colors.text.primary,
     textAlign: 'center',

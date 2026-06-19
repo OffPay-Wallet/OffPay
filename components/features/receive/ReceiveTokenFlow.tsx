@@ -51,6 +51,7 @@ import {
 } from '@/lib/api/offpay-wallet-query-keys';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import {
   isRnZkProverNativeModuleAvailable,
@@ -424,20 +425,25 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     walletAddress,
   ]);
 
-  const compactReceive = width < 390 || height < 760 || fontScale > 1.08;
-  const denseReceive = width < 350 || fontScale > 1.18;
-  const screenHorizontalPadding = denseReceive
-    ? spacing.md
-    : compactReceive
-      ? spacing.lg
-      : spacing['2xl'];
+  const viewportProfile = getViewportProfile({
+    width,
+    height,
+    fontScale,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+  });
+  const compactReceive = viewportProfile.compact;
+  const denseReceive = viewportProfile.dense;
+  const ultraDenseReceive = viewportProfile.ultraDense;
+  const screenHorizontalPadding = viewportProfile.horizontalPadding;
   const contentMaxWidth = Math.min(
     Math.max(width - screenHorizontalPadding * 2, 0),
     RECEIVE_CONTENT_MAX_WIDTH,
   );
+  const qrMaxSize = ultraDenseReceive ? 216 : denseReceive ? 238 : compactReceive ? 266 : 300;
   const qrSize = Math.min(
-    Math.max(contentMaxWidth - (denseReceive ? spacing['2xl'] : spacing['3xl']), 208),
-    denseReceive ? 260 : compactReceive ? 286 : 310,
+    Math.max(contentMaxWidth - (denseReceive ? spacing['2xl'] : spacing['3xl']), 184),
+    qrMaxSize,
   );
   const networkLabel = formatNetworkLabel(network);
   const title =
@@ -1030,12 +1036,22 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           styles.scrollContent,
           {
             paddingTop: insets.top + (denseReceive ? spacing.sm : spacing.lg),
-            paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing['4xl'],
+            paddingBottom:
+              Math.max(insets.bottom, denseReceive ? spacing.sm : spacing.lg) +
+              (denseReceive ? spacing['2xl'] : spacing['4xl']),
             paddingHorizontal: screenHorizontalPadding,
           },
         ]}
       >
-        <View style={[styles.content, { maxWidth: contentMaxWidth }]}>
+        <View
+          style={[
+            styles.content,
+            {
+              maxWidth: contentMaxWidth,
+              gap: denseReceive ? spacing.md : spacing.lg,
+            },
+          ]}
+        >
           <View style={styles.header}>
             <HeaderIconButton onPress={handleClose} accessibilityLabel="Go back">
               <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
@@ -1072,7 +1088,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 eval, no React Query refetch, no SVG rebuild. */}
             <View
               key="receive-mode-standard"
-              style={[styles.standardLayout, isUmbraSurfaceVisible && styles.modeHidden]}
+              style={[
+                styles.standardLayout,
+                { gap: denseReceive ? spacing.md : spacing.lg },
+                isUmbraSurfaceVisible && styles.modeHidden,
+              ]}
               pointerEvents={isUmbraSurfaceVisible ? 'none' : 'auto'}
               accessibilityElementsHidden={isUmbraSurfaceVisible}
               importantForAccessibility={isUmbraSurfaceVisible ? 'no-hide-descendants' : 'auto'}
@@ -1091,7 +1111,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
               <StaggerRevealItem
                 index={1}
                 trigger={renderedReceiveMode}
-                style={styles.identityBlock}
+                style={[styles.identityBlock, denseReceive && styles.identityBlockDense]}
               >
                 <Text
                   variant="bodyBold"
@@ -1125,7 +1145,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                       backgroundColor={colors.brand.whiteStream}
                       logo={RECEIVE_QR_LOGO}
                       logoPlateColor={colors.brand.deepShadow}
-                      logoSize={Math.max(48, qrSize * 0.14)}
+                      logoSize={Math.max(34, qrSize * 0.14)}
                     />
                   ) : (
                     <View style={[styles.qrEmpty, { width: qrSize, height: qrSize }]}>
@@ -1419,6 +1439,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
     marginBottom: spacing.xs,
+  },
+  identityBlockDense: {
+    marginBottom: 0,
   },
   identityName: {
     fontFamily: fontFamily.semiBold,
