@@ -90,6 +90,7 @@ interface RpcSignatureEntry {
 interface RpcSignaturePage {
   entries: RpcSignatureEntry[];
   hasMore: boolean;
+  tokenAccounts: WalletTokenAccountAddress[];
 }
 
 interface WalletTransactionsResponse {
@@ -2522,6 +2523,7 @@ async function fetchWalletTransactionsViaEnhancedApi(
   url.searchParams.set('limit', limit.toString());
   url.searchParams.set('commitment', 'confirmed');
   url.searchParams.set('sort-order', 'desc');
+  url.searchParams.set('token-accounts', 'balanceChanged');
 
   if (cursor) {
     url.searchParams.set('before-signature', cursor);
@@ -2756,6 +2758,8 @@ function extractWalletNativeSolTransferDeltas(
 function extractWalletTokenRawBalances(
   balances: unknown,
   walletAddress: string,
+  walletTokenAccountAddresses: ReadonlySet<string>,
+  accountKeys: readonly unknown[],
 ): Map<string, BalanceAccumulator> {
   const totals = new Map<string, BalanceAccumulator>();
   if (!Array.isArray(balances)) {
@@ -2768,7 +2772,15 @@ function extractWalletTokenRawBalances(
     }
 
     const owner = readTrimmedString(entry.owner);
-    if (owner && owner !== walletAddress) {
+    const accountIndex = readFiniteNumber(entry.accountIndex);
+    const accountAddress =
+      accountIndex !== null && accountIndex >= 0
+        ? readAccountKeyAddress(accountKeys[Math.trunc(accountIndex)])
+        : null;
+    const belongsToWallet =
+      owner === walletAddress ||
+      (owner == null && accountAddress != null && walletTokenAccountAddresses.has(accountAddress));
+    if (!belongsToWallet) {
       continue;
     }
 
@@ -2903,13 +2915,28 @@ function extractTokenBalanceCounterparties(
 function extractWalletTokenBalanceDeltas(
   meta: Record<string, unknown> | null,
   walletAddress: string,
+  walletTokenAccounts: readonly WalletTokenAccountAddress[] = [],
+  accountKeys: readonly unknown[] = [],
 ): TokenBalanceDelta[] {
   if (meta === null) {
     return [];
   }
 
-  const preBalances = extractWalletTokenRawBalances(meta.preTokenBalances, walletAddress);
-  const postBalances = extractWalletTokenRawBalances(meta.postTokenBalances, walletAddress);
+  const walletTokenAccountAddresses = new Set(
+    walletTokenAccounts.map((account) => account.address),
+  );
+  const preBalances = extractWalletTokenRawBalances(
+    meta.preTokenBalances,
+    walletAddress,
+    walletTokenAccountAddresses,
+    accountKeys,
+  );
+  const postBalances = extractWalletTokenRawBalances(
+    meta.postTokenBalances,
+    walletAddress,
+    walletTokenAccountAddresses,
+    accountKeys,
+  );
   const mints = new Set([...preBalances.keys(), ...postBalances.keys()]);
   const deltas: TokenBalanceDelta[] = [];
 
@@ -3049,6 +3076,7 @@ async function buildRpcTransactionRecordFromResult(
   bindings: Bindings,
   network: Network,
   walletAddress: string,
+  walletTokenAccounts: readonly WalletTokenAccountAddress[],
   signature: string,
   fallbackTimestamp: number,
   fallbackStatus: 'success' | 'failed',
@@ -3068,6 +3096,7 @@ async function buildRpcTransactionRecordFromResult(
 
   const transaction = isRecord(result.transaction) ? result.transaction : null;
   const message = transaction && isRecord(transaction.message) ? transaction.message : null;
+  const accountKeys = message && Array.isArray(message.accountKeys) ? message.accountKeys : [];
   const instructions = message && Array.isArray(message.instructions) ? message.instructions : [];
   const meta = isRecord(result.meta) ? result.meta : null;
   const parsedInstructions = collectRpcParsedInstructions(instructions, meta);
@@ -3076,7 +3105,7 @@ async function buildRpcTransactionRecordFromResult(
   const hasError = meta ? meta.err !== null && meta.err !== undefined : fallbackStatus === 'failed';
 
   const tokenBalanceDeltas = [
-    ...extractWalletTokenBalanceDeltas(meta, walletAddress),
+    ...extractWalletTokenBalanceDeltas(meta, walletAddress, walletTokenAccounts, accountKeys),
     ...extractWalletNativeSolTransferDeltas(parsedInstructions, walletAddress, result),
   ];
   const tokenMetadata = await fetchTokenMetadataMap(
@@ -3143,6 +3172,7 @@ async function fetchRpcTransactionRecord(
   bindings: Bindings,
   network: Network,
   walletAddress: string,
+  walletTokenAccounts: readonly WalletTokenAccountAddress[],
   signature: string,
   fallbackTimestamp: number,
   fallbackStatus: 'success' | 'failed',
@@ -3160,6 +3190,7 @@ async function fetchRpcTransactionRecord(
     bindings,
     network,
     walletAddress,
+    walletTokenAccounts,
     signature,
     fallbackTimestamp,
     fallbackStatus,
@@ -3171,6 +3202,7 @@ async function fetchRpcTransactionRecordsBatch(
   bindings: Bindings,
   network: Network,
   walletAddress: string,
+  walletTokenAccounts: readonly WalletTokenAccountAddress[],
   entries: readonly {
     signature: string;
     timestamp: number;
@@ -3201,6 +3233,7 @@ async function fetchRpcTransactionRecordsBatch(
           bindings,
           network,
           walletAddress,
+          walletTokenAccounts,
           entry.signature,
           entry.timestamp,
           entry.status,
@@ -3215,6 +3248,7 @@ async function fetchRpcTransactionRecordsBatch(
           bindings,
           network,
           walletAddress,
+          walletTokenAccounts,
           entry.signature,
           entry.timestamp,
           entry.status,
@@ -3310,6 +3344,7 @@ async function fetchRpcWalletSignaturePage(
   return {
     entries,
     hasMore: entries.length > limit || anySourceMayHaveMore,
+    tokenAccounts,
   };
 }
 
@@ -3333,6 +3368,7 @@ async function fetchWalletTransactionsViaRpc(
     bindings,
     network,
     address,
+    signaturePage.tokenAccounts,
     transactionRequests,
   );
 

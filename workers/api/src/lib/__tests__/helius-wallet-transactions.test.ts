@@ -153,7 +153,7 @@ describe('getWalletTransactions RPC fallback', () => {
     });
   });
 
-  it('fetches token-account signatures so arbitrary token transfer history is not stablecoin-only', async () => {
+  it('fetches token-account signatures so arbitrary token transfer history is not stablecoin-only when owner metadata is sparse', async () => {
     const tokenSignature = `${SIGNATURE}tok`;
     const sender = 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3';
     const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
@@ -228,11 +228,12 @@ describe('getWalletTransactions RPC fallback', () => {
                 preTokenBalances: [
                   {
                     owner: sender,
+                    accountIndex: 0,
                     mint: OTHER_TOKEN_MINT,
                     uiTokenAmount: { amount: '12345000', decimals: 5 },
                   },
                   {
-                    owner: WALLET,
+                    accountIndex: 1,
                     mint: OTHER_TOKEN_MINT,
                     uiTokenAmount: { amount: '0', decimals: 5 },
                   },
@@ -240,11 +241,12 @@ describe('getWalletTransactions RPC fallback', () => {
                 postTokenBalances: [
                   {
                     owner: sender,
+                    accountIndex: 0,
                     mint: OTHER_TOKEN_MINT,
                     uiTokenAmount: { amount: '0', decimals: 5 },
                   },
                   {
-                    owner: WALLET,
+                    accountIndex: 1,
                     mint: OTHER_TOKEN_MINT,
                     uiTokenAmount: { amount: '12345000', decimals: 5 },
                   },
@@ -307,11 +309,11 @@ describe('getWalletTransactions RPC fallback', () => {
     });
   });
 
-  it('does not ask the mainnet enhanced history endpoint for token-account-only results', async () => {
+  it('asks the mainnet enhanced history endpoint for token-account balance-change results', async () => {
     const fetchMock = jest.fn(async (input: string) => {
       const url = new URL(input);
       expect(url.pathname).toBe(`/v0/addresses/${WALLET}/transactions`);
-      expect(url.searchParams.has('token-accounts')).toBe(false);
+      expect(url.searchParams.get('token-accounts')).toBe('balanceChanged');
       return jsonResponse([]);
     });
 
