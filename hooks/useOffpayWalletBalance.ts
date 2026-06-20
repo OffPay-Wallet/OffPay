@@ -25,6 +25,7 @@ interface UseOffpayWalletBalanceOptions {
   deferCapabilitiesUntilAfterInteractions?: boolean;
   eagerWithoutCapabilities?: boolean;
   enabled?: boolean;
+  requestOwner?: string;
 }
 
 export function useOffpayWalletBalance(
@@ -43,6 +44,7 @@ export function useOffpayWalletBalance(
   const capabilitiesQuery = useOffpayCapabilities({
     deferUntilAfterInteractions: options?.deferCapabilitiesUntilAfterInteractions,
     enabled: enabledByCaller,
+    requestOwner: `${options?.requestOwner ?? 'wallet.balance'}.capabilities`,
   });
   const { capabilities } = capabilitiesQuery;
   const capability: CapabilityStatus = !canUseNetwork
@@ -77,7 +79,10 @@ export function useOffpayWalletBalance(
         throw new Error('Wallet balance requires an active wallet and supported network.');
       }
 
-      return getWalletBalance(walletAddress, network, { signal });
+      return getWalletBalance(walletAddress, network, {
+        signal,
+        requestOwner: options?.requestOwner ?? 'wallet.balance',
+      });
     },
     enabled,
     staleTime: WALLET_BALANCE_STALE_TIME_MS,

@@ -23,6 +23,7 @@ import {
   mapWalletActivityEventForRecentActivity,
 } from '@/lib/api/offpay-wallet-data';
 import { getOfflineNonceReadiness } from '@/lib/offline/offline-payments';
+import { useAppStore } from '@/store/app';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -171,6 +172,10 @@ export function OffpayLaunchProvider({
   adapters,
 }: OffpayLaunchProviderProps): React.JSX.Element {
   const walletMode = usePreferencesStore((state) => state.walletMode);
+  const hasOnboarded = useAppStore((state) => state.hasOnboarded);
+  const username = useAppStore((state) => state.username);
+  const walletHydrated = useWalletStore((state) => state.isHydrated);
+  const hasStoredWallet = useWalletStore((state) => state.wallets.length > 0);
   const { canUseNetwork, effectiveWalletMode } = useOffpayNetworkAccess();
   // Single first-paint gate for everything that doesn't need to be
   // ready before the user can see the home screen. BLE receiver and
@@ -205,9 +210,20 @@ export function OffpayLaunchProvider({
   // behind first paint so the prompt/setup work doesn't compete with
   // launch-orchestrator and wallet warm-start rendering.
   useEffect(() => {
-    if (!firstPaintReady) return;
+    // Do not open an OS permission sheet during invite/onboarding.
+    // It can inactivate the app before a wallet session exists and
+    // leave pre-wallet screens behind a blank root shell on devices.
+    if (
+      !firstPaintReady ||
+      !walletHydrated ||
+      !hasStoredWallet ||
+      !hasOnboarded ||
+      username == null
+    ) {
+      return;
+    }
     prewarmWalletTransactionNotificationPermission();
-  }, [firstPaintReady]);
+  }, [firstPaintReady, hasOnboarded, hasStoredWallet, username, walletHydrated]);
 
   useLaunchOrchestrator({ adapters: launchAdapters });
   useSettlementEngine();

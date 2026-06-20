@@ -38,6 +38,7 @@ import { usePendingBackupQueueStats } from '@/hooks/usePendingBackupQueueStats';
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayPortfolioValuation } from '@/hooks/useOffpayPortfolioValuation';
+import { useOffpayHomeSnapshotCoordinator } from '@/hooks/useOffpayHomeSnapshotCoordinator';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOfflinePaymentSlots } from '@/hooks/useOfflinePaymentSlots';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
@@ -56,8 +57,10 @@ import {
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
 import {
   offpayWalletBalanceQueryKey,
+  offpayWalletDashboardQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
+  WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { useSettlementEngineStore } from '@/store/settlementEngineStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -264,16 +267,23 @@ export function HomeScreenContent(): React.JSX.Element {
   const promptRentEstimateTargetSlotCount = slotPromptVisible
     ? Math.max(offlinePaymentPoolSize, OFFLINE_PAYMENT_SLOT_DEFAULT)
     : undefined;
-  const capabilitiesQuery = useOffpayCapabilities({
+  const homeSnapshot = useOffpayHomeSnapshotCoordinator({
+    walletAddress: publicKey,
+    network,
     enabled: homeDataReady,
   });
+  const openHomeForegroundFetchGate = homeSnapshot.openForegroundFetchGate;
+  const capabilitiesQuery = useOffpayCapabilities({
+    enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
+    requestOwner: 'home.capabilities.fallback',
+  });
   const balanceQuery = useOffpayWalletBalance(null, {
-    enabled: homeDataReady,
-    // Capabilities are pre-warmed by the launch warm-start hook, so
-    // there's no need to defer the capabilities probe here. Subscribe
-    // as soon as the wallet identity resolves so hydrated dashboard
-    // cache can paint without replaying the old staged ramp.
+    enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
+    // Home reads dashboard/cache data first. Direct balance fetches
+    // are only a fallback after the snapshot coordinator opens the
+    // foreground gate.
     eagerWithoutCapabilities: true,
+    requestOwner: 'home.balance.fallback',
   });
   const offlinePaymentSlots = useOfflinePaymentSlots({
     enabled: homeDataReady,
@@ -282,9 +292,10 @@ export function HomeScreenContent(): React.JSX.Element {
     rentEstimateEnabled: slotPromptVisible && homeDataReady,
   });
   const transactionsQuery = useOffpayWalletTransactions({
-    enabled: homeDataReady,
+    enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
+    refetchOnMount: false,
+    requestOwner: 'home.transactions.fallback',
   });
-  const refetchFreshTransactions = transactionsQuery.refetchFresh;
   const pendingBackupStatsQuery = usePendingBackupQueueStats({
     walletAddress: publicKey,
     enabled: homeDataReady,
@@ -293,6 +304,7 @@ export function HomeScreenContent(): React.JSX.Element {
     enabled: homeDataReady,
     balanceData: balanceQuery.data,
     capabilities: capabilitiesQuery.capabilities,
+    fetchSwapTokenCatalog: homeSnapshot.idleFetchEnabled,
   });
   const settlementStatus = useSettlementEngineStore((state) => state.status);
   const settlementError = useSettlementEngineStore((state) => state.error);
@@ -315,8 +327,23 @@ export function HomeScreenContent(): React.JSX.Element {
     holdings: allVisibleHoldings,
     currency,
     enabled: homeDataReady,
+    networkFetchEnabled: homeSnapshot.marketFetchEnabled,
   });
-  const tokenValuations = portfolioValuationQuery.data?.tokenValues ?? EMPTY_TOKEN_VALUATIONS;
+  const hasPositiveHoldings = allVisibleHoldings.some((holding) => holding.balanceValue > 0);
+  const portfolioValuationData = portfolioValuationQuery.data;
+  const portfolioValuationComplete =
+    portfolioValuationData != null &&
+    portfolioValuationData.expectedCount > 0 &&
+    portfolioValuationData.pricedCount >= portfolioValuationData.expectedCount;
+  const portfolioValuationSettled =
+    portfolioValuationQuery.isFetched || portfolioValuationQuery.isError || !hasPositiveHoldings;
+  const portfolioValuationDisplayReady =
+    !hasPositiveHoldings || portfolioValuationComplete || portfolioValuationSettled;
+  const valuationValuesLoading =
+    previewHoldings.length > 0 && hasPositiveHoldings && !portfolioValuationDisplayReady;
+  const tokenValuations = portfolioValuationDisplayReady
+    ? (portfolioValuationData?.tokenValues ?? EMPTY_TOKEN_VALUATIONS)
+    : EMPTY_TOKEN_VALUATIONS;
   const recentActivity = useMemo(() => {
     const localReceiptsForNetwork = buildLocalHistoryReceiptInputs({
       network,
@@ -340,12 +367,9 @@ export function HomeScreenContent(): React.JSX.Element {
     transactionsQuery.transactions,
   ]);
   const portfolioValueLabel =
-    portfolioValuationQuery.data != null
-      ? formatFiatCurrency(
-          portfolioValuationQuery.data.total,
-          portfolioValuationQuery.data.currency,
-        )
-      : balanceQuery.data != null && allVisibleHoldings.length === 0
+    portfolioValuationDisplayReady && portfolioValuationData != null
+      ? formatFiatCurrency(portfolioValuationData.total, portfolioValuationData.currency)
+      : balanceQuery.data != null && !hasPositiveHoldings
         ? formatFiatCurrency(0, currency)
         : undefined;
   const networkLabel = network === 'mainnet' ? 'Mainnet' : network === 'devnet' ? 'Devnet' : null;
@@ -475,16 +499,27 @@ export function HomeScreenContent(): React.JSX.Element {
                 } waiting to sync.`
               : null;
   const hasWallet = publicKey != null;
-  const balanceWarmingUp = hasWallet && canUseNetwork && balanceQuery.isCapabilitiesPending;
-  const activityWarmingUp = hasWallet && canUseNetwork && transactionsQuery.isCapabilitiesPending;
+  const criticalSnapshotPending = homeSnapshot.criticalDataPending;
+  const balanceWarmingUp =
+    hasWallet && canUseNetwork && (criticalSnapshotPending || balanceQuery.isCapabilitiesPending);
+  const activityWarmingUp =
+    hasWallet &&
+    canUseNetwork &&
+    (criticalSnapshotPending || transactionsQuery.isCapabilitiesPending);
   const holdingsLoading =
     previewHoldings.length === 0 &&
-    (balanceWarmingUp || balanceQuery.isLoading || balanceQuery.isCapabilitiesPending);
+    (criticalSnapshotPending ||
+      balanceWarmingUp ||
+      balanceQuery.isLoading ||
+      balanceQuery.isCapabilitiesPending);
   const activityLoading =
     recentActivity.length === 0 &&
-    (activityWarmingUp || transactionsQuery.isLoading || transactionsQuery.isCapabilitiesPending);
+    (criticalSnapshotPending ||
+      activityWarmingUp ||
+      transactionsQuery.isLoading ||
+      transactionsQuery.isCapabilitiesPending);
   const holdingsEmptyTitle = balanceQuery.isCapabilityEnabled
-    ? balanceQuery.isLoading
+    ? holdingsLoading || balanceQuery.isLoading
       ? 'Loading holdings'
       : balanceQuery.isError
         ? 'Unable to load holdings'
@@ -500,7 +535,7 @@ export function HomeScreenContent(): React.JSX.Element {
       ? undefined
       : balanceQuery.capability.message;
   const activityEmptyTitle = transactionsQuery.isCapabilityEnabled
-    ? transactionsQuery.isLoading
+    ? activityLoading || transactionsQuery.isLoading
       ? 'Loading activity'
       : transactionsQuery.isError
         ? 'Unable to load activity'
@@ -526,6 +561,7 @@ export function HomeScreenContent(): React.JSX.Element {
     // no-op if the route is already in cache.
     router.prefetch('/receive-payment' as never);
     router.prefetch('/private-payment?mode=send' as never);
+    router.prefetch('/(tabs)/history' as never);
   }, [balanceQuery.data, router]);
 
   const handlePrefetchUmbraVaultContent = useCallback((): void => {
@@ -881,6 +917,10 @@ export function HomeScreenContent(): React.JSX.Element {
     const signal = getScreenSignal();
     const balanceKey =
       publicKey != null && network != null ? offpayWalletBalanceQueryKey(publicKey, network) : null;
+    const dashboardKey =
+      publicKey != null && network != null
+        ? offpayWalletDashboardQueryKey(publicKey, network, WALLET_TRANSACTIONS_PAGE_SIZE)
+        : null;
     const transactionsKey =
       publicKey != null && network != null
         ? offpayWalletTransactionsBaseQueryKey(publicKey, network)
@@ -903,6 +943,9 @@ export function HomeScreenContent(): React.JSX.Element {
       setHomeRefreshPending(false);
     };
     const cancelRefresh = (): void => {
+      if (dashboardKey != null) {
+        void queryClient.cancelQueries({ queryKey: dashboardKey });
+      }
       if (balanceKey != null) {
         void queryClient.cancelQueries({ queryKey: balanceKey });
       }
@@ -938,9 +981,10 @@ export function HomeScreenContent(): React.JSX.Element {
           );
         }
       } else {
-        if (balanceKey != null) {
+        openHomeForegroundFetchGate();
+        if (dashboardKey != null) {
           void queryClient.invalidateQueries(
-            { queryKey: balanceKey, refetchType: 'active' },
+            { queryKey: dashboardKey, refetchType: 'active' },
             { cancelRefetch: true },
           );
         }
@@ -951,9 +995,6 @@ export function HomeScreenContent(): React.JSX.Element {
 
         requestAnimationFrame(() => {
           if (signal.aborted) return;
-          if (transactionsKey != null) {
-            void refetchFreshTransactions({ signal }).catch(() => undefined);
-          }
           if (backupStatsKey != null) {
             void queryClient.invalidateQueries(
               { queryKey: backupStatsKey, refetchType: 'active' },
@@ -973,7 +1014,7 @@ export function HomeScreenContent(): React.JSX.Element {
     currency,
     queryClient,
     getScreenSignal,
-    refetchFreshTransactions,
+    openHomeForegroundFetchGate,
   ]);
 
   const handleTokenPress = useCallback(
@@ -1085,7 +1126,9 @@ export function HomeScreenContent(): React.JSX.Element {
               portfolioValueLabel={portfolioValueLabel}
               portfolioValueLoading={
                 portfolioValueLabel == null &&
-                (portfolioValuationQuery.isLoading ||
+                (criticalSnapshotPending ||
+                  valuationValuesLoading ||
+                  portfolioValuationQuery.isLoading ||
                   balanceQuery.isLoading ||
                   balanceQuery.isCapabilitiesPending)
               }
@@ -1114,6 +1157,7 @@ export function HomeScreenContent(): React.JSX.Element {
               hiddenSpamTokenCount={countSpamTokens(balanceQuery.data)}
               privacyHidden={privacyHidden}
               valuations={tokenValuations}
+              valuationsLoading={valuationValuesLoading}
               loading={holdingsLoading}
             />
           </View>

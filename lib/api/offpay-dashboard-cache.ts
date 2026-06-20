@@ -73,6 +73,7 @@ export async function prefetchOffpayWalletDashboard(params: {
   network: OffpayNetwork;
   limit?: number;
   useCache?: boolean;
+  requestOwner?: string;
 }): Promise<WalletDashboardResponse | null> {
   if (params.walletAddress.length === 0) return null;
 
@@ -96,6 +97,7 @@ export async function prefetchOffpayWalletDashboard(params: {
           signal,
           limit,
           useCache: params.useCache,
+          requestOwner: params.requestOwner ?? 'wallet.dashboard.prefetch',
         }),
       staleTime: WALLET_DASHBOARD_WARM_STALE_TIME_MS,
     });

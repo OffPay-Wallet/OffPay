@@ -764,7 +764,11 @@ export async function prefetchWalletDisplayData(params: {
     tasks.push(
       params.queryClient.prefetchQuery({
         queryKey: offpayWalletBalanceQueryKey(params.walletAddress, params.network),
-        queryFn: () => getWalletBalance(params.walletAddress, params.network, { useCache: false }),
+        queryFn: () =>
+          getWalletBalance(params.walletAddress, params.network, {
+            useCache: false,
+            requestOwner: 'wallet.displayPrefetch.balance',
+          }),
         staleTime: walletBalanceStaleTime,
       }),
     );
@@ -782,6 +786,7 @@ export async function prefetchWalletDisplayData(params: {
           const page = await getWalletTransactions(params.walletAddress, params.network, {
             cursor: pageParam,
             limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+            requestOwner: 'wallet.displayPrefetch.transactions',
           });
 
           if (pageParam != null) return page;

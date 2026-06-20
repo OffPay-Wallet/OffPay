@@ -1,7 +1,7 @@
 /**
  * HomeHeader — wallet identity, connectivity toggle, and notifications.
  */
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useQueryClient } from '@tanstack/react-query';
@@ -148,7 +148,6 @@ function HomeHeaderComponent({
   const markAllNotificationsRead = useNotificationStore((s) => s.markAllRead);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [faucetBusy, setFaucetBusy] = useState(false);
-  const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Animation values
   const toggleProgress = useDerivedValue(
@@ -201,21 +200,10 @@ function HomeHeaderComponent({
       headerFrameWidth - actionClusterWidth - headerGap - avatarSize - walletGap - spacing.xs,
     ),
   );
-  const notificationSheetTopOffset =
-    headerTopPadding + layout.minTouchTarget + spacing.xs + headerBottomGap + spacing.xs;
   const walletDisplayName = username != null ? `@${username}` : accountName;
   const walletPress = useCancelSafePressed(onPressWalletDetails == null);
   const faucetPress = useCancelSafePressed(faucetBusy || publicKey == null);
   const notificationPress = useCancelSafePressed(false);
-
-  useEffect(
-    () => () => {
-      if (markReadTimerRef.current != null) {
-        clearTimeout(markReadTimerRef.current);
-      }
-    },
-    [],
-  );
 
   const handleToggle = useCallback((): void => {
     const next = !isOffline;
@@ -298,21 +286,10 @@ function HomeHeaderComponent({
   const handleOpenNotifications = useCallback((): void => {
     if (notificationsVisible) return;
 
-    // Defer the store mutation until after the entrance animation has
-    // a chance to start. Marking-all-read writes to the notification
-    // store and re-renders every consumer (badge, header), which we
-    // want off the same frame the modal is mounting.
-    if (markReadTimerRef.current != null) {
-      clearTimeout(markReadTimerRef.current);
-    }
-    if (unreadNotifications > 0) {
-      markReadTimerRef.current = setTimeout(() => {
-        markReadTimerRef.current = null;
-        markAllNotificationsRead();
-      }, 360);
-    }
-
     setNotificationsVisible(true);
+    if (unreadNotifications > 0) {
+      markAllNotificationsRead();
+    }
   }, [markAllNotificationsRead, notificationsVisible, unreadNotifications]);
 
   const handleCloseNotifications = useCallback((): void => {
@@ -601,13 +578,7 @@ function HomeHeaderComponent({
           </Pressable>
         </View>
       </View>
-      {notificationsVisible ? (
-        <NotificationCenterModal
-          visible={notificationsVisible}
-          onClose={handleCloseNotifications}
-          sheetTopOffset={notificationSheetTopOffset}
-        />
-      ) : null}
+      <NotificationCenterModal visible={notificationsVisible} onClose={handleCloseNotifications} />
     </>
   );
 }

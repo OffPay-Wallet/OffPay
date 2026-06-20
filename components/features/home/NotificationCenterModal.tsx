@@ -27,7 +27,6 @@ type IoniconName = ComponentProps<typeof Ionicons>['name'];
 export interface NotificationCenterModalProps {
   visible: boolean;
   onClose: () => void;
-  sheetTopOffset?: number;
 }
 
 const VARIANT_TONE: Record<LocalNotificationVariant, { fill: string; ink: string }> = {
@@ -54,8 +53,8 @@ const VARIANT_ICON: Record<LocalNotificationVariant, IoniconName> = {
   warning: 'warning',
   info: 'information',
 };
-const MODAL_OPEN_MS = 420;
-const MODAL_CLOSE_MS = 260;
+const MODAL_OPEN_MS = 240;
+const MODAL_CLOSE_MS = 180;
 const CLEAR_ROW_DURATION_MS = 220;
 const CLEAR_ROW_STAGGER_MS = 56;
 const CLEAR_FINISH_SETTLE_MS = 24;
@@ -132,7 +131,13 @@ function NotificationRow({
           {notification.title}
         </Text>
         {notification.message.length > 0 ? (
-          <Text variant="small" color={colors.text.secondary} style={styles.notificationMessage}>
+          <Text
+            variant="small"
+            color={colors.text.secondary}
+            style={styles.notificationMessage}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {notification.message}
           </Text>
         ) : null}
@@ -152,7 +157,6 @@ function NotificationRow({
 export function NotificationCenterModal({
   visible,
   onClose,
-  sheetTopOffset = layout.minTouchTarget + spacing['2xl'],
 }: NotificationCenterModalProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
@@ -180,23 +184,24 @@ export function NotificationCenterModal({
     [clearItemCount, clearStaggerMs],
   );
   const compactPanel = windowWidth < 360 || windowHeight < 680 || fontScale > 1.12;
-  const sheetSideInset = compactPanel ? spacing.sm : spacing.lg;
+  const sheetSideInset = compactPanel ? spacing.md : spacing.lg;
   const sheetWidth = Math.max(0, Math.min(420, windowWidth - sheetSideInset * 2));
-  const sheetMaxHeight = Math.max(
-    0,
-    windowHeight - insets.top - insets.bottom - sheetTopOffset - spacing.md,
-  );
+  const sheetTopClearance = compactPanel ? spacing.lg : spacing['2xl'];
+  const sheetTopInset = Math.max(insets.top + sheetTopClearance, spacing['3xl']);
+  const sheetMaxHeight = Math.max(0, windowHeight - sheetTopInset - insets.bottom - spacing.lg);
   const sheetPadding = compactPanel ? spacing.md : spacing.lg;
   const closeButtonSize = compactPanel ? 40 : layout.minTouchTarget;
   const stableRowHeight = compactPanel ? 58 : 64;
+  const displayedRowCount =
+    notifications.length > 0 ? Math.max(stableRowCount, notifications.length) : stableRowCount;
   const stableListHeight =
-    stableRowCount > 0
-      ? stableRowCount * stableRowHeight + Math.max(0, stableRowCount - 1) * spacing.sm
+    displayedRowCount > 0
+      ? displayedRowCount * stableRowHeight + Math.max(0, displayedRowCount - 1) * spacing.sm
       : 0;
   const stableContentHeight =
-    stableRowCount > 0
+    displayedRowCount > 0
       ? closeButtonSize + spacing.md + stableListHeight + spacing.md + layout.buttonHeightMd
-      : closeButtonSize + spacing.md + (compactPanel ? 96 : 140);
+      : closeButtonSize + spacing.md + (compactPanel ? 84 : 104);
   const sheetMinHeight = Math.min(sheetMaxHeight, sheetPadding * 2 + stableContentHeight);
 
   const clearScheduledTimers = useCallback((): void => {
@@ -258,16 +263,14 @@ export function NotificationCenterModal({
       }
       sheetProgress.value = withTiming(1, {
         duration: reduceMotion ? 0 : MODAL_OPEN_MS,
-        // Gentle ease-in-out so the drawer glides open and settles
-        // softly instead of snapping down like a spring.
-        easing: Easing.inOut(Easing.cubic),
+        easing: Easing.out(Easing.cubic),
       });
       return;
     }
 
     sheetProgress.value = withTiming(
       0,
-      { duration: reduceMotion ? 0 : MODAL_CLOSE_MS, easing: Easing.inOut(Easing.cubic) },
+      { duration: reduceMotion ? 0 : MODAL_CLOSE_MS, easing: Easing.in(Easing.cubic) },
       (finished) => {
         if (finished) runOnJS(setRendered)(false);
       },
@@ -379,10 +382,7 @@ export function NotificationCenterModal({
 
   const sheetStyle = useAnimatedStyle(() => ({
     opacity: interpolate(sheetProgress.value, [0, 1], [0, 1]),
-    transform: [
-      { translateY: interpolate(sheetProgress.value, [0, 1], [-28, 0]) },
-      { scale: interpolate(sheetProgress.value, [0, 1], [0.97, 1]) },
-    ],
+    transform: [{ translateY: interpolate(sheetProgress.value, [0, 1], [-14, 0]) }],
   }));
 
   if (!rendered) return null;
@@ -395,7 +395,16 @@ export function NotificationCenterModal({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={styles.modalRoot}>
+      <View
+        style={[
+          styles.modalRoot,
+          {
+            paddingTop: sheetTopInset,
+            paddingHorizontal: sheetSideInset,
+            paddingBottom: Math.max(insets.bottom, spacing.md),
+          },
+        ]}
+      >
         <Animated.View style={[styles.backdrop, backdropStyle]}>
           <Pressable style={styles.backdropPressable} onPress={onClose} />
         </Animated.View>
@@ -404,7 +413,6 @@ export function NotificationCenterModal({
             styles.sheetShell,
             {
               width: sheetWidth,
-              marginTop: insets.top + sheetTopOffset,
             },
             sheetStyle,
           ]}
@@ -507,7 +515,7 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: colors.backgroundGradient.bottomDepth,
+    backgroundColor: 'rgba(0, 2, 5, 0.78)',
   },
   backdropPressable: {
     ...StyleSheet.absoluteFill,
@@ -519,7 +527,7 @@ const styles = StyleSheet.create({
   sheet: {
     width: '100%',
     borderRadius: radii['2xl'],
-    backgroundColor: colors.surface.cardElevated,
+    backgroundColor: colors.brand.glassTint,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     boxShadow: `0 18px 42px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
@@ -528,7 +536,7 @@ const styles = StyleSheet.create({
   },
   sheetTint: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: colors.surface.cardElevated,
+    backgroundColor: colors.brand.glassTint,
   },
   header: {
     flexDirection: 'row',

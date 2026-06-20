@@ -22,6 +22,7 @@ import type { CapabilitiesResponse, OffpayNetwork } from '@/types/offpay-api';
 interface UseOffpayCapabilitiesOptions {
   deferUntilAfterInteractions?: boolean;
   enabled?: boolean;
+  requestOwner?: string;
 }
 
 export const offpayCapabilitiesQueryKey = (
@@ -102,6 +103,7 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
       return getCapabilities(network, {
         signal,
         timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
+        requestOwner: options?.requestOwner ?? 'capabilities',
       });
     },
     enabled:

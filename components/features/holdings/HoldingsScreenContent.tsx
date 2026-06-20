@@ -89,7 +89,19 @@ export function HoldingsScreenContent({
       : buildVisibleTokenHoldings(balanceQuery.data, tokenLogoMap, tokenMetadata);
   }, [balanceQuery.data, tokenLogoMap, tokenMetadata]);
   const portfolioValuationQuery = useOffpayPortfolioValuation({ holdings, currency });
-  const valuations = portfolioValuationQuery.data?.tokenValues;
+  const hasPositiveHoldings = holdings.some((holding) => holding.balanceValue > 0);
+  const portfolioValuationData = portfolioValuationQuery.data;
+  const portfolioValuationComplete =
+    portfolioValuationData != null &&
+    portfolioValuationData.expectedCount > 0 &&
+    portfolioValuationData.pricedCount >= portfolioValuationData.expectedCount;
+  const portfolioValuationSettled =
+    portfolioValuationQuery.isFetched || portfolioValuationQuery.isError || !hasPositiveHoldings;
+  const portfolioValuationDisplayReady =
+    !hasPositiveHoldings || portfolioValuationComplete || portfolioValuationSettled;
+  const valuations = portfolioValuationDisplayReady
+    ? portfolioValuationData?.tokenValues
+    : undefined;
 
   const filtered = useMemo(() => {
     return holdings.filter((holding) => matchesQuery(holding, query));
@@ -150,6 +162,8 @@ export function HoldingsScreenContent({
   }, [router]);
 
   const hiddenSpamTokenCount = countSpamTokens(balanceQuery.data);
+  const valuationValuesLoading =
+    rowItems.length > 0 && hasPositiveHoldings && !portfolioValuationDisplayReady;
   const showLoadingPlaceholder = balanceQuery.isLoading && rowItems.length === 0;
 
   const renderItem = useCallback(
@@ -164,11 +178,12 @@ export function HoldingsScreenContent({
             onPress={handleTokenPress}
             privacyHidden={false}
             valuation={item.valuation}
+            valuationLoading={valuationValuesLoading}
           />
         </View>
       </View>
     ),
-    [compact, dense, handleTokenPress, rowFrameWidth],
+    [compact, dense, handleTokenPress, rowFrameWidth, valuationValuesLoading],
   );
 
   const keyExtractor = useCallback((item: RowItem) => item.holding.mint, []);

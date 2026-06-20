@@ -27,6 +27,8 @@ interface PortfolioValuationInput {
   currency: string;
   enabled?: boolean;
   deferCapabilitiesUntilAfterInteractions?: boolean;
+  networkFetchEnabled?: boolean;
+  skipNetworkWhenProviderPricesComplete?: boolean;
 }
 
 interface PortfolioValuationData {
@@ -124,6 +126,8 @@ export function useOffpayPortfolioValuation({
   holdings,
   currency,
   enabled: enabledOption,
+  networkFetchEnabled: networkFetchEnabledOption,
+  skipNetworkWhenProviderPricesComplete = true,
 }: PortfolioValuationInput) {
   const { network } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
@@ -168,6 +172,15 @@ export function useOffpayPortfolioValuation({
 
     return data.pricedCount > 0 ? data : null;
   }, [enabledByCaller, holdings, normalizedCurrency, priceInputs]);
+  const providerFallbackComplete =
+    providerFallbackData != null &&
+    providerFallbackData.expectedCount > 0 &&
+    providerFallbackData.pricedCount >= providerFallbackData.expectedCount;
+  const shouldSkipNetworkPriceFetch =
+    skipNetworkWhenProviderPricesComplete &&
+    normalizedCurrency === 'USD' &&
+    providerFallbackComplete;
+  const networkFetchEnabled = networkFetchEnabledOption ?? !shouldSkipNetworkPriceFetch;
 
   useEffect(() => {
     if (
@@ -252,7 +265,7 @@ export function useOffpayPortfolioValuation({
                 priceSymbol: item.priceSymbol,
               })),
             },
-            { signal },
+            { signal, requestOwner: 'portfolio.valuation' },
           ),
           readCachedTokenUsdPrices(network),
         ]);
@@ -293,7 +306,7 @@ export function useOffpayPortfolioValuation({
         allowProviderUsdPriceFallback: true,
       });
     },
-    enabled: enabled && !isNetworkAccessSuspended,
+    enabled: enabled && networkFetchEnabled && !isNetworkAccessSuspended,
     staleTime: PORTFOLIO_VALUATION_STALE_TIME_MS,
     refetchInterval: enabled && canUseNetwork ? PORTFOLIO_VALUATION_REFETCH_INTERVAL_MS : false,
     refetchIntervalInBackground: false,

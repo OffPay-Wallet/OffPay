@@ -221,6 +221,7 @@ interface PublicRequestOptions {
    */
   signal?: AbortSignal;
   timeoutMs?: number | null;
+  requestOwner?: string;
 }
 
 interface StoredAuthContext {
@@ -623,6 +624,7 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
       route: options.path,
       network: getPublicRequestNetwork(options.query),
       status: responseStatus,
+      owner: options.requestOwner ?? null,
     });
   }
 }
@@ -673,6 +675,7 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
       route: options.path,
       network: getPublicRequestNetwork(options.query),
       status: responseStatus,
+      owner: options.requestOwner ?? null,
     });
   }
 }
@@ -1236,13 +1239,14 @@ export async function provisionBootstrap(
 
 export function getCapabilities(
   network: OffpayNetwork,
-  options?: { signal?: AbortSignal; timeoutMs?: number },
+  options?: { signal?: AbortSignal; timeoutMs?: number; requestOwner?: string },
 ): Promise<CapabilitiesResponse> {
   return offpayPublicRequest<CapabilitiesResponse>({
     path: '/api/capabilities',
     query: { network },
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
+    requestOwner: options?.requestOwner,
   });
 }
 
@@ -1281,20 +1285,27 @@ export async function checkInviteEmail(
 export async function getWalletBalance(
   walletAddress: string,
   network: OffpayNetwork,
-  options?: { useCache?: boolean; signal?: AbortSignal },
+  options?: { useCache?: boolean; signal?: AbortSignal; requestOwner?: string },
 ): Promise<WalletBalanceResponse> {
   return offpayPublicRequest<WalletBalanceResponse>({
     path: '/api/wallet/balance',
     query: { address: walletAddress, network, useCache: options?.useCache },
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
   });
 }
 
 export async function getWalletTransactions(
   walletAddress: string,
   network: OffpayNetwork,
-  options?: { cursor?: string; limit?: number; useCache?: boolean; signal?: AbortSignal },
+  options?: {
+    cursor?: string;
+    limit?: number;
+    useCache?: boolean;
+    signal?: AbortSignal;
+    requestOwner?: string;
+  },
 ): Promise<WalletTransactionsResponse> {
   return offpayPublicRequest<WalletTransactionsResponse>({
     path: '/api/wallet/transactions',
@@ -1307,13 +1318,14 @@ export async function getWalletTransactions(
     },
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
   });
 }
 
 export async function getWalletDashboard(
   walletAddress: string,
   network: OffpayNetwork,
-  options?: { limit?: number; useCache?: boolean; signal?: AbortSignal },
+  options?: { limit?: number; useCache?: boolean; signal?: AbortSignal; requestOwner?: string },
 ): Promise<WalletDashboardResponse> {
   return offpayPublicRequest<WalletDashboardResponse>({
     path: '/api/wallet/dashboard',
@@ -1325,6 +1337,7 @@ export async function getWalletDashboard(
     },
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
   });
 }
 

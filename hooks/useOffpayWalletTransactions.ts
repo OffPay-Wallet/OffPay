@@ -66,6 +66,7 @@ export function useOffpayWalletTransactions(options?: {
   refetchOnMount?: boolean | 'always';
   useCache?: boolean;
   enabled?: boolean;
+  requestOwner?: string;
 }) {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
   const walletAddress = options?.walletAddress ?? activeWalletAddress;
@@ -74,6 +75,7 @@ export function useOffpayWalletTransactions(options?: {
   const autoFetchAllPages = options?.autoFetchAllPages ?? false;
   const useCache = options?.useCache;
   const enabledByCaller = options?.enabled ?? true;
+  const requestOwner = options?.requestOwner ?? 'wallet.transactions';
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const [freshRefetching, setFreshRefetching] = useState(false);
   const { network } = useOffpayNetwork();
@@ -82,7 +84,10 @@ export function useOffpayWalletTransactions(options?: {
     useIsFetching({
       queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
     }) > 0;
-  const capabilitiesQuery = useOffpayCapabilities({ enabled: enabledByCaller });
+  const capabilitiesQuery = useOffpayCapabilities({
+    enabled: enabledByCaller,
+    requestOwner: `${requestOwner}.capabilities`,
+  });
   const { capabilities } = capabilitiesQuery;
   const queryClient = useQueryClient();
   const transactionsQueryKey = useMemo(
@@ -156,6 +161,7 @@ export function useOffpayWalletTransactions(options?: {
         limit,
         useCache,
         signal,
+        requestOwner,
       });
 
       if (pageParam != null) return page;
@@ -253,6 +259,10 @@ export function useOffpayWalletTransactions(options?: {
         return;
       }
 
+      if (freshRefetching || query.isFetching) {
+        return;
+      }
+
       setFreshRefetching(true);
       try {
         await queryClient.cancelQueries({
@@ -266,6 +276,7 @@ export function useOffpayWalletTransactions(options?: {
           limit,
           useCache: false,
           signal: options?.signal,
+          requestOwner: `${requestOwner}.fresh`,
         });
         const mergedPage = await mergeWalletTransactionsWithDisplayCache({
           walletAddress,
@@ -312,10 +323,13 @@ export function useOffpayWalletTransactions(options?: {
     },
     [
       canRequestTransactions,
+      freshRefetching,
       limit,
       network,
+      query.isFetching,
       queryClient,
       refetchTransactionsQuery,
+      requestOwner,
       transactionsQueryKey,
       walletAddress,
     ],

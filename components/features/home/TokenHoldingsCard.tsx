@@ -43,6 +43,7 @@ interface TokenHoldingsCardProps {
   hiddenSpamTokenCount?: number;
   privacyHidden?: boolean;
   valuations?: Readonly<Record<string, TokenValuationView>>;
+  valuationsLoading?: boolean;
   loading?: boolean;
   separatedRows?: boolean;
 }
@@ -68,6 +69,7 @@ const TokenRow = memo(function TokenRow({
   onPress,
   privacyHidden,
   valuation,
+  valuationLoading = false,
 }: {
   holding: TokenHolding;
   isLast: boolean;
@@ -76,7 +78,9 @@ const TokenRow = memo(function TokenRow({
   onPress?: (holding: TokenHolding) => void;
   privacyHidden: boolean;
   valuation?: TokenValuationView;
+  valuationLoading?: boolean;
 }): React.JSX.Element {
+  const showValuationSkeleton = valuationLoading && !privacyHidden;
   const amountLabel = privacyHidden ? '****' : `${holding.balance} ${holding.symbol}`;
   const fiatValueLabel = privacyHidden
     ? '****'
@@ -168,48 +172,67 @@ const TokenRow = memo(function TokenRow({
       </View>
 
       <View style={[styles.valueCol, { width: valueColumnWidth }]}>
-        <SlotText
-          value={fiatValueLabel}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.58}
-          maxFontSizeMultiplier={1}
-        >
-          <FiatMoneyText
-            value={fiatValueLabel}
-            size="list"
-            compact={compact || dense}
-            align="right"
-            color={colors.text.primary}
-            style={styles.fiatValueWrap}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.58}
-            maxFontSizeMultiplier={1}
-          />
-        </SlotText>
-        {unitPriceLabel != null ? (
-          <SlotText
-            value={unitPriceLabel}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.62}
-            maxFontSizeMultiplier={1}
-          >
-            <FiatUnitPriceText
-              value={unitPriceLabel}
-              size="caption"
-              compact={compact || dense}
-              align="right"
-              color={colors.text.secondary}
-              style={styles.unitPriceWrap}
+        {showValuationSkeleton ? (
+          <>
+            <SkeletonBlock
+              width="78%"
+              height={compact || dense ? 13 : 15}
+              radius={8}
+              style={styles.skeletonValueLine}
+            />
+            <SkeletonBlock
+              width="64%"
+              height={compact || dense ? 10 : 11}
+              radius={8}
+              style={styles.skeletonValueSubline}
+            />
+          </>
+        ) : (
+          <>
+            <SlotText
+              value={fiatValueLabel}
               numberOfLines={1}
               adjustsFontSizeToFit
-              minimumFontScale={0.62}
+              minimumFontScale={0.58}
               maxFontSizeMultiplier={1}
-            />
-          </SlotText>
-        ) : null}
+            >
+              <FiatMoneyText
+                value={fiatValueLabel}
+                size="list"
+                compact={compact || dense}
+                align="right"
+                color={colors.text.primary}
+                style={styles.fiatValueWrap}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.58}
+                maxFontSizeMultiplier={1}
+              />
+            </SlotText>
+            {unitPriceLabel != null ? (
+              <SlotText
+                value={unitPriceLabel}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.62}
+                maxFontSizeMultiplier={1}
+              >
+                <FiatUnitPriceText
+                  value={unitPriceLabel}
+                  size="caption"
+                  compact={compact || dense}
+                  align="right"
+                  color={colors.text.secondary}
+                  style={styles.unitPriceWrap}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.62}
+                  maxFontSizeMultiplier={1}
+                />
+              </SlotText>
+            ) : null}
+          </>
+        )}
       </View>
     </Pressable>
   );
@@ -273,6 +296,7 @@ export const TokenHoldingsCard = memo(function TokenHoldingsCard({
   hiddenSpamTokenCount = 0,
   privacyHidden = false,
   valuations,
+  valuationsLoading = false,
   loading = false,
   separatedRows = false,
 }: TokenHoldingsCardProps): React.JSX.Element {
@@ -354,6 +378,7 @@ export const TokenHoldingsCard = memo(function TokenHoldingsCard({
                 onPress={onTokenPress}
                 privacyHidden={privacyHidden}
                 valuation={valuations?.[holding.mint]}
+                valuationLoading={valuationsLoading}
               />
             ))
           ) : (
@@ -395,6 +420,7 @@ export const TokenHoldingsCard = memo(function TokenHoldingsCard({
                     onPress={onTokenPress}
                     privacyHidden={privacyHidden}
                     valuation={valuations?.[holding.mint]}
+                    valuationLoading={valuationsLoading}
                   />
                 </View>
               </View>
@@ -590,6 +616,9 @@ const styles = StyleSheet.create({
   },
   skeletonValueSubline: {
     marginTop: spacing.xs,
+    alignSelf: 'flex-end',
+  },
+  skeletonValueLine: {
     alignSelf: 'flex-end',
   },
 

@@ -7,6 +7,7 @@ import Animated, {
   FadeOut,
   FadeOutDown,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
 import { Text } from '@/components/ui/Text';
@@ -50,11 +51,21 @@ export function OfflineSlotsPromptModal({
   onContinueOffline,
   onCancel,
 }: OfflineSlotsPromptModalProps): React.JSX.Element | null {
+  const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
-  const compact = width < 380 || height < 740 || fontScale > 1.1;
-  const stackSecondaryButtons = width < 390 || fontScale > 1.15;
-  const horizontalInset = width < 360 ? spacing.md : spacing['2xl'];
-  const verticalInset = compact ? spacing.lg : spacing['2xl'];
+  const dense = width < 350 || height < 700 || fontScale > 1.2;
+  const compact = dense || width < 390 || height < 780 || fontScale > 1.1;
+  const stackSecondaryButtons = width < 340 || fontScale > 1.22;
+  const horizontalInset = dense ? spacing.lg : compact ? spacing.xl : spacing['3xl'];
+  const verticalInset = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
+  const cardMaxWidth = dense ? 352 : compact ? 372 : 392;
+  const cardPadding = dense ? spacing.md : compact ? spacing.lg : spacing.xl;
+  const cardGap = dense ? spacing.sm : compact ? spacing.md : spacing.lg;
+  const detailRowHeight = dense ? 28 : compact ? 30 : 34;
+  const detailRowPaddingY = dense ? 2 : spacing.xs;
+  const primaryButtonHeight = dense ? layout.minTouchTarget : compact ? 46 : 48;
+  const secondaryButtonHeight = dense ? layout.minTouchTarget : 44;
+  const buttonPaddingHorizontal = dense ? spacing.md : spacing.lg;
   const needsOnline = isOffline || !canPrepare;
   const primaryLabel = needsOnline
     ? 'Go online to prepare'
@@ -84,25 +95,37 @@ export function OfflineSlotsPromptModal({
           styles.scrollerContent,
           {
             paddingHorizontal: horizontalInset,
-            paddingVertical: verticalInset,
-            justifyContent: compact ? 'flex-start' : 'center',
+            paddingTop: Math.max(insets.top, spacing.md) + verticalInset,
+            paddingBottom: Math.max(insets.bottom, spacing.md) + verticalInset,
+            justifyContent: 'center',
           },
         ]}
         keyboardShouldPersistTaps="always"
         showsVerticalScrollIndicator={false}
       >
-        <Animated.View entering={cardEntering} exiting={cardExiting} style={styles.cardShell}>
+        <Animated.View
+          entering={cardEntering}
+          exiting={cardExiting}
+          style={[styles.cardShell, { maxWidth: cardMaxWidth }]}
+        >
           <View
             style={[
               styles.card,
               {
-                padding: compact ? spacing.lg : spacing.xl,
-                gap: compact ? spacing.md : spacing.lg,
+                padding: cardPadding,
+                gap: cardGap,
               },
             ]}
           >
             <View style={styles.copyBlock}>
-              <Text variant="h3" color={colors.text.primary} align="center" style={styles.title}>
+              <Text
+                variant="h3"
+                color={colors.text.primary}
+                align="center"
+                style={styles.title}
+                numberOfLines={2}
+                maxFontSizeMultiplier={1.05}
+              >
                 Prepare offline slots
               </Text>
               <Text
@@ -110,13 +133,19 @@ export function OfflineSlotsPromptModal({
                 color={colors.text.secondary}
                 align="center"
                 style={styles.body}
+                maxFontSizeMultiplier={1.05}
               >
                 {`Needed for offline sends. ${progressLabel}.`}
               </Text>
             </View>
 
             <View style={styles.detailList}>
-              <View style={styles.detailRow}>
+              <View
+                style={[
+                  styles.detailRow,
+                  { minHeight: detailRowHeight, paddingVertical: detailRowPaddingY },
+                ]}
+              >
                 <Text variant="small" color={colors.text.tertiary}>
                   {pendingSlots > 0 && readySlots === 0 ? 'Finalizing' : 'Ready'}
                 </Text>
@@ -124,11 +153,17 @@ export function OfflineSlotsPromptModal({
                   variant="small"
                   color={colors.text.primary}
                   style={[styles.strong, styles.tabular]}
+                  maxFontSizeMultiplier={1.05}
                 >
                   {progressLabel}
                 </Text>
               </View>
-              <View style={styles.detailRow}>
+              <View
+                style={[
+                  styles.detailRow,
+                  { minHeight: detailRowHeight, paddingVertical: detailRowPaddingY },
+                ]}
+              >
                 <Text variant="small" color={colors.text.tertiary}>
                   Target
                 </Text>
@@ -136,29 +171,57 @@ export function OfflineSlotsPromptModal({
                   variant="small"
                   color={colors.text.primary}
                   style={[styles.strong, styles.tabular]}
+                  maxFontSizeMultiplier={1.05}
                 >
                   {targetSlotCount} slots
                 </Text>
               </View>
-              <View style={styles.detailRow}>
+              <View
+                style={[
+                  styles.detailRow,
+                  { minHeight: detailRowHeight, paddingVertical: detailRowPaddingY },
+                ]}
+              >
                 <Text variant="small" color={colors.text.tertiary}>
                   Network
                 </Text>
-                <Text variant="small" color={colors.text.primary} style={styles.strong}>
+                <Text
+                  variant="small"
+                  color={colors.text.primary}
+                  style={styles.strong}
+                  maxFontSizeMultiplier={1.05}
+                >
                   {networkLabel ?? 'Current'}
                 </Text>
               </View>
-              <View style={styles.detailRow}>
+              <View
+                style={[
+                  styles.detailRow,
+                  { minHeight: detailRowHeight, paddingVertical: detailRowPaddingY },
+                ]}
+              >
                 <Text variant="small" color={colors.text.tertiary}>
                   Rent
                 </Text>
-                <Text variant="small" color={colors.text.primary} style={styles.strong}>
+                <Text
+                  variant="small"
+                  color={colors.text.primary}
+                  style={styles.strong}
+                  maxFontSizeMultiplier={1.05}
+                >
                   {rentEstimateLabel ?? 'Checking'}
                 </Text>
               </View>
             </View>
 
-            <Text variant="small" color={colors.text.tertiary} align="center" style={styles.helper}>
+            <Text
+              variant="small"
+              color={colors.text.tertiary}
+              align="center"
+              style={styles.helper}
+              numberOfLines={2}
+              maxFontSizeMultiplier={1.05}
+            >
               Setup uses network access and SOL rent.
             </Text>
 
@@ -166,6 +229,10 @@ export function OfflineSlotsPromptModal({
               <Pressable
                 style={({ pressed }) => [
                   styles.primaryButton,
+                  {
+                    minHeight: primaryButtonHeight,
+                    paddingHorizontal: buttonPaddingHorizontal,
+                  },
                   pressed ? styles.buttonPressed : undefined,
                   preparing ? styles.disabled : undefined,
                 ]}
@@ -196,6 +263,10 @@ export function OfflineSlotsPromptModal({
                 <Pressable
                   style={({ pressed }) => [
                     styles.secondaryButton,
+                    {
+                      minHeight: secondaryButtonHeight,
+                      paddingHorizontal: buttonPaddingHorizontal,
+                    },
                     pressed ? styles.buttonPressed : undefined,
                   ]}
                   onPress={onCancel}
@@ -217,6 +288,10 @@ export function OfflineSlotsPromptModal({
                 <Pressable
                   style={({ pressed }) => [
                     styles.secondaryButton,
+                    {
+                      minHeight: secondaryButtonHeight,
+                      paddingHorizontal: buttonPaddingHorizontal,
+                    },
                     pressed ? styles.buttonPressed : undefined,
                   ]}
                   onPress={onContinueOffline}

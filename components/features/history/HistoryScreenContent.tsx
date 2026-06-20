@@ -3,7 +3,7 @@
  */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { useFocusEffect } from 'expo-router/react-navigation';
+import { useFocusEffect, useIsFocused } from 'expo-router/react-navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -49,6 +49,7 @@ export function HistoryScreenContent(): React.JSX.Element {
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const router = useRouter();
   const previousRoute = useTabHistoryStore((s) => s.previousRoute);
+  const isFocused = useIsFocused();
   const { network } = useOffpayNetwork();
   const walletAddress = useWalletStore((s) => s.publicKey);
   const offlineReceipts = useOfflinePaymentStore((s) => s.receipts);
@@ -66,11 +67,13 @@ export function HistoryScreenContent(): React.JSX.Element {
   const transactionsQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
     deferUntilAfterInteractions: true,
+    enabled: isFocused,
     // History is the canonical transaction view. Do not let the
     // worker-side wallet cache or the shared warm-start TTL keep this
     // screen stale after a user explicitly opens it.
     refetchOnMount: 'always',
     useCache: false,
+    requestOwner: 'history.transactions',
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;

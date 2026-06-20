@@ -73,6 +73,8 @@ export function useOffpayWalletWarmStart(): void {
               network,
               options: {
                 includeBalance: true,
+                includeTransactions: true,
+                includePendingBackupStats: true,
               },
             });
             useOffpayLaunchStore.getState().setWalletDisplayHydrated(Date.now());
@@ -183,6 +185,7 @@ async function prefetchWalletDashboardInBackground(params: {
     walletAddress: params.walletAddress,
     network: params.network,
     limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    requestOwner: 'wallet.warmStart.dashboard',
   });
 
   if (dashboard != null) {
@@ -199,6 +202,7 @@ async function prefetchWalletDashboardInBackground(params: {
     });
   }
 
-  // Foreground hooks still fetch capabilities, balance, and history directly.
+  // Foreground hooks subscribe to the dashboard-hydrated query cache and
+  // only fall back to direct reads when the Home coordinator opens that gate.
   return dashboard;
 }

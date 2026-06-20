@@ -62,7 +62,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   });
   const compact = viewportProfile.compact;
   const dense = viewportProfile.dense;
-  const keypadGap = dense ? spacing.sm : spacing.lg;
+  const keypadGap = dense ? spacing.md : compact ? spacing.lg : spacing.xl;
 
   const [passcodeLength, setPasscodeLength] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
@@ -122,11 +122,11 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, [toast]);
 
   const keyFrameStyle = useMemo(() => {
-    const reservedHeight = dense ? 340 : compact ? 380 : 430;
+    const reservedHeight = dense ? 328 : compact ? 368 : 408;
     const keySize = Math.max(
       layout.minTouchTarget,
       Math.min(
-        dense ? 58 : compact ? 64 : 72,
+        dense ? 62 : compact ? 70 : 76,
         Math.floor(
           (Math.min(336, Math.max(220, width - viewportProfile.horizontalPadding * 2)) -
             keypadGap * 2) /
@@ -401,7 +401,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
         style={[
           styles.content,
           {
-            gap: dense ? spacing.lg : spacing['2xl'],
+            gap: dense ? spacing.xl : compact ? spacing['2xl'] : spacing['3xl'],
             paddingHorizontal: viewportProfile.horizontalPadding,
           },
         ]}
@@ -411,8 +411,8 @@ export const PasscodeScreen = memo(function PasscodeScreen({
             style={[
               styles.title,
               {
-                fontSize: dense ? 27 : compact ? 30 : 34,
-                lineHeight: dense ? 33 : compact ? 37 : 42,
+                fontSize: dense ? 30 : compact ? 33 : 36,
+                lineHeight: dense ? 36 : compact ? 40 : 44,
               },
             ]}
           >

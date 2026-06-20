@@ -361,35 +361,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [activePillX],
   );
 
-  const previewInactiveTabPill = useCallback(
-    (targetPrimaryIndex: number) => {
-      if (targetPrimaryIndex >= 0) {
-        activePillTranslateX.value = withSpring(
-          targetPrimaryIndex * tabSlotWidth + pillInsetX,
-          TAB_PILL_SLIDE_SPRING,
-        );
-      }
-
-      activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
-    },
-    [activePillFeedback, activePillTranslateX, pillInsetX, tabSlotWidth],
-  );
-
-  const restoreCommittedPillPosition = useCallback(() => {
-    activePillTranslateX.value = withSpring(activePillX, TAB_PILL_SLIDE_SPRING);
-  }, [activePillTranslateX, activePillX]);
-
-  const handlePrimaryTabPressIn = useCallback(
-    (targetPrimaryIndex: number) => {
-      previewInactiveTabPill(targetPrimaryIndex);
-    },
-    [previewInactiveTabPill],
-  );
-
-  const handlePrimaryTabResponderTerminate = useCallback(() => {
-    restoreCommittedPillPosition();
-  }, [restoreCommittedPillPosition]);
-
   const handleTabLongPress = useCallback(
     (route: BottomTabBarProps['state']['routes'][number]): void => {
       navigation.emit({
@@ -402,10 +373,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const handlePrimaryTabLongPress = useCallback(
     (route: BottomTabBarProps['state']['routes'][number]) => {
-      restoreCommittedPillPosition();
       handleTabLongPress(route);
     },
-    [handleTabLongPress, restoreCommittedPillPosition],
+    [handleTabLongPress],
   );
 
   const primeFocusedPillFeedback = useCallback(() => {
@@ -443,7 +413,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     });
 
     if (event.defaultPrevented) {
-      restoreCommittedPillPosition();
       return;
     }
 
@@ -603,12 +572,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                 onPressIn={() => {
                   if (focused) {
                     primeFocusedPillFeedback();
-                    return;
                   }
-                  handlePrimaryTabPressIn(primaryIndex);
                 }}
-                onResponderTerminate={handlePrimaryTabResponderTerminate}
-                onResponderTerminationRequest={() => true}
                 onPress={() => handleTabPress(route, originalIndex)}
                 onLongPress={() => handlePrimaryTabLongPress(route)}
                 unstable_pressDelay={0}

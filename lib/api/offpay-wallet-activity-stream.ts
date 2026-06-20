@@ -289,6 +289,7 @@ async function connectWalletActivitySse(
       headers: await buildOffpayPublicReadHeaders(),
       signal: controller.signal,
       timeoutMs: null,
+      requestOwner: 'walletActivity.sse',
     });
     clearTimeout(openTimeout);
 
@@ -400,6 +401,7 @@ async function connectWalletActivityPoller(
         limit: ACTIVITY_LIMIT,
         useCache: false,
         signal,
+        requestOwner: 'walletActivity.poll',
       });
       const newestFirst = response.transactions;
       if (!initialized) {

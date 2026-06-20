@@ -751,14 +751,18 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: true,
     eagerWithoutCapabilities: true,
+    requestOwner: 'tokenDetails.balance',
   });
   const transactionsQuery = useOffpayWalletTransactions({
     deferUntilAfterInteractions: true,
     refetchOnMount: 'always',
     useCache: false,
+    requestOwner: 'tokenDetails.transactions',
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
-  const capabilitiesQuery = useOffpayCapabilities();
+  const capabilitiesQuery = useOffpayCapabilities({
+    requestOwner: 'tokenDetails.capabilities',
+  });
   const tokenMetadata = useMemo(
     () =>
       buildStablecoinMetadataLookup(capabilitiesQuery.capabilities?.offline?.supportedStablecoins),

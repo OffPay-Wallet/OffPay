@@ -98,6 +98,7 @@ export async function runOffpayLaunchSequence(
     queryClient: params.queryClient,
     walletAddress,
     network,
+    requestOwner: 'launch.dashboard',
   });
   const capabilitiesKey = offpayCapabilitiesQueryKey(network);
   const cachedCapabilities = params.queryClient.getQueryData<CapabilitiesResponse>(capabilitiesKey);
@@ -112,6 +113,7 @@ export async function runOffpayLaunchSequence(
               getCapabilities(network, {
                 signal,
                 timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
+                requestOwner: 'launch.capabilities',
               }),
             staleTime: CAPABILITIES_STALE_TIME_MS,
           })

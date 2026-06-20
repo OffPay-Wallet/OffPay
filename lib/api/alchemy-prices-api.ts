@@ -61,7 +61,7 @@ export async function fetchAlchemyTokenUsdPrice(
 
 export async function fetchAlchemyTokenUsdPricesBatch(
   request: MarketTokenPricesBatchRequest,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; requestOwner?: string },
 ): Promise<MarketTokenPricesBatchResponse> {
   return offpayPublicRequest<MarketTokenPricesBatchResponse>({
     path: '/api/market/token-prices-batch',
@@ -69,6 +69,7 @@ export async function fetchAlchemyTokenUsdPricesBatch(
     body: request,
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
   });
 }
 

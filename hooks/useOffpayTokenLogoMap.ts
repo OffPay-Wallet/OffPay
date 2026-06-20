@@ -34,6 +34,7 @@ interface UseOffpayTokenLogoMapOptions {
   capabilities?: CapabilitiesResponse['capabilities'] | null;
   deferCapabilitiesUntilAfterInteractions?: boolean;
   enabled?: boolean;
+  fetchSwapTokenCatalog?: boolean;
 }
 
 function normalizeSymbol(symbol: string): string {
@@ -44,6 +45,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
   const { network } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
   const enabledByCaller = options?.enabled ?? true;
+  const fetchSwapTokenCatalog = options?.fetchSwapTokenCatalog ?? true;
   const hasExternalBalanceData = options != null && 'balanceData' in options;
   const hasExternalCapabilities = options != null && 'capabilities' in options;
   const balanceQuery = useOffpayWalletBalance(null, {
@@ -53,6 +55,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
   const capabilitiesQuery = useOffpayCapabilities({
     deferUntilAfterInteractions: options?.deferCapabilitiesUntilAfterInteractions,
     enabled: enabledByCaller && !hasExternalCapabilities,
+    requestOwner: 'tokenLogos.capabilities',
   });
   const capabilities = hasExternalCapabilities
     ? (options?.capabilities ?? null)
@@ -62,6 +65,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
   const enabled =
     network != null &&
     enabledByCaller &&
+    fetchSwapTokenCatalog &&
     canUseNetwork &&
     isOffpayFeatureAvailable(capabilities, 'swap.tokens') &&
     capability.available;
