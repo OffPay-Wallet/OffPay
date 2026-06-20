@@ -81,6 +81,17 @@ interface WalletTransactionRecord {
   counterparties: WalletTransactionCounterparty[];
 }
 
+interface RpcSignatureEntry {
+  signature: string;
+  timestamp: number;
+  status: 'success' | 'failed';
+}
+
+interface RpcSignaturePage {
+  entries: RpcSignatureEntry[];
+  hasMore: boolean;
+}
+
 interface WalletTransactionsResponse {
   address: string;
   network: Network;
@@ -2511,7 +2522,6 @@ async function fetchWalletTransactionsViaEnhancedApi(
   url.searchParams.set('limit', limit.toString());
   url.searchParams.set('commitment', 'confirmed');
   url.searchParams.set('sort-order', 'desc');
-  url.searchParams.set('token-accounts', 'balanceChanged');
 
   if (cursor) {
     url.searchParams.set('before-signature', cursor);
@@ -3214,6 +3224,95 @@ async function fetchRpcTransactionRecordsBatch(
   }
 }
 
+function parseRpcSignatureEntries(result: unknown): RpcSignatureEntry[] {
+  const signatureEntries = Array.isArray(result) ? result : [];
+  const entries: RpcSignatureEntry[] = [];
+
+  for (const entry of signatureEntries) {
+    if (!isRecord(entry)) continue;
+
+    const signature = readTrimmedString(entry.signature);
+    if (!signature) continue;
+
+    const timestamp = readFiniteNumber(entry.blockTime);
+    entries.push({
+      signature,
+      timestamp: timestamp !== null && timestamp > 0 ? timestamp : Math.floor(Date.now() / 1000),
+      status: entry.err === null || entry.err === undefined ? 'success' : 'failed',
+    });
+  }
+
+  return entries;
+}
+
+async function fetchRpcWalletSignaturePage(
+  bindings: Bindings,
+  network: Network,
+  walletAddress: string,
+  cursor: string | null,
+  limit: number,
+): Promise<RpcSignaturePage> {
+  const tokenAccounts = await getWalletTokenAccountAddresses(bindings, walletAddress, network);
+  const seenSources = new Set<string>();
+  const sourceAddresses = [
+    walletAddress,
+    ...tokenAccounts.map((account) => account.address),
+  ].filter((address) => {
+    if (seenSources.has(address)) return false;
+    seenSources.add(address);
+    return true;
+  });
+  const requests = sourceAddresses.map((sourceAddress, index): RpcBatchRequest => {
+    const config: Record<string, unknown> = {
+      commitment: 'confirmed',
+      limit,
+    };
+    if (cursor != null) {
+      config.before = cursor;
+    }
+
+    return {
+      id: `wallet-signatures-${index}`,
+      method: 'getSignaturesForAddress',
+      params: [sourceAddress, config],
+    };
+  });
+  const results = await heliusRpcBatchRequest(bindings, network, requests);
+  const entriesBySignature = new Map<string, RpcSignatureEntry>();
+  let anySourceMayHaveMore = false;
+
+  for (const result of results) {
+    const entries = parseRpcSignatureEntries(result);
+    if (entries.length >= limit) {
+      anySourceMayHaveMore = true;
+    }
+
+    for (const entry of entries) {
+      const existing = entriesBySignature.get(entry.signature);
+      if (
+        existing != null &&
+        (existing.timestamp > entry.timestamp ||
+          (existing.timestamp === entry.timestamp && existing.signature <= entry.signature))
+      ) {
+        continue;
+      }
+
+      entriesBySignature.set(entry.signature, entry);
+    }
+  }
+
+  const entries = Array.from(entriesBySignature.values()).sort((left, right) => {
+    const timestampDiff = right.timestamp - left.timestamp;
+    if (timestampDiff !== 0) return timestampDiff;
+    return left.signature.localeCompare(right.signature);
+  });
+
+  return {
+    entries,
+    hasMore: entries.length > limit || anySourceMayHaveMore,
+  };
+}
+
 async function fetchWalletTransactionsViaRpc(
   bindings: Bindings,
   address: string,
@@ -3221,36 +3320,14 @@ async function fetchWalletTransactionsViaRpc(
   cursor: string | null,
   limit: number,
 ): Promise<WalletTransactionsResponse> {
-  const signaturesResult = await heliusRpcRequest(bindings, network, 'getSignaturesForAddress', [
+  const signaturePage = await fetchRpcWalletSignaturePage(
+    bindings,
+    network,
     address,
-    {
-      commitment: 'confirmed',
-      limit,
-      ...(cursor ? { before: cursor } : {}),
-    },
-  ]);
-
-  const signatureEntries = Array.isArray(signaturesResult) ? signaturesResult : [];
-  const validSignatures = signatureEntries.filter(isRecord);
-
-  const transactionRequests = validSignatures.flatMap((entry) => {
-    const signature = readTrimmedString(entry.signature);
-    if (!signature) {
-      return [];
-    }
-
-    const timestamp = readFiniteNumber(entry.blockTime);
-    const status: 'success' | 'failed' =
-      entry.err === null || entry.err === undefined ? 'success' : 'failed';
-
-    return [
-      {
-        signature,
-        timestamp: timestamp !== null && timestamp > 0 ? timestamp : Math.floor(Date.now() / 1000),
-        status,
-      },
-    ];
-  });
+    cursor,
+    limit,
+  );
+  const transactionRequests = signaturePage.entries.slice(0, limit);
 
   const filteredTransactions = await fetchRpcTransactionRecordsBatch(
     bindings,
@@ -3259,9 +3336,8 @@ async function fetchWalletTransactionsViaRpc(
     transactionRequests,
   );
 
-  const lastEntry = validSignatures.at(-1);
-  const nextCursor =
-    validSignatures.length === limit && lastEntry ? readTrimmedString(lastEntry.signature) : null;
+  const lastEntry = transactionRequests.at(-1);
+  const nextCursor = signaturePage.hasMore && lastEntry ? lastEntry.signature : null;
 
   return {
     address,
@@ -3316,7 +3392,7 @@ async function getWalletTransactions(
   const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v2', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v3', [
     request.address,
     normalizedCursor ?? 'first-page',
     normalizedLimit,
@@ -3359,7 +3435,7 @@ async function getWalletTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v2',
+          namespace: 'wallet-transactions-v3',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,

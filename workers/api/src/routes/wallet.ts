@@ -91,7 +91,7 @@ walletRoutes.get('/dashboard', async (context) => {
       ? await resolveDashboard()
       : await getOrSetEdgeJsonCache({
           context,
-          namespace: 'wallet_dashboard_v2',
+          namespace: 'wallet_dashboard_v3',
           keyParts: [query.network, query.address, query.limit],
           freshTtlMs: WALLET_DASHBOARD_EDGE_FRESH_TTL_MS,
           staleTtlMs: WALLET_DASHBOARD_EDGE_STALE_TTL_MS,
@@ -156,7 +156,7 @@ walletRoutes.get('/transactions', async (context) => {
   const payload = canUseEdgeCache
     ? await getOrSetEdgeJsonCache({
         context,
-        namespace: 'wallet_transactions_first_page_v2',
+        namespace: 'wallet_transactions_first_page_v3',
         keyParts: [query.network, query.address, query.limit],
         freshTtlMs: WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS,
         staleTtlMs: WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS,

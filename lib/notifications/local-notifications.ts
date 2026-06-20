@@ -2,19 +2,21 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import { beginAppLockSuppression } from '@/lib/wallet/app-lock-suppression';
+import { useNotificationStore } from '@/store/notificationStore';
 
 import type {
   OffpayDisplayTransactionType,
   OffpayUmbraWalletActivityType,
   OffpayRecentActivityView,
 } from '@/lib/api/offpay-wallet-data';
+import type { LocalNotificationVariant } from '@/store/notificationStore';
 
 /**
  * Thin wrapper around `expo-notifications` so the rest of the app can
  * fire a local OS notification without coupling to the Expo module
- * directly. This is intentionally separate from the in-app toast and
- * notification-center stores: wallet activity should be allowed to
- * surface as an OS notification even when no toast is shown.
+ * directly. Wallet events are also mirrored into the in-app
+ * notification center here so the bell UI does not depend on a toast
+ * being shown or the OS notification permission being granted.
  */
 
 type OffpayNotificationChannelType = OffpayDisplayTransactionType | 'privacy';
@@ -71,6 +73,36 @@ function rememberPresentedNotificationId(identifier: string): boolean {
   }
 
   return true;
+}
+
+function getNotificationCenterVariant(
+  type: OffpayNotificationChannelType | null | undefined,
+): LocalNotificationVariant {
+  return type === 'receive' ? 'success' : 'info';
+}
+
+function persistWalletTransactionNotificationToCenter(
+  input: WalletTransactionNotificationInput,
+): void {
+  try {
+    const notificationStore = useNotificationStore.getState();
+    const alreadyPersisted = notificationStore.notifications.some(
+      (notification) => notification.id === input.identifier,
+    );
+
+    if (alreadyPersisted) return;
+
+    notificationStore.addNotification({
+      id: input.identifier,
+      title: input.title,
+      message: input.body ?? '',
+      variant: getNotificationCenterVariant(input.type),
+    });
+  } catch (error: unknown) {
+    if (__DEV__) {
+      console.warn('[local-notifications] notification center persist failed:', error);
+    }
+  }
 }
 
 export function buildWalletTransactionNotificationContent(
@@ -272,6 +304,8 @@ export interface UmbraTransactionNotificationInput {
 export async function presentWalletTransactionNotification(
   input: WalletTransactionNotificationInput,
 ): Promise<void> {
+  persistWalletTransactionNotificationToCenter(input);
+
   try {
     await configureNotifications();
     const granted = await ensurePermission();

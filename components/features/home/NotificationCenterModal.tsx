@@ -60,8 +60,12 @@ const CLEAR_ROW_STAGGER_MS = 56;
 const CLEAR_FINISH_SETTLE_MS = 24;
 const CLEAR_EMPTY_RESIZE_DELAY_MS = 160;
 const SHEET_RESIZE_DURATION_MS = 260;
+const ROW_STACK_SHIFT_DURATION_MS = 180;
 const ROW_EXIT_TRANSLATE_X = 36;
 const SHEET_SIZE_TRANSITION = LinearTransition.duration(SHEET_RESIZE_DURATION_MS).easing(
+  Easing.out(Easing.cubic),
+);
+const ROW_STACK_SHIFT_TRANSITION = LinearTransition.duration(ROW_STACK_SHIFT_DURATION_MS).easing(
   Easing.out(Easing.cubic),
 );
 
@@ -80,6 +84,7 @@ function NotificationRow({
   compact,
   dismissing,
   dismissProgress,
+  animateLayout,
   onDismiss,
 }: {
   notification: LocalNotification;
@@ -90,6 +95,7 @@ function NotificationRow({
   compact: boolean;
   dismissing: boolean;
   dismissProgress: SharedValue<number>;
+  animateLayout: boolean;
   onDismiss: (id: string) => void;
 }): React.JSX.Element {
   const tone = VARIANT_TONE[notification.variant];
@@ -109,6 +115,7 @@ function NotificationRow({
 
   return (
     <Animated.View
+      layout={animateLayout ? ROW_STACK_SHIFT_TRANSITION : undefined}
       style={[styles.notificationRow, compact ? styles.notificationRowCompact : null, clearStyle]}
     >
       <View
@@ -472,6 +479,7 @@ export function NotificationCenterModal({
                         compact={compactPanel}
                         dismissing={dismissingNotificationId === notification.id}
                         dismissProgress={dismissProgress}
+                        animateLayout={!reduceMotion && !clearing}
                         onDismiss={handleDismissNotification}
                       />
                     );

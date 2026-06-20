@@ -47,25 +47,33 @@ import { useOffpayTokenValuations } from '@/hooks/useOffpayTokenValuations';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import {
+  buildWalletHistoryGroups,
   buildStablecoinMetadataLookup,
   buildVisibleTokenHoldings,
-  mapWalletTransactionForHistory,
   shortenWalletAddress,
-  walletTransactionMatchesTokenFilter,
+  walletHistoryTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
+import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
-import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
+import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
+import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
+import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
+import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
+import { useWalletStore } from '@/store/walletStore';
 
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
-import type { OffpayHistoryTransactionView } from '@/lib/api/offpay-wallet-data';
+import type {
+  OffpayHistoryTransactionView,
+  OffpayLocalReceiptViewInput,
+} from '@/lib/api/offpay-wallet-data';
 import type {
   ConvertedTokenPriceHistorySample,
   TokenPriceHistoryTimeframeId,
 } from '@/hooks/useOffpayTokenPriceHistory';
-import type { OffpayNetwork, WalletTransactionsResponse } from '@/types/offpay-api';
+import type { OffpayNetwork } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const MAX_TOKEN_ACTIVITY_ROWS = 8;
@@ -89,12 +97,7 @@ const TOKEN_DETAIL_CONTROL_SHADOW = [
   '0 3px 8px rgba(0, 0, 0, 0.18)',
 ].join(', ');
 
-type WalletTransaction = WalletTransactionsResponse['transactions'][number];
 type TokenDetailActionId = 'send' | 'receive' | 'swap';
-type TokenActivityItem = {
-  transaction: WalletTransaction;
-  view: ReturnType<typeof mapWalletTransactionForHistory>;
-};
 type PriceChartPoint = {
   x: number;
   y: number;
@@ -124,8 +127,11 @@ function getTokenActionMint(holding: TokenHolding): string {
   return isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
 }
 
-function transactionMatchesHolding(transaction: WalletTransaction, holding: TokenHolding): boolean {
-  return walletTransactionMatchesTokenFilter(transaction, {
+function historyTransactionMatchesHolding(
+  transaction: OffpayHistoryTransactionView,
+  holding: TokenHolding,
+): boolean {
+  return walletHistoryTransactionMatchesTokenFilter(transaction, {
     mint: isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint,
     symbol: holding.symbol,
   });
@@ -143,81 +149,15 @@ function holdingSupportsPrivateSend(holding: TokenHolding, network: OffpayNetwor
   );
 }
 
-function formatTokenDetailsAmount(value: string): string | null {
-  const normalized = value.trim().replace(/,/g, '');
-  if (!/^[+-]?\d+(?:\.\d+)?$/.test(normalized)) return null;
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed)) return null;
+function formatActivityDateTime(timestampMs: number | null): string | null {
+  if (timestampMs == null || !Number.isFinite(timestampMs)) return null;
 
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 0,
-  }).format(Math.abs(parsed));
-}
-
-function recoverTokenActivityAmountLabel(
-  transaction: WalletTransaction,
-  holding: TokenHolding,
-  view: OffpayHistoryTransactionView,
-): string | null {
-  if (view.amountLabel != null || view.type === 'swap' || view.status === 'failed') {
-    return view.amountLabel;
-  }
-
-  const amount =
-    transaction.amount == null || transaction.amount.trim().length === 0
-      ? null
-      : formatTokenDetailsAmount(transaction.amount);
-  const decimals =
-    typeof transaction.tokenDecimals === 'number' && transaction.tokenDecimals >= 0
-      ? Math.trunc(transaction.tokenDecimals)
-      : isNativeSolHolding(holding)
-        ? 9
-        : null;
-  const rawAmount =
-    amount == null &&
-    decimals != null &&
-    transaction.rawAmount != null &&
-    /^-?\d+$/.test(transaction.rawAmount.trim())
-      ? formatAtomicAmount(transaction.rawAmount, decimals, 6)
-      : null;
-  const displayAmount = amount ?? rawAmount;
-  if (displayAmount == null) return null;
-
-  return `${view.type === 'receive' ? '+' : '-'}${displayAmount} ${holding.symbol}`;
-}
-
-function enrichTokenActivityView(
-  transaction: WalletTransaction,
-  holding: TokenHolding,
-  view: OffpayHistoryTransactionView,
-): OffpayHistoryTransactionView {
-  const fallbackAccountAddress =
-    view.type === 'receive' ? transaction.sender?.trim() : transaction.recipient?.trim();
-  const detailAccountAddress =
-    view.detailAccountAddress ??
-    (fallbackAccountAddress != null && fallbackAccountAddress.length > 0
-      ? fallbackAccountAddress
-      : null);
-
-  return {
-    ...view,
-    amountLabel: recoverTokenActivityAmountLabel(transaction, holding, view),
-    tokenMint: view.tokenMint ?? getTokenActionMint(holding),
-    tokenSymbol: view.tokenSymbol ?? holding.symbol,
-    tokenName: view.tokenName ?? holding.name,
-    tokenLogo: view.tokenLogo ?? holding.logo,
-    detailAccountAddress,
-  };
-}
-
-function formatDateTime(timestampSeconds: number): string {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(new Date(timestampSeconds * 1000));
+  }).format(new Date(timestampMs));
 }
 
 function HeaderIconButton({
@@ -745,9 +685,23 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const params = useLocalSearchParams<{ mint?: string }>();
   const requestedMint = getSearchParam(params.mint);
   const currency = usePreferencesStore((state) => state.currency);
+  const { network } = useOffpayNetwork();
+  const walletAddress = useWalletStore((state) => state.publicKey);
+  const offlineReceipts = useOfflinePaymentStore((state) => state.receipts);
+  const privatePaymentReceipts = usePrivatePaymentStore((state) => state.receipts);
+  const swapReceipts = useAdvancedSwapStore((state) => state.receipts);
   const [selectedTimeframe, setSelectedTimeframe] = useState<TokenPriceHistoryTimeframeId>('24H');
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
+  const localReceipts = useMemo<OffpayLocalReceiptViewInput[]>(() => {
+    return buildLocalHistoryReceiptInputs({
+      network,
+      walletAddress,
+      offlineReceipts,
+      privatePaymentReceipts,
+      swapReceipts,
+    });
+  }, [network, offlineReceipts, privatePaymentReceipts, swapReceipts, walletAddress]);
   const balanceQuery = useOffpayWalletBalance(null, {
     deferCapabilitiesUntilAfterInteractions: true,
     eagerWithoutCapabilities: true,
@@ -794,22 +748,18 @@ export function TokenDetailsScreen(): React.JSX.Element {
     timeframe: selectedTimeframe,
     enabled: holding != null,
   });
-  const tokenActivity = useMemo<TokenActivityItem[]>(() => {
+  const tokenActivity = useMemo<OffpayHistoryTransactionView[]>(() => {
     if (holding == null) return [];
 
-    const items: TokenActivityItem[] = [];
-    for (const transaction of transactionsQuery.transactions) {
-      if (!transactionMatchesHolding(transaction, holding)) continue;
-      const view = mapWalletTransactionForHistory(transaction, null, transactionsQuery.network);
-      items.push({
-        transaction,
-        view: enrichTokenActivityView(transaction, holding, view),
-      });
-      if (items.length >= MAX_TOKEN_ACTIVITY_ROWS) break;
-    }
-
-    return items;
-  }, [holding, transactionsQuery.network, transactionsQuery.transactions]);
+    return buildWalletHistoryGroups({
+      transactions: transactionsQuery.transactions,
+      localReceipts,
+      network: transactionsQuery.network ?? network,
+    })
+      .flatMap((group) => group.data)
+      .filter((transaction) => historyTransactionMatchesHolding(transaction, holding))
+      .slice(0, MAX_TOKEN_ACTIVITY_ROWS);
+  }, [holding, localReceipts, network, transactionsQuery.network, transactionsQuery.transactions]);
 
   const screenHorizontalPadding = viewportProfile.horizontalPadding;
   const actionCompact = dense || width < 360 || fontScale > 1.1;
@@ -964,18 +914,26 @@ export function TokenDetailsScreen(): React.JSX.Element {
               </Text>
               {tokenActivity.length > 0 ? (
                 <View style={styles.activityList}>
-                  {tokenActivity.map(({ transaction, view }) => (
-                    <TransactionActivityRow
-                      key={transaction.signature}
-                      tx={{
-                        ...view,
-                        subtitle: `${view.subtitle} · ${formatDateTime(transaction.timestamp)}`,
-                      }}
-                      compact={compact}
-                      tokenLogos={tokenLogoMap}
-                      onPress={() => handleTokenActivityPress(view)}
-                    />
-                  ))}
+                  {tokenActivity.map((transaction) => {
+                    const activityDate = formatActivityDateTime(transaction.detailTimestampMs);
+
+                    return (
+                      <TransactionActivityRow
+                        key={transaction.id}
+                        tx={
+                          activityDate == null
+                            ? transaction
+                            : {
+                                ...transaction,
+                                subtitle: `${transaction.subtitle} · ${activityDate}`,
+                              }
+                        }
+                        compact={compact}
+                        tokenLogos={tokenLogoMap}
+                        onPress={() => handleTokenActivityPress(transaction)}
+                      />
+                    );
+                  })}
                 </View>
               ) : transactionsQuery.isLoading ||
                 (transactionsQuery.isFetching && transactionsQuery.transactions.length === 0) ? (

@@ -1,7 +1,27 @@
+import * as Notifications from 'expo-notifications';
+
 import {
   buildUmbraTransactionNotificationContent,
   buildWalletTransactionNotificationContent,
+  presentWalletTransactionEventNotification,
 } from '@/lib/notifications/local-notifications';
+import { useNotificationStore } from '@/store/notificationStore';
+
+jest.mock('expo-notifications', () => ({
+  __esModule: true,
+  AndroidImportance: { HIGH: 'high' },
+  AndroidNotificationVisibility: { PUBLIC: 'public' },
+  PermissionStatus: { DENIED: 'denied' },
+  getPermissionsAsync: jest.fn(async () => ({
+    granted: false,
+    canAskAgain: false,
+    status: 'denied',
+  })),
+  requestPermissionsAsync: jest.fn(async () => ({ granted: false })),
+  scheduleNotificationAsync: jest.fn(async () => 'notification-id'),
+  setNotificationChannelAsync: jest.fn(async () => null),
+  setNotificationHandler: jest.fn(),
+}));
 
 describe('buildWalletTransactionNotificationContent', () => {
   it('formats received transaction notifications with unsigned amounts', () => {
@@ -158,6 +178,61 @@ describe('buildUmbraTransactionNotificationContent', () => {
     ).toEqual({
       title: 'Umbra vault ready',
       body: null,
+    });
+  });
+});
+
+describe('wallet transaction notification center bridge', () => {
+  beforeEach(() => {
+    useNotificationStore.setState({
+      notifications: [],
+      unreadCount: 0,
+    });
+  });
+
+  it('persists wallet events to the in-app notification center even when OS notifications are denied', async () => {
+    await presentWalletTransactionEventNotification({
+      identifier: 'wallet-transaction-devnet-sig-1',
+      type: 'receive',
+      amountLabel: '+2 USDC',
+      secondaryAmountLabel: null,
+      signature: 'sig-1',
+    });
+
+    expect(useNotificationStore.getState().notifications[0]).toMatchObject({
+      id: 'wallet-transaction-devnet-sig-1',
+      title: 'Received 2 USDC',
+      message: '',
+      variant: 'success',
+      read: false,
+    });
+    expect(useNotificationStore.getState().unreadCount).toBe(1);
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite a more specific notification center row with the same event id', async () => {
+    useNotificationStore.getState().addNotification({
+      id: 'offline-received-devnet-tx-1',
+      title: 'Payment received',
+      message: '2 USDC received offline.',
+      variant: 'success',
+      createdAt: 1000,
+    });
+
+    await presentWalletTransactionEventNotification({
+      identifier: 'offline-received-devnet-tx-1',
+      type: 'receive',
+      amountLabel: '+2 USDC',
+      secondaryAmountLabel: null,
+      signature: 'tx-1',
+    });
+
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(useNotificationStore.getState().notifications[0]).toMatchObject({
+      id: 'offline-received-devnet-tx-1',
+      title: 'Payment received',
+      message: '2 USDC received offline.',
+      variant: 'success',
     });
   });
 });

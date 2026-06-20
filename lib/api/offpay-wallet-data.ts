@@ -578,6 +578,50 @@ export function walletTransactionMatchesTokenFilter(
   );
 }
 
+function getHistoryTransactionAmountSymbols(
+  transaction: Pick<OffpayHistoryTransactionView, 'amountLabel' | 'secondaryAmountLabel'>,
+): Set<string> {
+  const symbols = new Set<string>();
+  for (const label of [transaction.amountLabel, transaction.secondaryAmountLabel]) {
+    for (const amount of parseTokenAmounts(label)) {
+      symbols.add(amount.symbol);
+    }
+  }
+  return symbols;
+}
+
+export function walletHistoryTransactionMatchesTokenFilter(
+  transaction: Pick<
+    OffpayHistoryTransactionView,
+    'amountLabel' | 'secondaryAmountLabel' | 'tokenMint' | 'tokenSymbol'
+  >,
+  filter: WalletTransactionTokenFilter,
+): boolean {
+  const transactionMint = normalizeTransactionTokenMint(transaction.tokenMint);
+  const transactionSymbol = resolveTransactionTokenSymbol(
+    transaction.tokenSymbol,
+    transaction.tokenMint,
+  );
+  const filterMint = normalizeTransactionTokenMint(filter.mint);
+  const filterSymbol = normalizeTokenSymbol(filter.symbol ?? '');
+  const filterIsNativeSol = isNativeSolMint(filter.mint) || filterSymbol === NATIVE_SOL_SYMBOL;
+  const amountSymbols = getHistoryTransactionAmountSymbols(transaction);
+
+  if (filterIsNativeSol) {
+    return (
+      transactionMint === NATIVE_SOL_MINT ||
+      transactionSymbol === NATIVE_SOL_SYMBOL ||
+      amountSymbols.has(NATIVE_SOL_SYMBOL)
+    );
+  }
+
+  return (
+    (filterMint != null && transactionMint === filterMint) ||
+    (filterSymbol.length > 0 &&
+      (transactionSymbol === filterSymbol || amountSymbols.has(filterSymbol)))
+  );
+}
+
 function normalizeTransactionTypeLabel(type: string): string {
   return type
     .trim()

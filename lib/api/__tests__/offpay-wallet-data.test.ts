@@ -15,6 +15,7 @@ import {
   mapWalletTransactionForHistory,
   mapWalletTransactionForRecentActivity,
   shortenWalletAddress,
+  walletHistoryTransactionMatchesTokenFilter,
   walletTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 
@@ -381,6 +382,65 @@ describe('offpay-wallet-data', () => {
       title: 'Received',
       amountLabel: '+1 SOL',
       amountTone: 'positive',
+      tokenMint: nativeSolMint,
+      tokenSymbol: 'SOL',
+      tokenName: 'Solana',
+    });
+  });
+
+  it('filters SOL token details from mapped history rows with accurate detail fields', () => {
+    const recipient = 'FWz4zbrhzEfBoPdWquP8ypWJVdNmswrLemGEJ2yJ3j6i';
+    const usdcSignature = `${signature}usdc`;
+    const solSignature = `${signature}sol`;
+    const rows = buildWalletHistoryGroups({
+      network: 'devnet',
+      transactions: [
+        buildTransaction({
+          signature: usdcSignature,
+          type: 'TOKEN_TRANSFER',
+          description: 'Sent 2 USDC to test wallet',
+          amount: '2',
+          rawAmount: null,
+          direction: 'send',
+          recipient,
+          tokenMint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          tokenSymbol: 'USDC',
+          tokenName: 'USD Coin',
+          tokenDecimals: 6,
+        }),
+        buildTransaction({
+          signature: solSignature,
+          type: 'TRANSFER',
+          description: null,
+          amount: null,
+          rawAmount: '200000000',
+          direction: 'send',
+          sender: 'CBbAfDh79oEhNn2ZouMi97Ek3y1vQYKuH5VbZqx3okMk',
+          recipient,
+          tokenMint: nativeSolMint,
+          tokenSymbol: null,
+          tokenName: null,
+          tokenDecimals: 9,
+        }),
+      ],
+    }).flatMap((group) => group.data);
+
+    const solRows = rows.filter((row) =>
+      walletHistoryTransactionMatchesTokenFilter(row, {
+        mint: 'native-sol',
+        symbol: 'SOL',
+      }),
+    );
+
+    expect(solRows).toHaveLength(1);
+    expect(solRows[0]).toMatchObject({
+      id: solSignature,
+      title: 'Sent',
+      amountLabel: '-0.2 SOL',
+      detailAccountLabel: 'To',
+      detailAccountAddress: recipient,
+      detailNetwork: 'devnet',
+      detailSignature: solSignature,
       tokenMint: nativeSolMint,
       tokenSymbol: 'SOL',
       tokenName: 'Solana',
