@@ -1,7 +1,7 @@
 /**
  * History screen — chronological list of wallet transactions.
  */
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect, useIsFocused } from 'expo-router/react-navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -24,6 +24,7 @@ import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
+import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
@@ -68,6 +69,7 @@ export function HistoryScreenContent(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: true,
     enabled: isFocused,
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     // History is the canonical transaction view. Do not let the
     // worker-side wallet cache or the shared warm-start TTL keep this
     // screen stale after a user explicitly opens it.
@@ -83,6 +85,7 @@ export function HistoryScreenContent(): React.JSX.Element {
   const canRefreshHistory = transactionsQuery.isCapabilityEnabled;
   const isHistoryStale = transactionsQuery.isStale;
   const refetchFreshHistoryQuery = transactionsQuery.refetchFresh;
+  const refreshHistoryInFlightRef = useRef(false);
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
 
@@ -106,10 +109,19 @@ export function HistoryScreenContent(): React.JSX.Element {
     (options?: { force?: boolean }) => {
       if (!canRefreshHistory) return;
       if (options?.force !== true && !isHistoryStale) return;
+      if (refreshHistoryInFlightRef.current) return;
       const signal = getScreenSignal();
+      refreshHistoryInFlightRef.current = true;
       runAfterTapFrame(() => {
-        if (signal.aborted) return;
-        void refetchFreshHistoryQuery({ signal }).catch(() => undefined);
+        if (signal.aborted) {
+          refreshHistoryInFlightRef.current = false;
+          return;
+        }
+        void refetchFreshHistoryQuery({ signal })
+          .catch(() => undefined)
+          .finally(() => {
+            refreshHistoryInFlightRef.current = false;
+          });
       });
     },
     [canRefreshHistory, getScreenSignal, isHistoryStale, refetchFreshHistoryQuery],
@@ -120,15 +132,20 @@ export function HistoryScreenContent(): React.JSX.Element {
   // tab from another screen). Without this guard, the very first
   // navigation into History would fire the API twice.
   const hasFocusedOnceRef = useRef(false);
+  const refreshHistoryRef = useRef(refreshHistory);
+  useEffect(() => {
+    refreshHistoryRef.current = refreshHistory;
+  }, [refreshHistory]);
+
   useFocusEffect(
     useCallback(() => {
       if (!hasFocusedOnceRef.current) {
         hasFocusedOnceRef.current = true;
         return undefined;
       }
-      refreshHistory({ force: true });
+      refreshHistoryRef.current({ force: true });
       return undefined;
-    }, [refreshHistory]),
+    }, []),
   );
 
   const handleRefresh = useCallback(() => refreshHistory({ force: true }), [refreshHistory]);

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useIsFetching, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
@@ -78,6 +78,7 @@ export function useOffpayWalletTransactions(options?: {
   const requestOwner = options?.requestOwner ?? 'wallet.transactions';
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const [freshRefetching, setFreshRefetching] = useState(false);
+  const freshRefetchingRef = useRef(false);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
   const dashboardFetching =
@@ -259,10 +260,11 @@ export function useOffpayWalletTransactions(options?: {
         return;
       }
 
-      if (freshRefetching || query.isFetching) {
+      if (freshRefetchingRef.current || query.isFetching) {
         return;
       }
 
+      freshRefetchingRef.current = true;
       setFreshRefetching(true);
       try {
         await queryClient.cancelQueries({
@@ -318,12 +320,12 @@ export function useOffpayWalletTransactions(options?: {
           replaceTransactions: true,
         }).catch(() => undefined);
       } finally {
+        freshRefetchingRef.current = false;
         setFreshRefetching(false);
       }
     },
     [
       canRequestTransactions,
-      freshRefetching,
       limit,
       network,
       query.isFetching,

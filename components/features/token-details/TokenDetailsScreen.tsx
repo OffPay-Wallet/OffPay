@@ -54,6 +54,7 @@ import {
   walletHistoryTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
+import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
@@ -709,6 +710,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
   });
   const transactionsQuery = useOffpayWalletTransactions({
     deferUntilAfterInteractions: true,
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     refetchOnMount: 'always',
     useCache: false,
     requestOwner: 'tokenDetails.transactions',
