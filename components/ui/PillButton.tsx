@@ -5,6 +5,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
@@ -26,6 +27,7 @@ export function PillButton({
 }: PillButtonProps): React.JSX.Element {
   const surfaceStyle =
     variant === 'primary' ? styles.primary : variant === 'danger' ? styles.danger : styles.neutral;
+  const isDisabled = disabled || loading;
 
   const textColor =
     variant === 'primary'
@@ -36,16 +38,22 @@ export function PillButton({
 
   return (
     <Pressable
-      style={[styles.shell, disabled ? styles.disabled : undefined]}
-      onPress={disabled || loading ? undefined : onPress}
+      style={[styles.shell, isDisabled ? styles.disabled : undefined]}
+      onPress={isDisabled ? undefined : onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled: disabled || loading, busy: loading }}
+      accessibilityState={{ disabled: isDisabled, busy: loading }}
     >
       <View style={[styles.surface, surfaceStyle]}>
-        <Text variant="button" color={textColor} allowFontScaling={false}>
-          {label}
-        </Text>
+        {loading ? (
+          <View style={styles.loadingFrame}>
+            <LazyLoadingSpinner size={18} color={textColor} />
+          </View>
+        ) : (
+          <Text variant="button" color={textColor} allowFontScaling={false}>
+            {label}
+          </Text>
+        )}
       </View>
     </Pressable>
   );
@@ -62,6 +70,12 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.4 },
   surface: {
     paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingFrame: {
+    width: 20,
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },

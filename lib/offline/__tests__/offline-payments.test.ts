@@ -16,6 +16,7 @@ jest.mock('@/lib/wallet/wallet', () => ({
   deriveSigningSeedFromMnemonic: jest.fn(async () => new Uint8Array(32).fill(9)),
 }));
 
+import { afterEach } from '@jest/globals';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
 
@@ -47,6 +48,10 @@ import {
 describe('offline-payments', () => {
   const walletAddress = 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw';
   const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   it('parses OffPay and Solana QR payloads without inventing fields', () => {
     const offpayQr = buildOfflinePaymentRequestQr({
@@ -186,6 +191,61 @@ describe('offline-payments', () => {
         targetSlotCount: 10,
       } as never),
     ).rejects.toThrow('explicit user confirmation');
+  });
+
+  it('removes generated local placeholders when backend preparation rejects before broadcast', async () => {
+    const localWallet = bs58.encode(ed25519.getPublicKey(new Uint8Array(32).fill(31)));
+    jest.spyOn(offpayApiClient, 'getOfflineRentEstimate').mockResolvedValueOnce({
+      network: 'devnet',
+      slotCount: 10,
+      lamportsPerNonceAccount: '1447680',
+      totalLamports: '14476800',
+      estimatedSol: '0.0144768',
+      expiresAt: Date.now() + 60_000,
+    });
+    jest.spyOn(offpayApiClient, 'getOfflineNoncePoolStatus').mockResolvedValueOnce({
+      walletAddress: localWallet,
+      network: 'devnet',
+      targetSlotCount: 10,
+      counts: {
+        ready: 0,
+        locked: 0,
+        settling: 0,
+        stale: 0,
+        missing: 0,
+        needsRefill: 10,
+      },
+      slots: [],
+      fetchedAt: Date.now(),
+    });
+    jest
+      .spyOn(offpayApiClient, 'prepareOfflineNoncePool')
+      .mockRejectedValueOnce(
+        new Error('Offline payment slot preparation exceeds the 50 slot maximum.'),
+      );
+
+    await expect(
+      prepareOfflinePaymentSlots({
+        walletAddress: localWallet,
+        network: 'devnet',
+        targetSlotCount: 10,
+        spendAuthorization: 'user-confirmed',
+      }),
+    ).rejects.toThrow('exceeds the 50 slot maximum');
+
+    await expect(
+      loadOfflinePaymentSlotSnapshot({
+        walletAddress: localWallet,
+        network: 'devnet',
+      }),
+    ).resolves.toMatchObject({
+      slots: [],
+      counts: {
+        error: 0,
+        preparing: 0,
+        needsRefill: 10,
+      },
+    });
   });
 
   it('persists local slot count changes without a backend refresh', async () => {

@@ -204,6 +204,13 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
         refetchType: 'active',
       });
     },
+    onError: () => {
+      if (walletAddress == null || network == null) return;
+      void queryClient.invalidateQueries({
+        queryKey: offlinePaymentSlotsQueryKey(walletAddress, network),
+        refetchType: 'active',
+      });
+    },
   });
 
   const reclaimMutation = useMutation({

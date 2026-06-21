@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { useAppToast } from '@/components/ui/AppToast';
 import { GlassToggle } from '@/components/ui/GlassToggle';
 import { PillButton } from '@/components/ui/PillButton';
 import { Text } from '@/components/ui/Text';
@@ -23,9 +24,9 @@ interface OfflinePaymentSlotsStepProps {
   poolSize: number;
   onEnabledChange: (enabled: boolean) => void;
   onPoolSizeChange: (size: number) => void;
+  networkReadsEnabled?: boolean;
 }
 
-type PendingConfirmation = 'prepare' | 'restore' | null;
 type SlotStageTone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
 
 interface SlotStageItem {
@@ -56,15 +57,21 @@ export function OfflinePaymentSlotsStep({
   poolSize,
   onEnabledChange,
   onPoolSizeChange,
+  networkReadsEnabled = true,
 }: OfflinePaymentSlotsStepProps): React.JSX.Element {
   const [draftEnabled, setDraftEnabled] = useState(enabled);
   const [draftPoolSize, setDraftPoolSize] = useState(poolSize);
   const [customPoolSize, setCustomPoolSize] = useState(String(poolSize));
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null);
   const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const slots = useOfflinePaymentSlots({ targetSlotCount: draftPoolSize });
+  const { showToast } = useAppToast();
+  const slots = useOfflinePaymentSlots({
+    targetSlotCount: draftPoolSize,
+    deferCapabilitiesUntilAfterInteractions: true,
+    statusEnabled: networkReadsEnabled,
+    rentEstimateEnabled: networkReadsEnabled,
+  });
   const backendReady =
     slots.noncePoolCapability.available &&
     slots.nonceStatusCapability.available &&
@@ -146,11 +153,9 @@ export function OfflinePaymentSlotsStep({
   const progressPercent = draftEnabled
     ? Math.min(100, (progressSlotCount / draftPoolSize) * 100)
     : 0;
-  const needsPreparation =
-    draftEnabled &&
-    backendReady &&
-    slots.canPrepare &&
-    (slots.snapshot?.counts.needsRefill ?? draftPoolSize) > 0;
+  const requestedRefillCount = Math.max(0, Math.min(needsRefillCount, draftPoolSize));
+  const hasSlotSetupNeed = draftEnabled && requestedRefillCount > 0;
+  const canStartPreparation = hasSlotSetupNeed && backendReady && slots.canPrepare;
   const estimateLabel = slots.rentEstimateQuery.data
     ? `${formatLamportsAsExactSol(slots.rentEstimateQuery.data.totalLamports)} SOL`
     : slots.rentEstimateQuery.isFetching
@@ -215,7 +220,6 @@ export function OfflinePaymentSlotsStep({
   const handleSelectPoolSize = (size: number): void => {
     if (isMutatingSlots) return;
     const nextSize = clampPoolSize(size);
-    setPendingConfirmation(null);
     setDraftPoolSize(nextSize);
     setCustomPoolSize(String(nextSize));
   };
@@ -223,30 +227,36 @@ export function OfflinePaymentSlotsStep({
   const handleCustomChange = (value: string): void => {
     if (isMutatingSlots) return;
     const digits = value.replace(/[^\d]/g, '');
-    setPendingConfirmation(null);
     setCustomPoolSize(digits);
     if (digits.length > 0) {
       setDraftPoolSize(parsePoolSize(digits));
     }
   };
 
-  const handleApply = (): void => {
-    if (needsPreparation) {
-      setPendingConfirmation('prepare');
-      return;
-    }
-
+  const savePreferences = (message = 'Preferences saved'): void => {
     onEnabledChange(draftEnabled);
     onPoolSizeChange(draftPoolSize);
-    showSaveNotice('Preferences saved');
+    showSaveNotice(message);
+    showToast({
+      title: message,
+      message: draftEnabled ? `${draftPoolSize} payment slots selected` : 'Offline payments off',
+      variant: 'success',
+      notificationId: 'offline-slots-preferences-saved',
+    });
   };
 
-  const confirmPrepareSlots = (): void => {
-    setPendingConfirmation(null);
+  const prepareSlots = (): void => {
     onEnabledChange(draftEnabled);
     onPoolSizeChange(draftPoolSize);
     setRestoreNotice(null);
-    showSaveNotice('Saving preferences');
+    showSaveNotice('Preparing slots');
+    showToast({
+      title: 'Preparing offline slots',
+      message: `${draftPoolSize} slots. Keep the app open.`,
+      variant: 'info',
+      durationMs: 3200,
+      notificationId: 'offline-slots-prepare-started',
+    });
     slots.prepareMutation.mutate(
       {
         targetSlotCount: draftPoolSize,
@@ -256,72 +266,145 @@ export function OfflinePaymentSlotsStep({
         onSuccess: (result) => {
           const ready = result.snapshot.counts.ready;
           const pending = result.snapshot.counts.preparing + result.snapshot.counts.settling;
-          showSaveNotice(
+          const message =
             ready > 0
               ? `${ready}/${draftPoolSize} ready`
               : pending > 0
                 ? `${Math.min(pending, draftPoolSize)}/${draftPoolSize} finalizing`
-                : 'Slot preparation submitted',
-          );
+                : 'Slot preparation submitted';
+          showSaveNotice(message);
+          showToast({
+            title: ready > 0 ? 'Offline slots ready' : 'Slot preparation submitted',
+            message,
+            variant: ready > 0 ? 'success' : 'info',
+            notificationId: 'offline-slots-prepare-result',
+          });
         },
         onError: (error) => {
-          showSaveNotice(error instanceof Error ? error.message : 'Slot preparation failed');
+          const message = error instanceof Error ? error.message : 'Slot preparation failed';
+          showSaveNotice(message);
+          showToast({
+            title: 'Slot preparation failed',
+            message,
+            variant: 'error',
+            durationMs: 4200,
+            notificationId: 'offline-slots-prepare-error',
+          });
         },
       },
     );
+  };
+
+  const handleApply = (): void => {
+    if (hasSlotSetupNeed) {
+      if (!slots.canUseNetwork) {
+        showSaveNotice('Go online first');
+        showToast({
+          title: 'Go online first',
+          message: 'Preparing slots needs network access.',
+          variant: 'warning',
+          notificationId: 'offline-slots-prepare-offline',
+        });
+        return;
+      }
+
+      if (!canStartPreparation) {
+        showSaveNotice(backendReady ? 'Slot preparation unavailable' : 'Checking setup');
+        showToast({
+          title: backendReady ? 'Cannot prepare slots yet' : 'Checking setup',
+          message: backendReady
+            ? 'Slot preparation is temporarily unavailable.'
+            : 'Wait for OffPay capabilities to load.',
+          variant: 'warning',
+          notificationId: 'offline-slots-prepare-blocked',
+        });
+        return;
+      }
+
+      prepareSlots();
+      return;
+    }
+
+    savePreferences();
   };
 
   const handleRestoreSol = (): void => {
     if (!slots.canUseNetwork) {
       setRestoreNotice('Go online first');
+      showToast({
+        title: 'Go online first',
+        message: 'Restoring slot SOL needs network access.',
+        variant: 'warning',
+        notificationId: 'offline-slots-restore-offline',
+      });
       return;
     }
     if (!canRestoreSol) {
       setRestoreNotice('No slot SOL to restore');
-      return;
-    }
-    setRestoreNotice(null);
-    setPendingConfirmation('restore');
-  };
-
-  const confirmRestoreSol = (): void => {
-    if (!slots.canUseNetwork || !canRestoreSol) {
-      setPendingConfirmation(null);
-      setRestoreNotice(!slots.canUseNetwork ? 'Go online first' : 'No slot SOL to restore');
+      showToast({
+        title: 'No slot SOL to restore',
+        variant: 'info',
+        notificationId: 'offline-slots-restore-empty',
+      });
       return;
     }
 
-    setPendingConfirmation(null);
+    setRestoreNotice('Restoring slot SOL');
+    showToast({
+      title: 'Restoring slot SOL',
+      message: `${reclaimableSol} SOL from unused slots.`,
+      variant: 'info',
+      durationMs: 3200,
+      notificationId: 'offline-slots-restore-started',
+    });
     slots.reclaimMutation.mutate(
       { reclaimAuthorization: 'user-confirmed' },
       {
         onSuccess: (result) => {
-          setRestoreNotice(
+          const message =
             result.closedCount > 0
               ? `Restored ${result.reclaimedSol} SOL`
               : result.signatures.length > 0
                 ? 'Restore submitted'
-                : 'No slot SOL restored',
-          );
+                : 'No slot SOL restored';
+          setRestoreNotice(message);
+          showToast({
+            title: result.closedCount > 0 ? 'SOL restored' : 'Restore submitted',
+            message,
+            variant: result.closedCount > 0 ? 'success' : 'info',
+            notificationId: 'offline-slots-restore-result',
+          });
         },
         onError: (error) => {
-          setRestoreNotice(error instanceof Error ? error.message : 'Offline slot restore failed.');
+          const message = error instanceof Error ? error.message : 'Offline slot restore failed.';
+          setRestoreNotice(message);
+          showToast({
+            title: 'Restore failed',
+            message,
+            variant: 'error',
+            durationMs: 4200,
+            notificationId: 'offline-slots-restore-error',
+          });
         },
       },
     );
   };
 
-  const confirmationTitle =
-    pendingConfirmation === 'restore' ? 'Restore slot SOL?' : 'Prepare offline slots?';
-  const confirmationText =
-    pendingConfirmation === 'restore'
-      ? `Returns ${reclaimableSol} SOL from ${reclaimableSlots.length} unused slot${
-          reclaimableSlots.length === 1 ? '' : 's'
-        }. Network fees apply.`
-      : `Rent: ${estimateLabel}. Network fee applies.`;
-  const confirmationActionLabel = pendingConfirmation === 'restore' ? 'Restore' : 'Prepare';
-  const confirmPendingAction =
-    pendingConfirmation === 'restore' ? confirmRestoreSol : confirmPrepareSlots;
+  const primaryActionLabel = slots.prepareMutation.isPending
+    ? 'Preparing slots'
+    : slots.reclaimMutation.isPending
+      ? 'Restoring'
+      : hasSlotSetupNeed
+        ? !slots.canUseNetwork
+          ? 'Go online to prepare'
+          : !backendReady
+            ? 'Checking setup'
+            : slots.canPrepare
+              ? `Prepare ${requestedRefillCount} slot${requestedRefillCount === 1 ? '' : 's'}`
+              : 'Preparation unavailable'
+        : 'Save & Apply';
+  const primaryActionDisabled =
+    isMutatingSlots || (hasSlotSetupNeed && slots.canUseNetwork && !canStartPreparation);
 
   return (
     <View style={styles.container}>
@@ -438,42 +521,6 @@ export function OfflinePaymentSlotsStep({
         </View>
       </View>
 
-      {pendingConfirmation != null ? (
-        <View style={styles.confirmCard}>
-          <View style={styles.confirmIcon}>
-            <Ionicons
-              name={pendingConfirmation === 'restore' ? 'refresh-outline' : 'warning-outline'}
-              size={layout.iconSizeInline}
-              color={colors.text.secondary}
-            />
-          </View>
-          <View style={styles.confirmContent}>
-            <Text variant="bodyBold" color={colors.text.primary}>
-              {confirmationTitle}
-            </Text>
-            <Text variant="small" color={colors.text.secondary} style={styles.confirmText}>
-              {confirmationText}
-            </Text>
-            <View style={styles.confirmActions}>
-              <View style={styles.confirmActionSlot}>
-                <PillButton
-                  label="Cancel"
-                  variant="neutral"
-                  onPress={() => setPendingConfirmation(null)}
-                />
-              </View>
-              <View style={styles.confirmActionSlot}>
-                <PillButton
-                  label={confirmationActionLabel}
-                  variant="primary"
-                  onPress={confirmPendingAction}
-                />
-              </View>
-            </View>
-          </View>
-        </View>
-      ) : null}
-
       <View style={styles.footerPanel}>
         <View style={styles.footerRow}>
           <View style={styles.footerCopy}>
@@ -505,9 +552,7 @@ export function OfflinePaymentSlotsStep({
               label={slots.reclaimMutation.isPending ? 'Restoring' : 'Restore'}
               variant="neutral"
               loading={slots.reclaimMutation.isPending}
-              disabled={
-                slots.reclaimMutation.isPending || !slots.canUseNetwork || !canRestoreSol
-              }
+              disabled={slots.reclaimMutation.isPending || !slots.canUseNetwork || !canRestoreSol}
               onPress={handleRestoreSol}
             />
           </View>
@@ -515,10 +560,10 @@ export function OfflinePaymentSlotsStep({
       </View>
 
       <PillButton
-        label={slots.prepareMutation.isPending ? 'Preparing slots' : 'Save & Apply'}
+        label={primaryActionLabel}
         variant="primary"
-        loading={slots.prepareMutation.isPending}
-        disabled={isMutatingSlots || (draftEnabled && backendReady && !slots.canPrepare)}
+        loading={isMutatingSlots}
+        disabled={primaryActionDisabled}
         onPress={handleApply}
       />
     </View>
@@ -717,52 +762,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     textAlign: 'right',
-  },
-  confirmCard: {
-    borderRadius: radii.lg,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    padding: spacing.md,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    boxShadow: GLASS_PANEL_SHADOW,
-  },
-  confirmIcon: {
-    width: layout.buttonHeightSm,
-    height: layout.buttonHeightSm,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface.backgroundTint,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    flexShrink: 0,
-  },
-  confirmContent: {
-    flex: 1,
-    minWidth: 0,
-    gap: spacing.xs,
-  },
-  confirmText: {
-    lineHeight: 18,
-  },
-  confirmActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingTop: spacing.xs,
-  },
-  confirmActionSlot: {
-    flex: 1,
-    minWidth: 0,
   },
   footerPanel: {
     borderRadius: radii.lg,

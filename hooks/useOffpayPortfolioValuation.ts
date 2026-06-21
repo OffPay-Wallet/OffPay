@@ -338,9 +338,22 @@ export function useOffpayPortfolioValuation({
       allowProviderUsdPriceFallback: false,
     });
   }, [holdings, normalizedCurrency, priceInputs, pricingScopeKey]);
+  const latestHoldingsData = useMemo(() => {
+    if (query.data == null) return undefined;
+
+    return buildPortfolioValuationData({
+      holdings,
+      priceInputs,
+      currency: normalizedCurrency,
+      rate: query.data.rate,
+      unitUsdPrices: query.data.unitUsdPrices,
+      fetchedAt: query.data.fetchedAt,
+      allowProviderUsdPriceFallback: false,
+    });
+  }, [holdings, normalizedCurrency, priceInputs, query.data]);
 
   return {
     ...query,
-    data: query.data ?? fallbackData ?? cachedData ?? providerFallbackData ?? undefined,
+    data: latestHoldingsData ?? fallbackData ?? cachedData ?? providerFallbackData ?? undefined,
   };
 }

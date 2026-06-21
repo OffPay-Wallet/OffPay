@@ -80,6 +80,7 @@ const SHEET_SHADOW = [
 ].join(', ');
 const NAV_TIMING = { duration: 180, easing: Easing.out(Easing.cubic) } as const;
 const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
+const NAV_EXIT_TIMING = { duration: 90, easing: Easing.out(Easing.cubic) } as const;
 const NETWORK_SWITCH_SETTLE_OPTIONS = {
   timeoutMs: 3000,
   fallbackDelayMs: 650,
@@ -127,6 +128,8 @@ export function PreferencesModal({
   const [optimisticNetwork, setOptimisticNetwork] = useState(network);
   const [headerHeight, setHeaderHeight] = useState(HEADER_FALLBACK_HEIGHT);
   const [contentHeight, setContentHeight] = useState(0);
+  const [stepNetworkReadsEnabled, setStepNetworkReadsEnabled] = useState(true);
+  const stepTransitionIdRef = React.useRef(0);
 
   const setWalletMode = usePreferencesStore((s) => s.setWalletMode);
   const setOfflinePaymentsEnabled = usePreferencesStore((s) => s.setOfflinePaymentsEnabled);
@@ -186,7 +189,9 @@ export function PreferencesModal({
   // Animation
   useEffect(() => {
     if (visible) {
+      stepTransitionIdRef.current += 1;
       setContentHeight(0);
+      setStepNetworkReadsEnabled(true);
       setMounted(true);
       opacity.value = withTiming(1, { duration: 220 });
       translateY.value = withTiming(0, {
@@ -205,7 +210,9 @@ export function PreferencesModal({
         },
       );
       opacity.value = withTiming(0, { duration: 220 });
+      stepTransitionIdRef.current += 1;
       setStep('root');
+      setStepNetworkReadsEnabled(true);
     }
   }, [opacity, translateY, visible, windowHeight]);
 
@@ -219,7 +226,7 @@ export function PreferencesModal({
     transform: [{ translateY: translateY.value }],
   }));
   const contentStyle = useAnimatedStyle(() => ({
-    opacity: 0.74 + contentProgress.value * 0.26,
+    opacity: contentProgress.value,
     transform: [
       {
         translateX: (1 - contentProgress.value) * contentDirection.value * (dense ? 8 : 14),
@@ -269,17 +276,45 @@ export function PreferencesModal({
     setContentHeight((current) => (current === nextHeight ? current : nextHeight));
   }, []);
 
-  const navigateToStep = useCallback(
-    (nextStep: Step): void => {
-      contentDirection.value = nextStep === 'root' ? -1 : 1;
-      contentProgress.value = 0;
+  const enableDeferredStepReads = useCallback((transitionId: number): void => {
+    if (stepTransitionIdRef.current !== transitionId) return;
+    setStepNetworkReadsEnabled(true);
+  }, []);
+
+  const commitStepNavigation = useCallback(
+    (nextStep: Step, transitionId: number): void => {
+      if (stepTransitionIdRef.current !== transitionId) return;
+
       setContentHeight(0);
+      setStepNetworkReadsEnabled(nextStep !== 'offlinePayments');
       setStep(nextStep);
+
       requestAnimationFrame(() => {
-        contentProgress.value = withTiming(1, NAV_TIMING);
+        if (stepTransitionIdRef.current !== transitionId) return;
+        contentProgress.value = withTiming(1, NAV_TIMING, (finished) => {
+          if (finished && nextStep === 'offlinePayments') {
+            runOnJS(enableDeferredStepReads)(transitionId);
+          }
+        });
       });
     },
-    [contentDirection, contentProgress],
+    [contentProgress, enableDeferredStepReads],
+  );
+
+  const navigateToStep = useCallback(
+    (nextStep: Step): void => {
+      if (nextStep === step) return;
+
+      const transitionId = stepTransitionIdRef.current + 1;
+      stepTransitionIdRef.current = transitionId;
+      contentDirection.value = nextStep === 'root' ? -1 : 1;
+      contentProgress.value = withTiming(0, NAV_EXIT_TIMING, (finished) => {
+        if (finished) {
+          runOnJS(commitStepNavigation)(nextStep, transitionId);
+        }
+      });
+    },
+    [commitStepNavigation, contentDirection, contentProgress, step],
   );
 
   const handleWalletModeSelect = useCallback(
@@ -473,6 +508,7 @@ export function PreferencesModal({
           poolSize={offlinePaymentPoolSize}
           onEnabledChange={setOfflinePaymentsEnabled}
           onPoolSizeChange={setOfflinePaymentPoolSize}
+          networkReadsEnabled={stepNetworkReadsEnabled}
         />
       ) : null}
 

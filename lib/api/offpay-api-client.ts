@@ -75,6 +75,7 @@ import type {
   RpcBroadcastRequest,
   RpcBroadcastResponse,
   RpcEpochInfoResponse,
+  RpcOfflineSlotBroadcastRequest,
   RpcLatestBlockhashResponse,
   RpcSignatureStatusesRequest,
   RpcSignatureStatusesResponse,
@@ -1646,6 +1647,17 @@ export function broadcastRawTransaction(
 ): Promise<RpcBroadcastResponse> {
   return offpayApiRequest<RpcBroadcastResponse>({
     path: '/api/rpc/broadcast',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+export function broadcastOfflineSlotTransaction(
+  request: RpcOfflineSlotBroadcastRequest,
+): Promise<RpcBroadcastResponse> {
+  return offpayApiRequest<RpcBroadcastResponse>({
+    path: '/api/rpc/offline-slot-broadcast',
     method: 'POST',
     body: request,
     network: request.network,

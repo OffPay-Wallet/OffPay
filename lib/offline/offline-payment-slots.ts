@@ -4,7 +4,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
 
 import {
-  broadcastRawTransaction,
+  broadcastOfflineSlotTransaction,
   getOfflineNoncePoolStatus,
   getOfflineRentEstimate,
   getRpcLatestBlockhash,
@@ -14,6 +14,7 @@ import {
 } from '@/lib/api/offpay-api-client';
 import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import {
+  OFFLINE_PAYMENT_SLOT_MAX,
   OFFLINE_PAYMENT_SLOT_DEFAULT,
   clampOfflinePaymentSlotCount,
 } from '@/constants/offline-payment-slots';
@@ -279,6 +280,16 @@ async function saveSlot(slot: OfflinePaymentSlotRecord): Promise<OfflinePaymentS
   return slot;
 }
 
+function isEphemeralEmptyErrorSlot(slot: OfflinePaymentSlotRecord): boolean {
+  return (
+    slot.status === 'error' &&
+    slot.lamports == null &&
+    slot.nonceValue == null &&
+    slot.pendingSignature == null &&
+    slot.lockedTxId == null
+  );
+}
+
 export async function clearOfflinePaymentSlotCache(params: {
   walletAddress: string;
   network: OffpayNetwork;
@@ -331,7 +342,7 @@ export async function loadOfflinePaymentSlotSnapshot(params: {
   network: OffpayNetwork;
 }): Promise<OfflinePaymentSlotSnapshot> {
   const index = await loadIndex(params);
-  const slots = (
+  const loadedSlots = (
     await Promise.all(
       index.nonceAccounts.map((nonceAccount) =>
         loadSlot({
@@ -342,6 +353,24 @@ export async function loadOfflinePaymentSlotSnapshot(params: {
       ),
     )
   ).filter((slot): slot is OfflinePaymentSlotRecord => slot != null);
+  const slots = loadedSlots.filter((slot) => !isEphemeralEmptyErrorSlot(slot));
+
+  if (slots.length !== loadedSlots.length || slots.length !== index.nonceAccounts.length) {
+    const retainedAccounts = new Set(slots.map((slot) => slot.nonceAccount));
+    await Promise.allSettled(
+      loadedSlots
+        .filter((slot) => !retainedAccounts.has(slot.nonceAccount))
+        .map((slot) =>
+          deletePersistedJson(recordKey(slot.walletAddress, slot.network, slot.nonceAccount)),
+        ),
+    );
+    await saveIndex({
+      ...index,
+      nonceAccounts: slots.map((slot) => slot.nonceAccount),
+      updatedAt: Date.now(),
+    });
+  }
+
   await yieldToEventLoop();
 
   return {
@@ -373,6 +402,31 @@ async function upsertSlots(params: {
     ...index,
     targetSlotCount: clampSlotCount(params.targetSlotCount ?? index.targetSlotCount),
     nonceAccounts: Array.from(nonceAccounts),
+    updatedAt: Date.now(),
+  });
+
+  return loadOfflinePaymentSlotSnapshot(params);
+}
+
+async function removeSlots(params: {
+  walletAddress: string;
+  network: OffpayNetwork;
+  nonceAccounts: string[];
+}): Promise<OfflinePaymentSlotSnapshot> {
+  const removeSet = new Set(params.nonceAccounts);
+  if (removeSet.size === 0) {
+    return loadOfflinePaymentSlotSnapshot(params);
+  }
+
+  const index = await loadIndex(params);
+  await Promise.allSettled(
+    Array.from(removeSet).map((nonceAccount) =>
+      deletePersistedJson(recordKey(index.walletAddress, index.network, nonceAccount)),
+    ),
+  );
+  await saveIndex({
+    ...index,
+    nonceAccounts: index.nonceAccounts.filter((nonceAccount) => !removeSet.has(nonceAccount)),
     updatedAt: Date.now(),
   });
 
@@ -742,9 +796,10 @@ export async function prepareOfflinePaymentSlots(params: {
 
   for (let index = 0; index < preparedStaleAdvances.length; index += 1) {
     const { slot } = preparedStaleAdvances[index];
-    const broadcast = await broadcastRawTransaction({
+    const broadcast = await broadcastOfflineSlotTransaction({
       rawTransaction: signedStaleAdvances[index],
       network: params.network,
+      purpose: 'nonce-advance',
     });
     advanceSignatures.push(broadcast.signature);
     await saveSlot({
@@ -773,6 +828,19 @@ export async function prepareOfflinePaymentSlots(params: {
     refreshed.slots.length === 0
       ? targetSlotCount
       : Math.max(0, Math.min(refreshed.counts.needsRefill, targetSlotCount));
+  const capacityUsedSlotCount = refreshed.slots.filter(
+    (slot) =>
+      !isEphemeralEmptyErrorSlot(slot) && (slot.lamports != null || slot.status !== 'error'),
+  ).length;
+
+  if (requestCount > 0 && capacityUsedSlotCount >= OFFLINE_PAYMENT_SLOT_MAX) {
+    const reclaimableCount = refreshed.slots.filter(isOfflinePaymentSlotReclaimable).length;
+    throw new Error(
+      reclaimableCount > 0
+        ? 'Offline slot pool is full. Restore unused slot SOL before preparing more slots.'
+        : 'Offline slot pool is full. Refresh slot status, then try preparing again.',
+    );
+  }
 
   if (requestCount === 0) {
     return {
@@ -789,6 +857,7 @@ export async function prepareOfflinePaymentSlots(params: {
     await yieldToEventLoop();
   }
   const generatedByAccount = new Map(generated.map((entry) => [entry.nonceAccount, entry]));
+  const submittedNonceAccounts = new Set<string>();
 
   try {
     await yieldToUi();
@@ -873,11 +942,13 @@ export async function prepareOfflinePaymentSlots(params: {
         transactionLabel: 'offline slot creation transaction',
       });
       await yieldToUi();
-      const broadcast = await broadcastRawTransaction({
+      const broadcast = await broadcastOfflineSlotTransaction({
         rawTransaction: fullySigned,
         network: params.network,
+        purpose: 'nonce-create',
       });
       signatures.push(broadcast.signature);
+      submittedNonceAccounts.add(generatedAccount.nonceAccount);
       await saveSlot({
         version: SLOT_VERSION,
         walletAddress: params.walletAddress,
@@ -917,26 +988,12 @@ export async function prepareOfflinePaymentSlots(params: {
       rentEstimate,
     };
   } catch (error) {
-    await upsertSlots({
+    await removeSlots({
       walletAddress: params.walletAddress,
       network: params.network,
-      targetSlotCount,
-      slots: generated.map((entry) => ({
-        version: SLOT_VERSION,
-        walletAddress: params.walletAddress,
-        network: params.network,
-        nonceAccount: entry.nonceAccount,
-        nonceAuthority: params.walletAddress,
-        nonceValue: null,
-        status: 'error',
-        lamports: null,
-        rentExempt: null,
-        checkedAt: null,
-        updatedAt: Date.now(),
-        lockedTxId: null,
-        pendingSignature: null,
-        errorMessage: error instanceof Error ? error.message : 'Offline slot preparation failed.',
-      })),
+      nonceAccounts: generated
+        .filter((entry) => !submittedNonceAccounts.has(entry.nonceAccount))
+        .map((entry) => entry.nonceAccount),
     });
     throw error;
   } finally {
@@ -1012,9 +1069,10 @@ export async function reclaimOfflinePaymentSlotRent(params: {
         walletAddress: params.walletAddress,
         walletId: params.walletId,
       });
-      const broadcast = await broadcastRawTransaction({
+      const broadcast = await broadcastOfflineSlotTransaction({
         rawTransaction: signedTransaction,
         network: params.network,
+        purpose: 'nonce-close',
       });
       signatures.push(broadcast.signature);
       reclaimedLamports += lamports;

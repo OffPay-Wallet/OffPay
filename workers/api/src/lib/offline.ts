@@ -15,11 +15,7 @@ import {
   type RpcAccountInfo,
 } from './helius.js';
 import { runKvPipeline } from './provider-utils.js';
-import {
-  canonicalJsonStringify,
-  isRecord,
-  isValidSolanaAddress,
-} from './validation.js';
+import { canonicalJsonStringify, isRecord, isValidSolanaAddress } from './validation.js';
 import type { Bindings, Network } from './types.js';
 
 const OFFLINE_SLOT_MIN_COUNT = 10;
@@ -182,6 +178,11 @@ interface OfflineNonceStore {
   acquireNoncePoolLock(walletAddress: string, network: Network): Promise<string | null>;
   releaseNoncePoolLock(walletAddress: string, network: Network, lockToken: string): Promise<void>;
   addNonceAccounts(walletAddress: string, network: Network, nonceAccounts: string[]): Promise<void>;
+  removeNonceAccounts(
+    walletAddress: string,
+    network: Network,
+    nonceAccounts: string[],
+  ): Promise<void>;
   listNonceAccounts(walletAddress: string, network: Network): Promise<string[]>;
 }
 
@@ -191,7 +192,9 @@ let offlineNonceStoreFactory: OfflineNonceStoreFactory = createOfflineNonceStore
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join(
+    '',
+  );
 }
 
 function clampSlotCount(value: number): number {
@@ -232,7 +235,9 @@ function assertSolanaAddress(value: string, message: string): void {
 }
 
 function uniqueAddresses(values: readonly string[]): string[] {
-  return Array.from(new Set(values.map((value) => value.trim()))).filter((value) => value.length > 0);
+  return Array.from(new Set(values.map((value) => value.trim()))).filter(
+    (value) => value.length > 0,
+  );
 }
 
 function buildNoncePoolSetKey(walletAddress: string, network: Network): string {
@@ -243,7 +248,11 @@ function buildNoncePoolLockKey(walletAddress: string, network: Network): string 
   return `${OFFLINE_NONCE_POOL_LOCK_PREFIX}:${network}:${walletAddress}`;
 }
 
-function buildNonceAccountRecordKey(walletAddress: string, network: Network, nonceAccount: string): string {
+function buildNonceAccountRecordKey(
+  walletAddress: string,
+  network: Network,
+  nonceAccount: string,
+): string {
   return `${OFFLINE_NONCE_RECORD_PREFIX}:${network}:${walletAddress}:${nonceAccount}`;
 }
 
@@ -305,7 +314,16 @@ function createOfflineNonceStore(bindings: Bindings): OfflineNonceStore {
       const lockToken = crypto.randomUUID();
       const [result] = await runKvPipeline(
         bindings,
-        [['SET', buildNoncePoolLockKey(walletAddress, network), lockToken, 'NX', 'EX', OFFLINE_NONCE_POOL_LOCK_TTL_SEC]],
+        [
+          [
+            'SET',
+            buildNoncePoolLockKey(walletAddress, network),
+            lockToken,
+            'NX',
+            'EX',
+            OFFLINE_NONCE_POOL_LOCK_TTL_SEC,
+          ],
+        ],
         'Offline nonce pool storage is unavailable.',
       );
 
@@ -347,6 +365,24 @@ function createOfflineNonceStore(bindings: Bindings): OfflineNonceStore {
         'Offline nonce pool storage is unavailable.',
       );
     },
+    async removeNonceAccounts(walletAddress, network, nonceAccounts) {
+      const uniqueNonceAccounts = uniqueAddresses(nonceAccounts);
+      if (uniqueNonceAccounts.length === 0) {
+        return;
+      }
+
+      await runKvPipeline(
+        bindings,
+        [
+          ['SREM', buildNoncePoolSetKey(walletAddress, network), ...uniqueNonceAccounts],
+          ...uniqueNonceAccounts.map((nonceAccount) => [
+            'DEL',
+            buildNonceAccountRecordKey(walletAddress, network, nonceAccount),
+          ]),
+        ],
+        'Offline nonce pool storage is unavailable.',
+      );
+    },
     async listNonceAccounts(walletAddress, network) {
       const [members] = await runKvPipeline(
         bindings,
@@ -359,7 +395,9 @@ function createOfflineNonceStore(bindings: Bindings): OfflineNonceStore {
       }
 
       return uniqueAddresses(
-        members.filter((member): member is string => typeof member === 'string' && isValidSolanaAddress(member)),
+        members.filter(
+          (member): member is string => typeof member === 'string' && isValidSolanaAddress(member),
+        ),
       );
     },
   };
@@ -408,7 +446,11 @@ async function withOfflineIdempotency<T>(
     expiresAt: now + OFFLINE_IDEMPOTENCY_TTL_SEC * 1000,
   };
 
-  const stored = await store.storeIdempotencyRecord(storageKey, record, OFFLINE_IDEMPOTENCY_TTL_SEC);
+  const stored = await store.storeIdempotencyRecord(
+    storageKey,
+    record,
+    OFFLINE_IDEMPOTENCY_TTL_SEC,
+  );
   if (stored) {
     return response;
   }
@@ -572,13 +614,14 @@ async function estimateOfflineNonceRent(
   const totalLamports = lamportsPerNonceAccount * BigInt(slotCount);
   const walletLamports = request.walletAddress
     ? await getWalletLamports(bindings, {
-      address: request.walletAddress,
-      network: request.network,
-    })
+        address: request.walletAddress,
+        network: request.network,
+      })
     : null;
-  const affordableSlotCount = walletLamports === null
-    ? null
-    : Math.min(OFFLINE_SLOT_MAX_COUNT, Number(BigInt(walletLamports) / lamportsPerNonceAccount));
+  const affordableSlotCount =
+    walletLamports === null
+      ? null
+      : Math.min(OFFLINE_SLOT_MAX_COUNT, Number(BigInt(walletLamports) / lamportsPerNonceAccount));
 
   return {
     network: request.network,
@@ -593,10 +636,12 @@ async function estimateOfflineNonceRent(
 }
 
 function serializeUnsignedTransaction(transaction: Transaction): string {
-  return Buffer.from(transaction.serialize({
-    requireAllSignatures: false,
-    verifySignatures: false,
-  })).toString('base64');
+  return Buffer.from(
+    transaction.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    }),
+  ).toString('base64');
 }
 
 async function prepareNoncePool(
@@ -660,9 +705,17 @@ async function prepareNoncePool(
       }
 
       try {
-        const existingNonceAccounts = await store.listNonceAccounts(request.walletAddress, request.network);
+        const existingNonceAccounts = await pruneMissingNoncePoolAccounts({
+          bindings,
+          store,
+          walletAddress: request.walletAddress,
+          network: request.network,
+          nonceAccounts: await store.listNonceAccounts(request.walletAddress, request.network),
+        });
         const existingSet = new Set(existingNonceAccounts);
-        const newNonceAccounts = nonceAccounts.filter((nonceAccount) => !existingSet.has(nonceAccount));
+        const newNonceAccounts = nonceAccounts.filter(
+          (nonceAccount) => !existingSet.has(nonceAccount),
+        );
         const resultingPoolSize = existingSet.size + newNonceAccounts.length;
 
         if (resultingPoolSize < OFFLINE_SLOT_MIN_COUNT) {
@@ -687,7 +740,10 @@ async function prepareNoncePool(
             space: NONCE_ACCOUNT_LENGTH,
           }),
         );
-        const { blockhash, lastValidBlockHeight } = await getLatestBlockhash(bindings, request.network);
+        const { blockhash, lastValidBlockHeight } = await getLatestBlockhash(
+          bindings,
+          request.network,
+        );
         const walletPubkey = new PublicKey(request.walletAddress);
         const authorityPubkey = new PublicKey(request.nonceAuthority);
         const rentLamports = lamportsPerNonceAccount * BigInt(newNonceAccounts.length);
@@ -763,7 +819,9 @@ function parseNonceAccount(
   }
 
   try {
-    const decodedNonceAccount = NonceAccount.fromAccountData(Buffer.from(account.dataBase64, 'base64'));
+    const decodedNonceAccount = NonceAccount.fromAccountData(
+      Buffer.from(account.dataBase64, 'base64'),
+    );
     const authority = decodedNonceAccount.authorizedPubkey.toBase58();
     const authorityMatches = authority === walletAddress;
 
@@ -789,6 +847,38 @@ function parseNonceAccount(
   }
 }
 
+async function pruneMissingNoncePoolAccounts(params: {
+  bindings: Bindings;
+  store: OfflineNonceStore;
+  walletAddress: string;
+  network: Network;
+  nonceAccounts: string[];
+}): Promise<string[]> {
+  if (params.nonceAccounts.length === 0) {
+    return [];
+  }
+
+  const accounts = await getRpcAccounts(params.bindings, {
+    network: params.network,
+    addresses: params.nonceAccounts,
+  });
+  const missingNonceAccounts = accounts.accounts
+    .filter((account) => !account.exists)
+    .map((account) => account.address);
+
+  if (missingNonceAccounts.length === 0) {
+    return params.nonceAccounts;
+  }
+
+  await params.store.removeNonceAccounts(
+    params.walletAddress,
+    params.network,
+    missingNonceAccounts,
+  );
+  const missingSet = new Set(missingNonceAccounts);
+  return params.nonceAccounts.filter((nonceAccount) => !missingSet.has(nonceAccount));
+}
+
 async function readNonceSlotStatus(
   bindings: Bindings,
   request: {
@@ -798,12 +888,14 @@ async function readNonceSlotStatus(
     rentLamports?: bigint;
   },
 ): Promise<NoncePoolSlotStatus> {
-  const rentLamports = request.rentLamports ?? BigInt(
-    await getMinimumBalanceForRentExemption(bindings, {
-      network: request.network,
-      space: NONCE_ACCOUNT_LENGTH,
-    }),
-  );
+  const rentLamports =
+    request.rentLamports ??
+    BigInt(
+      await getMinimumBalanceForRentExemption(bindings, {
+        network: request.network,
+        space: NONCE_ACCOUNT_LENGTH,
+      }),
+    );
   const checkedAt = Date.now();
   const accounts = await getRpcAccounts(bindings, {
     network: request.network,
@@ -835,7 +927,11 @@ async function prepareNonceAdvance(
     },
     async () => {
       const slotStatus = await readNonceSlotStatus(bindings, request);
-      if (slotStatus.state !== 'ready' || !slotStatus.nonceValue || slotStatus.authority !== request.walletAddress) {
+      if (
+        slotStatus.state !== 'ready' ||
+        !slotStatus.nonceValue ||
+        slotStatus.authority !== request.walletAddress
+      ) {
         throw new AppError({
           status: 400,
           code: 'INVALID_REQUEST',
@@ -914,6 +1010,12 @@ async function getNoncePoolStatus(
   const missing = slots.filter((slot) => slot.state === 'missing').length;
   const invalidAuthority = slots.filter((slot) => slot.state === 'invalid_authority').length;
   const stale = slots.filter((slot) => slot.state === 'stale').length + invalidAuthority;
+  const missingNonceAccounts = slots
+    .filter((slot) => slot.state === 'missing')
+    .map((slot) => slot.nonceAccount);
+  if (missingNonceAccounts.length > 0) {
+    await store.removeNonceAccounts(request.walletAddress, request.network, missingNonceAccounts);
+  }
 
   return {
     network: request.network,
@@ -944,13 +1046,20 @@ async function getOfflineTokenContext(
   const stablecoin = requireSupportedStablecoin(bindings, request.network, request.mint);
   const supportedStablecoins = getSupportedStablecoins(bindings, request.network);
   const senderAta = associatedTokenAddress(request.sender, request.mint, stablecoin.programId);
-  const recipientAta = associatedTokenAddress(request.recipient, request.mint, stablecoin.programId);
+  const recipientAta = associatedTokenAddress(
+    request.recipient,
+    request.mint,
+    stablecoin.programId,
+  );
   const accounts = await getRpcAccounts(bindings, {
     network: request.network,
     addresses: [senderAta, recipientAta],
   });
   const senderAccountExists = accountExistsForProgram(accounts.accounts[0], stablecoin.programId);
-  const recipientAccountExists = accountExistsForProgram(accounts.accounts[1], stablecoin.programId);
+  const recipientAccountExists = accountExistsForProgram(
+    accounts.accounts[1],
+    stablecoin.programId,
+  );
 
   return {
     network: request.network,

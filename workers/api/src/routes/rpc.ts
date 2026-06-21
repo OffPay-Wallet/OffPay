@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer';
+import { SystemInstruction, SystemProgram, Transaction } from '@solana/web3.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getAuthenticatedContext } from '../lib/auth.js';
@@ -32,6 +34,14 @@ const broadcastBodySchema = z.object({
   rawTransaction: base64StringSchema,
   network: networkSchema,
 });
+
+const offlineSlotBroadcastPurposeSchema = z.enum(['nonce-create', 'nonce-advance', 'nonce-close']);
+
+const offlineSlotBroadcastBodySchema = broadcastBodySchema.extend({
+  purpose: offlineSlotBroadcastPurposeSchema,
+});
+
+type OfflineSlotBroadcastPurpose = z.infer<typeof offlineSlotBroadcastPurposeSchema>;
 
 const networkQuerySchema = z.object({
   network: networkSchema,
@@ -96,6 +106,86 @@ function assertSignature(value: string, message: string): void {
       code: 'INVALID_REQUEST',
       message,
     });
+  }
+}
+
+function assertOfflineSlotBroadcastTransaction(params: {
+  rawTransaction: string;
+  walletAddress: string;
+  purpose: OfflineSlotBroadcastPurpose;
+}): void {
+  let transaction: Transaction;
+  try {
+    transaction = Transaction.from(Buffer.from(params.rawTransaction, 'base64'));
+  } catch {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Offline slot broadcast transaction is invalid.',
+    });
+  }
+
+  if (transaction.feePayer?.toBase58() !== params.walletAddress) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Offline slot broadcast fee payer must match the authenticated wallet.',
+    });
+  }
+
+  const walletSignature = transaction.signatures.find(
+    (entry) => entry.publicKey.toBase58() === params.walletAddress,
+  );
+  if (walletSignature?.signature == null) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Offline slot broadcast must be signed by the authenticated wallet.',
+    });
+  }
+
+  const expectedInstructionTypes: Record<OfflineSlotBroadcastPurpose, string[]> = {
+    'nonce-create': ['Create', 'InitializeNonceAccount'],
+    'nonce-advance': ['AdvanceNonceAccount'],
+    'nonce-close': ['WithdrawNonceAccount'],
+  };
+  const expectedTypes = expectedInstructionTypes[params.purpose];
+  if (transaction.instructions.length !== expectedTypes.length) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Offline slot broadcast transaction does not match the requested purpose.',
+    });
+  }
+
+  for (let index = 0; index < transaction.instructions.length; index += 1) {
+    const instruction = transaction.instructions[index];
+    if (!instruction.programId.equals(SystemProgram.programId)) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'Offline slot broadcast only supports system nonce transactions.',
+      });
+    }
+
+    let instructionType: string;
+    try {
+      instructionType = SystemInstruction.decodeInstructionType(instruction);
+    } catch {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'Offline slot broadcast contains an unsupported system instruction.',
+      });
+    }
+
+    if (instructionType !== expectedTypes[index]) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'Offline slot broadcast transaction does not match the requested purpose.',
+      });
+    }
   }
 }
 
@@ -265,6 +355,32 @@ rpcRoutes.post('/broadcast', async (context) => {
   );
 
   assertRequestedNetwork(body.network, authenticatedContext.network);
+
+  const response = context.json(
+    await broadcastRawTransaction(context.env, {
+      rawTransaction: body.rawTransaction,
+      network: body.network,
+    }),
+  );
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+});
+
+rpcRoutes.post('/offline-slot-broadcast', async (context) => {
+  const authenticatedContext = getAuthenticatedContext(context);
+  const body = await readJsonBody(
+    context.req.raw,
+    offlineSlotBroadcastBodySchema,
+    'Request body is required.',
+    'Malformed offline slot broadcast request body.',
+  );
+
+  assertRequestedNetwork(body.network, authenticatedContext.network);
+  assertOfflineSlotBroadcastTransaction({
+    rawTransaction: body.rawTransaction,
+    walletAddress: authenticatedContext.wallet,
+    purpose: body.purpose,
+  });
 
   const response = context.json(
     await broadcastRawTransaction(context.env, {

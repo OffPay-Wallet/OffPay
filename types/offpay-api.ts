@@ -565,6 +565,12 @@ export interface RpcBroadcastRequest {
   preflightCommitment?: 'processed' | 'confirmed' | 'finalized';
 }
 
+export type RpcOfflineSlotBroadcastPurpose = 'nonce-create' | 'nonce-advance' | 'nonce-close';
+
+export interface RpcOfflineSlotBroadcastRequest extends RpcBroadcastRequest {
+  purpose: RpcOfflineSlotBroadcastPurpose;
+}
+
 export interface RpcBroadcastResponse {
   signature: string;
 }

@@ -132,6 +132,12 @@ function getQueryErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function runAfterTapFrame(task: () => void): void {
+  requestAnimationFrame(() => {
+    setTimeout(task, 0);
+  });
+}
+
 function countOfflineSetupPendingSlots(
   counts: { preparing: number; settling: number } | null | undefined,
 ): number {
@@ -247,6 +253,7 @@ export function HomeScreenContent(): React.JSX.Element {
     readySlots: number;
     pendingSlots: number;
   } | null>(null);
+  const homeRefreshInFlightRef = useRef(false);
   const walletModeCommitRef = useRef<ScheduledUiWork | null>(null);
   const {
     effectiveWalletMode,
@@ -909,15 +916,15 @@ export function HomeScreenContent(): React.JSX.Element {
   );
 
   const handleRefreshHomeData = useCallback((): void => {
-    if (homeRefreshPending) return;
+    if (homeRefreshInFlightRef.current) return;
+
+    homeRefreshInFlightRef.current = true;
     setHomeRefreshPending(true);
 
-    // A fresh signal scoped to the current screen focus. If the user
-    // backs out of Home (or swaps tabs) mid-refresh, cancel active
-    // query work immediately and release the button state. The
-    // actual refetches are scheduled after this press frame so the
-    // refresh tap can paint before network/JSON work begins.
+    // The actual refetches are scheduled after this press frame so
+    // the refresh tap can paint before network / JSON work begins.
     const signal = getScreenSignal();
+    const refreshStartedAt = mark();
     const balanceKey =
       publicKey != null && network != null ? offpayWalletBalanceQueryKey(publicKey, network) : null;
     const dashboardKey =
@@ -933,17 +940,25 @@ export function HomeScreenContent(): React.JSX.Element {
         ? pendingBackupQueueStatsQueryKey(publicKey, network)
         : null;
     const portfolioKey = ['offpay', 'portfolioValuation', network, currency] as const;
-    let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+    let minSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshSettled = false;
+    let minSpinnerElapsed = false;
     let released = false;
     const releaseSpinner = (): void => {
       if (released) return;
       released = true;
-      if (releaseTimer != null) {
-        clearTimeout(releaseTimer);
-        releaseTimer = null;
+      if (minSpinnerTimer != null) {
+        clearTimeout(minSpinnerTimer);
+        minSpinnerTimer = null;
       }
       signal.removeEventListener('abort', cancelRefresh);
+      homeRefreshInFlightRef.current = false;
       setHomeRefreshPending(false);
+    };
+    const maybeReleaseSpinner = (): void => {
+      if (refreshSettled && minSpinnerElapsed) {
+        releaseSpinner();
+      }
     };
     const cancelRefresh = (): void => {
       if (dashboardKey != null) {
@@ -962,55 +977,60 @@ export function HomeScreenContent(): React.JSX.Element {
       releaseSpinner();
     };
     signal.addEventListener('abort', cancelRefresh, { once: true });
+    minSpinnerTimer = setTimeout(() => {
+      minSpinnerElapsed = true;
+      maybeReleaseSpinner();
+    }, HOME_REFRESH_SPINNER_MIN_MS);
 
-    requestAnimationFrame(() => {
+    runAfterTapFrame(() => {
       if (signal.aborted) {
         releaseSpinner();
         return;
       }
 
+      const finishRefresh = (): void => {
+        refreshSettled = true;
+        measure('home.manualRefresh', refreshStartedAt, {
+          network,
+          mode: canUseNetwork ? 'online' : 'cache',
+          aborted: signal.aborted,
+        });
+        maybeReleaseSpinner();
+      };
+
       if (!canUseNetwork) {
+        const cacheRefreshes: Promise<unknown>[] = [];
         if (publicKey != null && network != null) {
-          void hydrateWalletDisplayCacheIntoQueryClient({
-            queryClient,
-            walletAddress: publicKey,
-            network,
-          }).catch(() => false);
+          cacheRefreshes.push(
+            hydrateWalletDisplayCacheIntoQueryClient({
+              queryClient,
+              walletAddress: publicKey,
+              network,
+            }),
+          );
         }
         if (backupStatsKey != null) {
-          void queryClient.invalidateQueries(
-            { queryKey: backupStatsKey, refetchType: 'active' },
-            { cancelRefetch: true },
-          );
+          cacheRefreshes.push(pendingBackupStatsQuery.refetch({ cancelRefetch: true }));
         }
+        cacheRefreshes.push(portfolioValuationQuery.refetch({ cancelRefetch: true }));
+
+        void Promise.allSettled(cacheRefreshes).finally(finishRefresh);
+        return;
       } else {
         openHomeForegroundFetchGate();
-        if (dashboardKey != null) {
-          void queryClient.invalidateQueries(
-            { queryKey: dashboardKey, refetchType: 'active' },
-            { cancelRefetch: true },
-          );
-        }
-        void queryClient.invalidateQueries(
-          { queryKey: portfolioKey, refetchType: 'active' },
-          { cancelRefetch: true },
-        );
+        const networkRefreshes: Promise<unknown>[] = [
+          capabilitiesQuery.refetch({ cancelRefetch: true }),
+          homeSnapshot.dashboardQuery.refetch({ cancelRefetch: true }),
+          balanceQuery.refetch({ cancelRefetch: true }),
+          transactionsQuery.refetchFresh({ signal, useCache: false }),
+          pendingBackupStatsQuery.refetch({ cancelRefetch: true }),
+          portfolioValuationQuery.refetch({ cancelRefetch: true }),
+        ];
 
-        requestAnimationFrame(() => {
-          if (signal.aborted) return;
-          if (backupStatsKey != null) {
-            void queryClient.invalidateQueries(
-              { queryKey: backupStatsKey, refetchType: 'active' },
-              { cancelRefetch: true },
-            );
-          }
-        });
+        void Promise.allSettled(networkRefreshes).finally(finishRefresh);
       }
-
-      releaseTimer = setTimeout(releaseSpinner, HOME_REFRESH_SPINNER_MIN_MS);
     });
   }, [
-    homeRefreshPending,
     canUseNetwork,
     publicKey,
     network,
@@ -1018,6 +1038,12 @@ export function HomeScreenContent(): React.JSX.Element {
     queryClient,
     getScreenSignal,
     openHomeForegroundFetchGate,
+    capabilitiesQuery,
+    homeSnapshot.dashboardQuery,
+    balanceQuery,
+    transactionsQuery,
+    pendingBackupStatsQuery,
+    portfolioValuationQuery,
   ]);
 
   const handleTokenPress = useCallback(
