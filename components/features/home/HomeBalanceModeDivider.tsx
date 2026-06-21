@@ -15,6 +15,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
 export type HomeBalanceMode = 'default' | 'shielded';
 
@@ -37,6 +38,7 @@ const MODES: { id: HomeBalanceMode; label: string; accessibilityLabel: string }[
 const TRACK_VERTICAL_PADDING = 5;
 const TRACK_HORIZONTAL_PADDING = 5;
 const SEGMENT_GAP = 2;
+const HOME_CONTENT_MAX_WIDTH = 430;
 
 // Timing-only thumb motion: smooth and predictable, with no spring settle.
 const THUMB_TIMING: WithTimingConfig = {
@@ -137,14 +139,21 @@ export function HomeBalanceModeDivider({
   onShieldedPressIn,
 }: HomeBalanceModeDividerProps): React.JSX.Element {
   const { width, height, fontScale } = useWindowDimensions();
-  const dense = width < 340 || fontScale > 1.18;
-  const compact = width < 390 || height < 760 || fontScale > 1.08;
+  const viewportProfile = getViewportProfile({ width, height, fontScale });
+  const dense = viewportProfile.dense;
+  const compact = viewportProfile.compact;
   const trackHeight = dense ? 44 : compact ? 46 : 50;
   const segmentHeight = trackHeight - TRACK_VERTICAL_PADDING * 2;
   const labelFontSize = compact ? 14 : 15;
   const labelLineHeight = compact ? 18 : 20;
-  const estimatedTrackWidth = Math.max(0, Math.min(width, 430));
-  const trackWidth = useSharedValue(estimatedTrackWidth);
+  const trackWidth = Math.max(
+    0,
+    Math.min(HOME_CONTENT_MAX_WIDTH, width - viewportProfile.horizontalPadding * 2),
+  );
+  const segmentWidthPx = Math.max(
+    0,
+    (trackWidth - TRACK_HORIZONTAL_PADDING * 2 - SEGMENT_GAP * (MODES.length - 1)) / MODES.length,
+  );
   const selectedIndex = useSharedValue(modeIndex(selectedMode));
   const selectedModeIndex = modeIndex(selectedMode);
   const propSelectedIndex = useDerivedValue(() => selectedModeIndex, [selectedModeIndex]);
@@ -170,14 +179,7 @@ export function HomeBalanceModeDivider({
     [onChangeMode, selectedIndex],
   );
 
-  const segmentWidth = useDerivedValue(() => {
-    if (trackWidth.value <= 0) return 0;
-    return Math.max(
-      0,
-      (trackWidth.value - TRACK_HORIZONTAL_PADDING * 2 - SEGMENT_GAP * (MODES.length - 1)) /
-        MODES.length,
-    );
-  });
+  const segmentWidth = useDerivedValue(() => segmentWidthPx, [segmentWidthPx]);
 
   const thumbStyle = useAnimatedStyle(() => {
     const w = segmentWidth.value;
@@ -190,20 +192,9 @@ export function HomeBalanceModeDivider({
     };
   });
 
-  const handleTrackLayout = useCallback(
-    (event: { nativeEvent: { layout: { width: number } } }) => {
-      const nextWidth = event.nativeEvent.layout.width;
-      if (!Number.isFinite(nextWidth) || nextWidth <= 0) return;
-      if (Math.abs(trackWidth.value - nextWidth) > 0.5) {
-        trackWidth.value = nextWidth;
-      }
-    },
-    [trackWidth],
-  );
-
   return (
     <View style={[styles.wrapper, compact && styles.wrapperCompact]}>
-      <View style={[styles.track, { height: trackHeight }]} onLayout={handleTrackLayout}>
+      <View style={[styles.track, { width: trackWidth, height: trackHeight }]}>
         {!loading ? (
           <Animated.View
             pointerEvents="none"
@@ -268,6 +259,7 @@ const styles = StyleSheet.create({
   wrapper: {
     marginTop: spacing.sm,
     marginBottom: spacing.xl,
+    alignItems: 'center',
   },
   wrapperCompact: {
     marginTop: spacing.xs,

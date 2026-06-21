@@ -9,7 +9,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { DEFAULT_CURRENCY } from '@/constants/currencies';
-import { DEFAULT_NETWORK } from '@/constants/networks';
+import { DEFAULT_NETWORK, resolveSelectableSolanaNetwork } from '@/constants/networks';
 import {
   OFFLINE_PAYMENT_SLOT_DEFAULT,
   clampOfflinePaymentSlotCount,
@@ -82,11 +82,7 @@ function nextNetworkPreferenceTimestamp(previous: number): number {
 }
 
 function normalizePersistedNetwork(network: unknown): SolanaNetworkId {
-  if (network === 'mainnet-beta' || network === 'devnet') {
-    return network;
-  }
-
-  return DEFAULT_NETWORK;
+  return resolveSelectableSolanaNetwork(network);
 }
 
 function normalizePoolSize(value: unknown): number {
@@ -178,20 +174,21 @@ export const usePreferencesStore = create<PreferencesState>()(
         }),
       setCurrency: (code) => set((state) => (state.currency === code ? state : { currency: code })),
       setNetwork: (network) => {
+        const selectableNetwork = resolveSelectableSolanaNetwork(network);
         let mirror: NetworkPreferenceMirror | null = null;
 
         set((state) => {
-          if (state.network === network) return state;
+          if (state.network === selectableNetwork) return state;
 
           const updatedAt = nextNetworkPreferenceTimestamp(state.networkUpdatedAt);
           mirror = {
             version: 1,
-            network,
+            network: selectableNetwork,
             updatedAt,
           };
 
           return {
-            network,
+            network: selectableNetwork,
             networkUpdatedAt: updatedAt,
           };
         });

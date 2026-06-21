@@ -42,7 +42,7 @@ import { PuffyNetworkIcon } from '@/components/ui/icons/PuffyNetworkIcon';
 import { PuffyPaymentsIcon } from '@/components/ui/icons/PuffyPaymentsIcon';
 import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
 import { colors } from '@/constants/colors';
-import { SOLANA_NETWORKS } from '@/constants/networks';
+import { SOLANA_NETWORKS, isSolanaNetworkSelectable } from '@/constants/networks';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransitionStore';
@@ -63,6 +63,7 @@ const PREFERENCE_MENU_DIVIDER_INSET = spacing.lg + 40 + spacing.md;
 const SHEET_CHROME_PADDING = spacing.md;
 const HEADER_FALLBACK_HEIGHT = layout.minTouchTarget + spacing.lg + spacing.md;
 const SHEET_MIN_HEIGHT = layout.buttonHeightLg * 2 + spacing['3xl'];
+const NETWORK_STEP_CONTENT_ESTIMATE = 280;
 
 const HEADER_TITLES: Record<Step, string> = {
   root: 'Preferences',
@@ -161,14 +162,19 @@ export function PreferencesModal({
 
     if (contentHeight <= 0) {
       const stepEstimate = step === 'offlinePayments' ? 520 : SHEET_MIN_HEIGHT;
-      return Math.min(maxSheetHeight, chromeHeight + stepEstimate);
+      return Math.min(
+        maxSheetHeight,
+        chromeHeight + (step === 'network' ? NETWORK_STEP_CONTENT_ESTIMATE : stepEstimate),
+      );
     }
 
     if (scrollOverflows) {
       return maxSheetHeight;
     }
 
-    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight));
+    const stableContentHeight =
+      step === 'network' ? Math.max(contentHeight, NETWORK_STEP_CONTENT_ESTIMATE) : contentHeight;
+    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + stableContentHeight));
   }, [contentHeight, maxSheetHeight, resolvedHeaderHeight, scrollOverflows, step]);
 
   const translateY = useSharedValue(windowHeight);
@@ -302,6 +308,7 @@ export function PreferencesModal({
 
   const handleNetworkSelect = useCallback(
     (id: SolanaNetworkId): void => {
+      if (!isSolanaNetworkSelectable(id)) return;
       if (id === optimisticNetwork) return;
 
       setOptimisticNetwork(id);

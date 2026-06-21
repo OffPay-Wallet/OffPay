@@ -28,6 +28,9 @@ export function SelectableCard({
   disabled = false,
 }: SelectableCardProps): React.JSX.Element {
   const pressDisabled = disabled || selected;
+  const titleColor = disabled ? colors.text.tertiary : colors.text.primary;
+  const subtitleColor = disabled ? colors.text.placeholder : colors.text.secondary;
+  const badgeTextColor = disabled ? colors.text.tertiary : colors.text.secondary;
 
   return (
     <Pressable
@@ -46,7 +49,7 @@ export function SelectableCard({
           <View style={styles.titleRow}>
             <Text
               variant="bodyBold"
-              color={colors.text.primary}
+              color={titleColor}
               style={styles.title}
               numberOfLines={1}
               ellipsizeMode="tail"
@@ -54,18 +57,24 @@ export function SelectableCard({
               {title}
             </Text>
             {badge != null ? (
-              <View style={styles.badge}>
-                <Text variant="small" color={colors.text.secondary} style={styles.badgeText}>
+              <View style={[styles.badge, disabled ? styles.badgeDisabled : undefined]}>
+                <Text variant="small" color={badgeTextColor} style={styles.badgeText}>
                   {badge}
                 </Text>
               </View>
             ) : null}
           </View>
-          <Text variant="small" color={colors.text.secondary} numberOfLines={2}>
+          <Text variant="small" color={subtitleColor} numberOfLines={2}>
             {subtitle}
           </Text>
         </View>
-        <View style={[styles.radio, selected ? styles.radioActive : undefined]}>
+        <View
+          style={[
+            styles.radio,
+            disabled ? styles.radioDisabled : undefined,
+            selected ? styles.radioActive : undefined,
+          ]}
+        >
           {selected ? <View style={styles.radioDot} /> : null}
         </View>
       </View>
@@ -101,7 +110,12 @@ const styles = StyleSheet.create({
     ].join(', '),
   },
   disabled: {
-    opacity: 0.45,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.04)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.18)',
+    ].join(', '),
   },
   content: {
     flexDirection: 'row',
@@ -125,6 +139,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     flexShrink: 0,
   },
+  badgeDisabled: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
   badgeText: { fontSize: 10 },
   radio: {
     width: 24,
@@ -135,6 +152,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+  },
+  radioDisabled: {
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   radioActive: { borderColor: colors.text.primary },
   radioDot: {
