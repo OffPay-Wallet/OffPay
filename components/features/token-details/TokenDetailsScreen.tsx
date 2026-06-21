@@ -45,6 +45,7 @@ import {
 import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayTokenValuations } from '@/hooks/useOffpayTokenValuations';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
+import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayWalletTokenTransactions } from '@/hooks/useOffpayWalletTokenTransactions';
 import {
   buildWalletHistoryGroups,
@@ -54,6 +55,7 @@ import {
   walletHistoryTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
+import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
@@ -68,6 +70,7 @@ import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard'
 import type {
   OffpayHistoryTransactionView,
   OffpayLocalReceiptViewInput,
+  WalletTransactionTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 import type {
   ConvertedTokenPriceHistorySample,
@@ -110,9 +113,39 @@ const TOKEN_DETAIL_ACTIONS: { id: TokenDetailActionId; label: string }[] = [
   { id: 'swap', label: 'Swap' },
 ];
 
+type TokenDetailsRouteParams = {
+  mint?: string;
+  symbol?: string;
+  name?: string;
+  balance?: string;
+  balanceValue?: string;
+  priceMint?: string;
+  priceSymbol?: string;
+  logo?: string;
+  usdPrice?: string;
+  verified?: string;
+  spam?: string;
+  priceChange?: string;
+};
+
 function getSearchParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0]?.trim() || null;
   return value?.trim() || null;
+}
+
+function getNumberSearchParam(value: string | string[] | undefined): number | null {
+  const text = getSearchParam(value);
+  if (text == null) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getBooleanSearchParam(value: string | string[] | undefined): boolean | null {
+  const text = getSearchParam(value)?.toLowerCase();
+  if (text == null) return null;
+  if (text === 'true' || text === '1') return true;
+  if (text === 'false' || text === '0') return false;
+  return null;
 }
 
 function normalizeSymbol(value: string | null | undefined): string {
@@ -131,14 +164,76 @@ function getTokenActionMint(holding: TokenHolding): string {
   return isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
 }
 
-function historyTransactionMatchesHolding(
-  transaction: OffpayHistoryTransactionView,
-  holding: TokenHolding,
-): boolean {
-  return walletHistoryTransactionMatchesTokenFilter(transaction, {
-    mint: isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint,
-    symbol: holding.symbol,
-  });
+function buildRouteHoldingSnapshot(
+  params: TokenDetailsRouteParams,
+  requestedMint: string | null,
+): TokenHolding | null {
+  if (requestedMint == null) return null;
+
+  const symbol =
+    getSearchParam(params.symbol) ?? (isNativeSolMintValue(requestedMint) ? 'SOL' : null);
+  const name = getSearchParam(params.name) ?? (symbol === 'SOL' ? 'Solana' : symbol);
+  if (symbol == null || name == null) return null;
+
+  const balanceValue = getNumberSearchParam(params.balanceValue) ?? 0;
+  const priceMint =
+    getSearchParam(params.priceMint) ??
+    (isNativeSolMintValue(requestedMint) ? NATIVE_SOL_MINT : requestedMint);
+
+  return {
+    mint: requestedMint,
+    priceMint,
+    priceSymbol: getSearchParam(params.priceSymbol) ?? symbol,
+    symbol,
+    name,
+    balance: getSearchParam(params.balance) ?? '0',
+    balanceValue,
+    logo: getSearchParam(params.logo),
+    usdPrice: getNumberSearchParam(params.usdPrice),
+    verified: getBooleanSearchParam(params.verified) ?? true,
+    spam: getBooleanSearchParam(params.spam) ?? false,
+    priceChange: getSearchParam(params.priceChange),
+  };
+}
+
+function getTokenActivityFilter(
+  holding: TokenHolding | null,
+  requestedMint: string | null,
+): WalletTransactionTokenFilter | null {
+  if (holding != null) {
+    return {
+      mint: getTokenActionMint(holding),
+      symbol: holding.symbol,
+    };
+  }
+
+  if (requestedMint == null) return null;
+
+  return {
+    mint: isNativeSolMintValue(requestedMint) ? NATIVE_SOL_MINT : requestedMint,
+    symbol: isNativeSolMintValue(requestedMint) ? 'SOL' : null,
+  };
+}
+
+function buildTokenActivityRows(params: {
+  filter: WalletTransactionTokenFilter | null;
+  transactions: Parameters<typeof buildWalletHistoryGroups>[0]['transactions'];
+  transactionViews: Parameters<typeof buildWalletHistoryGroups>[0]['transactionViews'];
+  localReceipts: OffpayLocalReceiptViewInput[];
+  network: OffpayNetwork | null;
+}): OffpayHistoryTransactionView[] {
+  const filter = params.filter;
+  if (filter == null) return [];
+
+  return buildWalletHistoryGroups({
+    transactions: params.transactions,
+    transactionViews: params.transactionViews,
+    localReceipts: params.localReceipts,
+    network: params.network,
+  })
+    .flatMap((group) => group.data)
+    .filter((transaction) => walletHistoryTransactionMatchesTokenFilter(transaction, filter))
+    .slice(0, MAX_TOKEN_ACTIVITY_ROWS);
 }
 
 function holdingSupportsPrivateSend(holding: TokenHolding, network: OffpayNetwork | null): boolean {
@@ -686,8 +781,25 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const compact = viewportProfile.compact;
   const dense = viewportProfile.dense;
   const { showToast } = useAppToast();
-  const params = useLocalSearchParams<{ mint?: string }>();
+  const params = useLocalSearchParams<TokenDetailsRouteParams>();
   const requestedMint = getSearchParam(params.mint);
+  const routeHoldingSnapshot = useMemo(
+    () => buildRouteHoldingSnapshot(params, requestedMint),
+    [
+      params.balance,
+      params.balanceValue,
+      params.logo,
+      params.name,
+      params.priceChange,
+      params.priceMint,
+      params.priceSymbol,
+      params.spam,
+      params.symbol,
+      params.usdPrice,
+      params.verified,
+      requestedMint,
+    ],
+  );
   const currency = usePreferencesStore((state) => state.currency);
   const { network } = useOffpayNetwork();
   const walletAddress = useWalletStore((state) => state.publicKey);
@@ -733,21 +845,28 @@ export function TokenDetailsScreen(): React.JSX.Element {
         (item) =>
           item.mint === requestedMint ||
           (isNativeSolMintValue(requestedMint) && isNativeSolHolding(item)),
-      ) ?? null,
-    [holdings, requestedMint],
+      ) ??
+      routeHoldingSnapshot ??
+      null,
+    [holdings, requestedMint, routeHoldingSnapshot],
   );
   const valuationHoldings = useMemo(() => (holding == null ? [] : [holding]), [holding]);
   const valuationQuery = useOffpayTokenValuations({ holdings: valuationHoldings, currency });
   const valuation = holding == null ? null : (valuationQuery.data?.[holding.mint] ?? null);
   const mintForDisplay =
     holding == null ? requestedMint : isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
-  const tokenTransactionsQuery = useOffpayWalletTokenTransactions({
-    mint: holding == null ? null : getTokenActionMint(holding),
+  const tokenActivityFilter = useMemo(
+    () => getTokenActivityFilter(holding, requestedMint),
+    [holding, requestedMint],
+  );
+  const walletHistoryQuery = useOffpayWalletTransactions({
+    autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
-    limit: MAX_TOKEN_ACTIVITY_ROWS,
+    enabled: requestedMint != null,
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     refetchOnMount: true,
-    enabled: holding != null,
-    requestOwner: 'tokenDetails.transactions',
+    requestOwner: 'tokenDetails.walletHistory',
+    waitForDashboard: false,
   });
   const selectedTokenSupportsPrivateSend =
     holding != null && holdingSupportsPrivateSend(holding, capabilitiesQuery.network);
@@ -759,26 +878,61 @@ export function TokenDetailsScreen(): React.JSX.Element {
     timeframe: selectedTimeframe,
     enabled: holding != null,
   });
-  const tokenActivity = useMemo<OffpayHistoryTransactionView[]>(() => {
-    if (holding == null) return [];
-
-    return buildWalletHistoryGroups({
-      transactions: tokenTransactionsQuery.transactions,
-      transactionViews: tokenTransactionsQuery.transactionViews,
+  const walletHistoryActivity = useMemo<OffpayHistoryTransactionView[]>(
+    () =>
+      buildTokenActivityRows({
+        filter: tokenActivityFilter,
+        transactions: walletHistoryQuery.transactions,
+        transactionViews: walletHistoryQuery.transactionViews,
+        localReceipts,
+        network: walletHistoryQuery.network ?? network,
+      }),
+    [
       localReceipts,
-      network: tokenTransactionsQuery.network ?? network,
-    })
-      .flatMap((group) => group.data)
-      .filter((transaction) => historyTransactionMatchesHolding(transaction, holding))
-      .slice(0, MAX_TOKEN_ACTIVITY_ROWS);
-  }, [
-    holding,
-    localReceipts,
-    network,
-    tokenTransactionsQuery.network,
-    tokenTransactionsQuery.transactionViews,
-    tokenTransactionsQuery.transactions,
-  ]);
+      network,
+      tokenActivityFilter,
+      walletHistoryQuery.network,
+      walletHistoryQuery.transactionViews,
+      walletHistoryQuery.transactions,
+    ],
+  );
+  const shouldBackfillTokenTransactions =
+    holding != null &&
+    walletHistoryActivity.length === 0 &&
+    !walletHistoryQuery.isInitialDataPending &&
+    !walletHistoryQuery.isFetching;
+  const tokenTransactionsQuery = useOffpayWalletTokenTransactions({
+    mint: holding == null ? null : getTokenActionMint(holding),
+    deferUntilAfterInteractions: true,
+    limit: MAX_TOKEN_ACTIVITY_ROWS,
+    refetchOnMount: false,
+    enabled: shouldBackfillTokenTransactions,
+    requestOwner: 'tokenDetails.transactions.backfill',
+  });
+  const tokenEndpointActivity = useMemo<OffpayHistoryTransactionView[]>(
+    () =>
+      buildTokenActivityRows({
+        filter: tokenActivityFilter,
+        transactions: tokenTransactionsQuery.transactions,
+        transactionViews: tokenTransactionsQuery.transactionViews,
+        localReceipts,
+        network: tokenTransactionsQuery.network ?? network,
+      }),
+    [
+      localReceipts,
+      network,
+      tokenActivityFilter,
+      tokenTransactionsQuery.network,
+      tokenTransactionsQuery.transactionViews,
+      tokenTransactionsQuery.transactions,
+    ],
+  );
+  const tokenActivity =
+    walletHistoryActivity.length > 0 ? walletHistoryActivity : tokenEndpointActivity;
+  const tokenActivityLoading =
+    tokenActivity.length === 0 &&
+    (walletHistoryQuery.isInitialDataPending ||
+      (walletHistoryQuery.isFetching && walletHistoryQuery.transactions.length === 0));
 
   const screenHorizontalPadding = viewportProfile.horizontalPadding;
   const actionCompact = dense || width < 360 || fontScale > 1.1;
@@ -954,9 +1108,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
                     );
                   })}
                 </View>
-              ) : tokenTransactionsQuery.isLoading ||
-                (tokenTransactionsQuery.isFetching &&
-                  tokenTransactionsQuery.transactions.length === 0) ? (
+              ) : tokenActivityLoading ? (
                 <View style={styles.emptyActivityCard}>
                   <LazyLoadingSpinner size={18} color={colors.brand.glossAccent} />
                   <Text variant="small" color={colors.text.secondary} style={styles.emptyText}>

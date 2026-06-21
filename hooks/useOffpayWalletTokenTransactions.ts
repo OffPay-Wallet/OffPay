@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
@@ -14,6 +14,7 @@ import {
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
+import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { InfiniteData } from '@tanstack/react-query';
@@ -26,6 +27,7 @@ import type {
 
 const TOKEN_TRANSACTION_STALE_TIME_MS = 1000 * 60;
 const TOKEN_TRANSACTION_GC_TIME_MS = 1000 * 60 * 15;
+const TOKEN_HISTORY_FETCH_WAIT_MS = 6500;
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_TRANSACTION_VIEWS: WalletTransactionView[] = [];
 const EMPTY_HISTORY_GROUPS: WalletTransactionGroup[] = [];
@@ -136,6 +138,14 @@ export function useOffpayWalletTokenTransactions(options: {
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
   const queryClient = useQueryClient();
+  const walletHistoryBaseQueryKey = useMemo(
+    () => offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+    [network, walletAddress],
+  );
+  const walletHistoryFetching = useIsFetching({ queryKey: walletHistoryBaseQueryKey }) > 0;
+  const [displayCacheHydrationSettled, setDisplayCacheHydrationSettled] = useState(false);
+  const [displayCacheHydrationVersion, setDisplayCacheHydrationVersion] = useState(0);
+  const [walletHistoryWaitExpired, setWalletHistoryWaitExpired] = useState(false);
   const capabilitiesQuery = useOffpayCapabilities({
     enabled: enabledByCaller,
     requestOwner: `${requestOwner}.capabilities`,
@@ -175,7 +185,6 @@ export function useOffpayWalletTokenTransactions(options: {
     mint != null &&
     canUseNetwork &&
     transactionsFeatureAvailable;
-  const enabled = canRequestTransactions && enabledByCaller && interactionsSettled;
 
   useEffect(() => {
     if (!enabledByCaller) {
@@ -204,11 +213,63 @@ export function useOffpayWalletTokenTransactions(options: {
     };
   }, [deferUntilAfterInteractions, enabledByCaller, limit, mint, network, walletAddress]);
 
-  const getWarmInitialData = useMemo(() => {
+  useEffect(() => {
+    setDisplayCacheHydrationSettled(false);
+
+    if (!enabledByCaller || walletAddress == null || network == null || mint == null) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    void hydrateWalletDisplayCacheIntoQueryClient({
+      queryClient,
+      walletAddress,
+      network,
+      options: {
+        includeBalance: false,
+        includeTransactions: true,
+        includePendingBackupStats: false,
+      },
+    })
+      .catch(() => false)
+      .finally(() => {
+        if (cancelled) return;
+        setDisplayCacheHydrationSettled(true);
+        setDisplayCacheHydrationVersion((version) => version + 1);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabledByCaller, mint, network, queryClient, walletAddress]);
+
+  useEffect(() => {
+    setWalletHistoryWaitExpired(false);
+
+    if (
+      !enabledByCaller ||
+      walletAddress == null ||
+      network == null ||
+      mint == null ||
+      !walletHistoryFetching
+    ) {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => {
+      setWalletHistoryWaitExpired(true);
+    }, TOKEN_HISTORY_FETCH_WAIT_MS);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [enabledByCaller, mint, network, walletAddress, walletHistoryFetching]);
+
+  const warmInitialData = useMemo(() => {
     if (walletAddress == null || network == null || mint == null) return undefined;
 
     const walletHistoryQueries = queryClient.getQueriesData<WalletTransactionsInfiniteData>({
-      queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+      queryKey: walletHistoryBaseQueryKey,
     });
     let bestPage: WalletTransactionsResponse | undefined;
 
@@ -229,7 +290,34 @@ export function useOffpayWalletTokenTransactions(options: {
     }
 
     return bestPage;
-  }, [limit, mint, network, queryClient, walletAddress]);
+  }, [
+    displayCacheHydrationVersion,
+    limit,
+    mint,
+    network,
+    queryClient,
+    walletAddress,
+    walletHistoryBaseQueryKey,
+  ]);
+
+  const shouldWaitForWalletHistory = walletHistoryFetching && !walletHistoryWaitExpired;
+  const enabled =
+    canRequestTransactions &&
+    enabledByCaller &&
+    interactionsSettled &&
+    displayCacheHydrationSettled &&
+    !shouldWaitForWalletHistory;
+
+  useEffect(() => {
+    if (warmInitialData == null) return;
+
+    const existing = queryClient.getQueryData<WalletTransactionsResponse>(transactionsQueryKey);
+    if (existing != null && existing.transactions.length >= warmInitialData.transactions.length) {
+      return;
+    }
+
+    queryClient.setQueryData(transactionsQueryKey, warmInitialData, { updatedAt: 0 });
+  }, [queryClient, transactionsQueryKey, warmInitialData]);
 
   const query = useQuery({
     queryKey: transactionsQueryKey,
@@ -248,9 +336,9 @@ export function useOffpayWalletTokenTransactions(options: {
     enabled,
     staleTime: TOKEN_TRANSACTION_STALE_TIME_MS,
     gcTime: TOKEN_TRANSACTION_GC_TIME_MS,
-    initialData: getWarmInitialData,
-    initialDataUpdatedAt: () => (getWarmInitialData == null ? undefined : 0),
-    placeholderData: getWarmInitialData,
+    initialData: warmInitialData,
+    initialDataUpdatedAt: () => (warmInitialData == null ? undefined : 0),
+    placeholderData: warmInitialData,
     refetchOnMount: options.refetchOnMount ?? true,
     refetchOnReconnect: true,
     retry: false,
@@ -269,7 +357,11 @@ export function useOffpayWalletTokenTransactions(options: {
     transactions.length === 0 &&
     (capabilitiesQuery.isCapabilitiesPending ||
       (transactionsFeatureAvailable &&
-        (!interactionsSettled || query.isLoading || query.isFetching)));
+        (!interactionsSettled ||
+          !displayCacheHydrationSettled ||
+          shouldWaitForWalletHistory ||
+          query.isLoading ||
+          query.isFetching)));
 
   return {
     ...query,

@@ -23,6 +23,7 @@ import {
   buildVisibleTokenHoldings,
   countSpamTokens,
 } from '@/lib/api/offpay-wallet-data';
+import { buildTokenDetailsRouteParams } from '@/lib/navigation/token-details-params';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
 import { usePreferencesStore } from '@/store/preferencesStore';
@@ -151,7 +152,7 @@ export function HoldingsScreenContent({
     (holding: TokenHolding): void => {
       router.navigate({
         pathname: '/token-details',
-        params: { mint: holding.mint },
+        params: buildTokenDetailsRouteParams(holding),
       } as never);
     },
     [router],

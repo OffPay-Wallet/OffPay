@@ -55,6 +55,7 @@ import {
   countSpamTokens,
 } from '@/lib/api/offpay-wallet-data';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
+import { buildTokenDetailsRouteParams } from '@/lib/navigation/token-details-params';
 import {
   offpayWalletBalanceQueryKey,
   offpayWalletDashboardQueryKey,
@@ -1021,7 +1022,7 @@ export function HomeScreenContent(): React.JSX.Element {
 
   const handleTokenPress = useCallback(
     (holding: TokenHolding): void => {
-      const params = new URLSearchParams({ mint: holding.mint });
+      const params = new URLSearchParams(buildTokenDetailsRouteParams(holding));
       navigateToStack(`/token-details?${params.toString()}`);
     },
     [navigateToStack],
