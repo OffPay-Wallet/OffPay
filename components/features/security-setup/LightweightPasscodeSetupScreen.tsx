@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, StyleSheet, Text as RNText, useWindowDimensions, View } from 'react-native';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CreateWalletScreenLayout } from '@/components/features/wallet-setup/CreateWalletScreenLayout';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { LightweightKeypadButton } from '@/components/ui/LightweightKeypadButton';
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
-import { getViewportProfile } from '@/lib/ui/responsive-layout';
+import { getPasscodeResponsiveLayout } from '@/lib/ui/passcode-responsive-layout';
 import {
   getCachedSecuritySettings,
   getSecuritySettings,
@@ -24,8 +25,20 @@ interface PasscodeSetupScreenProps {
   intent: SecuritySetupIntent;
 }
 
-function SimpleDot({ filled }: { filled: boolean }): React.JSX.Element {
-  return <View style={[styles.dot, filled ? styles.dotFilled : styles.dotEmpty]} />;
+function SimpleDot({ filled, size }: { filled: boolean; size: number }): React.JSX.Element {
+  return (
+    <View
+      style={[
+        styles.dot,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+        },
+        filled ? styles.dotFilled : styles.dotEmpty,
+      ]}
+    />
+  );
 }
 
 function nextRoute(intent: SecuritySetupIntent): void {
@@ -36,13 +49,22 @@ function nextRoute(intent: SecuritySetupIntent): void {
 }
 
 export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
   const cachedSettings = getCachedSecuritySettings();
-  const viewportProfile = getViewportProfile({ width, height, fontScale });
-  const compact = viewportProfile.compact;
-  const dense = viewportProfile.dense;
-  const screenPadding = viewportProfile.horizontalPadding;
-  const keypadGap = dense ? spacing.md : compact ? spacing.lg : spacing.xl;
+  const passcodeLayout = useMemo(
+    () =>
+      getPasscodeResponsiveLayout({
+        width,
+        height,
+        fontScale,
+        topInset: insets.top,
+        bottomInset: insets.bottom,
+        footerReserve: layout.minTouchTarget * 2 + spacing['4xl'],
+      }),
+    [fontScale, height, insets.bottom, insets.top, width],
+  );
+  const keypadGap = passcodeLayout.keypadGap;
 
   const [mode, setMode] = useState<PasscodeMode>(() =>
     cachedSettings?.hasPasscode === true ? 'unlockExisting' : 'create',
@@ -62,27 +84,17 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
   const completingEntryRef = useRef(false);
   const initialSettingsAppliedRef = useRef(cachedSettings != null);
 
-  const keySize = useMemo(() => {
-    const maxWidth = Math.min(336, Math.max(220, width - screenPadding * 2));
-    const reservedHeight = dense ? 328 : compact ? 368 : 408;
-    const budget = Math.max(196, height - reservedHeight);
-    return Math.max(
-      layout.minTouchTarget,
-      Math.min(
-        dense ? 62 : compact ? 70 : 76,
-        Math.floor((maxWidth - keypadGap * 2) / 3),
-        Math.floor((budget - keypadGap * 3) / 4),
-      ),
-    );
-  }, [compact, dense, height, keypadGap, screenPadding, width]);
-
   const keyFrameStyle = useMemo(
     () => ({
-      width: keySize,
-      height: keySize,
-      borderRadius: keySize / 2,
+      width: passcodeLayout.keySize,
+      height: passcodeLayout.keySize,
+      borderRadius: passcodeLayout.keySize / 2,
     }),
-    [keySize],
+    [passcodeLayout.keySize],
+  );
+  const keyLabelStyle = useMemo(
+    () => [styles.keyLabel, { fontSize: passcodeLayout.keyFontSize }],
+    [passcodeLayout.keyFontSize],
   );
 
   const setModeValue = useCallback((nextMode: PasscodeMode): void => {
@@ -318,16 +330,21 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         <View
           style={[
             styles.centerBlock,
-            { gap: dense ? spacing.xl : compact ? spacing['2xl'] : spacing['3xl'] },
+            {
+              maxWidth: passcodeLayout.contentMaxWidth,
+              gap: passcodeLayout.contentGap,
+            },
           ]}
         >
-          <View style={styles.copyBlock}>
+          <View
+            style={[styles.copyBlock, { gap: Math.max(spacing.xs, passcodeLayout.contentGap / 3) }]}
+          >
             <RNText
               style={[
                 styles.title,
                 {
-                  fontSize: dense ? 28 : compact ? 31 : 34,
-                  lineHeight: dense ? 34 : compact ? 38 : 42,
+                  fontSize: passcodeLayout.titleFontSize,
+                  lineHeight: passcodeLayout.titleLineHeight,
                 },
               ]}
               numberOfLines={1}
@@ -336,16 +353,18 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
             >
               {content.title}
             </RNText>
-            <RNText style={styles.subtitle}>{content.subtitle}</RNText>
+            <RNText style={[styles.subtitle, { fontSize: passcodeLayout.subtitleFontSize }]}>
+              {content.subtitle}
+            </RNText>
           </View>
 
-          <View style={styles.dotRow}>
-            <SimpleDot filled={entry.length > 0} />
-            <SimpleDot filled={entry.length > 1} />
-            <SimpleDot filled={entry.length > 2} />
-            <SimpleDot filled={entry.length > 3} />
-            <SimpleDot filled={entry.length > 4} />
-            <SimpleDot filled={entry.length > 5} />
+          <View style={[styles.dotRow, { gap: passcodeLayout.dotGap }]}>
+            <SimpleDot filled={entry.length > 0} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={entry.length > 1} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={entry.length > 2} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={entry.length > 3} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={entry.length > 4} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={entry.length > 5} size={passcodeLayout.dotSize} />
           </View>
 
           <View style={[styles.keypad, { gap: keypadGap }]}>
@@ -364,7 +383,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
                         accessibilityRole="button"
                         accessibilityLabel="Clear passcode"
                       >
-                        <RNText style={styles.keyLabel}>x</RNText>
+                        <RNText style={keyLabelStyle}>x</RNText>
                       </LightweightKeypadButton>
                     );
                   }
@@ -381,7 +400,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
                         accessibilityRole="button"
                         accessibilityLabel="Delete last digit"
                       >
-                        <RNText style={styles.keyLabel}>{'<'}</RNText>
+                        <RNText style={keyLabelStyle}>{'<'}</RNText>
                       </LightweightKeypadButton>
                     );
                   }
@@ -396,7 +415,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
                       accessibilityRole="keyboardkey"
                       accessibilityLabel={`Digit ${key}`}
                     >
-                      <RNText style={styles.keyLabel}>{key}</RNText>
+                      <RNText style={keyLabelStyle}>{key}</RNText>
                     </LightweightKeypadButton>
                   );
                 })}
@@ -454,13 +473,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md,
   },
-  dot: {
-    width: spacing.xl,
-    height: spacing.xl,
-    borderRadius: spacing.xl / 2,
-  },
+  dot: {},
   dotFilled: {
     backgroundColor: colors.brand.glossAccent,
   },

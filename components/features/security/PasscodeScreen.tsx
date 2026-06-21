@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text as RNText,
   useWindowDimensions,
@@ -23,7 +24,7 @@ import { PuffyFingerprintIcon } from '@/components/ui/icons/PuffyFingerprintIcon
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
 import { authenticateWithBiometrics } from '@/lib/wallet/biometric-auth';
-import { getViewportProfile } from '@/lib/ui/responsive-layout';
+import { getPasscodeResponsiveLayout } from '@/lib/ui/passcode-responsive-layout';
 import {
   getCachedSecuritySettings,
   getSecuritySettings,
@@ -36,8 +37,26 @@ import { useWalletStore } from '@/store/walletStore';
 
 const PASSCODE_AUTO_BIOMETRIC_PROMPT_DELAY_MS = 750;
 
-const SimpleDot = memo(function SimpleDot({ filled }: { filled: boolean }): React.JSX.Element {
-  return <View style={[styles.dot, filled ? styles.dotFilled : styles.dotEmpty]} />;
+const SimpleDot = memo(function SimpleDot({
+  filled,
+  size,
+}: {
+  filled: boolean;
+  size: number;
+}): React.JSX.Element {
+  return (
+    <View
+      style={[
+        styles.dot,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+        },
+        filled ? styles.dotFilled : styles.dotEmpty,
+      ]}
+    />
+  );
 });
 
 interface PasscodeScreenProps {
@@ -53,16 +72,18 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   const router = useRouter();
   const queryClient = useQueryClient();
   const { width, height, fontScale } = useWindowDimensions();
-  const viewportProfile = getViewportProfile({
-    width,
-    height,
-    fontScale,
-    topInset: insets.top,
-    bottomInset: insets.bottom,
-  });
-  const compact = viewportProfile.compact;
-  const dense = viewportProfile.dense;
-  const keypadGap = dense ? spacing.md : compact ? spacing.lg : spacing.xl;
+  const passcodeLayout = useMemo(
+    () =>
+      getPasscodeResponsiveLayout({
+        width,
+        height,
+        fontScale,
+        topInset: insets.top,
+        bottomInset: insets.bottom,
+      }),
+    [fontScale, height, insets.bottom, insets.top, width],
+  );
+  const keypadGap = passcodeLayout.keypadGap;
 
   const [passcodeLength, setPasscodeLength] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
@@ -122,26 +143,16 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, [toast]);
 
   const keyFrameStyle = useMemo(() => {
-    const reservedHeight = dense ? 328 : compact ? 368 : 408;
-    const keySize = Math.max(
-      layout.minTouchTarget,
-      Math.min(
-        dense ? 62 : compact ? 70 : 76,
-        Math.floor(
-          (Math.min(336, Math.max(220, width - viewportProfile.horizontalPadding * 2)) -
-            keypadGap * 2) /
-            3,
-        ),
-        Math.floor((Math.max(196, height - reservedHeight) - keypadGap * 3) / 4),
-      ),
-    );
-
     return {
-      width: keySize,
-      height: keySize,
-      borderRadius: keySize / 2,
+      width: passcodeLayout.keySize,
+      height: passcodeLayout.keySize,
+      borderRadius: passcodeLayout.keySize / 2,
     };
-  }, [compact, dense, height, keypadGap, viewportProfile.horizontalPadding, width]);
+  }, [passcodeLayout.keySize]);
+  const keyLabelStyle = useMemo(
+    () => [styles.keyLabel, { fontSize: passcodeLayout.keyFontSize }],
+    [passcodeLayout.keyFontSize],
+  );
 
   const setPasscodeValue = useCallback((nextPasscode: string): void => {
     passcodeRef.current = nextPasscode;
@@ -396,134 +407,154 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, [handleBiometricUnlock]);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <View
-        style={[
-          styles.content,
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
           {
-            gap: dense ? spacing.xl : compact ? spacing['2xl'] : spacing['3xl'],
-            paddingHorizontal: viewportProfile.horizontalPadding,
+            paddingTop: insets.top + passcodeLayout.verticalPadding,
+            paddingBottom: insets.bottom + passcodeLayout.verticalPadding,
+            paddingHorizontal: passcodeLayout.horizontalPadding,
           },
         ]}
+        contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.copyBlock}>
-          <RNText
-            style={[
-              styles.title,
-              {
-                fontSize: dense ? 30 : compact ? 33 : 36,
-                lineHeight: dense ? 36 : compact ? 40 : 44,
-              },
-            ]}
+        <View
+          style={[
+            styles.content,
+            {
+              maxWidth: passcodeLayout.contentMaxWidth,
+              gap: passcodeLayout.contentGap,
+            },
+          ]}
+        >
+          <View
+            style={[styles.copyBlock, { gap: Math.max(spacing.xs, passcodeLayout.contentGap / 3) }]}
           >
-            Unlock wallet
-          </RNText>
-          <RNText style={styles.subtitle}>
-            {`Enter your passcode${fingerprintEnabled ? ' or use fingerprint' : ''}.`}
-          </RNText>
-        </View>
+            <RNText
+              style={[
+                styles.title,
+                {
+                  fontSize: passcodeLayout.titleFontSize,
+                  lineHeight: passcodeLayout.titleLineHeight,
+                },
+              ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+            >
+              Unlock wallet
+            </RNText>
+            <RNText style={[styles.subtitle, { fontSize: passcodeLayout.subtitleFontSize }]}>
+              {`Enter your passcode${fingerprintEnabled ? ' or use fingerprint' : ''}.`}
+            </RNText>
+          </View>
 
-        <Animated.View style={[styles.dotRow, dotRowStyle]}>
-          <SimpleDot filled={passcodeLength > 0} />
-          <SimpleDot filled={passcodeLength > 1} />
-          <SimpleDot filled={passcodeLength > 2} />
-          <SimpleDot filled={passcodeLength > 3} />
-          <SimpleDot filled={passcodeLength > 4} />
-          <SimpleDot filled={passcodeLength > 5} />
-        </Animated.View>
+          <Animated.View style={[styles.dotRow, { gap: passcodeLayout.dotGap }, dotRowStyle]}>
+            <SimpleDot filled={passcodeLength > 0} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={passcodeLength > 1} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={passcodeLength > 2} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={passcodeLength > 3} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={passcodeLength > 4} size={passcodeLayout.dotSize} />
+            <SimpleDot filled={passcodeLength > 5} size={passcodeLayout.dotSize} />
+          </Animated.View>
 
-        <View style={[styles.keypad, { gap: keypadGap }]}>
-          {keypadRows.map((row, rowIndex) => (
-            <View key={rowIndex} style={[styles.keyRow, { gap: keypadGap }]}>
-              {row.map((key) => {
-                if (key === 'fingerprint') {
+          <View style={[styles.keypad, { gap: keypadGap }]}>
+            {keypadRows.map((row, rowIndex) => (
+              <View key={rowIndex} style={[styles.keyRow, { gap: keypadGap }]}>
+                {row.map((key) => {
+                  if (key === 'fingerprint') {
+                    return (
+                      <LightweightKeypadButton
+                        key={key}
+                        frameStyle={keyFrameStyle}
+                        onPress={fingerprintPress}
+                        disabled={resetting}
+                        activateOnPressIn
+                        accessibilityRole="button"
+                        accessibilityLabel="Unlock with fingerprint"
+                      >
+                        <PuffyFingerprintIcon
+                          size={layout.iconSizeInline}
+                          color={colors.text.primary}
+                          focused
+                        />
+                      </LightweightKeypadButton>
+                    );
+                  }
+
+                  if (key === 'clear') {
+                    return (
+                      <LightweightKeypadButton
+                        key={key}
+                        frameStyle={keyFrameStyle}
+                        onPress={handleClear}
+                        disabled={passcodeLength === 0 || resetting}
+                        muted={passcodeLength === 0}
+                        activateOnPressIn
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear passcode"
+                      >
+                        <RNText style={keyLabelStyle}>x</RNText>
+                      </LightweightKeypadButton>
+                    );
+                  }
+
+                  if (key === 'delete') {
+                    return (
+                      <LightweightKeypadButton
+                        key={key}
+                        frameStyle={keyFrameStyle}
+                        onPress={handleDelete}
+                        disabled={passcodeLength === 0 || resetting}
+                        muted={passcodeLength === 0}
+                        activateOnPressIn
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete last digit"
+                      >
+                        <RNText style={keyLabelStyle}>{'<'}</RNText>
+                      </LightweightKeypadButton>
+                    );
+                  }
+
                   return (
                     <LightweightKeypadButton
                       key={key}
                       frameStyle={keyFrameStyle}
-                      onPress={fingerprintPress}
+                      onPress={digitHandlers[key as keyof typeof digitHandlers]}
                       disabled={resetting}
                       activateOnPressIn
-                      accessibilityRole="button"
-                      accessibilityLabel="Unlock with fingerprint"
+                      accessibilityRole="keyboardkey"
+                      accessibilityLabel={`Digit ${key}`}
                     >
-                      <PuffyFingerprintIcon
-                        size={layout.iconSizeInline}
-                        color={colors.text.primary}
-                        focused
-                      />
+                      <RNText style={keyLabelStyle}>{key}</RNText>
                     </LightweightKeypadButton>
                   );
-                }
-
-                if (key === 'clear') {
-                  return (
-                    <LightweightKeypadButton
-                      key={key}
-                      frameStyle={keyFrameStyle}
-                      onPress={handleClear}
-                      disabled={passcodeLength === 0 || resetting}
-                      muted={passcodeLength === 0}
-                      activateOnPressIn
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear passcode"
-                    >
-                      <RNText style={styles.keyLabel}>x</RNText>
-                    </LightweightKeypadButton>
-                  );
-                }
-
-                if (key === 'delete') {
-                  return (
-                    <LightweightKeypadButton
-                      key={key}
-                      frameStyle={keyFrameStyle}
-                      onPress={handleDelete}
-                      disabled={passcodeLength === 0 || resetting}
-                      muted={passcodeLength === 0}
-                      activateOnPressIn
-                      accessibilityRole="button"
-                      accessibilityLabel="Delete last digit"
-                    >
-                      <RNText style={styles.keyLabel}>{'<'}</RNText>
-                    </LightweightKeypadButton>
-                  );
-                }
-
-                return (
-                  <LightweightKeypadButton
-                    key={key}
-                    frameStyle={keyFrameStyle}
-                    onPress={digitHandlers[key as keyof typeof digitHandlers]}
-                    disabled={resetting}
-                    activateOnPressIn
-                    accessibilityRole="keyboardkey"
-                    accessibilityLabel={`Digit ${key}`}
-                  >
-                    <RNText style={styles.keyLabel}>{key}</RNText>
-                  </LightweightKeypadButton>
-                );
-              })}
-            </View>
-          ))}
-        </View>
-
-        <Pressable
-          style={[styles.forgotButton, (unlocking || resetting) && styles.buttonDisabled]}
-          onPress={handleForgotPasswordPress}
-          disabled={unlocking || resetting}
-        >
-          <RNText style={styles.forgotButtonText}>
-            {resetting ? 'Resetting wallet...' : 'Forgot password?'}
-          </RNText>
-        </Pressable>
-
-        {toast != null ? (
-          <View style={styles.toast}>
-            <RNText style={styles.toastText}>{toast}</RNText>
+                })}
+              </View>
+            ))}
           </View>
-        ) : null}
-      </View>
+
+          <Pressable
+            style={[styles.forgotButton, (unlocking || resetting) && styles.buttonDisabled]}
+            onPress={handleForgotPasswordPress}
+            disabled={unlocking || resetting}
+          >
+            <RNText style={styles.forgotButtonText}>
+              {resetting ? 'Resetting wallet...' : 'Forgot password?'}
+            </RNText>
+          </Pressable>
+
+          {toast != null ? (
+            <View style={styles.toast}>
+              <RNText style={styles.toastText}>{toast}</RNText>
+            </View>
+          ) : null}
+        </View>
+      </ScrollView>
 
       {showingReset ? (
         <View style={styles.resetOverlay}>
@@ -560,8 +591,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.background,
   },
-  content: {
+  scroll: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: {
+    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -584,13 +623,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md,
   },
-  dot: {
-    width: spacing.xl,
-    height: spacing.xl,
-    borderRadius: spacing.xl / 2,
-  },
+  dot: {},
   dotFilled: {
     backgroundColor: colors.brand.glossAccent,
   },
@@ -628,8 +662,6 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   toast: {
-    position: 'absolute',
-    bottom: spacing['2xl'],
     backgroundColor: colors.surface.cardElevated,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
