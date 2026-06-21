@@ -1,11 +1,13 @@
 import { StyleSheet } from 'react-native';
 import Animated, {
+  cancelAnimation,
   Easing,
   useAnimatedStyle,
-  useDerivedValue,
+  useSharedValue,
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
+import { useEffect } from 'react';
 import Svg, { Line } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
@@ -17,10 +19,9 @@ import { colors } from '@/constants/colors';
  * Performance:
  *   - The bars are STATIC SVG <Line>s computed once at module scope
  *     (no per-render math, no per-bar animated worklets).
- *   - A SINGLE shared value drives ONE rotation transform on the UI
- *     thread, stepped in 12 increments via `Easing.steps` to match
- *     the characteristic iOS "tick". This is strictly lighter than a
- *     spinner that animates each dot's radius/opacity every frame.
+ *   - A SINGLE shared value drives ONE continuous rotation transform
+ *     on the UI thread. Continuous rotation is easier to read on
+ *     Android than a stepped spinner, which can look frozen at small sizes.
  */
 
 const BAR_COUNT = 12;
@@ -29,7 +30,7 @@ const CENTER = VIEWBOX / 2;
 const INNER_RADIUS = 5;
 const OUTER_RADIUS = 9.5;
 const BAR_STROKE_WIDTH = 2;
-const SPIN_DURATION_MS = 900;
+const SPIN_DURATION_MS = 760;
 
 interface SpinnerBar {
   x1: number;
@@ -64,23 +65,26 @@ export function LazyLoadingSpinner({
   size = 32,
   color = colors.text.primary,
 }: LazyLoadingSpinnerProps): React.JSX.Element {
-  const rotation = useDerivedValue(
-    () =>
-      withRepeat(
-        // Stepped easing gives the authentic iOS per-bar "tick" while
-        // still being a single tween on the UI thread.
-        withTiming(BAR_COUNT, {
-          duration: SPIN_DURATION_MS,
-          easing: Easing.steps(BAR_COUNT, true),
-        }),
-        -1,
-        false,
-      ),
-    [],
-  );
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    rotation.value = 0;
+    rotation.value = withRepeat(
+      withTiming(1, {
+        duration: SPIN_DURATION_MS,
+        easing: Easing.linear,
+      }),
+      -1,
+      false,
+    );
+
+    return () => {
+      cancelAnimation(rotation);
+    };
+  }, [rotation]);
 
   const rotateStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${(rotation.value / BAR_COUNT) * 360}deg` }],
+    transform: [{ rotate: `${rotation.value * 360}deg` }],
   }));
 
   return (

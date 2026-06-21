@@ -24,7 +24,10 @@ import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import {
+  WALLET_DEEP_HISTORY_PAGE_SIZE,
+  WALLET_TRANSACTIONS_PAGE_SIZE,
+} from '@/lib/api/offpay-wallet-query-keys';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
@@ -44,6 +47,10 @@ function runAfterTapFrame(task: () => void): void {
 
 const HEADER_CONTAINER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
+const HISTORY_BACKGROUND_PAGE_TARGET = Math.ceil(
+  WALLET_DEEP_HISTORY_PAGE_SIZE / WALLET_TRANSACTIONS_PAGE_SIZE,
+);
+const HISTORY_BACKGROUND_PAGE_DELAY_MS = 180;
 
 export function HistoryScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -69,12 +76,11 @@ export function HistoryScreenContent(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: true,
     enabled: isFocused,
-    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
-    // History is the canonical transaction view. Do not let the
-    // worker-side wallet cache or the shared warm-start TTL keep this
-    // screen stale after a user explicitly opens it.
-    refetchOnMount: 'always',
-    useCache: false,
+    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    // Keep the initial history request small and cache-eligible so
+    // the screen can paint quickly. Deeper pages are fetched below in
+    // the background for complete token coverage.
+    refetchOnMount: true,
     requestOwner: 'history.transactions',
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
@@ -85,7 +91,9 @@ export function HistoryScreenContent(): React.JSX.Element {
   const canRefreshHistory = transactionsQuery.isCapabilityEnabled;
   const isHistoryStale = transactionsQuery.isStale;
   const refetchFreshHistoryQuery = transactionsQuery.refetchFresh;
+  const prefetchHistoryPageQuery = transactionsQuery.fetchNextPage;
   const refreshHistoryInFlightRef = useRef(false);
+  const backgroundPrefetchInFlightRef = useRef(false);
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
 
@@ -147,6 +155,54 @@ export function HistoryScreenContent(): React.JSX.Element {
       return undefined;
     }, []),
   );
+
+  const loadedHistoryPages = transactionsQuery.data?.pages.length ?? 0;
+  useEffect(() => {
+    if (!isFocused) return undefined;
+    if (!transactionsQuery.isCapabilityEnabled) return undefined;
+    if (backgroundPrefetchInFlightRef.current) return undefined;
+    if (loadedHistoryPages <= 0 || loadedHistoryPages >= HISTORY_BACKGROUND_PAGE_TARGET) {
+      return undefined;
+    }
+    if (
+      !transactionsQuery.hasNextPage ||
+      transactionsQuery.isFetchingNextPage ||
+      transactionsQuery.isLoading ||
+      transactionsQuery.isRefetching
+    ) {
+      return undefined;
+    }
+
+    const signal = getScreenSignal();
+    backgroundPrefetchInFlightRef.current = true;
+    const timer = setTimeout(() => {
+      if (signal.aborted) {
+        backgroundPrefetchInFlightRef.current = false;
+        return;
+      }
+
+      void prefetchHistoryPageQuery()
+        .catch(() => undefined)
+        .finally(() => {
+          backgroundPrefetchInFlightRef.current = false;
+        });
+    }, HISTORY_BACKGROUND_PAGE_DELAY_MS);
+
+    return () => {
+      clearTimeout(timer);
+      backgroundPrefetchInFlightRef.current = false;
+    };
+  }, [
+    getScreenSignal,
+    isFocused,
+    loadedHistoryPages,
+    prefetchHistoryPageQuery,
+    transactionsQuery.hasNextPage,
+    transactionsQuery.isCapabilityEnabled,
+    transactionsQuery.isFetchingNextPage,
+    transactionsQuery.isLoading,
+    transactionsQuery.isRefetching,
+  ]);
 
   const handleRefresh = useCallback(() => refreshHistory({ force: true }), [refreshHistory]);
 
