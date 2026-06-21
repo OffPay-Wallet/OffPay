@@ -3,6 +3,7 @@ import type {
   OffpayNetwork,
   WalletActivityEvent,
   WalletBalanceResponse,
+  WalletTransactionView,
   WalletTransactionsResponse,
 } from '@/types/offpay-api';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
@@ -1268,11 +1269,31 @@ function isUnenrichedWalletActivityEvent(event: WalletActivityEvent): boolean {
   return normalizeTransactionTypeLabel(event.type) === UNENRICHED_TRANSACTION_TYPE;
 }
 
+function getBackendWalletTransactionDisplayView(
+  transaction: WalletTransactionsResponse['transactions'][number],
+  network?: OffpayNetwork | null,
+): OffpayRecentActivityView | null {
+  const display: WalletTransactionView | null | undefined = transaction.display;
+  if (display == null) return null;
+
+  return {
+    ...display,
+    detailTimestampMs: display.detailTimestampMs ?? transaction.timestamp * 1000,
+    detailNetwork: display.detailNetwork ?? network ?? null,
+    detailSignature: display.detailSignature ?? transaction.signature,
+  };
+}
+
 export function mapWalletTransactionForRecentActivity(
   transaction: WalletTransactionsResponse['transactions'][number],
   localReceipt?: OffpayLocalReceiptViewInput | null,
   network?: OffpayNetwork | null,
 ): OffpayRecentActivityView {
+  const backendView = getBackendWalletTransactionDisplayView(transaction, network);
+  if (backendView != null) {
+    return mergeLocalReceiptData(backendView, localReceipt);
+  }
+
   const amounts = parseWalletTransactionAmounts(transaction);
   const counterparties = getWalletTransactionCounterparties(transaction);
   const type = normalizeWalletTransactionDisplayType(transaction, amounts, counterparties);
@@ -1390,6 +1411,7 @@ export function isDisplayableWalletActivityEvent(event: WalletActivityEvent): bo
 export function isDisplayableWalletPaymentTransaction(
   transaction: WalletTransactionsResponse['transactions'][number],
 ): boolean {
+  if (transaction.display != null) return true;
   if (isUmbraSetupTransactionType(transaction.type)) return false;
 
   const amounts = parseWalletTransactionAmounts(transaction);
@@ -1484,6 +1506,11 @@ export function mapWalletTransactionForHistory(
   localReceipt?: OffpayLocalReceiptViewInput | null,
   network?: OffpayNetwork | null,
 ): OffpayHistoryTransactionView {
+  const backendView = getBackendWalletTransactionDisplayView(transaction, network);
+  if (backendView != null) {
+    return mergeLocalReceiptData(backendView, localReceipt);
+  }
+
   const amounts = parseWalletTransactionAmounts(transaction);
   const counterparties = getWalletTransactionCounterparties(transaction);
   const type = normalizeWalletTransactionDisplayType(transaction, amounts, counterparties);
@@ -1614,6 +1641,13 @@ function getVisibleLocalReceipts(
     displayableTransactions.map((transaction) => transaction.signature),
   );
 
+  return getVisibleLocalReceiptsBySignature(receipts, displayableSignatures);
+}
+
+function getVisibleLocalReceiptsBySignature(
+  receipts: readonly OffpayLocalReceiptViewInput[],
+  displayableSignatures: ReadonlySet<string>,
+): OffpayLocalReceiptViewInput[] {
   return sortReceiptsMostRecent(
     receipts.filter((receipt) => {
       const signature = getOffpayLocalReceiptSignature(receipt);
@@ -1622,8 +1656,40 @@ function getVisibleLocalReceipts(
   );
 }
 
+function getTransactionViewTimestamp(view: Pick<OffpayRecentActivityView, 'detailTimestampMs'>) {
+  return view.detailTimestampMs ?? 0;
+}
+
+function sortTransactionViewsMostRecent<T extends OffpayRecentActivityView>(
+  views: readonly T[],
+): T[] {
+  return [...views].sort((left, right) => {
+    const timestampDiff = getTransactionViewTimestamp(right) - getTransactionViewTimestamp(left);
+    if (timestampDiff !== 0) return timestampDiff;
+    return left.id.localeCompare(right.id);
+  });
+}
+
+export function selectOffpayLocalReceiptForTransactionView<
+  TReceipt extends OffpayLocalReceiptViewInput,
+>(
+  view: OffpayRecentActivityView,
+  receipts: readonly TReceipt[] | null | undefined,
+): TReceipt | null {
+  if (receipts == null || receipts.length === 0) return null;
+
+  return (
+    receipts.find((receipt) => getLocalReceiptDisplayType(receipt) === view.type) ??
+    receipts.find((receipt) => receipt.direction === view.type) ??
+    receipts.find((receipt) => receipt.direction == null) ??
+    receipts[0] ??
+    null
+  );
+}
+
 export function buildWalletRecentActivityItems(params: {
   transactions: WalletTransactionsResponse['transactions'];
+  transactionViews?: readonly OffpayRecentActivityView[];
   localReceipts?: readonly OffpayLocalReceiptViewInput[];
   includeUnmatchedLocalReceipts?: boolean;
   network?: OffpayNetwork | null;
@@ -1631,17 +1697,33 @@ export function buildWalletRecentActivityItems(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
+  const backendViews = sortTransactionViewsMostRecent(params.transactionViews ?? []);
+  const backendViewSignatures = new Set(backendViews.map((view) => view.id));
   const displayableTransactions = getDisplayableWalletTransactions(
     params.transactions,
     receiptsBySignature,
+  ).filter((transaction) => !backendViewSignatures.has(transaction.signature));
+  const displayableSignatures = new Set([
+    ...backendViewSignatures,
+    ...displayableTransactions.map((transaction) => transaction.signature),
+  ]);
+  const visibleLocalReceipts = getVisibleLocalReceiptsBySignature(
+    localReceipts,
+    displayableSignatures,
   );
-  const visibleLocalReceipts = getVisibleLocalReceipts(localReceipts, displayableTransactions);
   const mappedReceipts = includeUnmatchedLocalReceipts
     ? visibleLocalReceipts.map((receipt) => ({
         timestamp: receipt.createdAt,
         view: mapLocalReceiptForRecentActivity(receipt),
       }))
     : [];
+  const mappedBackendViews = backendViews.map((view) => ({
+    timestamp: getTransactionViewTimestamp(view),
+    view: mergeLocalReceiptData(
+      view,
+      selectOffpayLocalReceiptForTransactionView(view, receiptsBySignature.get(view.id)),
+    ),
+  }));
   const mappedTransactions = displayableTransactions.map((transaction) => ({
     timestamp: transaction.timestamp * 1000,
     view: mapWalletTransactionForRecentActivity(
@@ -1654,7 +1736,7 @@ export function buildWalletRecentActivityItems(params: {
     ),
   }));
 
-  return [...mappedReceipts, ...mappedTransactions]
+  return [...mappedReceipts, ...mappedBackendViews, ...mappedTransactions]
     .sort((left, right) => {
       const timestampDiff = right.timestamp - left.timestamp;
       if (timestampDiff !== 0) return timestampDiff;
@@ -1672,6 +1754,7 @@ function getLocalReceiptHistoryTitle(receipt: OffpayLocalReceiptViewInput): stri
 
 export function buildWalletHistoryGroups(params: {
   transactions: WalletTransactionsResponse['transactions'];
+  transactionViews?: readonly OffpayHistoryTransactionView[];
   localReceipts?: readonly OffpayLocalReceiptViewInput[];
   includeUnmatchedLocalReceipts?: boolean;
   network?: OffpayNetwork | null;
@@ -1679,11 +1762,20 @@ export function buildWalletHistoryGroups(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
+  const backendViews = sortTransactionViewsMostRecent(params.transactionViews ?? []);
+  const backendViewSignatures = new Set(backendViews.map((view) => view.id));
   const displayableTransactions = getDisplayableWalletTransactions(
     params.transactions,
     receiptsBySignature,
+  ).filter((transaction) => !backendViewSignatures.has(transaction.signature));
+  const displayableSignatures = new Set([
+    ...backendViewSignatures,
+    ...displayableTransactions.map((transaction) => transaction.signature),
+  ]);
+  const visibleLocalReceipts = getVisibleLocalReceiptsBySignature(
+    localReceipts,
+    displayableSignatures,
   );
-  const visibleLocalReceipts = getVisibleLocalReceipts(localReceipts, displayableTransactions);
   const entries = [
     ...(includeUnmatchedLocalReceipts
       ? visibleLocalReceipts.map((receipt) => ({
@@ -1692,6 +1784,17 @@ export function buildWalletHistoryGroups(params: {
           view: mapLocalReceiptForRecentActivity(receipt),
         }))
       : []),
+    ...backendViews.map((view) => ({
+      title:
+        view.detailTimestampMs == null
+          ? 'Activity'
+          : formatDateTitle(Math.floor(view.detailTimestampMs / 1000)),
+      timestamp: getTransactionViewTimestamp(view),
+      view: mergeLocalReceiptData(
+        view,
+        selectOffpayLocalReceiptForTransactionView(view, receiptsBySignature.get(view.id)),
+      ),
+    })),
     ...displayableTransactions.map((transaction) => ({
       title: formatDateTitle(transaction.timestamp),
       timestamp: transaction.timestamp * 1000,

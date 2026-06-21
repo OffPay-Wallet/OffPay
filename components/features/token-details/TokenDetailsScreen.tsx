@@ -765,6 +765,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
 
     return buildWalletHistoryGroups({
       transactions: tokenTransactionsQuery.transactions,
+      transactionViews: tokenTransactionsQuery.transactionViews,
       localReceipts,
       network: tokenTransactionsQuery.network ?? network,
     })
@@ -776,6 +777,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     localReceipts,
     network,
     tokenTransactionsQuery.network,
+    tokenTransactionsQuery.transactionViews,
     tokenTransactionsQuery.transactions,
   ]);
 

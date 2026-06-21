@@ -20,6 +20,8 @@ import type { PendingBackupQueueStats } from '@/lib/payments/pending-backup-queu
 import type {
   OffpayNetwork,
   WalletBalanceResponse,
+  WalletTransactionGroup,
+  WalletTransactionView,
   WalletTransactionsResponse,
 } from '@/types/offpay-api';
 
@@ -178,6 +180,36 @@ function sortWalletTransactionRecords(
   });
 }
 
+function getWalletTransactionViews(
+  transactions: readonly WalletTransaction[],
+): WalletTransactionView[] {
+  return transactions
+    .map((transaction) => transaction.display)
+    .filter((view): view is WalletTransactionView => view != null);
+}
+
+function formatWalletTransactionGroupTitle(timestampMs: number): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(timestampMs));
+}
+
+function groupWalletTransactionViews(
+  views: readonly WalletTransactionView[],
+): WalletTransactionGroup[] {
+  const groups = new Map<string, WalletTransactionView[]>();
+  for (const view of views) {
+    if (view.detailTimestampMs == null) continue;
+    const title = formatWalletTransactionGroupTitle(view.detailTimestampMs);
+    const group = groups.get(title) ?? [];
+    group.push(view);
+    groups.set(title, group);
+  }
+  return Array.from(groups.entries()).map(([title, data]) => ({ title, data }));
+}
+
 function mergeWalletTransactionRecord(
   existing: WalletTransaction | null | undefined,
   incoming: WalletTransaction,
@@ -250,13 +282,18 @@ export function mergeWalletTransactionPage(
     WALLET_TRANSACTIONS_PAGE_SIZE,
   );
 
+  const transactions = mergeWalletTransactionRecords(
+    page.transactions,
+    fallbackTransactions,
+    maxTransactions,
+  );
+  const displayTransactions = getWalletTransactionViews(transactions);
+
   return {
     ...page,
-    transactions: mergeWalletTransactionRecords(
-      page.transactions,
-      fallbackTransactions,
-      maxTransactions,
-    ),
+    transactions,
+    displayTransactions,
+    historyGroups: groupWalletTransactionViews(displayTransactions),
   };
 }
 
@@ -277,13 +314,18 @@ function mergeWalletTransactionPageMetadata(
     );
   }
 
+  const transactions = sortWalletTransactionRecords(
+    page.transactions.map((transaction) =>
+      mergeWalletTransactionRecord(fallbackBySignature.get(transaction.signature), transaction),
+    ),
+  );
+  const displayTransactions = getWalletTransactionViews(transactions);
+
   return {
     ...page,
-    transactions: sortWalletTransactionRecords(
-      page.transactions.map((transaction) =>
-        mergeWalletTransactionRecord(fallbackBySignature.get(transaction.signature), transaction),
-      ),
-    ),
+    transactions,
+    displayTransactions,
+    historyGroups: groupWalletTransactionViews(displayTransactions),
   };
 }
 
@@ -291,12 +333,16 @@ function trimTransactions(
   transactions: WalletTransactionsResponse | null | undefined,
 ): WalletTransactionsResponse | null {
   if (transactions == null) return null;
+  const trimmedTransactions = sortWalletTransactionRecords(transactions.transactions).slice(
+    0,
+    MAX_CACHED_TRANSACTIONS,
+  );
+  const displayTransactions = getWalletTransactionViews(trimmedTransactions);
   return {
     ...transactions,
-    transactions: sortWalletTransactionRecords(transactions.transactions).slice(
-      0,
-      MAX_CACHED_TRANSACTIONS,
-    ),
+    transactions: trimmedTransactions,
+    displayTransactions,
+    historyGroups: groupWalletTransactionViews(displayTransactions),
   };
 }
 

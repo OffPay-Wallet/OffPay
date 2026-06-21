@@ -15,10 +15,13 @@ const SIGNATURE = '5JEBA3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_ACCOUNT = '8Huh8yL4uY8r4nHkFiXLpFZ6LbWyKqVgL4PBYiX8FWXG';
 const OTHER_TOKEN_MINT = 'DezXAZ8z7PnrnRJjz3mP8cB1sMiBw1ZbrGdNd4T5wwf';
+const DEVNET_UMBRA_PROGRAM = 'DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ';
+const UMBRA_POOL = '9B5mqKTY4N6mNLLbnVMXg67thA6Z6hVSY8FzN4JNYqgd';
 
 const bindings = {
   HELIUS_DEVNET_RPC_URL: 'https://rpc.offpay.test',
   HELIUS_MAINNET_API_KEY: 'test-mainnet-key',
+  HELIUS_MAINNET_RPC_URL: 'https://mainnet-rpc.offpay.test',
   JUPITER_API_KEY: 'test-jupiter',
   OFFPAY_BOOTSTRAP_SECRET: 'test-bootstrap',
   BOOTSTRAP_SECRET_VERSION: '1',
@@ -310,12 +313,38 @@ describe('getWalletTransactions RPC fallback', () => {
     });
   });
 
-  it('asks the mainnet enhanced history endpoint for token-account balance-change results', async () => {
-    const fetchMock = jest.fn(async (input: string) => {
-      const url = new URL(input);
-      expect(url.pathname).toBe(`/v0/addresses/${WALLET}/transactions`);
-      expect(url.searchParams.get('token-accounts')).toBe('balanceChanged');
-      return jsonResponse([]);
+  it('uses raw RPC for mainnet wallet history instead of indexed enhanced history', async () => {
+    const seenMethods: string[] = [];
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        seenMethods.push(String(request.method));
+
+        if (request.method === 'getTokenAccountsByOwner') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { value: [] },
+          };
+        }
+
+        if (request.method === 'getSignaturesForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
     });
 
     setHeliusFetchImplementation(fetchMock);
@@ -327,7 +356,11 @@ describe('getWalletTransactions RPC fallback', () => {
       useCache: false,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(seenMethods).toEqual([
+      'getTokenAccountsByOwner',
+      'getTokenAccountsByOwner',
+      'getSignaturesForAddress',
+    ]);
   });
 
   it('deep-scans token-specific RPC history and returns balance-only SOL rows', async () => {
@@ -488,5 +521,275 @@ describe('getWalletTransactions RPC fallback', () => {
       direction: 'send',
     });
     expect(signaturePageCount).toBe(2);
+  });
+
+  it('does not treat Umbra rent or fee lamport movement as SOL token activity', async () => {
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTokenAccountsByOwner') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { value: [] },
+          };
+        }
+
+        if (request.method === 'getSignaturesForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [
+              {
+                signature: SIGNATURE,
+                blockTime: 1781794600,
+                err: null,
+              },
+            ],
+          };
+        }
+
+        if (request.method === 'getTransaction') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              blockTime: 1781794600,
+              meta: {
+                err: null,
+                fee: 5000,
+                preBalances: [1_000_000_000, 0, 0],
+                postBalances: [995_151_000, 4_844_000, 0],
+                preTokenBalances: [],
+                postTokenBalances: [],
+              },
+              transaction: {
+                message: {
+                  accountKeys: [
+                    { pubkey: WALLET },
+                    { pubkey: UMBRA_POOL },
+                    { pubkey: DEVNET_UMBRA_PROGRAM },
+                  ],
+                  instructions: [
+                    {
+                      programId: '11111111111111111111111111111111',
+                      parsed: {
+                        type: 'transfer',
+                        info: {
+                          source: WALLET,
+                          destination: UMBRA_POOL,
+                          lamports: 4_844_000,
+                        },
+                      },
+                    },
+                    {
+                      programId: DEVNET_UMBRA_PROGRAM,
+                      accounts: [WALLET, UMBRA_POOL, DEVNET_UMBRA_PROGRAM],
+                    },
+                  ],
+                },
+              },
+            },
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: SOL_MINT,
+      limit: 8,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(0);
+  });
+
+  it('scans past internal SOL rent noise and returns the real SOL transfer in canonical history', async () => {
+    const noiseSignatures = Array.from(
+      { length: 100 },
+      (_, index) => `${SIGNATURE}umbra${String(index).padStart(3, '0')}`,
+    );
+    const solSignature = `${SIGNATURE}real-sol-transfer`;
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTokenAccountsByOwner') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { value: [] },
+          };
+        }
+
+        if (request.method === 'getSignaturesForAddress') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const config = params[1] as { before?: string; limit?: number } | undefined;
+          expect(config?.limit).toBe(100);
+
+          if (config?.before === noiseSignatures.at(-1)) {
+            return {
+              jsonrpc: '2.0',
+              id: request.id,
+              result: [
+                {
+                  signature: solSignature,
+                  blockTime: 1781708200,
+                  err: null,
+                },
+              ],
+            };
+          }
+
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result:
+              config?.before == null
+                ? noiseSignatures.map((signature, index) => ({
+                    signature,
+                    blockTime: 1781794600 - index,
+                    err: null,
+                  }))
+                : [],
+          };
+        }
+
+        if (request.method === 'getTransaction') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const signature = params[0];
+          const isSolTransfer = signature === solSignature;
+
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: isSolTransfer
+              ? {
+                  blockTime: 1781708200,
+                  meta: {
+                    err: null,
+                    fee: 5000,
+                    preBalances: [1_000_000_000, 0],
+                    postBalances: [998_995_000, 1_000_000],
+                    preTokenBalances: [],
+                    postTokenBalances: [],
+                  },
+                  transaction: {
+                    message: {
+                      accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+                      instructions: [
+                        {
+                          programId: '11111111111111111111111111111111',
+                          parsed: {
+                            type: 'transfer',
+                            info: {
+                              source: WALLET,
+                              destination: RECIPIENT,
+                              lamports: 1_000_000,
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                }
+              : {
+                  blockTime: 1781794600,
+                  meta: {
+                    err: null,
+                    fee: 5000,
+                    preBalances: [1_000_000_000, 0, 0],
+                    postBalances: [995_151_000, 4_844_000, 0],
+                    preTokenBalances: [],
+                    postTokenBalances: [],
+                  },
+                  transaction: {
+                    message: {
+                      accountKeys: [
+                        { pubkey: WALLET },
+                        { pubkey: UMBRA_POOL },
+                        { pubkey: DEVNET_UMBRA_PROGRAM },
+                      ],
+                      instructions: [
+                        {
+                          programId: '11111111111111111111111111111111',
+                          parsed: {
+                            type: 'transfer',
+                            info: {
+                              source: WALLET,
+                              destination: UMBRA_POOL,
+                              lamports: 4_844_000,
+                            },
+                          },
+                        },
+                        {
+                          programId: DEVNET_UMBRA_PROGRAM,
+                          accounts: [WALLET, UMBRA_POOL, DEVNET_UMBRA_PROGRAM],
+                        },
+                      ],
+                    },
+                  },
+                },
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(bindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 100,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: solSignature,
+      amount: '0.001',
+      rawAmount: '1000000',
+      tokenMint: SOL_MINT,
+      tokenSymbol: 'SOL',
+      direction: 'send',
+      recipient: RECIPIENT,
+    });
   });
 });

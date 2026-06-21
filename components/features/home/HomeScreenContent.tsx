@@ -355,6 +355,7 @@ export function HomeScreenContent(): React.JSX.Element {
 
     return buildWalletRecentActivityItems({
       transactions: transactionsQuery.transactions,
+      transactionViews: transactionsQuery.transactionViews,
       localReceipts: localReceiptsForNetwork,
       network,
     }).slice(0, MAX_HOME_ACTIVITY_ITEMS);
@@ -364,6 +365,7 @@ export function HomeScreenContent(): React.JSX.Element {
     privatePaymentReceipts,
     publicKey,
     swapReceipts,
+    transactionsQuery.transactionViews,
     transactionsQuery.transactions,
   ]);
   const portfolioValueLabel =

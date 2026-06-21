@@ -140,6 +140,32 @@ export interface WalletBalanceResponse {
   fetchedAt: number;
 }
 
+export interface WalletTransactionView {
+  id: string;
+  type: 'send' | 'receive' | 'swap';
+  title: string;
+  subtitle: string;
+  sourceLabel: string | null;
+  amountLabel: string | null;
+  secondaryAmountLabel: string | null;
+  amountTone: 'positive' | 'negative' | 'neutral' | 'failed';
+  tokenMint: string | null;
+  tokenSymbol: string | null;
+  tokenName: string | null;
+  tokenLogo: string | null;
+  status: 'confirmed' | 'pending' | 'failed';
+  detailTimestampMs: number | null;
+  detailNetwork: OffpayNetwork | null;
+  detailSignature: string | null;
+  detailAccountLabel: string | null;
+  detailAccountAddress: string | null;
+}
+
+export interface WalletTransactionGroup {
+  title: string;
+  data: WalletTransactionView[];
+}
+
 export interface WalletTransactionsResponse {
   address: string;
   network: OffpayNetwork;
@@ -164,7 +190,10 @@ export interface WalletTransactionsResponse {
       address: string;
       role: string;
     }>;
+    display?: WalletTransactionView | null;
   }>;
+  displayTransactions?: WalletTransactionView[];
+  historyGroups?: WalletTransactionGroup[];
   cursor: string | null;
   fetchedAt: number;
 }

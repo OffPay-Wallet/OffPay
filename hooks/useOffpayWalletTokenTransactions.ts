@@ -13,11 +13,31 @@ import { offpayWalletTokenTransactionsQueryKey } from '@/lib/api/offpay-wallet-q
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { useWalletStore } from '@/store/walletStore';
 
-import type { CapabilityStatus, WalletTransactionsResponse } from '@/types/offpay-api';
+import type {
+  CapabilityStatus,
+  WalletTransactionGroup,
+  WalletTransactionView,
+  WalletTransactionsResponse,
+} from '@/types/offpay-api';
 
 const TOKEN_TRANSACTION_STALE_TIME_MS = 1000 * 60;
 const TOKEN_TRANSACTION_GC_TIME_MS = 1000 * 60 * 15;
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
+const EMPTY_TRANSACTION_VIEWS: WalletTransactionView[] = [];
+const EMPTY_HISTORY_GROUPS: WalletTransactionGroup[] = [];
+
+function getPageTransactionViews(
+  page: WalletTransactionsResponse | undefined,
+): WalletTransactionView[] {
+  if (page == null) return EMPTY_TRANSACTION_VIEWS;
+  if (page.displayTransactions != null && page.displayTransactions.length > 0) {
+    return page.displayTransactions;
+  }
+
+  return page.transactions
+    .map((transaction) => transaction.display)
+    .filter((view): view is WalletTransactionView => view != null);
+}
 
 export function useOffpayWalletTokenTransactions(options: {
   mint: string | null;
@@ -130,6 +150,8 @@ export function useOffpayWalletTokenTransactions(options: {
   });
 
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
+  const transactionViews = getPageTransactionViews(query.data);
+  const historyGroups = query.data?.historyGroups ?? EMPTY_HISTORY_GROUPS;
   const isInitialDataPending =
     enabledByCaller &&
     walletAddress != null &&
@@ -148,6 +170,8 @@ export function useOffpayWalletTokenTransactions(options: {
     network,
     capability,
     transactions,
+    transactionViews,
+    historyGroups,
     isInitialDataPending,
     isCapabilitiesPending: canUseNetwork && capabilitiesQuery.isCapabilitiesPending,
     isCapabilityEnabled: canRequestTransactions,

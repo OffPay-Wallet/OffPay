@@ -23,7 +23,12 @@ import {
 import { useWalletStore } from '@/store/walletStore';
 
 import type { InfiniteData } from '@tanstack/react-query';
-import type { CapabilityStatus, WalletTransactionsResponse } from '@/types/offpay-api';
+import type {
+  CapabilityStatus,
+  WalletTransactionGroup,
+  WalletTransactionView,
+  WalletTransactionsResponse,
+} from '@/types/offpay-api';
 
 // Live updates from the WS activity stream invalidate this cache the
 // moment a notification arrives, so a high `staleTime` keeps RPC
@@ -35,6 +40,8 @@ const TRANSACTION_GC_TIME_MS = 1000 * 60 * 30;
 
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_PAGES: WalletTransactionsResponse[] = [];
+const EMPTY_TRANSACTION_VIEWS: WalletTransactionView[] = [];
+const EMPTY_HISTORY_GROUPS: WalletTransactionGroup[] = [];
 
 type WalletTransactionsInfiniteData = InfiniteData<WalletTransactionsResponse, string | undefined>;
 
@@ -42,19 +49,41 @@ interface WalletTransactionsSelectResult {
   pages: WalletTransactionsResponse[];
   pageParams: (string | undefined)[];
   transactions: WalletTransactionsResponse['transactions'];
+  transactionViews: WalletTransactionView[];
+  historyGroups: WalletTransactionGroup[];
+}
+
+function getPageTransactionViews(page: WalletTransactionsResponse): WalletTransactionView[] {
+  if (page.displayTransactions != null && page.displayTransactions.length > 0) {
+    return page.displayTransactions;
+  }
+
+  return page.transactions
+    .map((transaction) => transaction.display)
+    .filter((view): view is WalletTransactionView => view != null);
 }
 
 function selectWalletTransactionPages(
   data: InfiniteData<WalletTransactionsResponse, string | undefined>,
 ): WalletTransactionsSelectResult {
   const transactions: WalletTransactionsResponse['transactions'] = [];
+  const transactionViews: WalletTransactionView[] = [];
+  const groupsByTitle = new Map<string, WalletTransactionView[]>();
   for (const page of data.pages) {
     for (const transaction of page.transactions) transactions.push(transaction);
+    for (const view of getPageTransactionViews(page)) transactionViews.push(view);
+    for (const group of page.historyGroups ?? []) {
+      const groupedViews = groupsByTitle.get(group.title) ?? [];
+      groupedViews.push(...group.data);
+      groupsByTitle.set(group.title, groupedViews);
+    }
   }
   return {
     pages: data.pages,
     pageParams: data.pageParams,
     transactions,
+    transactionViews,
+    historyGroups: Array.from(groupsByTitle.entries()).map(([title, data]) => ({ title, data })),
   };
 }
 
@@ -206,6 +235,8 @@ export function useOffpayWalletTransactions(options?: {
   });
   const refetchTransactionsQuery = query.refetch;
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
+  const transactionViews = query.data?.transactionViews ?? EMPTY_TRANSACTION_VIEWS;
+  const historyGroups = query.data?.historyGroups ?? EMPTY_HISTORY_GROUPS;
   const pages = query.data?.pages ?? EMPTY_PAGES;
   const firstPage = pages[0] ?? null;
   const displayCachePage = useMemo(() => {
@@ -214,10 +245,12 @@ export function useOffpayWalletTransactions(options?: {
     return {
       ...firstPage,
       transactions,
+      displayTransactions: transactionViews,
+      historyGroups,
       cursor: lastPage.cursor ?? firstPage.cursor,
       fetchedAt: Math.max(...pages.map((page) => page.fetchedAt)),
     };
-  }, [firstPage, pages, transactions]);
+  }, [firstPage, historyGroups, pages, transactionViews, transactions]);
 
   useEffect(() => {
     if (
@@ -357,6 +390,8 @@ export function useOffpayWalletTransactions(options?: {
     network,
     capability,
     transactions,
+    transactionViews,
+    historyGroups,
     refetchFresh,
     isInitialDataPending,
     isCapabilitiesPending:

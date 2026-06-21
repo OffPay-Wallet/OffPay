@@ -151,6 +151,7 @@ export function HistoryList({
   const sections = useMemo(() => {
     return buildWalletHistoryGroups({
       transactions: transactionsQuery.transactions,
+      transactionViews: transactionsQuery.transactionViews,
       localReceipts,
       includeUnmatchedLocalReceipts,
       network: transactionsQuery.network,
@@ -159,6 +160,7 @@ export function HistoryList({
     includeUnmatchedLocalReceipts,
     localReceipts,
     transactionsQuery.network,
+    transactionsQuery.transactionViews,
     transactionsQuery.transactions,
   ]);
   const rows = useMemo(() => flattenHistorySections(sections), [sections]);
