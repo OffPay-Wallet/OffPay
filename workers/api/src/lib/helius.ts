@@ -41,6 +41,7 @@ const TOKEN_METADATA_CACHE_TTL_MS = 60 * 60_000;
 const DEFAULT_TRANSACTION_LIMIT = 25;
 const WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
 const MAX_WALLET_TRANSACTION_SIGNATURE_SCAN = 1_000;
+const MIN_WALLET_TRANSACTION_BATCH_SIZE = 20;
 const TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
 const MAX_NATIVE_SOL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 1_000;
 const MAX_SPL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 200;
@@ -4028,7 +4029,12 @@ async function fetchWalletTransactionsViaRpc(
       scanCursor,
       signatureLimit,
     );
-    const transactionRequests = signaturePage.entries.slice(0, signatureLimit);
+    const remainingDisplayableTransactions = Math.max(1, limit - filteredTransactions.length);
+    const transactionBatchLimit = Math.min(
+      signatureLimit,
+      Math.max(MIN_WALLET_TRANSACTION_BATCH_SIZE, remainingDisplayableTransactions * 2),
+    );
+    const transactionRequests = signaturePage.entries.slice(0, transactionBatchLimit);
     if (transactionRequests.length === 0) {
       nextCursor = null;
       break;
@@ -4061,7 +4067,11 @@ async function fetchWalletTransactionsViaRpc(
     }
 
     const lastEntry = transactionRequests.at(-1);
-    nextCursor = signaturePage.hasMore && lastEntry ? lastEntry.signature : null;
+    const hasUnparsedSignatureEntries = transactionRequests.length < signaturePage.entries.length;
+    nextCursor =
+      (hasUnparsedSignatureEntries || signaturePage.hasMore) && lastEntry
+        ? lastEntry.signature
+        : null;
     if (nextCursor === null) {
       break;
     }
@@ -4249,7 +4259,12 @@ async function fetchWalletTokenTransactionsViaRpc(
       scanCursor,
       signatureLimit,
     );
-    const transactionRequests = signaturePage.entries.slice(0, signatureLimit);
+    const remainingDisplayableTransactions = Math.max(1, limit - filteredTransactions.length);
+    const transactionBatchLimit = Math.min(
+      signatureLimit,
+      Math.max(MIN_WALLET_TRANSACTION_BATCH_SIZE, remainingDisplayableTransactions * 2),
+    );
+    const transactionRequests = signaturePage.entries.slice(0, transactionBatchLimit);
     if (transactionRequests.length === 0) {
       nextCursor = null;
       break;
@@ -4275,7 +4290,11 @@ async function fetchWalletTokenTransactionsViaRpc(
     }
 
     const lastEntry = transactionRequests.at(-1);
-    nextCursor = signaturePage.hasMore && lastEntry ? lastEntry.signature : null;
+    const hasUnparsedSignatureEntries = transactionRequests.length < signaturePage.entries.length;
+    nextCursor =
+      (hasUnparsedSignatureEntries || signaturePage.hasMore) && lastEntry
+        ? lastEntry.signature
+        : null;
     if (nextCursor === null) break;
     scanCursor = nextCursor;
   }

@@ -69,7 +69,7 @@ export function HistoryScreenContent(): React.JSX.Element {
   }, [network, offlineReceipts, privatePaymentReceipts, swapReceipts, walletAddress]);
   const transactionsQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
-    deferUntilAfterInteractions: true,
+    deferUntilAfterInteractions: false,
     enabled: isFocused,
     // History is the canonical activity surface, so it needs enough
     // depth on first fetch to include SOL/custom-token rows that can be
@@ -77,6 +77,7 @@ export function HistoryScreenContent(): React.JSX.Element {
     limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     refetchOnMount: true,
     requestOwner: 'history.transactions',
+    waitForDashboard: false,
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;

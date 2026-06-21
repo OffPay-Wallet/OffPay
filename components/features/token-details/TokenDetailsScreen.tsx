@@ -743,10 +743,9 @@ export function TokenDetailsScreen(): React.JSX.Element {
     holding == null ? requestedMint : isNativeSolHolding(holding) ? NATIVE_SOL_MINT : holding.mint;
   const tokenTransactionsQuery = useOffpayWalletTokenTransactions({
     mint: holding == null ? null : getTokenActionMint(holding),
-    deferUntilAfterInteractions: true,
+    deferUntilAfterInteractions: false,
     limit: MAX_TOKEN_ACTIVITY_ROWS,
-    refetchOnMount: 'always',
-    useCache: false,
+    refetchOnMount: true,
     enabled: holding != null,
     requestOwner: 'tokenDetails.transactions',
   });

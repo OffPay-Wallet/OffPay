@@ -450,6 +450,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
 const styles = StyleSheet.create({
   centerBlock: {
     width: '100%',
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing['2xl'],

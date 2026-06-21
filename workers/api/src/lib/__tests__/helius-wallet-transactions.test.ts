@@ -157,6 +157,274 @@ describe('getWalletTransactions RPC fallback', () => {
     });
   });
 
+  it('limits shallow wallet history transaction batches instead of parsing the whole signature page', async () => {
+    const signatures = Array.from(
+      { length: 100 },
+      (_, index) => `${SIGNATURE}${index.toString().padStart(3, '0')}`,
+    );
+    const getTransactionBatchSizes: number[] = [];
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+
+      if (
+        Array.isArray(requestBody) &&
+        requestBody.every((request) => request.method === 'getTransaction')
+      ) {
+        getTransactionBatchSizes.push(requestBody.length);
+      }
+
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTokenAccountsByOwner') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { value: [] },
+          };
+        }
+
+        if (request.method === 'getSignaturesForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: signatures.map((signature, index) => ({
+              signature,
+              blockTime: 1781794440 - index,
+              err: null,
+            })),
+          };
+        }
+
+        if (request.method === 'getTransaction') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const signature = String(params[0] ?? '');
+          const signatureIndex = signatures.indexOf(signature);
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result:
+              signatureIndex >= 0 && signatureIndex < 20
+                ? {
+                    blockTime: 1781794440 - signatureIndex,
+                    meta: {
+                      err: null,
+                      fee: 5000,
+                      preBalances: [1_000_000_000, 0],
+                      postBalances: [999_990_000, 5_000],
+                      preTokenBalances: [],
+                      postTokenBalances: [],
+                    },
+                    transaction: {
+                      message: {
+                        accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+                        instructions: [
+                          {
+                            programId: '11111111111111111111111111111111',
+                            parsed: {
+                              type: 'transfer',
+                              info: {
+                                source: WALLET,
+                                destination: RECIPIENT,
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  }
+                : null,
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(bindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 20,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(20);
+    expect(getTransactionBatchSizes).toEqual([40]);
+  });
+
+  it('limits token detail transaction batches instead of parsing the whole signature page', async () => {
+    const signatures = Array.from(
+      { length: 100 },
+      (_, index) => `${SIGNATURE}token${index.toString().padStart(3, '0')}`,
+    );
+    const sender = 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3';
+    const getTransactionBatchSizes: number[] = [];
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+
+      if (
+        Array.isArray(requestBody) &&
+        requestBody.every((request) => request.method === 'getTransaction')
+      ) {
+        getTransactionBatchSizes.push(requestBody.length);
+      }
+
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTokenAccountsByOwner') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const filter = params[1];
+          const programId =
+            filter != null && typeof filter === 'object' && 'programId' in filter
+              ? String(filter.programId)
+              : '';
+
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              value: programId.includes('Tokenkeg')
+                ? [
+                    {
+                      pubkey: TOKEN_ACCOUNT,
+                      account: {
+                        data: {
+                          parsed: {
+                            info: {
+                              mint: OTHER_TOKEN_MINT,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  ]
+                : [],
+            },
+          };
+        }
+
+        if (request.method === 'getSignaturesForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: signatures.map((signature, index) => ({
+              signature,
+              blockTime: 1781794500 - index,
+              err: null,
+            })),
+          };
+        }
+
+        if (request.method === 'getTransaction') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const signature = String(params[0] ?? '');
+          const signatureIndex = signatures.indexOf(signature);
+          const hasTokenTransfer = signatureIndex >= 0 && signatureIndex < 8;
+
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              blockTime: 1781794500 - Math.max(signatureIndex, 0),
+              meta: {
+                err: null,
+                fee: 5000,
+                preBalances: [1_000_000_000],
+                postBalances: [999_995_000],
+                preTokenBalances: hasTokenTransfer
+                  ? [
+                      {
+                        owner: sender,
+                        accountIndex: 0,
+                        mint: OTHER_TOKEN_MINT,
+                        uiTokenAmount: { amount: '1000000', decimals: 5 },
+                      },
+                      {
+                        accountIndex: 1,
+                        mint: OTHER_TOKEN_MINT,
+                        uiTokenAmount: { amount: '0', decimals: 5 },
+                      },
+                    ]
+                  : [],
+                postTokenBalances: hasTokenTransfer
+                  ? [
+                      {
+                        owner: sender,
+                        accountIndex: 0,
+                        mint: OTHER_TOKEN_MINT,
+                        uiTokenAmount: { amount: '0', decimals: 5 },
+                      },
+                      {
+                        accountIndex: 1,
+                        mint: OTHER_TOKEN_MINT,
+                        uiTokenAmount: { amount: '1000000', decimals: 5 },
+                      },
+                    ]
+                  : [],
+              },
+              transaction: {
+                message: {
+                  accountKeys: [{ pubkey: sender }, { pubkey: TOKEN_ACCOUNT }],
+                  instructions: [],
+                },
+              },
+            },
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [
+              {
+                id: OTHER_TOKEN_MINT,
+                content: { metadata: { name: 'Bonk', symbol: 'BONK' } },
+                token_info: { symbol: 'BONK', decimals: 5 },
+              },
+            ],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: OTHER_TOKEN_MINT,
+      limit: 8,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(8);
+    expect(getTransactionBatchSizes).toEqual([20]);
+  });
+
   it('fetches token-account signatures so arbitrary token transfer history is not stablecoin-only when owner metadata is sparse', async () => {
     const tokenSignature = `${SIGNATURE}tok`;
     const sender = 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3';
@@ -391,7 +659,11 @@ describe('getWalletTransactions RPC fallback', () => {
           expect(config?.limit).toBe(100);
           signaturePageCount += 1;
 
-          if (config?.before === unrelatedSignatures.at(-1)) {
+          const previousIndex =
+            config?.before == null ? -1 : unrelatedSignatures.indexOf(config.before);
+          const startIndex = previousIndex < 0 ? 0 : previousIndex + 1;
+
+          if (startIndex >= unrelatedSignatures.length) {
             return {
               jsonrpc: '2.0',
               id: request.id,
@@ -405,17 +677,24 @@ describe('getWalletTransactions RPC fallback', () => {
             };
           }
 
+          const page = unrelatedSignatures.slice(startIndex, startIndex + (config?.limit ?? 100));
+          const result = page.map((signature, index) => ({
+            signature,
+            blockTime: 1781794600 - startIndex - index,
+            err: null,
+          }));
+          if (startIndex + page.length >= unrelatedSignatures.length) {
+            result.push({
+              signature: solSignature,
+              blockTime: 1781794500,
+              err: null,
+            });
+          }
+
           return {
             jsonrpc: '2.0',
             id: request.id,
-            result:
-              config?.before == null
-                ? unrelatedSignatures.map((signature, index) => ({
-                    signature,
-                    blockTime: 1781794600 - index,
-                    err: null,
-                  }))
-                : [],
+            result,
           };
         }
 
@@ -510,7 +789,6 @@ describe('getWalletTransactions RPC fallback', () => {
       limit: 8,
       useCache: false,
     });
-
     expect(response.transactions).toHaveLength(1);
     expect(response.transactions[0]).toMatchObject({
       signature: solSignature,
@@ -520,7 +798,7 @@ describe('getWalletTransactions RPC fallback', () => {
       tokenSymbol: 'SOL',
       direction: 'send',
     });
-    expect(signaturePageCount).toBe(2);
+    expect(signaturePageCount).toBe(6);
   });
 
   it('does not treat Umbra rent or fee lamport movement as SOL token activity', async () => {

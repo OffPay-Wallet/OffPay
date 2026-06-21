@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
@@ -9,10 +9,14 @@ import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
-import { offpayWalletTokenTransactionsQueryKey } from '@/lib/api/offpay-wallet-query-keys';
+import {
+  offpayWalletTokenTransactionsQueryKey,
+  offpayWalletTransactionsBaseQueryKey,
+} from '@/lib/api/offpay-wallet-query-keys';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { useWalletStore } from '@/store/walletStore';
 
+import type { InfiniteData } from '@tanstack/react-query';
 import type {
   CapabilityStatus,
   WalletTransactionGroup,
@@ -25,6 +29,9 @@ const TOKEN_TRANSACTION_GC_TIME_MS = 1000 * 60 * 15;
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_TRANSACTION_VIEWS: WalletTransactionView[] = [];
 const EMPTY_HISTORY_GROUPS: WalletTransactionGroup[] = [];
+const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+type WalletTransactionsInfiniteData = InfiniteData<WalletTransactionsResponse, string | undefined>;
 
 function getPageTransactionViews(
   page: WalletTransactionsResponse | undefined,
@@ -37,6 +44,74 @@ function getPageTransactionViews(
   return page.transactions
     .map((transaction) => transaction.display)
     .filter((view): view is WalletTransactionView => view != null);
+}
+
+function isNativeSolMint(value: string | null | undefined): boolean {
+  return value === NATIVE_SOL_MINT || value === 'native-sol' || value === 'SOL';
+}
+
+function transactionMatchesMint(
+  transaction: WalletTransactionsResponse['transactions'][number],
+  mint: string,
+): boolean {
+  if (isNativeSolMint(mint)) {
+    return (
+      isNativeSolMint(transaction.tokenMint) ||
+      transaction.tokenSymbol?.trim().toUpperCase() === 'SOL' ||
+      isNativeSolMint(transaction.display?.tokenMint)
+    );
+  }
+
+  return transaction.tokenMint === mint || transaction.display?.tokenMint === mint;
+}
+
+function buildWarmTokenTransactionsPage(params: {
+  walletAddress: string;
+  network: WalletTransactionsResponse['network'];
+  mint: string;
+  limit: number;
+  pages: readonly WalletTransactionsResponse[];
+}): WalletTransactionsResponse | undefined {
+  const transactionsBySignature = new Map<
+    string,
+    WalletTransactionsResponse['transactions'][number]
+  >();
+  let fetchedAt = 0;
+
+  for (const page of params.pages) {
+    if (page.address !== params.walletAddress || page.network !== params.network) continue;
+    fetchedAt = Math.max(fetchedAt, page.fetchedAt);
+
+    for (const transaction of page.transactions) {
+      if (transactionsBySignature.has(transaction.signature)) continue;
+      if (!transactionMatchesMint(transaction, params.mint)) continue;
+      transactionsBySignature.set(transaction.signature, transaction);
+    }
+  }
+
+  const transactions = Array.from(transactionsBySignature.values())
+    .sort((left, right) => {
+      const timestampDiff = right.timestamp - left.timestamp;
+      if (timestampDiff !== 0) return timestampDiff;
+      return left.signature.localeCompare(right.signature);
+    })
+    .slice(0, params.limit);
+
+  if (transactions.length === 0) return undefined;
+
+  const displayTransactions = transactions
+    .map((transaction) => transaction.display)
+    .filter((view): view is WalletTransactionView => view != null);
+
+  return {
+    address: params.walletAddress,
+    network: params.network,
+    transactions,
+    displayTransactions,
+    historyGroups: [],
+    cursor: null,
+    fetchedAt,
+  };
 }
 
 export function useOffpayWalletTokenTransactions(options: {
@@ -60,6 +135,7 @@ export function useOffpayWalletTokenTransactions(options: {
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
+  const queryClient = useQueryClient();
   const capabilitiesQuery = useOffpayCapabilities({
     enabled: enabledByCaller,
     requestOwner: `${requestOwner}.capabilities`,
@@ -128,6 +204,33 @@ export function useOffpayWalletTokenTransactions(options: {
     };
   }, [deferUntilAfterInteractions, enabledByCaller, limit, mint, network, walletAddress]);
 
+  const getWarmInitialData = useMemo(() => {
+    if (walletAddress == null || network == null || mint == null) return undefined;
+
+    const walletHistoryQueries = queryClient.getQueriesData<WalletTransactionsInfiniteData>({
+      queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+    });
+    let bestPage: WalletTransactionsResponse | undefined;
+
+    for (const [, data] of walletHistoryQueries) {
+      if (data == null || data.pages.length === 0) continue;
+      const page = buildWarmTokenTransactionsPage({
+        walletAddress,
+        network,
+        mint,
+        limit,
+        pages: data.pages,
+      });
+
+      if (page == null) continue;
+      if (bestPage == null || page.transactions.length > bestPage.transactions.length) {
+        bestPage = page;
+      }
+    }
+
+    return bestPage;
+  }, [limit, mint, network, queryClient, walletAddress]);
+
   const query = useQuery({
     queryKey: transactionsQueryKey,
     queryFn: ({ signal }) => {
@@ -145,8 +248,12 @@ export function useOffpayWalletTokenTransactions(options: {
     enabled,
     staleTime: TOKEN_TRANSACTION_STALE_TIME_MS,
     gcTime: TOKEN_TRANSACTION_GC_TIME_MS,
+    initialData: getWarmInitialData,
+    initialDataUpdatedAt: () => (getWarmInitialData == null ? undefined : 0),
+    placeholderData: getWarmInitialData,
     refetchOnMount: options.refetchOnMount ?? true,
     refetchOnReconnect: true,
+    retry: false,
   });
 
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
