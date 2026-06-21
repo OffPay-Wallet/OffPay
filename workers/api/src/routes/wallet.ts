@@ -3,7 +3,12 @@ import { z } from 'zod';
 import { getCapabilities } from '../lib/capabilities.js';
 import { getOrSetEdgeJsonCache } from '../lib/edge-cache.js';
 import { AppError } from '../lib/errors.js';
-import { getStreamCapabilities, getWalletBalance, getWalletTransactions } from '../lib/helius.js';
+import {
+  getStreamCapabilities,
+  getWalletBalance,
+  getWalletTokenTransactions,
+  getWalletTransactions,
+} from '../lib/helius.js';
 import type { AppEnv } from '../lib/types.js';
 import { isValidSolanaAddress, networkSchema, readSearchParams } from '../lib/validation.js';
 
@@ -30,6 +35,15 @@ const walletTransactionsQuerySchema = z.object({
   network: networkSchema,
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+  useCache: booleanQuerySchema,
+});
+
+const walletTokenTransactionsQuerySchema = z.object({
+  address: z.string().min(1),
+  network: networkSchema,
+  mint: z.string().min(1),
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(12),
   useCache: booleanQuerySchema,
 });
 
@@ -158,6 +172,39 @@ walletRoutes.get('/transactions', async (context) => {
         context,
         namespace: 'wallet_transactions_first_page_v3',
         keyParts: [query.network, query.address, query.limit],
+        freshTtlMs: WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS,
+        staleTtlMs: WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS,
+        resolver: resolveTransactions,
+      })
+    : await resolveTransactions();
+
+  const response = context.json(payload);
+  response.headers.set('Cache-Control', canUseEdgeCache ? 'public, max-age=30' : 'no-store');
+  return response;
+});
+
+walletRoutes.get('/token-transactions', async (context) => {
+  const query = readSearchParams(context.req.url, walletTokenTransactionsQuerySchema);
+
+  assertWalletAddress(query.address, 'Wallet address is invalid.');
+  assertWalletAddress(query.mint, 'Token mint is invalid.');
+
+  const resolveTransactions = () =>
+    getWalletTokenTransactions(context.env, {
+      address: query.address,
+      network: query.network,
+      mint: query.mint,
+      cursor: query.cursor ?? null,
+      limit: query.limit,
+      useCache: query.useCache ?? true,
+    });
+
+  const canUseEdgeCache = query.useCache !== false && query.cursor == null;
+  const payload = canUseEdgeCache
+    ? await getOrSetEdgeJsonCache({
+        context,
+        namespace: 'wallet_token_transactions_first_page_v1',
+        keyParts: [query.network, query.address, query.mint, query.limit],
         freshTtlMs: WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS,
         staleTtlMs: WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS,
         resolver: resolveTransactions,

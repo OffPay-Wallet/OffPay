@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
+  getWalletTokenTransactions,
   getWalletTransactions,
   resetHeliusFetchImplementation,
   setHeliusFetchImplementation,
@@ -327,5 +328,165 @@ describe('getWalletTransactions RPC fallback', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deep-scans token-specific RPC history and returns balance-only SOL rows', async () => {
+    const unrelatedSignatures = Array.from(
+      { length: 100 },
+      (_, index) => `${SIGNATURE}noise${String(index).padStart(3, '0')}`,
+    );
+    const solSignature = `${SIGNATURE}sol`;
+    let signaturePageCount = 0;
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTokenAccountsByOwner') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { value: [] },
+          };
+        }
+
+        if (request.method === 'getSignaturesForAddress') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const config = params[1] as { before?: string; limit?: number } | undefined;
+          expect(params[0]).toBe(WALLET);
+          expect(config?.limit).toBe(100);
+          signaturePageCount += 1;
+
+          if (config?.before === unrelatedSignatures.at(-1)) {
+            return {
+              jsonrpc: '2.0',
+              id: request.id,
+              result: [
+                {
+                  signature: solSignature,
+                  blockTime: 1781794500,
+                  err: null,
+                },
+              ],
+            };
+          }
+
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result:
+              config?.before == null
+                ? unrelatedSignatures.map((signature, index) => ({
+                    signature,
+                    blockTime: 1781794600 - index,
+                    err: null,
+                  }))
+                : [],
+          };
+        }
+
+        if (request.method === 'getTransaction') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const signature = params[0];
+          const isSolTransfer = signature === solSignature;
+
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: isSolTransfer
+              ? {
+                  blockTime: 1781794500,
+                  meta: {
+                    err: null,
+                    fee: 5000,
+                    preBalances: [1_000_000_000, 0],
+                    postBalances: [799_995_000, 200_000_000],
+                    preTokenBalances: [],
+                    postTokenBalances: [],
+                  },
+                  transaction: {
+                    message: {
+                      accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+                      instructions: [],
+                    },
+                  },
+                }
+              : {
+                  blockTime: 1781794560,
+                  meta: {
+                    err: null,
+                    fee: 5000,
+                    preBalances: [1_000_000_000],
+                    postBalances: [999_995_000],
+                    preTokenBalances: [
+                      {
+                        owner: WALLET,
+                        accountIndex: 0,
+                        mint: OTHER_TOKEN_MINT,
+                        uiTokenAmount: { amount: '1000000', decimals: 6 },
+                      },
+                    ],
+                    postTokenBalances: [
+                      {
+                        owner: WALLET,
+                        accountIndex: 0,
+                        mint: OTHER_TOKEN_MINT,
+                        uiTokenAmount: { amount: '0', decimals: 6 },
+                      },
+                    ],
+                  },
+                  transaction: {
+                    message: {
+                      accountKeys: [{ pubkey: WALLET }],
+                      instructions: [],
+                    },
+                  },
+                },
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [
+              {
+                id: OTHER_TOKEN_MINT,
+                content: { metadata: { name: 'USD Coin', symbol: 'USDC' } },
+                token_info: { symbol: 'USDC', decimals: 6 },
+              },
+            ],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: SOL_MINT,
+      limit: 8,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: solSignature,
+      amount: '0.2',
+      rawAmount: '200000000',
+      tokenMint: SOL_MINT,
+      tokenSymbol: 'SOL',
+      direction: 'send',
+    });
+    expect(signaturePageCount).toBe(2);
   });
 });

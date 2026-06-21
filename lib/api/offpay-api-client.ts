@@ -1322,6 +1322,34 @@ export async function getWalletTransactions(
   });
 }
 
+export async function getWalletTokenTransactions(
+  walletAddress: string,
+  network: OffpayNetwork,
+  mint: string,
+  options?: {
+    cursor?: string;
+    limit?: number;
+    useCache?: boolean;
+    signal?: AbortSignal;
+    requestOwner?: string;
+  },
+): Promise<WalletTransactionsResponse> {
+  return offpayPublicRequest<WalletTransactionsResponse>({
+    path: '/api/wallet/token-transactions',
+    query: {
+      address: walletAddress,
+      network,
+      mint,
+      cursor: options?.cursor,
+      limit: options?.limit,
+      useCache: options?.useCache,
+    },
+    signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
+  });
+}
+
 export async function getWalletDashboard(
   walletAddress: string,
   network: OffpayNetwork,

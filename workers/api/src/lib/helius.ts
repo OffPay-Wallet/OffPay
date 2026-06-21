@@ -33,6 +33,9 @@ const WALLET_TRANSACTIONS_CACHE_TTL_MS = 60_000;
 const STREAM_CAPABILITY_CACHE_TTL_MS = 60_000;
 const TOKEN_METADATA_CACHE_TTL_MS = 60 * 60_000;
 const DEFAULT_TRANSACTION_LIMIT = 25;
+const TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
+const MAX_NATIVE_SOL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 500;
+const MAX_SPL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 200;
 const DEFAULT_STREAM_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_STREAM_WEBSOCKET_FALLBACK_POLL_INTERVAL_MS = 45_000;
 const DEFAULT_STREAM_ACTIVITY_LIMIT = 10;
@@ -252,6 +255,10 @@ interface WalletTransactionsRequest {
   cursor?: string | null;
   limit?: number;
   useCache?: boolean;
+}
+
+interface WalletTokenTransactionsRequest extends WalletTransactionsRequest {
+  mint: string;
 }
 
 interface RawTransactionBroadcastRequest {
@@ -2691,9 +2698,9 @@ function extractWalletNativeSolTransferDeltas(
   instructions: readonly unknown[],
   walletAddress: string,
   result: Record<string, unknown>,
+  allowBalanceFallback: boolean,
 ): TokenBalanceDelta[] {
   let rawDelta = 0n;
-  let sawWalletSystemTransfer = false;
 
   for (const instruction of instructions) {
     if (!isRecord(instruction)) {
@@ -2718,8 +2725,6 @@ function extractWalletNativeSolTransferDeltas(
       continue;
     }
 
-    sawWalletSystemTransfer = true;
-
     const lamports = readNonNegativeBigInt(info.lamports);
     if (lamports === null || lamports === 0n) {
       continue;
@@ -2734,10 +2739,13 @@ function extractWalletNativeSolTransferDeltas(
   }
 
   if (rawDelta === 0n) {
-    if (!sawWalletSystemTransfer) {
+    if (!allowBalanceFallback) {
       return [];
     }
 
+    // Devnet SOL funding can appear as a native balance delta without
+    // a parsed system transfer instruction. Fees are removed in the
+    // balance-delta helper so fee-only transactions still resolve to 0.
     const fallbackDelta = extractWalletNativeSolBalanceDelta(result, walletAddress);
     if (fallbackDelta === null) {
       return [];
@@ -3104,9 +3112,20 @@ async function buildRpcTransactionRecordFromResult(
   const fee = meta ? readFiniteNumber(meta.fee) : null;
   const hasError = meta ? meta.err !== null && meta.err !== undefined : fallbackStatus === 'failed';
 
+  const splTokenBalanceDeltas = extractWalletTokenBalanceDeltas(
+    meta,
+    walletAddress,
+    walletTokenAccounts,
+    accountKeys,
+  );
   const tokenBalanceDeltas = [
-    ...extractWalletTokenBalanceDeltas(meta, walletAddress, walletTokenAccounts, accountKeys),
-    ...extractWalletNativeSolTransferDeltas(parsedInstructions, walletAddress, result),
+    ...splTokenBalanceDeltas,
+    ...extractWalletNativeSolTransferDeltas(
+      parsedInstructions,
+      walletAddress,
+      result,
+      splTokenBalanceDeltas.length === 0,
+    ),
   ];
   const tokenMetadata = await fetchTokenMetadataMap(
     bindings,
@@ -3384,6 +3403,204 @@ async function fetchWalletTransactionsViaRpc(
   };
 }
 
+function normalizeTokenTransactionMint(mint: string): string {
+  return isNativeSolMint(mint) ? SOL_MINT : mint;
+}
+
+function getTokenTransactionScanLimit(limit: number): number {
+  return Math.min(100, Math.max(limit * 4, limit));
+}
+
+function getTokenTransactionMaxSignatureScan(normalizedMint: string, limit: number): number {
+  if (normalizedMint === SOL_MINT) {
+    return MAX_NATIVE_SOL_TOKEN_TRANSACTION_SIGNATURE_SCAN;
+  }
+
+  return Math.min(
+    MAX_SPL_TOKEN_TRANSACTION_SIGNATURE_SCAN,
+    Math.max(TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE, getTokenTransactionScanLimit(limit)),
+  );
+}
+
+function walletTransactionMatchesMint(
+  transaction: WalletTransactionRecord,
+  normalizedMint: string,
+): boolean {
+  if (normalizedMint === SOL_MINT) {
+    return (
+      isNativeSolMint(transaction.tokenMint) ||
+      transaction.tokenSymbol?.trim().toUpperCase() === 'SOL'
+    );
+  }
+
+  return transaction.tokenMint === normalizedMint;
+}
+
+async function fetchWalletTokenTransactionsViaEnhancedApi(
+  bindings: Bindings,
+  address: string,
+  mint: string,
+  cursor: string | null,
+  limit: number,
+): Promise<WalletTransactionsResponse> {
+  const scanLimit = getTokenTransactionScanLimit(limit);
+  const page = await fetchWalletTransactionsViaEnhancedApi(bindings, address, cursor, scanLimit);
+  const normalizedMint = normalizeTokenTransactionMint(mint);
+
+  return {
+    ...page,
+    transactions: page.transactions
+      .filter((transaction) => walletTransactionMatchesMint(transaction, normalizedMint))
+      .slice(0, limit),
+  };
+}
+
+async function fetchRpcWalletTokenSignaturePage(
+  bindings: Bindings,
+  network: Network,
+  walletAddress: string,
+  mint: string,
+  cursor: string | null,
+  signatureLimit: number,
+): Promise<RpcSignaturePage> {
+  const walletTokenAccounts = await getWalletTokenAccountAddresses(
+    bindings,
+    walletAddress,
+    network,
+  );
+  const normalizedMint = normalizeTokenTransactionMint(mint);
+  const sourceAddresses =
+    normalizedMint === SOL_MINT
+      ? [walletAddress]
+      : walletTokenAccounts
+          .filter((account) => account.mint === normalizedMint)
+          .map((account) => account.address);
+
+  if (sourceAddresses.length === 0) {
+    return {
+      entries: [],
+      hasMore: false,
+      tokenAccounts: walletTokenAccounts,
+    };
+  }
+
+  const requests = sourceAddresses.map((sourceAddress, index): RpcBatchRequest => {
+    const config: Record<string, unknown> = {
+      commitment: 'confirmed',
+      limit: signatureLimit,
+    };
+    if (cursor != null) {
+      config.before = cursor;
+    }
+
+    return {
+      id: `wallet-token-signatures-${index}`,
+      method: 'getSignaturesForAddress',
+      params: [sourceAddress, config],
+    };
+  });
+  const results = await heliusRpcBatchRequest(bindings, network, requests);
+  const entriesBySignature = new Map<string, RpcSignatureEntry>();
+  let anySourceMayHaveMore = false;
+
+  for (const result of results) {
+    const entries = parseRpcSignatureEntries(result);
+    if (entries.length >= signatureLimit) {
+      anySourceMayHaveMore = true;
+    }
+
+    for (const entry of entries) {
+      const existing = entriesBySignature.get(entry.signature);
+      if (
+        existing != null &&
+        (existing.timestamp > entry.timestamp ||
+          (existing.timestamp === entry.timestamp && existing.signature <= entry.signature))
+      ) {
+        continue;
+      }
+
+      entriesBySignature.set(entry.signature, entry);
+    }
+  }
+
+  const entries = Array.from(entriesBySignature.values()).sort((left, right) => {
+    const timestampDiff = right.timestamp - left.timestamp;
+    if (timestampDiff !== 0) return timestampDiff;
+    return left.signature.localeCompare(right.signature);
+  });
+
+  return {
+    entries,
+    hasMore: entries.length > signatureLimit || anySourceMayHaveMore,
+    tokenAccounts: walletTokenAccounts,
+  };
+}
+
+async function fetchWalletTokenTransactionsViaRpc(
+  bindings: Bindings,
+  address: string,
+  network: Network,
+  mint: string,
+  cursor: string | null,
+  limit: number,
+): Promise<WalletTransactionsResponse> {
+  const normalizedMint = normalizeTokenTransactionMint(mint);
+  const maxSignatureScan = getTokenTransactionMaxSignatureScan(normalizedMint, limit);
+  const filteredTransactions: WalletTransactionRecord[] = [];
+  let scannedSignatures = 0;
+  let scanCursor = cursor;
+  let nextCursor: string | null = null;
+
+  while (filteredTransactions.length < limit && scannedSignatures < maxSignatureScan) {
+    const signatureLimit = Math.min(
+      TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE,
+      maxSignatureScan - scannedSignatures,
+    );
+    const signaturePage = await fetchRpcWalletTokenSignaturePage(
+      bindings,
+      network,
+      address,
+      normalizedMint,
+      scanCursor,
+      signatureLimit,
+    );
+    const transactionRequests = signaturePage.entries.slice(0, signatureLimit);
+    if (transactionRequests.length === 0) {
+      nextCursor = null;
+      break;
+    }
+
+    scannedSignatures += transactionRequests.length;
+
+    const parsedTransactions = await fetchRpcTransactionRecordsBatch(
+      bindings,
+      network,
+      address,
+      signaturePage.tokenAccounts,
+      transactionRequests,
+    );
+    for (const transaction of parsedTransactions) {
+      if (walletTransactionMatchesMint(transaction, normalizedMint)) {
+        filteredTransactions.push(transaction);
+      }
+      if (filteredTransactions.length >= limit) break;
+    }
+
+    const lastEntry = transactionRequests.at(-1);
+    nextCursor = signaturePage.hasMore && lastEntry ? lastEntry.signature : null;
+    if (nextCursor === null) break;
+    scanCursor = nextCursor;
+  }
+
+  return {
+    address,
+    network,
+    transactions: filteredTransactions.slice(0, limit),
+    cursor: nextCursor,
+    fetchedAt: Date.now(),
+  };
+}
+
 async function getWalletBalance(
   bindings: Bindings,
   request: WalletBalanceRequest,
@@ -3472,6 +3689,71 @@ async function getWalletTransactions(
         getOrSetSharedJsonCache({
           bindings,
           namespace: 'wallet-transactions-v3',
+          key: cacheKey,
+          ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
+          isValid: isWalletTransactionsResponse,
+          resolver,
+        }),
+      )
+    : resolver();
+}
+
+async function getWalletTokenTransactions(
+  bindings: Bindings,
+  request: WalletTokenTransactionsRequest,
+): Promise<WalletTransactionsResponse> {
+  const normalizedLimit = Math.min(50, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
+  const normalizedCursor = request.cursor?.trim() || null;
+  const normalizedMint = normalizeTokenTransactionMint(request.mint.trim());
+  const useCache = request.useCache ?? true;
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-token-transactions-v1', [
+    request.address,
+    normalizedMint,
+    normalizedCursor ?? 'first-page',
+    normalizedLimit,
+  ]);
+
+  const resolver = async () => {
+    if (request.network === 'mainnet') {
+      try {
+        return await fetchWalletTokenTransactionsViaEnhancedApi(
+          bindings,
+          request.address,
+          normalizedMint,
+          normalizedCursor,
+          normalizedLimit,
+        );
+      } catch (error) {
+        if (error instanceof AppError && error.status === 503) {
+          return fetchWalletTokenTransactionsViaRpc(
+            bindings,
+            request.address,
+            request.network,
+            normalizedMint,
+            normalizedCursor,
+            normalizedLimit,
+          );
+        }
+
+        throw error;
+      }
+    }
+
+    return fetchWalletTokenTransactionsViaRpc(
+      bindings,
+      request.address,
+      request.network,
+      normalizedMint,
+      normalizedCursor,
+      normalizedLimit,
+    );
+  };
+
+  return useCache
+    ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
+        getOrSetSharedJsonCache({
+          bindings,
+          namespace: 'wallet-token-transactions-v1',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
@@ -3606,6 +3888,7 @@ export {
   getWalletLamports,
   getWalletMintRawBalance,
   getWalletBalance,
+  getWalletTokenTransactions,
   getWalletTransactions,
   resetHeliusFetchImplementation,
   setHeliusFetchImplementation,
@@ -3639,6 +3922,7 @@ export {
   type WalletTransactionCounterparty,
   type WalletTransactionRecord,
   type WalletTokenAccountAddress,
+  type WalletTokenTransactionsRequest,
   type WalletTransactionsRequest,
   type WalletTransactionsResponse,
 };

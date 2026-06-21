@@ -70,6 +70,7 @@ const {
   getStreamCapabilities,
   getSwapTokens,
   getWalletBalance,
+  getWalletTokenTransactions,
   getWalletTransactions,
   offpayPublicFetch,
   offpayApiRequest,
@@ -274,6 +275,53 @@ describe('offpay-api-client', () => {
     );
     expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=mainnet'));
     expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('limit=20'));
+    expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
+  });
+
+  it('routes token-specific wallet transactions without requiring local signing material', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockResolvedValueOnce(
+      buildResponse({
+        address: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+        network: 'devnet',
+        transactions: [],
+        cursor: null,
+        fetchedAt: 123,
+      }),
+    );
+
+    await expect(
+      getWalletTokenTransactions(
+        'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+        'devnet',
+        'So11111111111111111111111111111111111111112',
+        {
+          limit: 8,
+          useCache: false,
+        },
+      ),
+    ).resolves.toMatchObject({
+      address: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+      network: 'devnet',
+      transactions: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/wallet/token-transactions?'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'X-App-Version': OFFPAY_APP_VERSION,
+          'X-Device-Id': 'device-1',
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('network=devnet'));
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('limit=8'));
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining('useCache=false'));
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(
+      expect.stringContaining('mint=So11111111111111111111111111111111111111112'),
+    );
     expect(mockGetStoredWalletSigningMaterialWithAuth).not.toHaveBeenCalled();
   });
 

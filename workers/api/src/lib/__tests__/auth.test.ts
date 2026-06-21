@@ -14,6 +14,7 @@ describe('requiresAuthentication', () => {
     expect(requiresAuthentication('GET', '/api/wallet/dashboard')).toBe(false);
     expect(requiresAuthentication('GET', '/api/wallet/balance')).toBe(false);
     expect(requiresAuthentication('GET', '/api/wallet/transactions')).toBe(false);
+    expect(requiresAuthentication('GET', '/api/wallet/token-transactions')).toBe(false);
   });
 
   it('still protects private wallet-prefixed mutations by default', () => {

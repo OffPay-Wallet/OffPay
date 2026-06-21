@@ -41,6 +41,7 @@ const PUBLIC_AUTH_EXEMPT_ROUTES = new Set([
   'GET /api/wallet/dashboard',
   'GET /api/wallet/balance',
   'GET /api/wallet/transactions',
+  'GET /api/wallet/token-transactions',
   'GET /api/stream/capabilities',
   'GET /api/stream/wallet-activity',
 ]);
@@ -58,6 +59,7 @@ const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/wallet/dashboard',
   'GET /api/wallet/balance',
   'GET /api/wallet/transactions',
+  'GET /api/wallet/token-transactions',
   'GET /api/stream/capabilities',
   'GET /api/stream/wallet-activity',
 ]);

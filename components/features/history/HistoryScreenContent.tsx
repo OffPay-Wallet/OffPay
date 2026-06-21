@@ -24,10 +24,7 @@ import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import {
-  WALLET_DEEP_HISTORY_PAGE_SIZE,
-  WALLET_TRANSACTIONS_PAGE_SIZE,
-} from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
@@ -47,9 +44,7 @@ function runAfterTapFrame(task: () => void): void {
 
 const HEADER_CONTAINER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
-const HISTORY_BACKGROUND_PAGE_TARGET = Math.ceil(
-  WALLET_DEEP_HISTORY_PAGE_SIZE / WALLET_TRANSACTIONS_PAGE_SIZE,
-);
+const HISTORY_BACKGROUND_PAGE_TARGET = 1;
 const HISTORY_BACKGROUND_PAGE_DELAY_MS = 180;
 
 export function HistoryScreenContent(): React.JSX.Element {
@@ -76,10 +71,10 @@ export function HistoryScreenContent(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: true,
     enabled: isFocused,
-    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
-    // Keep the initial history request small and cache-eligible so
-    // the screen can paint quickly. Deeper pages are fetched below in
-    // the background for complete token coverage.
+    // History is the canonical activity surface, so it needs enough
+    // depth on first fetch to include SOL/custom-token rows that can be
+    // pushed behind repeated stablecoin activity.
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     refetchOnMount: true,
     requestOwner: 'history.transactions',
   });
@@ -135,10 +130,9 @@ export function HistoryScreenContent(): React.JSX.Element {
     [canRefreshHistory, getScreenSignal, isHistoryStale, refetchFreshHistoryQuery],
   );
 
-  // First focus is already covered by the initial query mount — only
-  // refetch on subsequent focuses (i.e., when the user re-enters the
-  // tab from another screen). Without this guard, the very first
-  // navigation into History would fire the API twice.
+  // First focus is already covered by the initial query mount. Later
+  // focuses only refresh when React Query marks the deep history page
+  // stale; the manual refresh button still forces a network fetch.
   const hasFocusedOnceRef = useRef(false);
   const refreshHistoryRef = useRef(refreshHistory);
   useEffect(() => {
@@ -151,7 +145,7 @@ export function HistoryScreenContent(): React.JSX.Element {
         hasFocusedOnceRef.current = true;
         return undefined;
       }
-      refreshHistoryRef.current({ force: true });
+      refreshHistoryRef.current();
       return undefined;
     }, []),
   );

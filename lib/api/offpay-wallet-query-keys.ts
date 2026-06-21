@@ -32,6 +32,22 @@ export const offpayWalletTransactionsQueryKey = (
 ) =>
   [...offpayWalletTransactionsBaseQueryKey(walletAddress, network), { limit, cacheMode }] as const;
 
+export const offpayWalletTokenTransactionsQueryKey = (
+  walletAddress: string | null,
+  network: OffpayNetwork | null,
+  mint: string | null,
+  limit: number,
+  cacheMode: 'cached' | 'network' = 'cached',
+) =>
+  [
+    'offpay',
+    'walletTokenTransactions',
+    network,
+    walletAddress,
+    mint,
+    { limit, cacheMode },
+  ] as const;
+
 export const pendingBackupQueueStatsQueryKey = (
   walletAddress: string | null,
   network: OffpayNetwork | null,
