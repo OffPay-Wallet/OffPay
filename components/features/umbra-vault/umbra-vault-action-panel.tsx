@@ -121,6 +121,7 @@ export function UmbraVaultActionPanel({
   const submitBlocked = disabled || !withdrawReadable;
   const submitDisabled = submitBlocked || loading;
   const submitAccessibilityDisabled = loading;
+  const controlsLocked = loading;
   const showDangerFeedback = feedbackTone === 'danger' && submitBlocked && !loading;
   const submitLabel = loading
     ? (loadingLabel ?? getButtonLabel(action, token, true))
@@ -213,9 +214,10 @@ export function UmbraVaultActionPanel({
               <Pressable
                 key={item.id}
                 accessibilityRole="button"
-                accessibilityState={{ selected }}
+                accessibilityState={{ disabled: controlsLocked, selected }}
+                disabled={controlsLocked}
                 onPress={() => {
-                  if (!selected) handleActionSelect(item.id, index);
+                  if (!controlsLocked && !selected) handleActionSelect(item.id, index);
                 }}
                 hitSlop={6}
                 style={({ pressed }) => [
@@ -251,10 +253,13 @@ export function UmbraVaultActionPanel({
             <Pressable
               key={item.symbol}
               accessibilityRole="button"
-              accessibilityState={{ selected }}
+              accessibilityState={{ disabled: controlsLocked, selected }}
               accessibilityLabel={`Select ${item.symbol}`}
+              disabled={controlsLocked}
               hitSlop={4}
-              onPress={() => onTokenChange(item.symbol)}
+              onPress={() => {
+                if (!controlsLocked) onTokenChange(item.symbol);
+              }}
               style={({ pressed }) => [
                 styles.tokenChip,
                 dense && styles.tokenChipDense,
@@ -282,31 +287,38 @@ export function UmbraVaultActionPanel({
         <View style={[styles.inputWrap, dense && styles.inputWrapDense]}>
           <TextInput
             value={amount}
-            onChangeText={onAmountChange}
+            onChangeText={(nextAmount) => {
+              if (!controlsLocked) onAmountChange(nextAmount);
+            }}
+            editable={!controlsLocked}
             placeholder="Amount"
             placeholderTextColor={colors.text.placeholder}
             selectionColor={colors.brand.glossAccent}
             keyboardType="decimal-pad"
-            style={[styles.input, dense && styles.inputDense]}
+            style={[styles.input, dense && styles.inputDense, controlsLocked && styles.inputLocked]}
             maxFontSizeMultiplier={1.1}
           />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Use max ${token} balance`}
-            accessibilityState={{ disabled: maxAmount == null }}
-            disabled={maxAmount == null}
+            accessibilityState={{ disabled: controlsLocked || maxAmount == null }}
+            disabled={controlsLocked || maxAmount == null}
             hitSlop={8}
-            onPress={onMaxPress}
+            onPress={() => {
+              if (!controlsLocked) onMaxPress();
+            }}
             style={({ pressed }) => [
               styles.maxPill,
               dense && styles.maxPillDense,
-              maxAmount == null && styles.maxPillDisabled,
-              pressed && maxAmount != null && styles.maxPillPressed,
+              (controlsLocked || maxAmount == null) && styles.maxPillDisabled,
+              pressed && !controlsLocked && maxAmount != null && styles.maxPillPressed,
             ]}
           >
             <Text
               variant="captionBold"
-              color={maxAmount == null ? colors.text.tertiary : colors.text.primary}
+              color={
+                controlsLocked || maxAmount == null ? colors.text.tertiary : colors.text.primary
+              }
               style={styles.maxPillText}
               numberOfLines={1}
               maxFontSizeMultiplier={1}
@@ -557,6 +569,9 @@ const styles = StyleSheet.create({
     minHeight: 42,
     fontSize: 15,
   },
+  inputLocked: {
+    color: colors.text.secondary,
+  },
   maxPill: {
     minHeight: 34,
     paddingHorizontal: spacing.md,
@@ -593,8 +608,9 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     flexShrink: 0,
-    minWidth: 116,
-    maxWidth: 168,
+    width: 136,
+    minWidth: 136,
+    maxWidth: 136,
     minHeight: 48,
     borderRadius: radii.full,
     borderCurve: 'continuous',
@@ -616,8 +632,9 @@ const styles = StyleSheet.create({
     ].join(', '),
   },
   submitButtonDense: {
-    minWidth: 104,
-    maxWidth: 152,
+    width: 118,
+    minWidth: 118,
+    maxWidth: 118,
     minHeight: 42,
     paddingHorizontal: spacing.sm,
   },

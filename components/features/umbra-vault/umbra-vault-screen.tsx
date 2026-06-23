@@ -171,8 +171,8 @@ function getVaultDisabledMessage(params: {
   return null;
 }
 
-function getDefaultVaultActionLabel(action: UmbraVaultAction, token: UmbraVaultToken): string {
-  return action === 'withdraw' ? `Withdraw ${token}` : `Shield ${token}`;
+function getDefaultVaultActionLabel(action: UmbraVaultAction): string {
+  return action === 'withdraw' ? 'Withdraw' : 'Shield';
 }
 
 function buildDangerVaultFeedback(
@@ -214,7 +214,7 @@ function buildVaultActionFeedback(params: {
   activeBalanceLoaded: boolean;
   showBalanceIssues: boolean;
 }): VaultActionFeedback {
-  const defaultLabel = getDefaultVaultActionLabel(params.action, params.token);
+  const defaultLabel = getDefaultVaultActionLabel(params.action);
   const defaultFeedback = (
     label: string,
     toastTitle = label,
@@ -228,7 +228,7 @@ function buildVaultActionFeedback(params: {
     toastVariant: 'warning',
   });
   const validateFundsFeedback = (): VaultActionFeedback => ({
-    label: 'Validate funds',
+    label: 'Review',
     tone: 'default',
     disabled: false,
     toastTitle: 'Validate funds',
@@ -250,7 +250,7 @@ function buildVaultActionFeedback(params: {
   }
 
   if (params.isSubmitLocked) {
-    return defaultFeedback('Please wait', 'Transaction in progress');
+    return defaultFeedback('Wait', 'Transaction in progress');
   }
 
   if (params.selectedTokenConfig == null) {
@@ -266,26 +266,26 @@ function buildVaultActionFeedback(params: {
   }
 
   if (params.amount.trim().length === 0 || params.amountAtomic == null) {
-    return defaultFeedback('Enter an amount', 'Amount required');
+    return defaultFeedback('Amount', 'Amount required');
   }
 
   if (params.activeWalletBalance == null) {
     if (params.walletBalanceError != null) {
-      return dangerFeedback('Unable to verify balance', 'Unable to verify balance');
+      return dangerFeedback('Refresh', 'Unable to verify balance');
     }
 
     if (params.walletBalanceLoading) {
-      return defaultFeedback('Checking balance');
+      return defaultFeedback('Checking');
     }
 
-    return defaultFeedback('Refresh balance');
+    return defaultFeedback('Refresh');
   }
 
   if (params.action !== 'withdraw') {
     if (params.selectedPublicToken == null) {
       if (!params.showBalanceIssues) return validateFundsFeedback();
       return dangerFeedback(
-        `Insufficient ${params.token}`,
+        'Insufficient',
         `Insufficient ${params.token}`,
         `${params.token} is not available in this wallet.`,
       );
@@ -293,13 +293,13 @@ function buildVaultActionFeedback(params: {
 
     if (params.publicBalanceAtomic == null) {
       if (!params.showBalanceIssues) return validateFundsFeedback();
-      return dangerFeedback('Unable to verify amount', 'Unable to verify amount');
+      return dangerFeedback('Refresh', 'Unable to verify amount');
     }
 
     if (params.amountAtomic > params.publicBalanceAtomic) {
       if (!params.showBalanceIssues) return validateFundsFeedback();
       return dangerFeedback(
-        `Insufficient ${params.token}`,
+        'Insufficient',
         `Insufficient ${params.token}`,
         `Available: ${params.selectedPublicToken.balance} ${params.token}.`,
       );
@@ -308,7 +308,7 @@ function buildVaultActionFeedback(params: {
     const fundingIssue = getUmbraSolFundingIssue(params.activeWalletBalance);
     if (fundingIssue != null) {
       if (!params.showBalanceIssues) return validateFundsFeedback();
-      return dangerFeedback('Insufficient SOL', fundingIssue.title, fundingIssue.message);
+      return dangerFeedback('Low SOL', fundingIssue.title, fundingIssue.message);
     }
 
     return {
@@ -322,19 +322,19 @@ function buildVaultActionFeedback(params: {
 
   if (!params.activeBalanceLoaded) {
     if (params.encryptedBalanceError != null) {
-      return dangerFeedback('Unable to verify vault', 'Unable to verify vault balance');
+      return dangerFeedback('Refresh', 'Unable to verify vault balance');
     }
 
     if (params.encryptedBalanceLoading) {
-      return defaultFeedback('Checking vault balance');
+      return defaultFeedback('Checking');
     }
 
-    return defaultFeedback('Refresh vault balance');
+    return defaultFeedback('Refresh');
   }
 
   if (params.vaultBalanceState !== 'shared' || params.vaultBalanceRaw == null) {
     return defaultFeedback(
-      'Refresh vault balance',
+      'Refresh',
       'Vault balance not ready',
       'Wait for shield to settle',
     );
@@ -342,7 +342,7 @@ function buildVaultActionFeedback(params: {
 
   if (params.shieldedBalanceAtomic == null) {
     if (!params.showBalanceIssues) return validateFundsFeedback();
-    return dangerFeedback('Unable to verify vault', 'Unable to verify vault balance');
+    return dangerFeedback('Refresh', 'Unable to verify vault balance');
   }
 
   if (params.amountAtomic > params.shieldedBalanceAtomic) {
@@ -353,7 +353,7 @@ function buildVaultActionFeedback(params: {
       6,
     );
     return dangerFeedback(
-      `Insufficient ${params.token}`,
+      'Insufficient',
       `Insufficient shielded ${params.token}`,
       `Available: ${displayBalance} ${params.token}.`,
     );
@@ -362,7 +362,7 @@ function buildVaultActionFeedback(params: {
   const fundingIssue = getUmbraSolFundingIssue(params.activeWalletBalance);
   if (fundingIssue != null) {
     if (!params.showBalanceIssues) return validateFundsFeedback();
-    return dangerFeedback('Insufficient SOL', fundingIssue.title, fundingIssue.message);
+    return dangerFeedback('Low SOL', fundingIssue.title, fundingIssue.message);
   }
 
   return {
@@ -1235,7 +1235,7 @@ function UmbraVaultContentBody({
         subtitle={vaultActionSubtitle}
         amount={amount}
         loading={isActionSubmitting || fundsValidationPending}
-        loadingLabel={fundsValidationPending ? 'Checking funds' : 'Finalizing'}
+        loadingLabel={fundsValidationPending ? 'Check' : 'Send'}
         disabled={actionSubmitDisabled}
         feedbackLabel={actionFeedback.label}
         feedbackTone={actionFeedback.tone}
