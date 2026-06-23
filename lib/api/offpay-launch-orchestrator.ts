@@ -1,12 +1,12 @@
 import { QueryClient } from '@tanstack/react-query';
 
-import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
-import { getCapabilities } from '@/lib/api/offpay-api-client';
+import {
+  offpayCapabilitiesQueryKey,
+  offpayCapabilitiesQueryOptions,
+} from '@/lib/api/offpay-capabilities-query';
 import { prefetchOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
 import {
   buildUnavailableCapabilities,
-  CAPABILITIES_FAST_TIMEOUT_MS,
-  CAPABILITIES_STALE_TIME_MS,
 } from '@/lib/api/offpay-capability-fallback';
 import {
   persistWalletDisplayCacheFromQueryClient,
@@ -104,25 +104,21 @@ export async function runOffpayLaunchSequence(
   const cachedCapabilities = params.queryClient.getQueryData<CapabilitiesResponse>(capabilitiesKey);
   const capabilities =
     dashboardPreload?.capabilities ??
-    (cachedCapabilities?.network === network
-      ? cachedCapabilities
-      : await params.queryClient
-          .fetchQuery({
-            queryKey: capabilitiesKey,
-            queryFn: ({ signal }) =>
-              getCapabilities(network, {
-                signal,
-                timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
-                requestOwner: 'launch.capabilities',
-              }),
-            staleTime: CAPABILITIES_STALE_TIME_MS,
-          })
-          .catch(() =>
-            buildUnavailableCapabilities(
+    (await params.queryClient
+      .fetchQuery(
+        offpayCapabilitiesQueryOptions({
+          network,
+          requestOwner: 'launch.capabilities',
+        }),
+      )
+      .catch(() =>
+        cachedCapabilities?.network === network
+          ? cachedCapabilities
+          : buildUnavailableCapabilities(
               network,
               'OffPay API capabilities were unavailable during launch.',
             ),
-          ));
+      ));
   onStep(
     'capabilities',
     'complete',

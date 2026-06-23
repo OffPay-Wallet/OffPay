@@ -303,6 +303,9 @@ const {
 const { getUserRegistrationFunction } = require('@umbra-privacy/sdk/registration') as {
   getUserRegistrationFunction: jest.Mock;
 };
+const { getEncryptedBalanceQuerierFunction } = require('@umbra-privacy/sdk/query') as {
+  getEncryptedBalanceQuerierFunction: jest.Mock;
+};
 const {
   getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction:
     getLegacyEncryptedBalanceToPublicBalanceDirectWithdrawerFunction,
@@ -503,6 +506,10 @@ describe('umbra-execution', () => {
       mockSdkDeps.epochInfoProvider,
       mockSdkDeps.computationMonitor,
     ].forEach((mock) => mock.mockReset());
+    getUserAccountX25519KeypairDeriver.mockReset();
+    getUserAccountX25519KeypairDeriver.mockImplementation(
+      () => mockUserAccountX25519KeypairDeriver,
+    );
     mockCapturedUmbraSigner = null;
     mockClaimableScannerDeps = null;
     mockClaimableScannerArgs = null;
@@ -1968,6 +1975,43 @@ describe('umbra-execution', () => {
     expect(getSelfClaimableUtxoToEncryptedBalanceClaimerFunction).not.toHaveBeenCalled();
   });
 
+  it('keeps all master-seed schemes for pending P2P scans when scheme probing fails', async () => {
+    const claimableIndex = 7101;
+    const tokenKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    Object.assign(mockClient, {
+      masterSeedSchemes: [{ id: 'current' }, { id: 'v4' }],
+    });
+    mockDecodeEncryptedUserAccount.mockReturnValue({
+      exists: true,
+      data: {
+        statusBits: {
+          first: 1n << 4n,
+        },
+        x25519PublicKeyForTokenEncryption: {
+          first: tokenKey,
+        },
+      },
+    });
+    mockUserAccountX25519KeypairDeriver.mockRejectedValueOnce(
+      new TypeError('undefined is not a function'),
+    );
+    configureRegisteredUmbraVault();
+    mockClaimableScanner.mockResolvedValueOnce(makeClaimableScanResult([claimableIndex]));
+
+    const result = await scanUmbraPrivateP2PClaims({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      excludedInsertionIndices: [],
+    });
+    const scanClient = mockClaimableScannerArgs?.client as
+      | { masterSeedSchemes?: readonly { id: string }[] }
+      | undefined;
+
+    expect(scanClient?.masterSeedSchemes).toEqual([{ id: 'current' }, { id: 'v4' }]);
+    expect(result.pendingClaimUtxoInsertionIndices).toContain(claimableIndex);
+  });
+
   it('filters cold-boot scan results by on-chain Umbra nullifier-set membership', async () => {
     const claimedIndex = 4401;
     const unrelatedIndex = 4402;
@@ -2449,6 +2493,152 @@ describe('umbra-execution', () => {
         },
       ],
     });
+  });
+
+  it('falls back to local registration decoding when SDK PDA derivation is unavailable', async () => {
+    mockQueryUser.mockRejectedValueOnce(
+      new Error('Failed to derive user account PDA: undefined is not a function'),
+    );
+    mockDecodeEncryptedUserAccount.mockReturnValueOnce({
+      exists: true,
+      data: {
+        statusBits: {
+          first: (1n << 0n) | (1n << 1n) | (1n << 2n) | (1n << 4n),
+        },
+        x25519PublicKeyForTokenEncryption: {
+          first: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+        },
+      },
+    });
+    mockQueryBalances.mockResolvedValueOnce(
+      new Map([
+        [
+          '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+          {
+            state: 'shared',
+            balance: 1_000_000n,
+          },
+        ],
+      ]),
+    );
+
+    const result = await fetchUmbraEncryptedBalances({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      tokens: ['dUSDC'],
+    });
+
+    expect(result).toMatchObject({
+      vaultState: 'exists',
+      vaultRegistered: true,
+      vaultCanShield: true,
+      mixerRegistered: true,
+    });
+    expect(mockQueryBalances).toHaveBeenCalledTimes(1);
+    expect(result.balances).toEqual([
+      expect.objectContaining({
+        symbol: 'dUSDC',
+        state: 'shared',
+        displayBalance: '1',
+      }),
+    ]);
+  });
+
+  it('refreshes encrypted balances with the full client when scheme probing fails', async () => {
+    const tokenKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    Object.assign(mockClient, {
+      masterSeedSchemes: [{ id: 'current' }, { id: 'v4' }],
+    });
+    mockDecodeEncryptedUserAccount.mockReturnValue({
+      exists: true,
+      data: {
+        statusBits: {
+          first: 1n << 4n,
+        },
+        x25519PublicKeyForTokenEncryption: {
+          first: tokenKey,
+        },
+      },
+    });
+    mockUserAccountX25519KeypairDeriver.mockRejectedValueOnce(
+      new TypeError('undefined is not a function'),
+    );
+    mockQueryBalances.mockResolvedValueOnce(
+      new Map([
+        [
+          '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+          {
+            state: 'shared',
+            balance: 1_000_000n,
+          },
+        ],
+      ]),
+    );
+
+    const result = await fetchUmbraEncryptedBalances({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      tokens: ['dUSDC'],
+    });
+
+    expect(getEncryptedBalanceQuerierFunction).toHaveBeenCalledWith(
+      { client: mockClient },
+      expect.objectContaining({
+        accountInfoProvider: mockSdkDeps.accountInfoProvider,
+      }),
+    );
+    expect(result.balances).toEqual([
+      expect.objectContaining({
+        symbol: 'dUSDC',
+        state: 'shared',
+        displayBalance: '1',
+      }),
+    ]);
+  });
+
+  it('tries legacy schemes for encrypted balances when the default scheme key mismatches', async () => {
+    Object.assign(mockClient, {
+      masterSeedSchemes: [{ id: 'current' }, { id: 'v4' }],
+      getSchemeMasterSeed: jest.fn(),
+    });
+    mockQueryBalances
+      .mockRejectedValueOnce(
+        new Error('On-chain token encryption X25519 public key does not match locally-derived key'),
+      )
+      .mockResolvedValueOnce(
+        new Map([
+          [
+            '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+            {
+              state: 'shared',
+              balance: 2_000_000n,
+            },
+          ],
+        ]),
+      );
+
+    const result = await fetchUmbraEncryptedBalances({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      tokens: ['dUSDC'],
+    });
+    const legacyQueryClient = getEncryptedBalanceQuerierFunction.mock.calls[1]?.[0]?.client as
+      | { masterSeed?: { getMasterSeed?: unknown } }
+      | undefined;
+
+    expect(getEncryptedBalanceQuerierFunction).toHaveBeenCalledTimes(2);
+    expect(legacyQueryClient).not.toBe(mockClient);
+    expect(typeof legacyQueryClient?.masterSeed?.getMasterSeed).toBe('function');
+    expect(result.balances).toEqual([
+      expect.objectContaining({
+        symbol: 'dUSDC',
+        state: 'shared',
+        displayBalance: '2',
+      }),
+    ]);
   });
 
   it('returns devnet Umbra token metadata with encrypted balances', async () => {

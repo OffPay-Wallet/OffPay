@@ -148,12 +148,22 @@ function buildOfflineSlotsLabel(params: {
   readySlots: number;
   pendingSlots: number;
   targetSlots: number;
+  snapshotLoaded: boolean;
+  preparePending: boolean;
 }): string {
-  if (params.readySlots > 0 || params.pendingSlots === 0) {
+  if (params.preparePending) {
+    return 'Preparing slots';
+  }
+
+  if (params.pendingSlots > 0) {
+    return `${Math.min(params.pendingSlots, params.targetSlots)}/${params.targetSlots} pending`;
+  }
+
+  if (params.readySlots > 0) {
     return `${params.readySlots}/${params.targetSlots} slots`;
   }
 
-  return `${Math.min(params.pendingSlots, params.targetSlots)}/${params.targetSlots} pending`;
+  return params.snapshotLoaded ? 'Setup needed' : 'Checking slots';
 }
 
 function ShieldedVaultSkeleton(): React.JSX.Element {
@@ -386,6 +396,7 @@ export function HomeScreenContent(): React.JSX.Element {
   const offlineSlotCounts = offlinePaymentSlots.snapshot?.counts ?? null;
   const offlineReadySlots = offlineSlotCounts?.ready ?? 0;
   const offlineSetupPendingSlots = countOfflineSetupPendingSlots(offlineSlotCounts);
+  const offlinePreparePending = offlinePaymentSlots.prepareMutation.isPending;
   const offlineSlotSnapshotLoaded =
     offlinePaymentSlots.localSnapshotQuery.isFetched || offlinePaymentSlots.snapshot != null;
   const offlineSlotTarget = Math.max(
@@ -456,6 +467,8 @@ export function HomeScreenContent(): React.JSX.Element {
         readySlots: offlineReadySlots,
         pendingSlots: offlineSetupPendingSlots,
         targetSlots: offlineSlotTarget,
+        snapshotLoaded: offlineSlotSnapshotLoaded,
+        preparePending: offlinePreparePending,
       })
     : null;
   const slotRentEstimateLabel =
@@ -1211,11 +1224,19 @@ export function HomeScreenContent(): React.JSX.Element {
         <OfflineSlotsPromptModal
           visible={slotPromptVisible}
           readySlots={offlineReadySlots}
-          pendingSlots={offlineSetupPendingSlots}
+          pendingSlots={
+            offlinePreparePending
+              ? Math.max(
+                  offlineSetupPendingSlots,
+                  Math.max(0, offlineSlotTarget - offlineReadySlots),
+                )
+              : offlineSetupPendingSlots
+          }
           targetSlotCount={offlineSlotTarget}
+          snapshotLoaded={offlineSlotSnapshotLoaded}
           networkLabel={networkLabel}
           rentEstimateLabel={slotRentEstimateLabel}
-          preparing={offlinePaymentSlots.prepareMutation.isPending}
+          preparing={offlinePreparePending}
           canPrepare={offlinePaymentSlots.canPrepare}
           isOffline={isOffline}
           onPrepare={handlePrepareOfflineSlots}

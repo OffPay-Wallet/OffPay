@@ -97,4 +97,13 @@ describe('umbra-error-messages', () => {
       message: 'Complete Umbra private P2P setup, wait for confirmation, then retry.',
     });
   });
+
+  it('maps raw wallet runtime function errors to retry guidance', () => {
+    const error = getUmbraFriendlyError(new TypeError('undefined is not a function'), 'balance');
+
+    expect(error).toEqual({
+      title: 'Balance refresh failed',
+      message: 'Umbra wallet runtime is still loading. Reopen the wallet and retry.',
+    });
+  });
 });

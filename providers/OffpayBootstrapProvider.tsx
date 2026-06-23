@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef } from 'react';
 
-import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
+import { prefetchOffpayCapabilities } from '@/lib/api/offpay-capabilities-query';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
@@ -59,7 +59,14 @@ export function OffpayBootstrapProvider({
 
     const scheduledReset = scheduleUiWorkAfterFirstPaint(
       () => {
-        void queryClient.invalidateQueries({ queryKey: ['offpay'], refetchType: 'none' });
+        void queryClient.invalidateQueries({
+          predicate: ({ queryKey }) =>
+            Array.isArray(queryKey) &&
+            queryKey[0] === 'offpay' &&
+            queryKey[1] !== 'capabilities' &&
+            queryKey[1] !== 'streamCapabilities',
+          refetchType: 'none',
+        });
       },
       {
         timeoutMs: 4500,
@@ -71,6 +78,16 @@ export function OffpayBootstrapProvider({
       scheduledReset.cancel();
     };
   }, [identity, queryClient, resetAuthState]);
+
+  useEffect(() => {
+    if (!canUseNetwork || network == null) return;
+
+    void prefetchOffpayCapabilities({
+      queryClient,
+      network,
+      requestOwner: 'bootstrap.capabilities',
+    });
+  }, [canUseNetwork, network, queryClient]);
 
   useEffect(() => {
     if (!canUseNetwork || network == null || walletId == null || walletAddress == null) {
@@ -93,8 +110,11 @@ export function OffpayBootstrapProvider({
           provisionedAt: result.issuedAt,
         });
 
-        await queryClient.invalidateQueries({
-          queryKey: offpayCapabilitiesQueryKey(network),
+        void prefetchOffpayCapabilities({
+          queryClient,
+          network,
+          requestOwner: 'bootstrap.capabilities.recovery',
+          force: true,
         });
       } catch (error: unknown) {
         setError(error instanceof Error ? error.message : 'OffPay bootstrap failed.');

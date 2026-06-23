@@ -9,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -25,6 +26,7 @@ interface OfflineSlotsPromptModalProps {
   readySlots: number;
   pendingSlots: number;
   targetSlotCount: number;
+  snapshotLoaded: boolean;
   networkLabel: string | null;
   rentEstimateLabel: string | null;
   preparing: boolean;
@@ -41,6 +43,7 @@ export function OfflineSlotsPromptModal({
   readySlots,
   pendingSlots,
   targetSlotCount,
+  snapshotLoaded,
   networkLabel,
   rentEstimateLabel,
   preparing,
@@ -66,16 +69,38 @@ export function OfflineSlotsPromptModal({
   const primaryButtonHeight = dense ? layout.minTouchTarget : compact ? 46 : 48;
   const secondaryButtonHeight = dense ? layout.minTouchTarget : 44;
   const buttonPaddingHorizontal = dense ? spacing.md : spacing.lg;
+  const requiredSlots = Math.max(0, targetSlotCount - readySlots);
+  const visiblePendingSlots = preparing
+    ? Math.max(pendingSlots, requiredSlots || targetSlotCount)
+    : pendingSlots;
+  const pendingLabel = `${Math.min(visiblePendingSlots, targetSlotCount)}/${targetSlotCount}`;
   const needsOnline = isOffline || !canPrepare;
   const primaryLabel = needsOnline
     ? 'Go online to prepare'
     : preparing
       ? 'Preparing slots'
-      : 'Prepare slots';
-  const progressLabel =
-    pendingSlots > 0 && readySlots === 0
-      ? `${Math.min(pendingSlots, targetSlotCount)}/${targetSlotCount} finalizing`
-      : `${readySlots}/${targetSlotCount} ready`;
+      : `Prepare ${targetSlotCount} slots`;
+  const networkName = networkLabel ?? 'the current network';
+  const statusLabel = preparing
+    ? `Preparing ${Math.max(1, Math.min(visiblePendingSlots, targetSlotCount))} slots`
+    : visiblePendingSlots > 0
+      ? `${pendingLabel} finalizing`
+      : readySlots > 0
+        ? `${readySlots}/${targetSlotCount} ready`
+        : snapshotLoaded
+          ? 'Not prepared'
+          : 'Checking';
+  const bodyText = preparing
+    ? 'Creating offline payment slots. Keep the app online.'
+    : visiblePendingSlots > 0
+      ? `Offline slot setup is finalizing on ${networkName}.`
+      : readySlots > 0
+        ? 'Offline sends can use prepared payment slots.'
+        : 'Needed for offline sends. Prepare before going offline.';
+  const helperText =
+    preparing || visiblePendingSlots > 0
+      ? 'Keep the app online until setup completes.'
+      : 'Setup uses network access and SOL rent.';
 
   if (!visible) {
     return null;
@@ -135,7 +160,7 @@ export function OfflineSlotsPromptModal({
                 style={styles.body}
                 maxFontSizeMultiplier={1.05}
               >
-                {`Needed for offline sends. ${progressLabel}.`}
+                {bodyText}
               </Text>
             </View>
 
@@ -147,7 +172,7 @@ export function OfflineSlotsPromptModal({
                 ]}
               >
                 <Text variant="small" color={colors.text.tertiary}>
-                  {pendingSlots > 0 && readySlots === 0 ? 'Finalizing' : 'Ready'}
+                  Status
                 </Text>
                 <Text
                   variant="small"
@@ -155,7 +180,7 @@ export function OfflineSlotsPromptModal({
                   style={[styles.strong, styles.tabular]}
                   maxFontSizeMultiplier={1.05}
                 >
-                  {progressLabel}
+                  {statusLabel}
                 </Text>
               </View>
               <View
@@ -222,7 +247,7 @@ export function OfflineSlotsPromptModal({
               numberOfLines={2}
               maxFontSizeMultiplier={1.05}
             >
-              Setup uses network access and SOL rent.
+              {helperText}
             </Text>
 
             <View style={styles.buttonColumn}>
@@ -241,18 +266,25 @@ export function OfflineSlotsPromptModal({
                 hitSlop={6}
                 accessibilityRole="button"
                 accessibilityLabel={primaryLabel}
+                accessibilityState={{ busy: preparing, disabled: preparing }}
               >
-                <Text
-                  variant="button"
-                  color={colors.text.onAccent}
-                  style={styles.buttonText}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.82}
-                  maxFontSizeMultiplier={1.1}
-                >
-                  {primaryLabel}
-                </Text>
+                {preparing ? (
+                  <View style={styles.loadingFrame}>
+                    <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
+                  </View>
+                ) : (
+                  <Text
+                    variant="button"
+                    color={colors.text.onAccent}
+                    style={styles.buttonText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
+                    maxFontSizeMultiplier={1.1}
+                  >
+                    {primaryLabel}
+                  </Text>
+                )}
               </Pressable>
               <View
                 style={[
@@ -383,6 +415,12 @@ const styles = StyleSheet.create({
   },
   buttonColumn: {
     gap: spacing.sm,
+  },
+  loadingFrame: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryButton: {
     minHeight: layout.buttonHeightLg,

@@ -1,6 +1,8 @@
 import { Buffer } from 'buffer';
 
-import { address, getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { address } from '@solana/addresses';
+import { PublicKey } from '@solana/web3.js';
 import { getUmbraClient } from '@umbra-privacy/sdk/client';
 import { getDefaultArciumDeps, getPollingComputationMonitor } from '@umbra-privacy/sdk/arcium';
 import {
@@ -22,15 +24,13 @@ import {
   masterSeedSchemeV4,
 } from '@umbra-privacy/sdk/master-seed-schemes';
 import {
-  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_SHARED_BALANCE_V17_SEED,
-  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_NETWORK_BALANCE_V17_SEED,
-  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_NETWORK_BALANCE_V17_SEED,
-  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_SHARED_BALANCE_V17_SEED,
+  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_SHARED_BALANCE_V18_SEED,
+  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_NETWORK_BALANCE_V18_SEED,
+  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_NETWORK_BALANCE_V18_SEED,
+  DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_SHARED_BALANCE_V18_SEED,
   DEPOSIT_INTO_STEALTH_POOL_FROM_PUBLIC_BALANCE_SEED,
-  DEPOSIT_INTO_STEALTH_POOL_FROM_SHARED_BALANCE_V17_SEED,
-  WITHDRAW_FROM_SHARED_BALANCE_INTO_PUBLIC_BALANCE_V17_SEED,
-  findFeeSchedulePda,
-  findProtocolFeeVaultPda,
+  DEPOSIT_INTO_STEALTH_POOL_FROM_SHARED_BALANCE_V18_SEED,
+  WITHDRAW_FROM_SHARED_BALANCE_INTO_PUBLIC_BALANCE_V18_SEED,
 } from '@umbra-privacy/sdk/pda';
 import {
   getPollingTransactionForwarder,
@@ -55,6 +55,7 @@ import {
   OFFPAY_API_ORIGIN,
 } from '@/lib/api/offpay-api-client';
 import { mark, measure } from '@/lib/perf/perf-marks';
+import { encodeU128LeBytes } from '@/lib/umbra/umbra-parsing';
 
 import type { OffpayNetwork, RpcAccountRecord } from '@/types/offpay-api';
 import type { Address } from '@solana/kit';
@@ -121,7 +122,6 @@ const UMBRA_PROGRAM_ID_BY_NETWORK: Partial<Record<OffpayNetwork, string>> = {
   devnet: 'DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ',
 };
 
-const PROTOCOL_FEE_VAULT_OFFSET_ZERO = 0n as never;
 const UMBRA_FORWARDER_SEND_MAX_RETRIES = 1;
 const UMBRA_VAULT_READINESS_POSITIVE_CACHE_TTL_MS = 5 * 60_000;
 const UMBRA_RPC_READINESS_POSITIVE_CACHE_TTL_MS = 10_000;
@@ -129,7 +129,7 @@ const depositProtocolFeeProvider = getHardcodedDepositProtocolFeeProvider();
 const createUtxoProtocolFeeProvider = getHardcodedCreateUtxoProtocolFeeProvider();
 const withdrawalProtocolFeeProvider = getHardcodedWithdrawalProtocolFeeProvider();
 type UmbraCurrentInstructionSeed =
-  typeof DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_SHARED_BALANCE_V17_SEED;
+  typeof DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_SHARED_BALANCE_V18_SEED;
 export type UmbraProtocolVersion = 'current' | 'legacy';
 const unsupportedProtocolVersions = new Map<string, Set<UmbraProtocolVersion>>();
 const positiveVaultReadinessCache = new Map<
@@ -176,34 +176,41 @@ const LEGACY_DOMAIN_PROTOCOL_FEES_SEED = Uint8Array.from([
   251, 5, 111, 22, 232, 53, 164, 66, 26, 145,
 ]);
 const LEGACY_U128_ZERO_OFFSET_SEED = new Uint8Array(16);
+const UMBRA_STRUCT_TEXT_ENCODER = new TextEncoder();
+const FEE_VAULT_SEED = sha256(UMBRA_STRUCT_TEXT_ENCODER.encode('FeeVault'));
+const FEE_SCHEDULE_SEED = sha256(UMBRA_STRUCT_TEXT_ENCODER.encode('FeeSchedule'));
+const DOMAIN_PROTOCOL_FEES_SEED = sha256(UMBRA_STRUCT_TEXT_ENCODER.encode('ProtocolFees'));
+const FEE_SCHEDULE_DOMAIN_PROTOCOL_SEED = sha256(
+  UMBRA_STRUCT_TEXT_ENCODER.encode('FeeScheduleProtocol'),
+);
 
 const UMBRA_DIRECT_SHIELD_INSTRUCTIONS = [
   {
-    label: 'deposit_from_public_balance_into_new_network_balance_v17',
-    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_NETWORK_BALANCE_V17_SEED,
+    label: 'deposit_from_public_balance_into_new_network_balance_v18',
+    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_NETWORK_BALANCE_V18_SEED,
     feeProvider: depositProtocolFeeProvider,
   },
   {
-    label: 'deposit_from_public_balance_into_existing_network_balance_v17',
-    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_NETWORK_BALANCE_V17_SEED,
+    label: 'deposit_from_public_balance_into_existing_network_balance_v18',
+    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_NETWORK_BALANCE_V18_SEED,
     feeProvider: depositProtocolFeeProvider,
   },
   {
-    label: 'deposit_from_public_balance_into_new_shared_balance_v17',
-    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_SHARED_BALANCE_V17_SEED,
+    label: 'deposit_from_public_balance_into_new_shared_balance_v18',
+    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_NEW_SHARED_BALANCE_V18_SEED,
     feeProvider: depositProtocolFeeProvider,
   },
   {
-    label: 'deposit_from_public_balance_into_existing_shared_balance_v17',
-    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_SHARED_BALANCE_V17_SEED,
+    label: 'deposit_from_public_balance_into_existing_shared_balance_v18',
+    seed: DEPOSIT_FROM_PUBLIC_BALANCE_INTO_EXISTING_SHARED_BALANCE_V18_SEED,
     feeProvider: depositProtocolFeeProvider,
   },
 ] as const;
 
 const UMBRA_DIRECT_WITHDRAW_INSTRUCTIONS = [
   {
-    label: 'withdraw_from_shared_balance_into_public_balance_v17',
-    seed: WITHDRAW_FROM_SHARED_BALANCE_INTO_PUBLIC_BALANCE_V17_SEED,
+    label: 'withdraw_from_shared_balance_into_public_balance_v18',
+    seed: WITHDRAW_FROM_SHARED_BALANCE_INTO_PUBLIC_BALANCE_V18_SEED,
     feeProvider: withdrawalProtocolFeeProvider,
   },
 ] as const;
@@ -218,8 +225,8 @@ const UMBRA_PRIVATE_P2P_PUBLIC_INSTRUCTIONS = [
 
 const UMBRA_PRIVATE_P2P_ENCRYPTED_INSTRUCTIONS = [
   {
-    label: 'deposit_into_stealth_pool_from_shared_balance_v17',
-    seed: DEPOSIT_INTO_STEALTH_POOL_FROM_SHARED_BALANCE_V17_SEED,
+    label: 'deposit_into_stealth_pool_from_shared_balance_v18',
+    seed: DEPOSIT_INTO_STEALTH_POOL_FROM_SHARED_BALANCE_V18_SEED,
     feeProvider: createUtxoProtocolFeeProvider,
   },
 ] as const;
@@ -643,6 +650,18 @@ export function __clearOffpayUmbraProtocolVersionCacheForTesting(): void {
   inFlightVaultReadinessCache.clear();
 }
 
+function publicKeyBytes(value: unknown): Uint8Array {
+  return new PublicKey(String(value)).toBytes();
+}
+
+function findUmbraProgramAddress(seeds: readonly Uint8Array[], programAddress: unknown): string {
+  const [pda] = PublicKey.findProgramAddressSync(
+    seeds.map((seed) => Buffer.from(seed)),
+    new PublicKey(String(programAddress)),
+  );
+  return pda.toBase58();
+}
+
 async function deriveCurrentProtocolFeeAccountAddresses(params: {
   feeConfig: FeeScheduleConfig;
   instruction: UmbraCurrentProtocolFeeInstruction;
@@ -652,22 +671,30 @@ async function deriveCurrentProtocolFeeAccountAddresses(params: {
   feeSchedule: string;
   feeVault: string;
 }> {
-  const [feeSchedule] = await findFeeSchedulePda({
-    instructionSeed: params.instruction.seed,
-    mintAddress: params.mintAddress,
-    allowedAddress: params.feeConfig.allowedAddress,
-    umbraProgram: params.programAddress,
-  });
-  const [feeVault] = await findProtocolFeeVaultPda({
-    instructionSeed: params.instruction.seed,
-    mintAddress: params.mintAddress,
-    offset: PROTOCOL_FEE_VAULT_OFFSET_ZERO,
-    umbraProgram: params.programAddress,
-  });
+  const instructionSeed = encodeU128LeBytes(BigInt(params.instruction.seed));
+  const mintBytes = publicKeyBytes(params.mintAddress);
 
   return {
-    feeSchedule: String(feeSchedule),
-    feeVault: String(feeVault),
+    feeSchedule: findUmbraProgramAddress(
+      [
+        FEE_SCHEDULE_SEED,
+        FEE_SCHEDULE_DOMAIN_PROTOCOL_SEED,
+        instructionSeed,
+        mintBytes,
+        publicKeyBytes(params.feeConfig.allowedAddress),
+      ],
+      params.programAddress,
+    ),
+    feeVault: findUmbraProgramAddress(
+      [
+        FEE_VAULT_SEED,
+        DOMAIN_PROTOCOL_FEES_SEED,
+        instructionSeed,
+        mintBytes,
+        encodeU128LeBytes(0n),
+      ],
+      params.programAddress,
+    ),
   };
 }
 
@@ -679,25 +706,23 @@ async function deriveLegacyProtocolFeeAccountAddresses(params: {
   feeSchedule: string;
   feeVault: string;
 }> {
-  const mintBytes = getAddressEncoder().encode(params.mintAddress);
-  const [feeSchedule] = await getProgramDerivedAddress({
-    programAddress: params.programAddress,
-    seeds: [LEGACY_FEE_SCHEDULE_SEED, params.instruction.seed, mintBytes],
-  });
-  const [feeVault] = await getProgramDerivedAddress({
-    programAddress: params.programAddress,
-    seeds: [
-      LEGACY_FEE_VAULT_SEED,
-      LEGACY_DOMAIN_PROTOCOL_FEES_SEED,
-      params.instruction.seed,
-      mintBytes,
-      LEGACY_U128_ZERO_OFFSET_SEED,
-    ],
-  });
+  const mintBytes = publicKeyBytes(params.mintAddress);
 
   return {
-    feeSchedule: String(feeSchedule),
-    feeVault: String(feeVault),
+    feeSchedule: findUmbraProgramAddress(
+      [LEGACY_FEE_SCHEDULE_SEED, params.instruction.seed, mintBytes],
+      params.programAddress,
+    ),
+    feeVault: findUmbraProgramAddress(
+      [
+        LEGACY_FEE_VAULT_SEED,
+        LEGACY_DOMAIN_PROTOCOL_FEES_SEED,
+        params.instruction.seed,
+        mintBytes,
+        LEGACY_U128_ZERO_OFFSET_SEED,
+      ],
+      params.programAddress,
+    ),
   };
 }
 

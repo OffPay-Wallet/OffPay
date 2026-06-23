@@ -82,29 +82,33 @@ function createDashboard(): WalletDashboardResponse {
 describe('hydrateOffpayWalletDashboard', () => {
   it('hydrates existing wallet query keys from one dashboard response', () => {
     const queryClient = new QueryClient();
-    const dashboard = createDashboard();
+    try {
+      const dashboard = createDashboard();
 
-    hydrateOffpayWalletDashboard({ queryClient, dashboard, limit: 20 });
+      hydrateOffpayWalletDashboard({ queryClient, dashboard, limit: 20 });
 
-    expect(queryClient.getQueryData(offpayWalletDashboardQueryKey(WALLET, 'devnet', 20))).toBe(
-      dashboard,
-    );
-    expect(queryClient.getQueryData(offpayCapabilitiesCacheKey('devnet'))).toBe(
-      dashboard.capabilities,
-    );
-    expect(queryClient.getQueryData(offpayStreamCapabilitiesCacheKey('devnet'))).toBe(
-      dashboard.streamCapabilities,
-    );
-    expect(queryClient.getQueryData(offpayWalletBalanceQueryKey(WALLET, 'devnet'))).toBe(
-      dashboard.balance,
-    );
-    expect(
-      queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
-        offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
-      ),
-    ).toEqual({
-      pages: [dashboard.transactions],
-      pageParams: [undefined],
-    });
+      expect(queryClient.getQueryData(offpayWalletDashboardQueryKey(WALLET, 'devnet', 20))).toBe(
+        dashboard,
+      );
+      expect(queryClient.getQueryData(offpayCapabilitiesCacheKey('devnet'))).toBe(
+        dashboard.capabilities,
+      );
+      expect(queryClient.getQueryData(offpayStreamCapabilitiesCacheKey('devnet'))).toBe(
+        dashboard.streamCapabilities,
+      );
+      expect(queryClient.getQueryData(offpayWalletBalanceQueryKey(WALLET, 'devnet'))).toBe(
+        dashboard.balance,
+      );
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        ),
+      ).toEqual({
+        pages: [dashboard.transactions],
+        pageParams: [undefined],
+      });
+    } finally {
+      queryClient.clear();
+    }
   });
 });

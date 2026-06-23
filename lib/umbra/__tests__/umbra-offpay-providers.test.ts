@@ -396,13 +396,13 @@ describe('umbra-offpay-providers', () => {
     ).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          address: 'Em6nLGwWFW8XzZrfCCNDMDMz552iptDg3LJZJbUFr2Ej',
-          instruction: 'deposit_from_public_balance_into_new_shared_balance_v17',
+          address: '9gEGKVitP8tvFCX3FDzH8ZRZ78US5oia1dGgSpcd2vQt',
+          instruction: 'deposit_from_public_balance_into_new_shared_balance_v18',
           kind: 'feeSchedule',
         }),
         expect.objectContaining({
-          address: '9E4prQoasEBxRo6X4pyT29yx1QGEoD6v9bdcsD6Lt3Xh',
-          instruction: 'deposit_from_public_balance_into_new_shared_balance_v17',
+          address: '9JhnESLZSzre3Mr6Xx4GRimS2MWsvekHx8k2abokJVZS',
+          instruction: 'deposit_from_public_balance_into_new_shared_balance_v18',
           kind: 'feeVault',
         }),
       ]),
@@ -416,13 +416,13 @@ describe('umbra-offpay-providers', () => {
       }),
     ).resolves.toEqual([
       expect.objectContaining({
-        address: 'ANCj2dLMipbAc4dYBQ61kFPSGfGfuFctKzSwtRkj8zbV',
-        instruction: 'withdraw_from_shared_balance_into_public_balance_v17',
+        address: '2QAmpUPH2dKEyHyYCMpWsYbGcU9taB1YdavXriyba9Ed',
+        instruction: 'withdraw_from_shared_balance_into_public_balance_v18',
         kind: 'feeSchedule',
       }),
       expect.objectContaining({
-        address: 'AVTMgK9kCa6hQDPvgxTJK3orxzS3Tg5wndoG9Wb6eYV9',
-        instruction: 'withdraw_from_shared_balance_into_public_balance_v17',
+        address: 'BFdLwG9t8NWxNEhKbUnhVj7o4bKdpgCr32uXipEoXZQk',
+        instruction: 'withdraw_from_shared_balance_into_public_balance_v18',
         kind: 'feeVault',
       }),
     ]);
@@ -438,13 +438,13 @@ describe('umbra-offpay-providers', () => {
     ).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          address: 'AYpSdxJRX4DmgbHevUV7iPNAYkZhDE6a8CmtuKCkpTza',
-          instruction: 'deposit_from_public_balance_into_new_shared_balance_v17',
+          address: 'KkEn9q8jd35CCTCtzocsp2KmKDk6XaPyiARzcX2agHa',
+          instruction: 'deposit_from_public_balance_into_new_shared_balance_v18',
           kind: 'feeSchedule',
         }),
         expect.objectContaining({
-          address: 'CV8npvD9T7Zh3ykC1wp5EtsJw95EhBNf7P96GWaE8CgJ',
-          instruction: 'deposit_from_public_balance_into_new_shared_balance_v17',
+          address: '9nSHyfssSH94wpk3bu6aFsmZCC1MuduxVW1VYAEY2CNX',
+          instruction: 'deposit_from_public_balance_into_new_shared_balance_v18',
           kind: 'feeVault',
         }),
       ]),
@@ -458,13 +458,13 @@ describe('umbra-offpay-providers', () => {
       }),
     ).resolves.toEqual([
       expect.objectContaining({
-        address: 'C44vDFaCR3YYx32jBSpWwBv2kxGQN9ywL9Jgs3XZzneP',
-        instruction: 'withdraw_from_shared_balance_into_public_balance_v17',
+        address: 'FqWMSekF68SgmNsHb4KXAe2gBEgSsby7UTioihatRzKj',
+        instruction: 'withdraw_from_shared_balance_into_public_balance_v18',
         kind: 'feeSchedule',
       }),
       expect.objectContaining({
-        address: 'Gma3NtFUtxPMXBh3jjUrKJUmcnfiCWJonvukmTpgxH2D',
-        instruction: 'withdraw_from_shared_balance_into_public_balance_v17',
+        address: '6GBuEJt3n5inG85xPneRs2stBZBCTuNZLRQpiLJvkAZC',
+        instruction: 'withdraw_from_shared_balance_into_public_balance_v18',
         kind: 'feeVault',
       }),
     ]);
@@ -488,7 +488,7 @@ describe('umbra-offpay-providers', () => {
         'Umbra vault is not enabled for this token/network yet. A required protocol fee account is missing or has an incompatible layout.',
       missingAccounts: expect.arrayContaining([
         expect.objectContaining({
-          address: 'Em6nLGwWFW8XzZrfCCNDMDMz552iptDg3LJZJbUFr2Ej',
+          address: '9gEGKVitP8tvFCX3FDzH8ZRZ78US5oia1dGgSpcd2vQt',
           exists: false,
           kind: 'feeSchedule',
         }),

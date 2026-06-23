@@ -4,7 +4,10 @@ import bs58 from 'bs58';
 import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { runCryptoTask } from '@/lib/crypto/crypto-scheduler';
 import { mark, measure } from '@/lib/perf/perf-marks';
-import { getExternalWalletSigner } from '@/lib/wallet/external-wallet-signing';
+import {
+  getExternalWalletSigner,
+  waitForExternalWalletSigner,
+} from '@/lib/wallet/external-wallet-signing';
 import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
 import {
   getStoredWalletInfo,
@@ -21,6 +24,8 @@ import {
 
 import type { IUmbraSigner } from '@umbra-privacy/sdk/client';
 import type { ExternalWalletSigner } from '@/lib/wallet/external-wallet-signing';
+
+const UMBRA_EXTERNAL_SIGNER_WAIT_TIMEOUT_MS = 2500;
 
 /**
  * Security-critical helpers for the Umbra signer.
@@ -205,7 +210,9 @@ export async function createUmbraSignerForWallet(
   }
 
   if (walletInfo?.importMethod === 'privy-embedded') {
-    const externalSigner = getExternalWalletSigner(walletAddress);
+    const externalSigner =
+      getExternalWalletSigner(walletAddress) ??
+      (await waitForExternalWalletSigner(walletAddress, UMBRA_EXTERNAL_SIGNER_WAIT_TIMEOUT_MS));
     if (externalSigner == null) {
       throw new Error(
         getWalletSigningBlocker(walletInfo.importMethod, 'Umbra', walletAddress) ??

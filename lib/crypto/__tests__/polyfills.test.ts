@@ -53,6 +53,33 @@ describe('polyfills', () => {
     expect(typeof globalThis.crypto.subtle.importKey).toBe('function');
   });
 
+  it('supports Solana Kit PDA derivation when only getRandomValues is native', async () => {
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      enumerable: true,
+      value: {
+        getRandomValues: (array: Uint8Array) => {
+          array.fill(7);
+          return array;
+        },
+      },
+      writable: true,
+    });
+
+    installSubtleDigestPolyfill();
+
+    const { address, getAddressEncoder, getProgramDerivedAddress } =
+      require('@solana/kit') as typeof import('@solana/kit');
+    const addressEncoder = getAddressEncoder();
+    const [pda] = await getProgramDerivedAddress({
+      programAddress: address('11111111111111111111111111111111'),
+      seeds: [addressEncoder.encode(address('SysvarRent111111111111111111111111111111111'))],
+    });
+
+    expect(typeof pda).toBe('string');
+    expect(pda.length).toBeGreaterThan(0);
+  });
+
   it('supports Solana Kit Ed25519 keypair signing when WebCrypto is missing', async () => {
     Object.defineProperty(globalThis, 'crypto', {
       configurable: true,
@@ -68,9 +95,8 @@ describe('polyfills', () => {
 
     installSubtleDigestPolyfill();
 
-    const {
-      createKeyPairSignerFromPrivateKeyBytes,
-    } = require('@solana/kit') as typeof import('@solana/kit');
+    const { createKeyPairSignerFromPrivateKeyBytes } =
+      require('@solana/kit') as typeof import('@solana/kit');
     const seed = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const publicKey = ed25519.getPublicKey(seed);
     const signer = await createKeyPairSignerFromPrivateKeyBytes(seed, true);

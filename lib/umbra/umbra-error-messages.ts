@@ -111,6 +111,18 @@ export function getUmbraFriendlyError(
   }
 
   if (
+    hasPattern(
+      message,
+      /\b(?:undefined|null) is not a function\b|is not a function \(it is undefined\)|object is not a function/i,
+    )
+  ) {
+    return {
+      title: titleForAction(action),
+      message: 'Umbra wallet runtime is still loading. Reopen the wallet and retry.',
+    };
+  }
+
+  if (
     hasPattern(message, /InsufficientFundsForRent|insufficient funds for rent/i) ||
     hasPattern(message, /insufficient lamports|not enough sol/i) ||
     hasPattern(message, /custom\s*(?:program\s*)?error[:\s]+0x1\b/i)

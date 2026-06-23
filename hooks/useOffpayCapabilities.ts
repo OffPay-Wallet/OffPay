@@ -1,23 +1,21 @@
-import { useIsFetching, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { getCapabilities } from '@/lib/api/offpay-api-client';
 import {
   buildUnavailableCapabilities,
-  CAPABILITIES_FAST_TIMEOUT_MS,
-  CAPABILITIES_GC_TIME_MS,
-  CAPABILITIES_STALE_TIME_MS,
 } from '@/lib/api/offpay-capability-fallback';
-import { offpayCapabilitiesCacheKey } from '@/lib/api/offpay-dashboard-cache';
-import { offpayWalletDashboardBaseQueryKey } from '@/lib/api/offpay-wallet-query-keys';
+import {
+  isTransientCapabilityError,
+  offpayCapabilitiesQueryKey,
+  offpayCapabilitiesQueryOptions,
+} from '@/lib/api/offpay-capabilities-query';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { selectCapability } from '@/lib/api/offpay-capabilities';
 import { observeOfflineSupportedStablecoins } from '@/lib/offline/offline-token-metadata';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import { useWalletStore } from '@/store/walletStore';
 
-import type { CapabilitiesResponse, OffpayNetwork } from '@/types/offpay-api';
+import type { CapabilitiesResponse } from '@/types/offpay-api';
 
 interface UseOffpayCapabilitiesOptions {
   deferUntilAfterInteractions?: boolean;
@@ -25,40 +23,10 @@ interface UseOffpayCapabilitiesOptions {
   requestOwner?: string;
 }
 
-export const offpayCapabilitiesQueryKey = (
-  network: OffpayNetwork | null,
-  walletAddress?: string | null,
-) =>
-  walletAddress == null
-    ? offpayCapabilitiesCacheKey(network)
-    : (['offpay', 'capabilities', network, walletAddress] as const);
-
-function isTransientCapabilityError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const name = error.name.toLowerCase();
-  const message = error.message.toLowerCase();
-  return (
-    name === 'aborterror' ||
-    message.includes('canceled') ||
-    message.includes('cancelled') ||
-    message.includes('aborted') ||
-    message.includes('timed out') ||
-    message.includes('timeout') ||
-    message.includes('fetch failed') ||
-    message.includes('failed to fetch') ||
-    message.includes('network request failed')
-  );
-}
-
 export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
   const { network, unsupportedReason } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended, networkTransitionVersion } =
     useOffpayNetworkAccess();
-  const walletAddress = useWalletStore((state) => state.publicKey);
-  const dashboardFetching =
-    useIsFetching({
-      queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
-    }) > 0;
   const deferUntilAfterInteractions = options?.deferUntilAfterInteractions ?? false;
   const enabledByCaller = options?.enabled ?? true;
   const handledTransitionVersionRef = useRef(networkTransitionVersion);
@@ -95,29 +63,16 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
   }, [capabilityIdentity, deferUntilAfterInteractions, networkTransitionVersion]);
 
   const query = useQuery<CapabilitiesResponse>({
-    queryKey: offpayCapabilitiesQueryKey(network),
-    queryFn: async ({ signal }) => {
-      if (network == null) {
-        throw new Error(unsupportedReason ?? 'This network is not supported by OffPay API.');
-      }
-      return getCapabilities(network, {
-        signal,
-        timeoutMs: CAPABILITIES_FAST_TIMEOUT_MS,
-        requestOwner: options?.requestOwner ?? 'capabilities',
-      });
-    },
-    enabled:
-      capabilityIdentity != null &&
-      readyCapabilityIdentity === capabilityIdentity &&
-      !dashboardFetching,
-    staleTime: CAPABILITIES_STALE_TIME_MS,
-    gcTime: CAPABILITIES_GC_TIME_MS,
+    ...offpayCapabilitiesQueryOptions({
+      network,
+      unsupportedReason,
+      requestOwner: options?.requestOwner ?? 'capabilities',
+    }),
+    enabled: capabilityIdentity != null && readyCapabilityIdentity === capabilityIdentity,
     placeholderData: (previousData) =>
       previousData?.network === network ? previousData : undefined,
     refetchOnMount: false,
     refetchOnReconnect: true,
-    retry: (failureCount, error) => isTransientCapabilityError(error) && failureCount < 2,
-    retryDelay: (failureCount) => 600 + failureCount * 900,
   });
 
   const isTransientCapabilityErrorState = query.isError && isTransientCapabilityError(query.error);
@@ -156,8 +111,9 @@ export function useOffpayCapabilities(options?: UseOffpayCapabilitiesOptions) {
       canUseNetwork &&
       network != null &&
       capabilities == null &&
-      (!hasCapabilityError || dashboardFetching),
+      !hasCapabilityError,
   };
 }
 
 export { selectCapability };
+export { offpayCapabilitiesQueryKey };

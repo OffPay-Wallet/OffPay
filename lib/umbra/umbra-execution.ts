@@ -1,5 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
-import { address, getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses';
+import { PublicKey } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 import {
   deriveNullifierFromModifiedGenerationIndex,
   expandModifiedGenerationIndex,
@@ -14,6 +15,7 @@ import {
   withMasterSeedScheme,
 } from '@umbra-privacy/sdk/master-seed-schemes';
 import type { MasterSeedScheme } from '@umbra-privacy/sdk/master-seed-schemes';
+import { isKeyConsistencyError } from '@umbra-privacy/sdk/errors';
 import { getAesDecryptor } from '@umbra-privacy/sdk/crypto/aes';
 import { getMintEncryptionKeyRotatorFunction } from '@umbra-privacy/sdk/account';
 import {
@@ -180,6 +182,9 @@ type UmbraQueriedUserAccount =
         isUserAccountX25519KeyRegistered?: boolean;
       };
     };
+type UmbraQueriedUserAccountData = NonNullable<
+  Extract<UmbraQueriedUserAccount, { state: 'exists' }>['data']
+>;
 
 const UMBRA_AWAIT_COMPUTATION_FINALIZATION = {
   maxSlotWindow: 200,
@@ -189,6 +194,9 @@ const UMBRA_AWAIT_COMPUTATION_FINALIZATION = {
 const UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT = 384n;
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT;
 const U64_MAX = (1n << 64n) - 1n;
+const ENCRYPTED_USER_STATUS_BIT_INITIALISED = 0;
+const ENCRYPTED_USER_STATUS_BIT_ACTIVE_FOR_ANONYMOUS_USAGE = 1;
+const ENCRYPTED_USER_STATUS_BIT_USER_COMMITMENT_REGISTERED = 2;
 const ENCRYPTED_USER_STATUS_BIT_MVK_KEY_REGISTERED = 2;
 const ENCRYPTED_USER_STATUS_BIT_TOKEN_KEY_REGISTERED = 4;
 const ENCRYPTED_TOKEN_STATUS_BIT_SHARED_MODE = 3;
@@ -480,6 +488,10 @@ interface UmbraVaultEncryptionKeyStatus {
 type DecodedUmbraUserAccountForKeyCheck = {
   exists?: boolean;
   data: {
+    isInitialised?: boolean;
+    isActiveForAnonymousUsage?: boolean;
+    isUserCommitmentRegistered?: boolean;
+    isUserAccountX25519KeyRegistered?: boolean;
     statusBits?: {
       first: bigint;
     };
@@ -566,6 +578,19 @@ function getUmbraClientForMasterSeedScheme(client: IUmbraClient, schemeId: strin
   return schemeId === currentScheme.id ? client : withMasterSeedScheme(client, schemeId);
 }
 
+function warnUmbraSchemeProbeFallback(params: {
+  stage: string;
+  schemeId?: string | null;
+  error: unknown;
+}): void {
+  if (typeof __DEV__ !== 'boolean' || !__DEV__) return;
+  console.warn('[umbra-runtime] using full master-seed scheme registry after probe failure', {
+    stage: params.stage,
+    schemeId: params.schemeId ?? null,
+    error: params.error instanceof Error ? params.error.message : String(params.error),
+  });
+}
+
 /**
  * Build a scanner client whose `masterSeedSchemes` registry contains only the
  * one scheme that matched this wallet's on-chain registration.
@@ -642,16 +667,26 @@ const ENCRYPTED_TOKEN_ACCOUNT_SEED = sha256(
 );
 const NULLIFIER_SET_SEED = sha256(UMBRA_STRUCT_TEXT_ENCODER.encode('NullifierSet'));
 
+function publicKeyBytes(value: unknown): Uint8Array {
+  return new PublicKey(String(value)).toBytes();
+}
+
+function findUmbraProgramAddress(seeds: readonly Uint8Array[], programAddress: unknown): string {
+  const [pda] = PublicKey.findProgramAddressSync(
+    seeds.map((seed) => Buffer.from(seed)),
+    new PublicKey(String(programAddress)),
+  );
+  return pda.toBase58();
+}
+
 async function findEncryptedUserAccountPda(
   userPubkey: unknown,
   umbraProgram: unknown,
 ): Promise<string> {
-  const addressEncoder = getAddressEncoder();
-  const [pda] = await getProgramDerivedAddress({
-    programAddress: address(String(umbraProgram)),
-    seeds: [ENCRYPTED_USER_ACCOUNT_SEED, addressEncoder.encode(address(String(userPubkey)))],
-  });
-  return String(pda);
+  return findUmbraProgramAddress(
+    [ENCRYPTED_USER_ACCOUNT_SEED, publicKeyBytes(userPubkey)],
+    umbraProgram,
+  );
 }
 
 async function findEncryptedTokenAccountPda(
@@ -659,16 +694,10 @@ async function findEncryptedTokenAccountPda(
   mintPubkey: unknown,
   umbraProgram: unknown,
 ): Promise<string> {
-  const addressEncoder = getAddressEncoder();
-  const [pda] = await getProgramDerivedAddress({
-    programAddress: address(String(umbraProgram)),
-    seeds: [
-      ENCRYPTED_TOKEN_ACCOUNT_SEED,
-      addressEncoder.encode(address(String(userPubkey))),
-      addressEncoder.encode(address(String(mintPubkey))),
-    ],
-  });
-  return String(pda);
+  return findUmbraProgramAddress(
+    [ENCRYPTED_TOKEN_ACCOUNT_SEED, publicKeyBytes(userPubkey), publicKeyBytes(mintPubkey)],
+    umbraProgram,
+  );
 }
 
 async function fetchDecodedUmbraUserAccountForSchemeCheck(params: {
@@ -752,25 +781,86 @@ async function selectUmbraClientForRegisteredMasterSeedScheme(params: {
     : [];
   if (schemes.length === 0) return { client: params.client, schemeId: null };
 
-  const userAccount = await fetchDecodedUmbraUserAccountForSchemeCheck(params);
+  let userAccount: Awaited<ReturnType<typeof fetchDecodedUmbraUserAccountForSchemeCheck>>;
+  try {
+    userAccount = await fetchDecodedUmbraUserAccountForSchemeCheck(params);
+  } catch (error) {
+    warnUmbraSchemeProbeFallback({ stage: 'user-account-fetch', error });
+    return { client: params.client, schemeId: null };
+  }
   if (userAccount == null) return { client: params.client, schemeId: null };
 
   for (const scheme of schemes) {
-    if (
-      await umbraMasterSeedSchemeMatchesUserAccount({
-        client: params.client,
-        schemeId: scheme.id,
-        userAccount: userAccount.decoded,
-      })
-    ) {
-      return {
-        client: getUmbraClientForMasterSeedScheme(params.client, scheme.id),
-        schemeId: scheme.id,
-      };
+    try {
+      if (
+        await umbraMasterSeedSchemeMatchesUserAccount({
+          client: params.client,
+          schemeId: scheme.id,
+          userAccount: userAccount.decoded,
+        })
+      ) {
+        return {
+          client: getUmbraClientForMasterSeedScheme(params.client, scheme.id),
+          schemeId: scheme.id,
+        };
+      }
+    } catch (error) {
+      warnUmbraSchemeProbeFallback({ stage: 'scheme-match', schemeId: scheme.id, error });
+      return { client: params.client, schemeId: null };
     }
   }
 
   return { client: params.client, schemeId: null };
+}
+
+function isUmbraKeyConsistencyFailure(error: unknown): boolean {
+  if (isKeyConsistencyError(error)) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /KeyConsistencyError|key consistency|X25519.*does not match|locally-derived key|per-mint key/i.test(
+    message,
+  );
+}
+
+async function queryUmbraEncryptedBalanceEntries(params: {
+  runtime: UmbraRuntime;
+  mints: readonly UmbraSupportedToken[];
+}): Promise<ReadonlyMap<unknown, unknown>> {
+  const mintAddresses = params.mints.map((token) => token.mint as never);
+  const runQuery = async (client: IUmbraClient): Promise<ReadonlyMap<unknown, unknown>> => {
+    const queryBalances = getEncryptedBalanceQuerierFunction({ client }, {
+      accountInfoProvider: params.runtime.rpc.accountInfoProvider,
+    } as never);
+    return (await queryBalances(mintAddresses)) as ReadonlyMap<unknown, unknown>;
+  };
+
+  try {
+    return await runQuery(params.runtime.client);
+  } catch (error) {
+    const schemes = Array.isArray(params.runtime.client.masterSeedSchemes)
+      ? params.runtime.client.masterSeedSchemes
+      : [];
+    if (
+      params.runtime.activeMasterSeedSchemeId != null ||
+      schemes.length <= 1 ||
+      !isUmbraKeyConsistencyFailure(error)
+    ) {
+      throw error;
+    }
+
+    const currentSchemeId = getCurrentUmbraMasterSeedScheme(params.runtime.client).id;
+    let lastError = error;
+    for (const scheme of schemes) {
+      if (scheme.id === currentSchemeId) continue;
+      try {
+        return await runQuery(getUmbraClientForMasterSeedScheme(params.runtime.client, scheme.id));
+      } catch (fallbackError) {
+        lastError = fallbackError;
+        if (!isUmbraKeyConsistencyFailure(fallbackError)) throw fallbackError;
+      }
+    }
+
+    throw lastError;
+  }
 }
 
 async function findNullifierSetPdas(
@@ -783,15 +873,12 @@ async function findNullifierSetPdas(
   treap3: string;
   treap4: string;
 }> {
-  const programAddress = address(String(umbraProgram));
   const indexBytes = encodeU128LeBytes(stealthPoolIndex);
-  const derivePda = async (variant: number): Promise<string> => {
-    const [pda] = await getProgramDerivedAddress({
-      programAddress,
-      seeds: [NULLIFIER_SET_SEED, indexBytes, new Uint8Array([variant])],
-    });
-    return String(pda);
-  };
+  const derivePda = (variant: number): string =>
+    findUmbraProgramAddress(
+      [NULLIFIER_SET_SEED, indexBytes, new Uint8Array([variant])],
+      umbraProgram,
+    );
   const [treap0, treap1, treap2, treap3, treap4] = await Promise.all([
     derivePda(0),
     derivePda(1),
@@ -1023,6 +1110,68 @@ function registrationStatusFromQueriedUserAccount(
   };
 }
 
+function readUmbraUserAccountStatusFlag(
+  decoded: DecodedUmbraUserAccountForKeyCheck,
+  field: keyof UmbraQueriedUserAccountData,
+  bitPosition: number,
+): boolean {
+  const direct = decoded.data[field];
+  if (typeof direct === 'boolean') return direct;
+  return isStatusBitSet(decoded.data.statusBits?.first ?? 0n, bitPosition);
+}
+
+function queriedUserAccountFromDecodedUmbraUserAccount(
+  decoded: DecodedUmbraUserAccountForKeyCheck,
+): UmbraQueriedUserAccount {
+  if (decoded.exists === false) return { state: 'non_existent' };
+  return {
+    state: 'exists',
+    data: {
+      isInitialised: readUmbraUserAccountStatusFlag(
+        decoded,
+        'isInitialised',
+        ENCRYPTED_USER_STATUS_BIT_INITIALISED,
+      ),
+      isActiveForAnonymousUsage: readUmbraUserAccountStatusFlag(
+        decoded,
+        'isActiveForAnonymousUsage',
+        ENCRYPTED_USER_STATUS_BIT_ACTIVE_FOR_ANONYMOUS_USAGE,
+      ),
+      isUserCommitmentRegistered: readUmbraUserAccountStatusFlag(
+        decoded,
+        'isUserCommitmentRegistered',
+        ENCRYPTED_USER_STATUS_BIT_USER_COMMITMENT_REGISTERED,
+      ),
+      isUserAccountX25519KeyRegistered: readUmbraUserAccountStatusFlag(
+        decoded,
+        'isUserAccountX25519KeyRegistered',
+        ENCRYPTED_USER_STATUS_BIT_TOKEN_KEY_REGISTERED,
+      ),
+    },
+  };
+}
+
+function isUmbraPdaDerivationRuntimeFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    /pda-derivation|undefined is not a function|is not a function \(it is undefined\)|No digest implementation|SUBTLE_CRYPTO|crypto\.subtle|ExpoCrypto\.digest/i.test(
+      message,
+    )
+  ) {
+    return true;
+  }
+
+  const cause = error instanceof Error ? (error as { cause?: unknown }).cause : null;
+  return cause == null ? false : isUmbraPdaDerivationRuntimeFailure(cause);
+}
+
+function warnUmbraRegistrationStatusFallback(error: unknown): void {
+  if (typeof __DEV__ !== 'boolean' || !__DEV__) return;
+  console.warn('[umbra-runtime] reading registration with local PDA fallback', {
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
 async function queryUmbraVaultRegistrationStatus(
   runtime: UmbraRuntime,
   walletAddress: string,
@@ -1030,7 +1179,22 @@ async function queryUmbraVaultRegistrationStatus(
   const queryUser = getUserAccountQuerierFunction({ client: runtime.client }, {
     accountInfoProvider: runtime.rpc.accountInfoProvider,
   } as never);
-  const userAccount = (await queryUser(walletAddress as never)) as UmbraQueriedUserAccount;
+  let userAccount: UmbraQueriedUserAccount;
+  try {
+    userAccount = (await queryUser(walletAddress as never)) as UmbraQueriedUserAccount;
+  } catch (error) {
+    if (!isUmbraPdaDerivationRuntimeFailure(error)) throw error;
+    warnUmbraRegistrationStatusFallback(error);
+    const decoded = await fetchDecodedUmbraUserAccountForSchemeCheck({
+      client: runtime.client,
+      rpc: runtime.rpc,
+      walletAddress,
+    });
+    userAccount =
+      decoded == null
+        ? { state: 'non_existent' }
+        : queriedUserAccountFromDecodedUmbraUserAccount(decoded.decoded);
+  }
   return registrationStatusFromQueriedUserAccount(userAccount);
 }
 
@@ -1528,11 +1692,7 @@ async function ensureUmbraPrivateP2PSenderReady(
 ): Promise<UmbraVaultRegistrationStatus> {
   let registrationStatus = await queryUmbraVaultRegistrationStatus(runtime, walletAddress);
   if (registrationStatus.mixerRegistered) return registrationStatus;
-  if (
-    params.network === 'devnet' &&
-    !options.autoSetup &&
-    registrationStatus.vaultCanShield
-  ) {
+  if (params.network === 'devnet' && !options.autoSetup && registrationStatus.vaultCanShield) {
     return registrationStatus;
   }
 
@@ -1861,7 +2021,9 @@ export async function sendUmbraPrivateP2PFromPublicBalance(
 
       if (__DEV__) {
         const readinessDuration = Date.now() - readinessStartTime;
-        console.log(`[umbra-p2p] Readiness check completed in ${(readinessDuration / 1000).toFixed(2)}s`);
+        console.log(
+          `[umbra-p2p] Readiness check completed in ${(readinessDuration / 1000).toFixed(2)}s`,
+        );
       }
     } finally {
       measure('umbra.p2p.public.readiness', readinessStartedAt, {
@@ -3455,23 +3617,21 @@ export async function fetchUmbraEncryptedBalances(
           network: params.network,
         });
       });
-      const queryBalances = getEncryptedBalanceQuerierFunction({ client: runtime.client }, {
-        accountInfoProvider: runtime.rpc.accountInfoProvider,
-      } as never);
       const uniqueMints = mints.filter(
         (token, index, tokens) =>
           tokens.findIndex((candidate) => candidate.mint === token.mint) === index,
       );
       tokenCount = uniqueMints.length;
       const queryStartedAt = mark();
-      const result = await queryBalances(uniqueMints.map((token) => token.mint as never)).finally(
-        () => {
-          measure('umbra.encryptedBalances.querySdk', queryStartedAt, {
-            network: params.network,
-            tokenCount: uniqueMints.length,
-          });
-        },
-      );
+      const result = await queryUmbraEncryptedBalanceEntries({
+        runtime,
+        mints: uniqueMints,
+      }).finally(() => {
+        measure('umbra.encryptedBalances.querySdk', queryStartedAt, {
+          network: params.network,
+          tokenCount: uniqueMints.length,
+        });
+      });
       const keyStatusStartedAt = mark();
       const balances = await Promise.all(
         uniqueMints.map(async (token) => {

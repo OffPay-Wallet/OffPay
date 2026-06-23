@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
-import { offpayCapabilitiesQueryKey } from '@/hooks/useOffpayCapabilities';
+import { prefetchOffpayCapabilities } from '@/lib/api/offpay-capabilities-query';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
@@ -73,8 +73,11 @@ export function useOffpayBootstrap(options?: UseOffpayBootstrapOptions) {
         provisionedAt: result.issuedAt,
       });
 
-      await queryClient.invalidateQueries({
-        queryKey: offpayCapabilitiesQueryKey(network),
+      void prefetchOffpayCapabilities({
+        queryClient,
+        network,
+        requestOwner: 'bootstrap.capabilities.ensure',
+        force: true,
       });
 
       return result;
