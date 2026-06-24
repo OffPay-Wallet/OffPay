@@ -354,7 +354,7 @@ const ClaimSection = memo(function ClaimSection({
     <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.bodyCard]}>
       <View style={styles.claimHeaderRow}>
         {/* Left — PENDING chip with count when active. */}
-        <View style={styles.setupStatusChip}>
+        <View style={[styles.setupStatusChip, styles.claimStatusChip]}>
           <Text
             variant="caption"
             color={colors.text.inverse}
@@ -393,64 +393,80 @@ const ClaimSection = memo(function ClaimSection({
         ) : null}
       </View>
 
-      {scanning ? (
-        <ClaimScanSkeleton />
-      ) : hasPending ? (
-        <Text
-          variant="small"
-          color={colors.text.secondary}
-          numberOfLines={2}
-          maxFontSizeMultiplier={1}
-          align="center"
-          style={styles.descriptionText}
-        >
-          Ready to settle into your encrypted balance.
-        </Text>
-      ) : (
-        <Text
-          variant="bodyBold"
-          color={colors.text.primary}
-          numberOfLines={1}
-          maxFontSizeMultiplier={1.1}
-          align="center"
-          style={styles.claimEmptyTitle}
-        >
-          No pending claims
-        </Text>
-      )}
-
-      {hasPending && visibleClaims.length > 0 ? (
-        <View style={styles.claimPreviewList}>
-          {visibleClaims.map((utxo) => (
-            <ClaimPreviewRow key={utxo.id} utxo={utxo} />
-          ))}
-          {hiddenClaimCount > 0 ? (
+      <View style={[styles.claimContentSlot, !hasPending && styles.claimContentSlotCentered]}>
+        {scanning ? (
+          <ClaimScanSkeleton />
+        ) : hasPending ? (
+          <>
             <Text
-              variant="caption"
-              color={colors.text.tertiary}
-              numberOfLines={1}
+              variant="small"
+              color={colors.text.secondary}
+              numberOfLines={2}
               maxFontSizeMultiplier={1}
               align="center"
-              style={styles.claimPreviewMoreText}
+              style={styles.descriptionText}
             >
-              +{hiddenClaimCount} more in all claims
+              Ready to settle into your encrypted balance.
             </Text>
-          ) : null}
-        </View>
-      ) : null}
-
-      {!scanning && status != null && status.length > 0 ? (
-        <Text
-          variant="small"
-          color={statusColor}
-          numberOfLines={2}
-          maxFontSizeMultiplier={1}
-          align="center"
-          style={styles.descriptionText}
-        >
-          {status}
-        </Text>
-      ) : null}
+            {visibleClaims.length > 0 ? (
+              <View style={styles.claimPreviewList}>
+                {visibleClaims.map((utxo) => (
+                  <ClaimPreviewRow key={utxo.id} utxo={utxo} />
+                ))}
+                {hiddenClaimCount > 0 ? (
+                  <Text
+                    variant="caption"
+                    color={colors.text.tertiary}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                    align="center"
+                    style={styles.claimPreviewMoreText}
+                  >
+                    +{hiddenClaimCount} more in all claims
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+            {status != null && status.length > 0 ? (
+              <Text
+                variant="small"
+                color={statusColor}
+                numberOfLines={2}
+                maxFontSizeMultiplier={1}
+                align="center"
+                style={styles.descriptionText}
+              >
+                {status}
+              </Text>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <Text
+              variant="bodyBold"
+              color={colors.text.primary}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.1}
+              align="center"
+              style={styles.claimEmptyTitle}
+            >
+              No pending claims
+            </Text>
+            {status != null && status.length > 0 ? (
+              <Text
+                variant="small"
+                color={statusColor}
+                numberOfLines={2}
+                maxFontSizeMultiplier={1}
+                align="center"
+                style={styles.descriptionText}
+              >
+                {status}
+              </Text>
+            ) : null}
+          </>
+        )}
+      </View>
 
       <View style={styles.claimButtonWrap}>
         <Pressable
@@ -760,17 +776,29 @@ const styles = StyleSheet.create({
   claimViewAllText: {
     fontFamily: fontFamily.semiBold,
   },
+  claimStatusChip: {
+    minWidth: 136,
+  },
+  claimContentSlot: {
+    minHeight: 150,
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  claimContentSlotCentered: {
+    alignItems: 'center',
+  },
   claimEmptyTitle: {
     fontFamily: fontFamily.semiBold,
     fontSize: 16,
     lineHeight: 22,
     letterSpacing: -0.2,
-    paddingTop: spacing.xs,
   },
   claimScanState: {
     gap: spacing.sm,
-    minHeight: 116,
-    paddingVertical: spacing.md,
+    width: '100%',
+    minHeight: 150,
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radii.lg,
     borderCurve: 'continuous',

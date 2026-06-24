@@ -58,7 +58,6 @@ const MODAL_CLOSE_MS = 180;
 const CLEAR_ROW_DURATION_MS = 220;
 const CLEAR_ROW_STAGGER_MS = 56;
 const CLEAR_FINISH_SETTLE_MS = 24;
-const CLEAR_EMPTY_RESIZE_DELAY_MS = 160;
 const SHEET_RESIZE_DURATION_MS = 260;
 const ROW_STACK_SHIFT_DURATION_MS = 180;
 const ROW_EXIT_TRANSLATE_X = 36;
@@ -100,6 +99,7 @@ function NotificationRow({
 }): React.JSX.Element {
   const tone = VARIANT_TONE[notification.variant];
   const iconName = VARIANT_ICON[notification.variant];
+  const hasMessage = notification.message.trim().length > 0;
   const clearStyle = useAnimatedStyle(() => {
     const elapsedMs = clearProgress.value * clearDurationMs;
     const delayedProgress = (elapsedMs - index * clearStaggerMs) / CLEAR_ROW_DURATION_MS;
@@ -127,23 +127,27 @@ function NotificationRow({
       >
         <Ionicons name={iconName} size={compact ? 16 : 18} color={tone.ink} />
       </View>
-      <View style={styles.notificationText}>
+      <View style={[styles.notificationText, compact ? styles.notificationTextCompact : null]}>
         <Text
           variant="bodyBold"
           color={colors.text.primary}
           numberOfLines={1}
           ellipsizeMode="tail"
+          adjustsFontSizeToFit
+          minimumFontScale={0.84}
+          maxFontSizeMultiplier={1}
           style={styles.notificationTitle}
         >
           {notification.title}
         </Text>
-        {notification.message.length > 0 ? (
+        {hasMessage ? (
           <Text
             variant="small"
             color={colors.text.secondary}
             style={styles.notificationMessage}
-            numberOfLines={1}
+            numberOfLines={2}
             ellipsizeMode="tail"
+            maxFontSizeMultiplier={1}
           >
             {notification.message}
           </Text>
@@ -174,9 +178,8 @@ export function NotificationCenterModal({
   const [clearing, setClearing] = useState(false);
   const [clearRun, setClearRun] = useState<ClearRun | null>(null);
   const [dismissingNotificationId, setDismissingNotificationId] = useState<string | null>(null);
-  const [stableRowCount, setStableRowCount] = useState(0);
   const clearTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dismissResetFrameRef = useRef<number | null>(null);
   const reduceMotion = useReducedMotion();
   const sheetProgress = useSharedValue(visible ? 1 : 0);
   const clearProgress = useSharedValue(0);
@@ -198,9 +201,8 @@ export function NotificationCenterModal({
   const sheetMaxHeight = Math.max(0, windowHeight - sheetTopInset - insets.bottom - spacing.lg);
   const sheetPadding = compactPanel ? spacing.md : spacing.lg;
   const closeButtonSize = compactPanel ? 40 : layout.minTouchTarget;
-  const stableRowHeight = compactPanel ? 58 : 64;
-  const displayedRowCount =
-    notifications.length > 0 ? Math.max(stableRowCount, notifications.length) : stableRowCount;
+  const stableRowHeight = compactPanel ? 72 : 78;
+  const displayedRowCount = notifications.length;
   const stableListHeight =
     displayedRowCount > 0
       ? displayedRowCount * stableRowHeight + Math.max(0, displayedRowCount - 1) * spacing.sm
@@ -210,16 +212,14 @@ export function NotificationCenterModal({
       ? closeButtonSize + spacing.md + stableListHeight + spacing.md + layout.buttonHeightMd
       : closeButtonSize + spacing.md + (compactPanel ? 84 : 104);
   const sheetMinHeight = Math.min(sheetMaxHeight, sheetPadding * 2 + stableContentHeight);
+  const listMaxHeight = Math.max(
+    0,
+    sheetMaxHeight - sheetPadding * 2 - closeButtonSize - spacing.md * 2 - layout.buttonHeightMd,
+  );
 
   const clearScheduledTimers = useCallback((): void => {
     clearTimersRef.current.forEach(clearTimeout);
     clearTimersRef.current = [];
-  }, []);
-
-  const clearResizeTimer = useCallback((): void => {
-    if (resizeTimerRef.current == null) return;
-    clearTimeout(resizeTimerRef.current);
-    resizeTimerRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -227,33 +227,14 @@ export function NotificationCenterModal({
   }, [visible]);
 
   useEffect(() => {
-    if (!visible) {
-      clearResizeTimer();
-      setStableRowCount(0);
-      return;
+    if (visible) return;
+    if (dismissResetFrameRef.current != null) {
+      cancelAnimationFrame(dismissResetFrameRef.current);
+      dismissResetFrameRef.current = null;
     }
-
-    if (notifications.length > 0) {
-      clearResizeTimer();
-      setStableRowCount((count) => Math.max(count, notifications.length));
-      return;
-    }
-
-    if (stableRowCount === 0) return;
-
-    if (reduceMotion) {
-      clearResizeTimer();
-      setStableRowCount(0);
-      return;
-    }
-
-    if (resizeTimerRef.current != null) return;
-
-    resizeTimerRef.current = setTimeout(() => {
-      resizeTimerRef.current = null;
-      setStableRowCount(0);
-    }, CLEAR_EMPTY_RESIZE_DELAY_MS);
-  }, [clearResizeTimer, notifications.length, reduceMotion, stableRowCount, visible]);
+    setDismissingNotificationId(null);
+    dismissProgress.value = 0;
+  }, [dismissProgress, visible]);
 
   useEffect(() => {
     if (!rendered) return;
@@ -290,6 +271,18 @@ export function NotificationCenterModal({
     setClearing(false);
     setClearRun(null);
   }, [clearProgress, clearScheduledTimers]);
+
+  const finishDismissNotification = useCallback(
+    (id: string): void => {
+      removeNotification(id);
+      dismissResetFrameRef.current = requestAnimationFrame(() => {
+        dismissResetFrameRef.current = null;
+        dismissProgress.value = 0;
+        setDismissingNotificationId(null);
+      });
+    },
+    [dismissProgress, removeNotification],
+  );
 
   const handleClear = useCallback((): void => {
     if (clearing || dismissingNotificationId != null || notifications.length === 0) return;
@@ -347,6 +340,10 @@ export function NotificationCenterModal({
         return;
       }
 
+      if (dismissResetFrameRef.current != null) {
+        cancelAnimationFrame(dismissResetFrameRef.current);
+        dismissResetFrameRef.current = null;
+      }
       setDismissingNotificationId(id);
       dismissProgress.value = 0;
       dismissProgress.value = withTiming(
@@ -354,13 +351,18 @@ export function NotificationCenterModal({
         { duration: CLEAR_ROW_DURATION_MS, easing: Easing.in(Easing.cubic) },
         (finished) => {
           if (!finished) return;
-          runOnJS(removeNotification)(id);
-          dismissProgress.value = 0;
-          runOnJS(setDismissingNotificationId)(null);
+          runOnJS(finishDismissNotification)(id);
         },
       );
     },
-    [clearing, dismissProgress, dismissingNotificationId, reduceMotion, removeNotification],
+    [
+      clearing,
+      dismissProgress,
+      dismissingNotificationId,
+      finishDismissNotification,
+      reduceMotion,
+      removeNotification,
+    ],
   );
 
   useEffect(() => {
@@ -374,9 +376,12 @@ export function NotificationCenterModal({
   useEffect(
     () => () => {
       clearScheduledTimers();
-      clearResizeTimer();
+      if (dismissResetFrameRef.current != null) {
+        cancelAnimationFrame(dismissResetFrameRef.current);
+        dismissResetFrameRef.current = null;
+      }
     },
-    [clearResizeTimer, clearScheduledTimers],
+    [clearScheduledTimers],
   );
 
   const clearButtonStyle = useAnimatedStyle(() => ({
@@ -461,7 +466,7 @@ export function NotificationCenterModal({
             {notifications.length > 0 ? (
               <View style={styles.notificationBody}>
                 <ScrollView
-                  style={styles.list}
+                  style={[styles.list, { maxHeight: listMaxHeight }]}
                   contentContainerStyle={styles.listContent}
                   showsVerticalScrollIndicator={false}
                 >
@@ -564,21 +569,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.backgroundTint,
   },
   notificationBody: {
-    flex: 1,
     minHeight: 0,
-    justifyContent: 'space-between',
     gap: spacing.md,
   },
   list: {
-    flex: 1,
-    flexGrow: 1,
+    flexGrow: 0,
     flexShrink: 1,
   },
   listContent: {
     gap: spacing.sm,
+    paddingBottom: 1,
   },
   notificationRow: {
-    minHeight: 64,
+    minHeight: 78,
     borderRadius: radii.xl,
     backgroundColor: colors.surface.backgroundTint,
     borderWidth: StyleSheet.hairlineWidth,
@@ -591,33 +594,40 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   notificationRowCompact: {
-    minHeight: 58,
+    minHeight: 72,
     paddingHorizontal: spacing.sm,
   },
   statusIcon: {
-    width: 34,
-    height: 34,
+    width: 38,
+    height: 38,
     borderRadius: radii.full,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   statusIconCompact: {
-    width: 30,
-    height: 30,
+    width: 34,
+    height: 34,
   },
   notificationText: {
     flex: 1,
+    flexShrink: 1,
     minWidth: 0,
-    gap: 1,
+    minHeight: 42,
+    justifyContent: 'center',
+    gap: 2,
+  },
+  notificationTextCompact: {
+    minHeight: 38,
   },
   notificationTitle: {
-    flex: 1,
     minWidth: 0,
-    lineHeight: 20,
+    width: '100%',
+    lineHeight: 21,
   },
   notificationMessage: {
-    lineHeight: 16,
+    width: '100%',
+    lineHeight: 17,
   },
   rowDismissButton: {
     width: 40,

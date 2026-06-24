@@ -525,6 +525,19 @@ export function HomeScreenContent(): React.JSX.Element {
   const criticalSnapshotPending = homeSnapshot.criticalDataPending;
   const balanceWarmingUp =
     hasWallet && canUseNetwork && (criticalSnapshotPending || balanceQuery.isCapabilitiesPending);
+  const firstBalancePayloadPending =
+    hasWallet &&
+    canUseNetwork &&
+    balanceQuery.data == null &&
+    !balanceQuery.isError &&
+    (criticalSnapshotPending ||
+      homeSnapshot.dashboardQuery.isFetching ||
+      balanceQuery.isLoading ||
+      balanceQuery.isFetching ||
+      balanceQuery.isCapabilitiesPending ||
+      (homeSnapshot.foregroundFetchEnabled &&
+        balanceQuery.isCapabilityEnabled &&
+        !balanceQuery.isFetched));
   const activityWarmingUp =
     hasWallet &&
     canUseNetwork &&
@@ -533,6 +546,7 @@ export function HomeScreenContent(): React.JSX.Element {
     previewHoldings.length === 0 &&
     (criticalSnapshotPending ||
       balanceWarmingUp ||
+      firstBalancePayloadPending ||
       balanceQuery.isLoading ||
       balanceQuery.isCapabilitiesPending);
   const activityLoading =

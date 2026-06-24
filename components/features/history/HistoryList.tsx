@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -30,6 +30,12 @@ function getQueryErrorMessage(error: unknown, fallback: string): string {
 
 const HISTORY_CONTAINER_SHADOW =
   '0 16px 34px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
+const HISTORY_ROW_ESTIMATED_HEIGHT = 88;
+const HISTORY_MIN_SKELETON_ROWS = 7;
+const HISTORY_MAX_SKELETON_ROWS = 10;
+const HISTORY_RENDER_AHEAD_MIN_PX = 900;
+const HISTORY_VISIBLE_FILL_TARGET = 8;
+const EMPTY_HISTORY_ROWS: HistoryRow[] = [];
 
 interface HistoryListProps {
   transactionsQuery: UseOffpayWalletTransactionsResult;
@@ -121,20 +127,35 @@ const HistorySectionHeader = React.memo(function HistorySectionHeader({
   );
 });
 
-const HistoryLoadingPanel = React.memo(function HistoryLoadingPanel({
+function HistorySkeletonRow({ compact }: { compact: boolean }): React.JSX.Element {
+  const iconSize = compact ? 42 : 46;
+  return (
+    <View style={[styles.skeletonRow, compact && styles.skeletonRowCompact]}>
+      <SkeletonBlock width={iconSize} height={iconSize} radius={radii.full} />
+      <View style={styles.skeletonTextBlock}>
+        <SkeletonBlock width="48%" height={compact ? 15 : 17} radius={radii.xs} />
+        <SkeletonBlock width="72%" height={compact ? 12 : 14} radius={radii.xs} />
+      </View>
+      <SkeletonBlock width={compact ? 74 : 88} height={compact ? 13 : 15} radius={radii.xs} />
+    </View>
+  );
+}
+
+const HistorySkeletonPanel = React.memo(function HistorySkeletonPanel({
   compact,
   contentFrameWidth,
-  loaderHeight,
+  rowCount,
 }: {
   compact: boolean;
   contentFrameWidth: number;
-  loaderHeight: number;
+  rowCount: number;
 }): React.JSX.Element {
   return (
-    <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
-      <View style={[styles.loadingFrame, { minHeight: loaderHeight }]}>
-        <LazyLoadingSpinner size={compact ? 30 : 34} color={colors.brand.glossAccent} />
-      </View>
+    <View style={[styles.contentFrame, styles.skeletonPanel, { width: contentFrameWidth }]}>
+      <SkeletonBlock width={116} height={18} radius={radii.xs} style={styles.skeletonDate} />
+      {Array.from({ length: rowCount }, (_, index) => (
+        <HistorySkeletonRow key={`history-skeleton-${index}`} compact={compact} />
+      ))}
     </View>
   );
 });
@@ -164,6 +185,10 @@ export function HistoryList({
     transactionsQuery.transactions,
   ]);
   const rows = useMemo(() => flattenHistorySections(sections), [sections]);
+  const historyItemRowCount = useMemo(
+    () => rows.reduce((count, row) => count + (row.kind === 'item' ? 1 : 0), 0),
+    [rows],
+  );
 
   // Extra padding at the bottom so we can scroll past the custom Tab Bar
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + layout.tabBarHeight + spacing.xl;
@@ -171,8 +196,21 @@ export function HistoryList({
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.sm : compact ? spacing.md : spacing.lg;
   const contentFrameWidth = Math.min(430, Math.max(0, windowWidth - horizontalPadding * 2));
-  const loaderHeight = Math.max(260, windowHeight * 0.54);
-  const showInitialLoader = rows.length === 0 && transactionsQuery.isInitialDataPending;
+  const skeletonRowCount = Math.min(
+    HISTORY_MAX_SKELETON_ROWS,
+    Math.max(HISTORY_MIN_SKELETON_ROWS, Math.ceil(windowHeight / HISTORY_ROW_ESTIMATED_HEIGHT)),
+  );
+  const renderAheadDistance = Math.max(
+    HISTORY_RENDER_AHEAD_MIN_PX,
+    Math.round(windowHeight * 1.4),
+  );
+  const showSparseWarmLoader =
+    historyItemRowCount > 0 &&
+    historyItemRowCount < HISTORY_VISIBLE_FILL_TARGET &&
+    transactionsQuery.isFetching &&
+    !transactionsQuery.isFetchingNextPage;
+  const showInitialLoader =
+    (rows.length === 0 && transactionsQuery.isInitialDataPending) || showSparseWarmLoader;
   const emptyMessage = transactionsQuery.isCapabilityEnabled
     ? transactionsQuery.isError
       ? getQueryErrorMessage(transactionsQuery.error, 'Unable to load transaction history.')
@@ -242,10 +280,10 @@ export function HistoryList({
   const ListEmpty = useMemo(
     () =>
       showInitialLoader ? (
-        <HistoryLoadingPanel
+        <HistorySkeletonPanel
           compact={compact}
           contentFrameWidth={contentFrameWidth}
-          loaderHeight={loaderHeight}
+          rowCount={skeletonRowCount}
         />
       ) : (
         <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
@@ -277,7 +315,7 @@ export function HistoryList({
           </View>
         </View>
       ),
-    [compact, contentFrameWidth, emptyMessage, emptyTitle, loaderHeight, showInitialLoader],
+    [compact, contentFrameWidth, emptyMessage, emptyTitle, showInitialLoader, skeletonRowCount],
   );
 
   const ListFooter = useMemo(() => {
@@ -324,7 +362,7 @@ export function HistoryList({
 
   return (
     <FlashList<HistoryRow>
-      data={rows}
+      data={showInitialLoader ? EMPTY_HISTORY_ROWS : rows}
       renderItem={renderItem}
       keyExtractor={keyExtractor}
       getItemType={getItemType}
@@ -338,7 +376,7 @@ export function HistoryList({
         styles.container,
         { paddingBottom: bottomPadding, paddingHorizontal: horizontalPadding },
       ]}
-      drawDistance={400}
+      drawDistance={renderAheadDistance}
     />
   );
 }
@@ -349,6 +387,41 @@ const styles = StyleSheet.create({
   },
   contentFrame: {
     alignSelf: 'center',
+  },
+  skeletonPanel: {
+    paddingTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  skeletonDate: {
+    marginLeft: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  skeletonRow: {
+    minHeight: 78,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii['2xl'],
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: '0 10px 22px rgba(0, 0, 0, 0.32)',
+  },
+  skeletonRowCompact: {
+    minHeight: 74,
+    gap: spacing.sm,
+  },
+  skeletonTextBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
   },
   itemFrame: {
     alignSelf: 'center',
@@ -375,10 +448,6 @@ const styles = StyleSheet.create({
   sectionHeaderCompact: {
     fontSize: 13,
     lineHeight: 17,
-  },
-  loadingFrame: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   emptyStateShell: {
     borderRadius: radii['2xl'],

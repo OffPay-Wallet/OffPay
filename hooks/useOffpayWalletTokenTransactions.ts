@@ -120,6 +120,7 @@ export function useOffpayWalletTokenTransactions(options: {
   mint: string | null;
   walletAddress?: string | null;
   limit?: number;
+  minWarmTransactionRows?: number;
   deferUntilAfterInteractions?: boolean;
   refetchOnMount?: boolean | 'always';
   useCache?: boolean;
@@ -130,6 +131,7 @@ export function useOffpayWalletTokenTransactions(options: {
   const walletAddress = options.walletAddress ?? activeWalletAddress;
   const mint = options.mint?.trim() || null;
   const limit = options.limit ?? 12;
+  const minWarmTransactionRows = options.minWarmTransactionRows ?? 0;
   const deferUntilAfterInteractions = options.deferUntilAfterInteractions ?? false;
   const useCache = options.useCache;
   const enabledByCaller = options.enabled ?? true;
@@ -284,6 +286,7 @@ export function useOffpayWalletTokenTransactions(options: {
       });
 
       if (page == null) continue;
+      if (page.transactions.length < minWarmTransactionRows) continue;
       if (bestPage == null || page.transactions.length > bestPage.transactions.length) {
         bestPage = page;
       }
@@ -293,6 +296,7 @@ export function useOffpayWalletTokenTransactions(options: {
   }, [
     displayCacheHydrationVersion,
     limit,
+    minWarmTransactionRows,
     mint,
     network,
     queryClient,

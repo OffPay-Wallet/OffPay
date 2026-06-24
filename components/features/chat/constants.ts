@@ -6,9 +6,19 @@
  * screen file into a unit test.
  */
 
+import { spacing } from '@/constants/spacing';
+
 export const HEADER_BUTTON_SIZE = 44;
 export const PROMPT_HEIGHT = 56;
 export const PROMPT_ICON_SIZE = 40;
+export const PROMPT_INPUT_ROW_MIN_HEIGHT = 40;
+export const PROMPT_DOCK_COLLAPSED_BASE_HEIGHT =
+  spacing.sm +
+  spacing.md +
+  PROMPT_INPUT_ROW_MIN_HEIGHT +
+  spacing.sm +
+  PROMPT_ICON_SIZE +
+  spacing.sm;
 
 /** Maximum recent message turns sent to the AI proxy per request. */
 export const AGENT_HISTORY_LIMIT = 12;

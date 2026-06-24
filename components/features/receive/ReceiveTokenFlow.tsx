@@ -57,6 +57,7 @@ import {
   isRnZkProverNativeModuleAvailable,
   RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE,
 } from '@/lib/umbra/umbra-rn-zk-prover';
+import { PRIVY_SIGNING_NOT_READY_MESSAGE } from '@/lib/wallet/wallet-capabilities';
 import { useAppStore } from '@/store/app';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { getClaimedUmbraUtxoIndexSet, useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
@@ -274,13 +275,16 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     'payment.umbraPrivateP2p',
   );
   const umbraExecutionCapability = getOffpayFeatureCapability(capabilities, 'umbra.execution');
-  const canUseUmbraReceiveRoute =
+  const privySignerLoading = signingBlocker === PRIVY_SIGNING_NOT_READY_MESSAGE;
+  const umbraReceiveFeatureAvailable =
     canShowUmbraReceiveRoute &&
-    canSignWithApp &&
     canUseUmbraNativeProver &&
     isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p') &&
     isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&
     isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast');
+  const canUseUmbraReceiveRoute = umbraReceiveFeatureAvailable && canSignWithApp;
+  const canShowUmbraSignerLoadingState = umbraReceiveFeatureAvailable && privySignerLoading;
+  const canRenderUmbraReceivePanels = canUseUmbraReceiveRoute || canShowUmbraSignerLoadingState;
   const umbraReceiveDisabledReason = signingBlocker
     ? signingBlocker
     : !canUseUmbraNativeProver
@@ -335,16 +339,24 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         id: 'umbra',
         label: 'Umbra',
         description:
-          umbraReceiveDisabledReason == null
+          umbraReceiveDisabledReason == null || canShowUmbraSignerLoadingState
             ? 'Claim private P2P payments into encrypted balance.'
             : umbraReceiveDisabledReason,
-        disabled: !canUseUmbraReceiveRoute,
-        disabledReason: umbraReceiveDisabledReason ?? undefined,
+        disabled: !canUseUmbraReceiveRoute && !canShowUmbraSignerLoadingState,
+        disabledReason:
+          !canUseUmbraReceiveRoute && !canShowUmbraSignerLoadingState
+            ? (umbraReceiveDisabledReason ?? undefined)
+            : undefined,
       });
     }
 
     return routes;
-  }, [canShowUmbraReceiveRoute, canUseUmbraReceiveRoute, umbraReceiveDisabledReason]);
+  }, [
+    canShowUmbraReceiveRoute,
+    canShowUmbraSignerLoadingState,
+    canUseUmbraReceiveRoute,
+    umbraReceiveDisabledReason,
+  ]);
   const selectedReceiveRoute = receiveRouteOptions.some(
     (route) => route.id === receiveRoute && route.disabled !== true,
   )
@@ -522,17 +534,18 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     navigateAway();
   }, [abortUmbraPendingClaimScan, receiveMode, renderedReceiveMode, router]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    closingReceiveRef.current = false;
+
+    return () => {
       closingReceiveRef.current = true;
       abortUmbraPendingClaimScan('Receive screen unmounted.');
       if (closeFrameRef.current != null) {
         cancelAnimationFrame(closeFrameRef.current);
         closeFrameRef.current = null;
       }
-    },
-    [abortUmbraPendingClaimScan],
-  );
+    };
+  }, [abortUmbraPendingClaimScan]);
 
   const handleViewAllPendingClaims = useCallback(() => {
     router.push('/umbra-pending-claims' as never);
@@ -1250,29 +1263,44 @@ export function ReceiveTokenFlow(): React.JSX.Element {
             >
               <UmbraReceiveCard
                 unavailableMessage={
-                  canUseUmbraReceiveRoute ? null : (umbraReceiveDisabledReason ?? null)
+                  canRenderUmbraReceivePanels ? null : (umbraReceiveDisabledReason ?? null)
                 }
                 setupPanel={
-                  canUseUmbraReceiveRoute
+                  canRenderUmbraReceivePanels
                     ? {
                         title: 'Umbra Claims',
-                        buttonLabel: umbraMixerStatusChecking ? 'Checking' : 'Set up',
-                        loadingLabel: umbraMixerStatusChecking ? 'Checking' : 'Setting up',
+                        buttonLabel: canShowUmbraSignerLoadingState
+                          ? 'Loading'
+                          : umbraMixerStatusChecking
+                            ? 'Checking'
+                            : 'Set up',
+                        loadingLabel: canShowUmbraSignerLoadingState
+                          ? 'Wallet loading'
+                          : umbraMixerStatusChecking
+                            ? 'Checking'
+                            : 'Setting up',
                         onPress: handleSetupUmbraPrivateP2P,
                         disabled:
                           !canUseUmbraReceiveRoute ||
+                          canShowUmbraSignerLoadingState ||
                           mixerRegisterMutation.isPending ||
                           umbraMixerStatusChecking,
-                        loading: mixerRegisterMutation.isPending || umbraMixerStatusChecking,
+                        loading:
+                          canShowUmbraSignerLoadingState ||
+                          mixerRegisterMutation.isPending ||
+                          umbraMixerStatusChecking,
                         accessibilityLabel: 'Set up Umbra private P2P',
-                        completed: umbraAlreadyMixerRegistered,
+                        completed: canShowUmbraSignerLoadingState
+                          ? false
+                          : umbraAlreadyMixerRegistered,
                       }
                     : undefined
                 }
                 pendingClaimPanel={{
                   pendingCount: pendingClaimCount,
-                  status:
-                    pendingClaimCount > 0
+                  status: canShowUmbraSignerLoadingState
+                    ? PRIVY_SIGNING_NOT_READY_MESSAGE
+                    : pendingClaimCount > 0
                       ? claimError
                       : (claimError ??
                         claimResult?.subtitle ??
@@ -1281,29 +1309,39 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                           : hasCheckedUmbraClaims
                             ? 'No pending private payments found.'
                             : 'Check for pending private payments when needed.')),
-                  statusTone:
-                    claimError != null
+                  statusTone: canShowUmbraSignerLoadingState
+                    ? 'neutral'
+                    : claimError != null
                       ? 'error'
                       : pendingClaimCount > 0
                         ? 'success'
                         : claimResult != null
                           ? 'success'
                           : 'neutral',
-                  buttonLabel:
-                    pendingClaimCount > 0
+                  buttonLabel: canShowUmbraSignerLoadingState
+                    ? 'Loading'
+                    : pendingClaimCount > 0
                       ? 'Claim all'
                       : hasCheckedUmbraClaims
                         ? 'Check again'
                         : 'Check pending',
-                  loadingLabel: pendingClaimCount > 0 ? 'Claiming' : 'Checking',
+                  loadingLabel: canShowUmbraSignerLoadingState
+                    ? 'Wallet loading'
+                    : pendingClaimCount > 0
+                      ? 'Claiming'
+                      : 'Checking',
                   onPress:
                     pendingClaimCount > 0
                       ? handleClaimUmbraPayments
                       : () => scanUmbraPendingClaims(),
                   onViewAllPress: handleViewAllPendingClaims,
                   allowEmptyAction: true,
-                  disabled: !canUseUmbraClaim || claimingUmbra || scanningUmbraClaims,
-                  loading: claimingUmbra || scanningUmbraClaims,
+                  disabled:
+                    canShowUmbraSignerLoadingState ||
+                    !canUseUmbraClaim ||
+                    claimingUmbra ||
+                    scanningUmbraClaims,
+                  loading: canShowUmbraSignerLoadingState || claimingUmbra || scanningUmbraClaims,
                   accessibilityLabel:
                     pendingClaimCount > 0
                       ? 'Claim all pending Umbra private payments'

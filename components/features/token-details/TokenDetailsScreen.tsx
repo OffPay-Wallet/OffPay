@@ -4,6 +4,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type GestureResponderEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -30,6 +32,7 @@ import { PuffyReceiveIcon } from '@/components/ui/icons/PuffyReceiveIcon';
 import { PuffySendIcon } from '@/components/ui/icons/PuffySendIcon';
 import { PuffySwapIcon } from '@/components/ui/icons/PuffySwapIcon';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { useAppToast } from '@/components/ui/AppToast';
 import { Text } from '@/components/ui/Text';
@@ -79,7 +82,10 @@ import type {
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
-const MAX_TOKEN_ACTIVITY_ROWS = 8;
+const TOKEN_ACTIVITY_INITIAL_FILL_ROWS = 8;
+const TOKEN_ACTIVITY_BATCH_ROWS = 8;
+const TOKEN_ACTIVITY_SCROLL_PREFETCH_PX = 280;
+const MAX_TOKEN_ACTIVITY_ROWS = 32;
 const PRICE_CHART_VIEWBOX_WIDTH = 320;
 const PRICE_CHART_VIEWBOX_HEIGHT = 140;
 const PRICE_CHART_LEFT = 0;
@@ -767,6 +773,30 @@ function TokenPriceHistoryCard({
   );
 }
 
+function TokenActivitySkeletonRow({ compact }: { compact: boolean }): React.JSX.Element {
+  const iconSize = compact ? 42 : 46;
+  return (
+    <View style={[styles.activitySkeletonRow, compact && styles.activitySkeletonRowCompact]}>
+      <SkeletonBlock width={iconSize} height={iconSize} radius={radii.full} />
+      <View style={styles.activitySkeletonText}>
+        <SkeletonBlock width="46%" height={compact ? 15 : 17} radius={radii.xs} />
+        <SkeletonBlock width="70%" height={compact ? 12 : 14} radius={radii.xs} />
+      </View>
+      <SkeletonBlock width={compact ? 78 : 92} height={compact ? 13 : 15} radius={radii.xs} />
+    </View>
+  );
+}
+
+function TokenActivitySkeletonList({ compact }: { compact: boolean }): React.JSX.Element {
+  return (
+    <View style={styles.activityList}>
+      {Array.from({ length: TOKEN_ACTIVITY_INITIAL_FILL_ROWS }, (_, index) => (
+        <TokenActivitySkeletonRow key={`token-activity-skeleton-${index}`} compact={compact} />
+      ))}
+    </View>
+  );
+}
+
 export function TokenDetailsScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -785,20 +815,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const requestedMint = getSearchParam(params.mint);
   const routeHoldingSnapshot = useMemo(
     () => buildRouteHoldingSnapshot(params, requestedMint),
-    [
-      params.balance,
-      params.balanceValue,
-      params.logo,
-      params.name,
-      params.priceChange,
-      params.priceMint,
-      params.priceSymbol,
-      params.spam,
-      params.symbol,
-      params.usdPrice,
-      params.verified,
-      requestedMint,
-    ],
+    [params, requestedMint],
   );
   const currency = usePreferencesStore((state) => state.currency);
   const { network } = useOffpayNetwork();
@@ -809,6 +826,9 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const [selectedTimeframe, setSelectedTimeframe] = useState<TokenPriceHistoryTimeframeId>('24H');
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
+  const [visibleTokenActivityLimit, setVisibleTokenActivityLimit] = useState(
+    TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
+  );
   const localReceipts = useMemo<OffpayLocalReceiptViewInput[]>(() => {
     return buildLocalHistoryReceiptInputs({
       network,
@@ -864,6 +884,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     deferUntilAfterInteractions: false,
     enabled: requestedMint != null,
     limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
+    minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
     refetchOnMount: true,
     requestOwner: 'tokenDetails.walletHistory',
     waitForDashboard: false,
@@ -905,6 +926,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     mint: holding == null ? null : getTokenActionMint(holding),
     deferUntilAfterInteractions: true,
     limit: MAX_TOKEN_ACTIVITY_ROWS,
+    minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
     refetchOnMount: false,
     enabled: shouldBackfillTokenTransactions,
     requestOwner: 'tokenDetails.transactions.backfill',
@@ -929,10 +951,30 @@ export function TokenDetailsScreen(): React.JSX.Element {
   );
   const tokenActivity =
     walletHistoryActivity.length > 0 ? walletHistoryActivity : tokenEndpointActivity;
+  const tokenActivityWarmFillPending =
+    walletHistoryActivity.length > 0 &&
+    walletHistoryActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
+    walletHistoryQuery.isFetching;
+  const visibleTokenActivity = tokenActivity.slice(0, visibleTokenActivityLimit);
   const tokenActivityLoading =
-    tokenActivity.length === 0 &&
-    (walletHistoryQuery.isInitialDataPending ||
-      (walletHistoryQuery.isFetching && walletHistoryQuery.transactions.length === 0));
+    tokenActivityWarmFillPending ||
+    (tokenActivity.length === 0 &&
+      (walletHistoryQuery.isInitialDataPending ||
+        (walletHistoryQuery.isFetching && walletHistoryQuery.transactions.length === 0)));
+
+  useEffect(() => {
+    setVisibleTokenActivityLimit(TOKEN_ACTIVITY_INITIAL_FILL_ROWS);
+  }, [holding?.mint, requestedMint]);
+
+  useEffect(() => {
+    setVisibleTokenActivityLimit((currentLimit) => {
+      const initialLimit = Math.min(
+        Math.max(TOKEN_ACTIVITY_INITIAL_FILL_ROWS, currentLimit),
+        MAX_TOKEN_ACTIVITY_ROWS,
+      );
+      return tokenActivity.length < initialLimit ? tokenActivity.length : initialLimit;
+    });
+  }, [tokenActivity.length]);
 
   const screenHorizontalPadding = viewportProfile.horizontalPadding;
   const actionCompact = dense || width < 360 || fontScale > 1.1;
@@ -990,6 +1032,22 @@ export function TokenDetailsScreen(): React.JSX.Element {
     setSelectedTransaction(null);
   }, []);
 
+  const handleTokenDetailsScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      if (visibleTokenActivityLimit >= tokenActivity.length) return;
+
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      if (distanceFromBottom > TOKEN_ACTIVITY_SCROLL_PREFETCH_PX) return;
+
+      setVisibleTokenActivityLimit((currentLimit) =>
+        Math.min(tokenActivity.length, currentLimit + TOKEN_ACTIVITY_BATCH_ROWS),
+      );
+    },
+    [tokenActivity.length, visibleTokenActivityLimit],
+  );
+
   const bottomPadding =
     Math.max(insets.bottom, dense ? spacing.md : spacing.lg) +
     (dense ? spacing['2xl'] : spacing['4xl']);
@@ -1003,6 +1061,8 @@ export function TokenDetailsScreen(): React.JSX.Element {
         showsVerticalScrollIndicator={false}
         contentInsetAdjustmentBehavior="automatic"
         removeClippedSubviews={Platform.OS === 'android'}
+        onScroll={handleTokenDetailsScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={[
           styles.scrollContent,
           {
@@ -1085,9 +1145,11 @@ export function TokenDetailsScreen(): React.JSX.Element {
               <Text variant="bodyBold" color={colors.text.primary} style={styles.sectionTitle}>
                 Recent Activity
               </Text>
-              {tokenActivity.length > 0 ? (
+              {tokenActivityLoading ? (
+                <TokenActivitySkeletonList compact={compact} />
+              ) : visibleTokenActivity.length > 0 ? (
                 <View style={styles.activityList}>
-                  {tokenActivity.map((transaction) => {
+                  {visibleTokenActivity.map((transaction) => {
                     const activityDate = formatActivityDateTime(transaction.detailTimestampMs);
 
                     return (
@@ -1107,13 +1169,6 @@ export function TokenDetailsScreen(): React.JSX.Element {
                       />
                     );
                   })}
-                </View>
-              ) : tokenActivityLoading ? (
-                <View style={styles.emptyActivityCard}>
-                  <LazyLoadingSpinner size={18} color={colors.brand.glossAccent} />
-                  <Text variant="small" color={colors.text.secondary} style={styles.emptyText}>
-                    Loading recent activity…
-                  </Text>
                 </View>
               ) : (
                 <View style={styles.emptyActivityCard}>
@@ -1354,6 +1409,33 @@ const styles = StyleSheet.create({
   },
   activityList: {
     gap: spacing.md,
+  },
+  activitySkeletonRow: {
+    minHeight: 78,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii['2xl'],
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: '0 10px 22px rgba(0, 0, 0, 0.32)',
+  },
+  activitySkeletonRowCompact: {
+    minHeight: 74,
+    gap: spacing.sm,
+  },
+  activitySkeletonText: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
   },
   actionsRow: {
     flexDirection: 'row',

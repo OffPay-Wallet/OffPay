@@ -46,6 +46,7 @@ const HEADER_CONTAINER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const HISTORY_BACKGROUND_PAGE_TARGET = 1;
 const HISTORY_BACKGROUND_PAGE_DELAY_MS = 180;
+const HISTORY_INITIAL_FILL_ROW_TARGET = 8;
 
 export function HistoryScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -75,6 +76,7 @@ export function HistoryScreenContent(): React.JSX.Element {
     // depth on first fetch to include SOL/custom-token rows that can be
     // pushed behind repeated stablecoin activity.
     limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
+    minWarmTransactionRows: HISTORY_INITIAL_FILL_ROW_TARGET,
     refetchOnMount: true,
     requestOwner: 'history.transactions',
     waitForDashboard: false,
@@ -152,11 +154,17 @@ export function HistoryScreenContent(): React.JSX.Element {
   );
 
   const loadedHistoryPages = transactionsQuery.data?.pages.length ?? 0;
+  const loadedHistoryRows = transactionsQuery.transactionViews.length;
   useEffect(() => {
     if (!isFocused) return undefined;
     if (!transactionsQuery.isCapabilityEnabled) return undefined;
     if (backgroundPrefetchInFlightRef.current) return undefined;
-    if (loadedHistoryPages <= 0 || loadedHistoryPages >= HISTORY_BACKGROUND_PAGE_TARGET) {
+    const shouldTopOffInitialFill =
+      loadedHistoryRows > 0 && loadedHistoryRows < HISTORY_INITIAL_FILL_ROW_TARGET;
+    if (
+      loadedHistoryPages <= 0 ||
+      (loadedHistoryPages >= HISTORY_BACKGROUND_PAGE_TARGET && !shouldTopOffInitialFill)
+    ) {
       return undefined;
     }
     if (
@@ -191,6 +199,7 @@ export function HistoryScreenContent(): React.JSX.Element {
     getScreenSignal,
     isFocused,
     loadedHistoryPages,
+    loadedHistoryRows,
     prefetchHistoryPageQuery,
     transactionsQuery.hasNextPage,
     transactionsQuery.isCapabilityEnabled,

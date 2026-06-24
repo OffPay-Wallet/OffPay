@@ -90,6 +90,7 @@ function selectWalletTransactionPages(
 export function useOffpayWalletTransactions(options?: {
   walletAddress?: string | null;
   limit?: number;
+  minWarmTransactionRows?: number;
   deferUntilAfterInteractions?: boolean;
   autoFetchAllPages?: boolean;
   refetchOnMount?: boolean | 'always';
@@ -101,6 +102,7 @@ export function useOffpayWalletTransactions(options?: {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
   const walletAddress = options?.walletAddress ?? activeWalletAddress;
   const limit = options?.limit ?? WALLET_TRANSACTIONS_PAGE_SIZE;
+  const minWarmTransactionRows = options?.minWarmTransactionRows ?? 0;
   const deferUntilAfterInteractions = options?.deferUntilAfterInteractions ?? false;
   const autoFetchAllPages = options?.autoFetchAllPages ?? false;
   const useCache = options?.useCache;
@@ -201,12 +203,29 @@ export function useOffpayWalletTransactions(options?: {
 
     const warmData =
       queryClient.getQueryData<WalletTransactionsInfiniteData>(warmTransactionsQueryKey);
-    const firstPage = warmData?.pages[0];
+    if (warmData == null) return undefined;
 
-    return firstPage?.address === walletAddress && firstPage.network === network
-      ? warmData
-      : undefined;
-  }, [limit, network, queryClient, warmTransactionsQueryKey, walletAddress]);
+    const firstPage = warmData?.pages[0];
+    if (firstPage?.address !== walletAddress || firstPage.network !== network) {
+      return undefined;
+    }
+
+    if (minWarmTransactionRows > 0) {
+      const warmTransactionViews = selectWalletTransactionPages(warmData).transactionViews.length;
+      if (warmTransactionViews < minWarmTransactionRows) {
+        return undefined;
+      }
+    }
+
+    return warmData;
+  }, [
+    limit,
+    minWarmTransactionRows,
+    network,
+    queryClient,
+    warmTransactionsQueryKey,
+    walletAddress,
+  ]);
 
   const query = useInfiniteQuery({
     queryKey: transactionsQueryKey,

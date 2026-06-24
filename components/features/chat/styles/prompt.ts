@@ -4,7 +4,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
-import { PROMPT_ICON_SIZE } from '../constants';
+import { PROMPT_ICON_SIZE, PROMPT_INPUT_ROW_MIN_HEIGHT } from '../constants';
 
 const COMPOSER_SHADOW =
   '0 14px 32px rgba(0, 0, 0, 0.52), inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.35)';
@@ -34,7 +34,7 @@ export const promptStyles = StyleSheet.create({
     boxShadow: COMPOSER_SHADOW,
   },
   promptInputRow: {
-    minHeight: 40,
+    minHeight: PROMPT_INPUT_ROW_MIN_HEIGHT,
     justifyContent: 'center',
     borderRadius: radii.xl,
     borderCurve: 'continuous',
