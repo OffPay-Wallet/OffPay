@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
+import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
 import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { colors } from '@/constants/colors';
@@ -293,6 +294,36 @@ const ClaimPreviewRow = memo(function ClaimPreviewRow({
   );
 });
 
+function ClaimScanSkeleton(): React.JSX.Element {
+  return (
+    <View
+      accessible
+      accessibilityLabel="Scanning pending Umbra claims"
+      style={styles.claimScanState}
+    >
+      <View style={styles.claimScanSkeletonHeader}>
+        <SkeletonBlock width={34} height={34} radius={radii.full} />
+        <View style={styles.claimScanSkeletonText}>
+          <SkeletonBlock width="48%" height={14} radius={radii.full} />
+          <SkeletonBlock width="74%" height={12} radius={radii.full} />
+        </View>
+      </View>
+      <View style={styles.claimScanSkeletonRows}>
+        {[0, 1].map((row) => (
+          <View key={row} style={styles.claimScanSkeletonRow}>
+            <SkeletonBlock width={28} height={28} radius={radii.full} />
+            <View style={styles.claimScanSkeletonText}>
+              <SkeletonBlock width="56%" height={12} radius={radii.full} />
+              <SkeletonBlock width="82%" height={10} radius={radii.full} />
+            </View>
+            <SkeletonBlock width={42} height={22} radius={radii.full} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 const ClaimSection = memo(function ClaimSection({
   status,
   statusTone,
@@ -310,6 +341,7 @@ const ClaimSection = memo(function ClaimSection({
 }: ClaimSectionProps): React.JSX.Element {
   const statusColor = statusToneColor(statusTone);
   const hasPending = pendingCount > 0;
+  const scanning = loading && !hasPending;
   const claimDisabled = (!hasPending && !allowEmptyAction) || disabled;
   const safePendingClaims = pendingClaims ?? EMPTY_PENDING_CLAIMS;
   const visibleClaims = useMemo(
@@ -332,7 +364,7 @@ const ClaimSection = memo(function ClaimSection({
             maxFontSizeMultiplier={1.1}
             style={styles.setupStatusChipText}
           >
-            {hasPending ? `PENDING · ${pendingCount}` : 'PENDING'}
+            {scanning ? 'SCANNING' : hasPending ? `PENDING · ${pendingCount}` : 'PENDING'}
           </Text>
         </View>
 
@@ -361,7 +393,9 @@ const ClaimSection = memo(function ClaimSection({
         ) : null}
       </View>
 
-      {hasPending ? (
+      {scanning ? (
+        <ClaimScanSkeleton />
+      ) : hasPending ? (
         <Text
           variant="small"
           color={colors.text.secondary}
@@ -405,7 +439,7 @@ const ClaimSection = memo(function ClaimSection({
         </View>
       ) : null}
 
-      {status != null && status.length > 0 ? (
+      {!scanning && status != null && status.length > 0 ? (
         <Text
           variant="small"
           color={statusColor}
@@ -732,6 +766,48 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     letterSpacing: -0.2,
     paddingTop: spacing.xs,
+  },
+  claimScanState: {
+    gap: spacing.sm,
+    minHeight: 116,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.lg,
+    borderCurve: 'continuous',
+    backgroundColor: colors.glass.frostFill,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    boxShadow: [
+      'inset 0 1px 1px rgba(255, 255, 255, 0.1)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.2)',
+    ].join(', '),
+  },
+  claimScanSkeletonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  claimScanSkeletonText: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
+  },
+  claimScanSkeletonRows: {
+    gap: spacing.xs,
+  },
+  claimScanSkeletonRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(255, 255, 255, 0.035)',
   },
   claimPreviewList: {
     gap: spacing.xs,

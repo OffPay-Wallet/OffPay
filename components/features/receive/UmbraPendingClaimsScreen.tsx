@@ -276,6 +276,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [utxos, setUtxos] = useState<UmbraPendingClaimUtxo[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [claimingAll, setClaimingAll] = useState(false);
   const [recentClaimSettled, setRecentClaimSettled] = useState(false);
   const scanInFlightRef = useRef(false);
   const visibleUtxos = useMemo(
@@ -505,6 +506,124 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
     ],
   );
 
+  const handleClaimAll = useCallback((): void => {
+    if (walletAddress == null || walletId == null || network == null || !canScan) {
+      showToast({
+        title: 'Umbra unavailable',
+        message: unavailableMessage ?? 'Umbra claims are unavailable.',
+        variant: 'warning',
+      });
+      return;
+    }
+    if (claimingAll || busyId != null || pendingInsertionIndices.length === 0) return;
+
+    setClaimingAll(true);
+    void (async () => {
+      try {
+        const {
+          claimUmbraPrivateP2PToEncryptedBalance,
+          getUmbraClaimScanRangeForInsertionIndices,
+          isBenignAlreadyClaimedFailure,
+        } = await import('@/lib/umbra/umbra-execution');
+
+        try {
+          const result = await claimUmbraPrivateP2PToEncryptedBalance({
+            walletAddress,
+            walletId,
+            network,
+            ...getUmbraClaimScanRangeForInsertionIndices(pendingInsertionIndices),
+            excludedInsertionIndices: claimedIndexSet,
+            pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
+            onUtxoClaimedOnChain: (insertionIndices) => {
+              markUmbraUtxosClaimed({
+                network,
+                walletAddress,
+                insertionIndices,
+              });
+              setUtxos((current) => removeClaimedUtxos(current, insertionIndices));
+              setRecentClaimSettled(true);
+            },
+          });
+          const claimed = result.claimedUtxoCount ?? 0;
+          const claimedIndices = result.claimedUtxoInsertionIndices ?? [];
+          if (claimedIndices.length > 0) {
+            markUmbraUtxosClaimed({
+              network,
+              walletAddress,
+              insertionIndices: claimedIndices,
+            });
+            setUtxos((current) => removeClaimedUtxos(current, claimedIndices));
+            setError(null);
+            setRecentClaimSettled(true);
+          }
+          showToast({
+            title: claimed > 0 ? 'Claims submitted' : 'Already settled',
+            message: result.subtitle,
+            variant: claimed > 0 ? 'success' : 'info',
+          });
+          if (claimed > 0) {
+            const claimSignature = result.primarySignature ?? result.signatures[0] ?? null;
+            void presentUmbraTransactionNotification({
+              identifier: buildUmbraTransactionNotificationIdentifier({
+                network,
+                action: 'claim',
+                signature: claimSignature,
+                fallbackId: claimedIndices.join('-') || `all-${pendingInsertionIndices.length}`,
+              }),
+              action: 'claim',
+              claimedCount: claimed,
+              signature: claimSignature,
+            });
+          }
+          umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
+          void runScan('background');
+        } catch (claimError) {
+          if (isBenignAlreadyClaimedFailure(claimError)) {
+            markUmbraUtxosClaimed({
+              network,
+              walletAddress,
+              insertionIndices: pendingInsertionIndices,
+            });
+            setUtxos((current) => removeClaimedUtxos(current, pendingInsertionIndices));
+            setError(null);
+            setRecentClaimSettled(true);
+            showToast({
+              title: 'Already claimed',
+              message: 'Encrypted balance is up to date.',
+              variant: 'success',
+            });
+            umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
+            void runScan('background');
+          } else {
+            const { getUmbraFriendlyError } = await import('@/lib/umbra/umbra-error-messages');
+            const friendly = getUmbraFriendlyError(claimError, 'claim');
+            showToast({
+              title: friendly.title,
+              message: friendly.message,
+              variant: 'error',
+            });
+          }
+        }
+      } finally {
+        setClaimingAll(false);
+      }
+    })();
+  }, [
+    busyId,
+    canScan,
+    claimedIndexSet,
+    claimingAll,
+    markUmbraUtxosClaimed,
+    network,
+    pendingInsertionIndices,
+    runScan,
+    showToast,
+    umbraCacheInvalidator,
+    unavailableMessage,
+    walletAddress,
+    walletId,
+  ]);
+
   const handleCopyId = useCallback(
     async (utxo: UmbraPendingClaimUtxo): Promise<void> => {
       await Clipboard.setStringAsync(utxo.id);
@@ -538,12 +657,12 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
       <ClaimRow
         utxo={item}
         busy={busyId === item.id}
-        disabled={busyId != null && busyId !== item.id}
+        disabled={claimingAll || (busyId != null && busyId !== item.id)}
         onClaim={handleClaim}
         onCopyId={handleCopyIdPress}
       />
     ),
-    [busyId, handleClaim, handleCopyIdPress],
+    [busyId, claimingAll, handleClaim, handleCopyIdPress],
   );
   const keyExtractor = useCallback((item: UmbraPendingClaimUtxo) => item.id, []);
 
@@ -567,62 +686,125 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
         ItemSeparatorComponent={ClaimRowSeparator}
         drawDistance={CLAIM_ROW_ESTIMATED_HEIGHT * 2}
         ListHeaderComponent={
-          <View style={styles.header}>
-            <Pressable
-              style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
-              onPress={handleBack}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-            >
-              <View
-                style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}
+          <View style={styles.listHeader}>
+            <View style={styles.header}>
+              <Pressable
+                style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
+                onPress={handleBack}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
               >
-                <Ionicons
-                  name="chevron-back"
-                  size={layout.iconSizeNav}
-                  color={colors.text.primary}
-                />
-              </View>
-            </Pressable>
-            <Text
-              variant="h2"
-              color={colors.text.inverse}
-              align="center"
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.86}
-              maxFontSizeMultiplier={1}
-              style={styles.headerTitle}
-            >
-              Pending Claims
-            </Text>
-            <Pressable
-              style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
-              onPress={() => void runScan('refresh')}
-              disabled={!canScan || refreshing || scanning || deepScanning}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel="Refresh pending claims"
-              accessibilityState={{
-                busy: refreshing,
-                disabled: !canScan || refreshing || scanning || deepScanning,
-              }}
-            >
-              <View
-                style={[{ backgroundColor: colors.surface.cardElevated }, styles.headerIconSurface]}
-              >
-                {refreshing ? (
-                  <LazyLoadingSpinner size={18} color={colors.text.primary} />
-                ) : (
+                <View
+                  style={[
+                    { backgroundColor: colors.surface.cardElevated },
+                    styles.headerIconSurface,
+                  ]}
+                >
                   <Ionicons
-                    name="refresh"
-                    size={layout.iconSizeInline}
+                    name="chevron-back"
+                    size={layout.iconSizeNav}
                     color={colors.text.primary}
                   />
-                )}
+                </View>
+              </Pressable>
+              <Text
+                variant="h2"
+                color={colors.text.inverse}
+                align="center"
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.86}
+                maxFontSizeMultiplier={1}
+                style={styles.headerTitle}
+              >
+                Pending Claims
+              </Text>
+              <Pressable
+                style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
+                onPress={() => void runScan('refresh')}
+                disabled={!canScan || refreshing || scanning || deepScanning || claimingAll}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Refresh pending claims"
+                accessibilityState={{
+                  busy: refreshing,
+                  disabled: !canScan || refreshing || scanning || deepScanning || claimingAll,
+                }}
+              >
+                <View
+                  style={[
+                    { backgroundColor: colors.surface.cardElevated },
+                    styles.headerIconSurface,
+                  ]}
+                >
+                  {refreshing ? (
+                    <LazyLoadingSpinner size={18} color={colors.text.primary} />
+                  ) : (
+                    <Ionicons
+                      name="refresh"
+                      size={layout.iconSizeInline}
+                      color={colors.text.primary}
+                    />
+                  )}
+                </View>
+              </Pressable>
+            </View>
+
+            {visibleUtxos.length > 0 ? (
+              <View style={styles.claimAllCard}>
+                <View style={styles.claimAllTextBlock}>
+                  <Text
+                    variant="bodyBold"
+                    color={colors.text.primary}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1.05}
+                    style={styles.claimAllTitle}
+                  >
+                    {visibleUtxos.length} pending claim{visibleUtxos.length === 1 ? '' : 's'}
+                  </Text>
+                  <Text
+                    variant="small"
+                    color={colors.text.secondary}
+                    numberOfLines={2}
+                    maxFontSizeMultiplier={1}
+                    style={styles.statusText}
+                  >
+                    Move every pending UTXO into encrypted balance.
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Claim all pending Umbra private payments"
+                  accessibilityState={{
+                    busy: claimingAll,
+                    disabled: !canScan || claimingAll || busyId != null,
+                  }}
+                  disabled={!canScan || claimingAll || busyId != null}
+                  onPress={handleClaimAll}
+                  style={({ pressed }) => [
+                    styles.claimAllButton,
+                    (!canScan || busyId != null) && !claimingAll && styles.claimAllButtonDisabled,
+                    pressed && canScan && !claimingAll && busyId == null ? styles.pressed : null,
+                  ]}
+                >
+                  {claimingAll ? (
+                    <LazyLoadingSpinner size={18} color={colors.text.inverse} />
+                  ) : null}
+                  <Text
+                    variant="button"
+                    color={colors.text.inverse}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
+                    maxFontSizeMultiplier={1}
+                    style={styles.claimAllButtonText}
+                  >
+                    {claimingAll ? 'Claiming' : 'Claim all'}
+                  </Text>
+                </Pressable>
               </View>
-            </Pressable>
+            ) : null}
           </View>
         }
         ListEmptyComponent={
@@ -713,11 +895,11 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Deep scan for older private payments"
-                disabled={!canScan || deepScanning || scanning || refreshing}
+                disabled={!canScan || deepScanning || scanning || refreshing || claimingAll}
                 onPress={() => void runScan('deep')}
                 style={({ pressed }) => [
                   styles.deepScanButton,
-                  (!canScan || (!deepScanning && (scanning || refreshing))) &&
+                  (!canScan || (!deepScanning && (scanning || refreshing || claimingAll))) &&
                     styles.deepScanButtonDisabled,
                   pressed && styles.pressed,
                 ]}
@@ -754,11 +936,14 @@ const styles = StyleSheet.create({
   scrollContentCentered: {
     justifyContent: 'flex-start',
   },
+  listHeader: {
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
   },
   headerIconBtn: {
     width: layout.minTouchTarget + spacing.xs,
@@ -817,6 +1002,45 @@ const styles = StyleSheet.create({
   },
   statusText: {
     maxWidth: 320,
+  },
+  claimAllCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    ...ROW_BORDER,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: `0 12px 28px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
+  },
+  claimAllTextBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
+  },
+  claimAllTitle: {
+    fontFamily: fontFamily.semiBold,
+  },
+  claimAllButton: {
+    minHeight: 40,
+    minWidth: 116,
+    borderRadius: radii.full,
+    backgroundColor: colors.brand.actionFill,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    flexShrink: 0,
+  },
+  claimAllButtonDisabled: {
+    opacity: 0.5,
+  },
+  claimAllButtonText: {
+    fontFamily: fontFamily.semiBold,
   },
   claimRowSeparator: {
     height: spacing.md,

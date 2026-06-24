@@ -738,7 +738,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     const scheduled = scheduleUiWorkAfterFirstPaint(
       async () => {
         await yieldToUi();
-        scanLatestRef.current({ pageLimit: UMBRA_INLINE_AUTO_SCAN_PAGE_LIMIT, silent: true });
+        scanLatestRef.current({ pageLimit: UMBRA_INLINE_AUTO_SCAN_PAGE_LIMIT });
       },
       { fallbackDelayMs: UMBRA_AUTO_SCAN_DELAY_MS, timeoutMs: UMBRA_AUTO_SCAN_TIMEOUT_MS },
     );
@@ -1297,7 +1297,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                         : 'Check pending',
                   loadingLabel: pendingClaimCount > 0 ? 'Claiming' : 'Checking',
                   onPress:
-                    pendingClaimCount > 0 ? handleClaimUmbraPayments : scanUmbraPendingClaims,
+                    pendingClaimCount > 0
+                      ? handleClaimUmbraPayments
+                      : () => scanUmbraPendingClaims(),
                   onViewAllPress: handleViewAllPendingClaims,
                   allowEmptyAction: true,
                   disabled: !canUseUmbraClaim || claimingUmbra || scanningUmbraClaims,
