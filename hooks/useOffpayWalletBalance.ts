@@ -13,6 +13,7 @@ import {
   offpayWalletBalanceQueryKey,
   offpayWalletDashboardBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { shouldWaitForDashboardData } from '@/lib/api/offpay-home-loading-gates';
 import { observeOfflineTokenMetadataFromWalletBalance } from '@/lib/offline/offline-token-metadata';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -26,6 +27,7 @@ interface UseOffpayWalletBalanceOptions {
   eagerWithoutCapabilities?: boolean;
   enabled?: boolean;
   requestOwner?: string;
+  waitForDashboard?: boolean;
 }
 
 export function useOffpayWalletBalance(
@@ -37,10 +39,12 @@ export function useOffpayWalletBalance(
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
   const enabledByCaller = options?.enabled ?? true;
+  const waitForDashboard = options?.waitForDashboard ?? true;
   const dashboardFetching =
     useIsFetching({
       queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
     }) > 0;
+  const dashboardPending = shouldWaitForDashboardData({ waitForDashboard, dashboardFetching });
   const capabilitiesQuery = useOffpayCapabilities({
     deferUntilAfterInteractions: options?.deferCapabilitiesUntilAfterInteractions,
     enabled: enabledByCaller,
@@ -66,7 +70,7 @@ export function useOffpayWalletBalance(
     walletAddress != null &&
     network != null &&
     canUseNetwork &&
-    !dashboardFetching &&
+    !dashboardPending &&
     (capabilityAvailable ||
       (options?.eagerWithoutCapabilities === true &&
         capabilities == null &&
@@ -111,7 +115,7 @@ export function useOffpayWalletBalance(
     network,
     capability,
     isCapabilitiesPending:
-      canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardFetching),
+      canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardPending),
     isCapabilityEnabled: capabilityAvailable || enabled,
   };
 }

@@ -15,6 +15,7 @@ import {
   offpayWalletTransactionsQueryKey,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { shouldWaitForDashboardData } from '@/lib/api/offpay-home-loading-gates';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import {
   mergeWalletTransactionsWithDisplayCache,
@@ -118,6 +119,7 @@ export function useOffpayWalletTransactions(options?: {
     useIsFetching({
       queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
     }) > 0;
+  const dashboardPending = shouldWaitForDashboardData({ waitForDashboard, dashboardFetching });
   const capabilitiesQuery = useOffpayCapabilities({
     enabled: enabledByCaller,
     requestOwner: `${requestOwner}.capabilities`,
@@ -163,8 +165,7 @@ export function useOffpayWalletTransactions(options?: {
   );
   const canRequestTransactions =
     walletAddress != null && network != null && canUseNetwork && transactionsFeatureAvailable;
-  const canFetchTransactions =
-    canRequestTransactions && enabledByCaller && (!waitForDashboard || !dashboardFetching);
+  const canFetchTransactions = canRequestTransactions && enabledByCaller && !dashboardPending;
   const enabled = canFetchTransactions && interactionsSettled;
 
   useEffect(() => {
@@ -431,7 +432,7 @@ export function useOffpayWalletTransactions(options?: {
     !query.isError &&
     transactions.length === 0 &&
     (capabilitiesQuery.isCapabilitiesPending ||
-      dashboardFetching ||
+      dashboardPending ||
       (transactionsFeatureAvailable &&
         (!interactionsSettled || query.isLoading || query.isFetching || freshRefetching)));
 
@@ -448,7 +449,7 @@ export function useOffpayWalletTransactions(options?: {
     refetchFresh,
     isInitialDataPending,
     isCapabilitiesPending:
-      canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardFetching),
+      canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardPending),
     isCapabilityEnabled: canRequestTransactions,
   };
 }

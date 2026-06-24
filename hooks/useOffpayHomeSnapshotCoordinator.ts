@@ -11,6 +11,11 @@ import {
   offpayWalletDashboardQueryKey,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
+import {
+  shouldOpenHomeSnapshotFallbackGate,
+  type HomeDisplayCacheStatus,
+  type HomeFallbackDeadlineStatus,
+} from '@/lib/api/offpay-home-loading-gates';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import {
@@ -23,9 +28,6 @@ import type { OffpayNetwork, WalletDashboardResponse } from '@/types/offpay-api'
 const HOME_SNAPSHOT_FALLBACK_DELAY_MS = 450;
 const HOME_SNAPSHOT_IDLE_DELAY_MS = 900;
 const HOME_SNAPSHOT_GC_TIME_MS = 1000 * 60 * 30;
-
-type DisplayCacheStatus = 'idle' | 'pending' | 'hit' | 'miss';
-type FallbackDeadlineStatus = 'idle' | 'pending' | 'elapsed';
 
 interface UseOffpayHomeSnapshotCoordinatorParams {
   walletAddress: string | null;
@@ -40,9 +42,9 @@ export function useOffpayHomeSnapshotCoordinator({
 }: UseOffpayHomeSnapshotCoordinatorParams) {
   const queryClient = useQueryClient();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
-  const [displayCacheStatus, setDisplayCacheStatus] = useState<DisplayCacheStatus>('idle');
+  const [displayCacheStatus, setDisplayCacheStatus] = useState<HomeDisplayCacheStatus>('idle');
   const [fallbackDeadlineStatus, setFallbackDeadlineStatus] =
-    useState<FallbackDeadlineStatus>('idle');
+    useState<HomeFallbackDeadlineStatus>('idle');
   const [fallbackGateOpen, setFallbackGateOpen] = useState(false);
   const [idleGateOpen, setIdleGateOpen] = useState(false);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -181,15 +183,19 @@ export function useOffpayHomeSnapshotCoordinator({
   }, [dashboardQuery.data, queryClient]);
 
   useEffect(() => {
-    if (!canCoordinate || !canUseNetwork || isNetworkAccessSuspended) return;
-    if (fallbackGateOpen || dashboardQuery.data != null) return;
-    if (fallbackDeadlineStatus !== 'elapsed') return;
-
-    // If the display cache hits, Home already has a coherent first
-    // snapshot. Keep waiting for the aggregate dashboard instead of
-    // starting direct balance/history fallbacks that will be replaced
-    // by the dashboard response moments later.
-    if (displayCacheStatus === 'hit' || displayCacheStatus === 'pending') return;
+    if (
+      !shouldOpenHomeSnapshotFallbackGate({
+        canCoordinate,
+        canUseNetwork,
+        isNetworkAccessSuspended,
+        fallbackGateOpen,
+        hasDashboardData: dashboardQuery.data != null,
+        displayCacheStatus,
+        fallbackDeadlineStatus,
+      })
+    ) {
+      return;
+    }
 
     setFallbackGateOpen(true);
   }, [

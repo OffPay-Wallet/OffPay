@@ -9,7 +9,6 @@
 import { spacing } from '@/constants/spacing';
 
 export const HEADER_BUTTON_SIZE = 44;
-export const PROMPT_HEIGHT = 56;
 export const PROMPT_ICON_SIZE = 40;
 export const PROMPT_INPUT_ROW_MIN_HEIGHT = 40;
 export const PROMPT_DOCK_COLLAPSED_BASE_HEIGHT =

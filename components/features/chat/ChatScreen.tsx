@@ -52,7 +52,7 @@ import { ChatHistoryDrawer } from './ChatHistoryDrawer';
 import { ChatCtaCards } from './ChatCtaCards';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatPromptDock } from './ChatPromptDock';
-import { CHAT_DRAWER_MAX_WIDTH, PROMPT_HEIGHT } from './constants';
+import { CHAT_DRAWER_MAX_WIDTH, PROMPT_DOCK_COLLAPSED_BASE_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
 import { PayrollChatController } from '@/components/features/payroll/PayrollChatController';
 import { PayrollColumnMapSheet } from '@/components/features/payroll/PayrollColumnMapSheet';
@@ -119,7 +119,9 @@ export function ChatScreen(): React.JSX.Element {
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const [payrollPasteOpen, setPayrollPasteOpen] = useState(false);
   const [keyboardFrame, setKeyboardFrame] = useState<{ screenY: number } | null>(null);
-  const [promptDockHeight, setPromptDockHeight] = useState(PROMPT_HEIGHT);
+  const initialPromptDockHeight =
+    PROMPT_DOCK_COLLAPSED_BASE_HEIGHT + Math.max(insets.bottom, spacing.lg);
+  const [promptDockHeight, setPromptDockHeight] = useState(initialPromptDockHeight);
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(
     null,
   );
@@ -143,9 +145,13 @@ export function ChatScreen(): React.JSX.Element {
     return Math.max(0, windowHeight - keyboardFrame.screenY);
   }, [keyboardFrame, windowHeight]);
   const promptBottomInset = keyboardFrame == null ? insets.bottom : spacing.xs;
+  const reservedPromptDockHeight = Math.max(
+    promptDockHeight,
+    PROMPT_DOCK_COLLAPSED_BASE_HEIGHT + Math.max(promptBottomInset, spacing.lg),
+  );
   // The composer is an overlay so the empty-state layout stays stable. Use the
   // measured dock height so multiline input and voice states never cover replies.
-  const bottomPadding = keyboardOffset + promptDockHeight + spacing['2xl'];
+  const bottomPadding = keyboardOffset + reservedPromptDockHeight + spacing['2xl'];
 
   const activeConversationId = useAgenticChatStore(
     (s) => s.activeConversationIdByScope[scopeKey] ?? null,
@@ -337,6 +343,7 @@ export function ChatScreen(): React.JSX.Element {
     activePayrollRunId != null &&
     showActivePayrollCard &&
     !payrollActionRunIds.has(activePayrollRunId);
+  const hasScrollableConversationContent = scopedMessages.length > 0 || activePayrollRunId != null;
 
   const addPayrollAssistantMessage = useCallback(
     async (
@@ -488,12 +495,12 @@ export function ChatScreen(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (keyboardFrame == null) return;
+    if (keyboardFrame == null || !hasScrollableConversationContent) return;
     const frame = requestAnimationFrame(() => {
       scrollRef.current?.scrollToEnd({ animated: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [keyboardFrame, keyboardOffset]);
+  }, [hasScrollableConversationContent, keyboardFrame, keyboardOffset]);
 
   useEffect(() => {
     if (scopedMessages.length === 0) return;
@@ -649,6 +656,10 @@ export function ChatScreen(): React.JSX.Element {
       Math.abs(currentHeight - nextHeight) > 1 ? nextHeight : currentHeight,
     );
   }, []);
+  const handleContentSizeChange = useCallback(() => {
+    if (!hasScrollableConversationContent) return;
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [hasScrollableConversationContent]);
 
   return (
     <View style={headerStyles.container}>
@@ -670,7 +681,7 @@ export function ChatScreen(): React.JSX.Element {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
-          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={handleContentSizeChange}
         >
           <View style={headerStyles.welcomeRow}>
             <View

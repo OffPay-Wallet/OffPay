@@ -302,6 +302,7 @@ export function HomeScreenContent(): React.JSX.Element {
     // foreground gate.
     eagerWithoutCapabilities: true,
     requestOwner: 'home.balance.fallback',
+    waitForDashboard: false,
   });
   const offlinePaymentSlots = useOfflinePaymentSlots({
     enabled: homeDataReady,
@@ -311,6 +312,7 @@ export function HomeScreenContent(): React.JSX.Element {
   });
   const transactionsQuery = useOffpayWalletTransactions({
     enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
+    waitForDashboard: false,
     refetchOnMount: false,
     requestOwner: 'home.transactions.fallback',
   });
