@@ -58,7 +58,7 @@ import {
   walletHistoryTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
@@ -787,10 +787,16 @@ function TokenActivitySkeletonRow({ compact }: { compact: boolean }): React.JSX.
   );
 }
 
-function TokenActivitySkeletonList({ compact }: { compact: boolean }): React.JSX.Element {
+function TokenActivitySkeletonList({
+  compact,
+  rowCount = TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
+}: {
+  compact: boolean;
+  rowCount?: number;
+}): React.JSX.Element {
   return (
     <View style={styles.activityList}>
-      {Array.from({ length: TOKEN_ACTIVITY_INITIAL_FILL_ROWS }, (_, index) => (
+      {Array.from({ length: rowCount }, (_, index) => (
         <TokenActivitySkeletonRow key={`token-activity-skeleton-${index}`} compact={compact} />
       ))}
     </View>
@@ -883,9 +889,11 @@ export function TokenDetailsScreen(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
     enabled: requestedMint != null,
-    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
+    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
+    allowPartialWarmData: true,
     refetchOnMount: true,
+    retry: false,
     requestOwner: 'tokenDetails.walletHistory',
     waitForDashboard: false,
   });
@@ -919,7 +927,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
   );
   const shouldBackfillTokenTransactions =
     holding != null &&
-    walletHistoryActivity.length === 0 &&
+    walletHistoryActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
     !walletHistoryQuery.isInitialDataPending &&
     !walletHistoryQuery.isFetching;
   const tokenTransactionsQuery = useOffpayWalletTokenTransactions({
@@ -927,6 +935,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     deferUntilAfterInteractions: true,
     limit: MAX_TOKEN_ACTIVITY_ROWS,
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
+    allowPartialWarmData: true,
     refetchOnMount: false,
     enabled: shouldBackfillTokenTransactions,
     requestOwner: 'tokenDetails.transactions.backfill',
@@ -950,17 +959,24 @@ export function TokenDetailsScreen(): React.JSX.Element {
     ],
   );
   const tokenActivity =
-    walletHistoryActivity.length > 0 ? walletHistoryActivity : tokenEndpointActivity;
+    tokenEndpointActivity.length > walletHistoryActivity.length
+      ? tokenEndpointActivity
+      : walletHistoryActivity;
+  const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsQuery.isFetching;
   const tokenActivityWarmFillPending =
-    walletHistoryActivity.length > 0 &&
-    walletHistoryActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
-    walletHistoryQuery.isFetching;
+    tokenActivity.length > 0 &&
+    tokenActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
+    tokenActivityFetching;
   const visibleTokenActivity = tokenActivity.slice(0, visibleTokenActivityLimit);
+  const tokenActivityTopOffRowCount = Math.max(
+    1,
+    Math.min(4, TOKEN_ACTIVITY_INITIAL_FILL_ROWS - visibleTokenActivity.length),
+  );
   const tokenActivityLoading =
-    tokenActivityWarmFillPending ||
-    (tokenActivity.length === 0 &&
-      (walletHistoryQuery.isInitialDataPending ||
-        (walletHistoryQuery.isFetching && walletHistoryQuery.transactions.length === 0)));
+    tokenActivity.length === 0 &&
+    (walletHistoryQuery.isInitialDataPending ||
+      tokenTransactionsQuery.isInitialDataPending ||
+      (tokenActivityFetching && walletHistoryQuery.transactions.length === 0));
 
   useEffect(() => {
     setVisibleTokenActivityLimit(TOKEN_ACTIVITY_INITIAL_FILL_ROWS);
@@ -1037,8 +1053,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
       if (visibleTokenActivityLimit >= tokenActivity.length) return;
 
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-      const distanceFromBottom =
-        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
       if (distanceFromBottom > TOKEN_ACTIVITY_SCROLL_PREFETCH_PX) return;
 
       setVisibleTokenActivityLimit((currentLimit) =>
@@ -1169,6 +1184,12 @@ export function TokenDetailsScreen(): React.JSX.Element {
                       />
                     );
                   })}
+                  {tokenActivityWarmFillPending ? (
+                    <TokenActivitySkeletonList
+                      compact={compact}
+                      rowCount={tokenActivityTopOffRowCount}
+                    />
+                  ) : null}
                 </View>
               ) : (
                 <View style={styles.emptyActivityCard}>

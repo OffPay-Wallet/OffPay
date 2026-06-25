@@ -111,4 +111,70 @@ describe('hydrateOffpayWalletDashboard', () => {
       queryClient.clear();
     }
   });
+
+  it('skips dashboard transactions when an existing page is fresher', () => {
+    const queryClient = new QueryClient();
+    try {
+      const dashboard = createDashboard();
+      const fresherTransactions: WalletTransactionsResponse = {
+        ...dashboard.transactions,
+        fetchedAt: dashboard.transactions.fetchedAt + 100,
+        transactions: [
+          {
+            signature: 'fresh-fallback',
+            timestamp: 1,
+            type: 'TRANSFER',
+            description: 'Fresh fallback row',
+            fee: 0,
+            status: 'success',
+            counterparties: [],
+          },
+        ],
+      };
+      queryClient.setQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+        offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        { pages: [fresherTransactions], pageParams: [undefined] },
+        { updatedAt: fresherTransactions.fetchedAt },
+      );
+
+      hydrateOffpayWalletDashboard({ queryClient, dashboard, limit: 20 });
+
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        )?.pages[0],
+      ).toBe(fresherTransactions);
+      expect(queryClient.getQueryData(offpayWalletBalanceQueryKey(WALLET, 'devnet'))).toBe(
+        dashboard.balance,
+      );
+    } finally {
+      queryClient.clear();
+    }
+  });
+
+  it('writes dashboard transactions when they are equal or newer', () => {
+    const queryClient = new QueryClient();
+    try {
+      const dashboard = createDashboard();
+      const staleTransactions: WalletTransactionsResponse = {
+        ...dashboard.transactions,
+        fetchedAt: dashboard.transactions.fetchedAt - 1,
+      };
+      queryClient.setQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+        offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        { pages: [staleTransactions], pageParams: [undefined] },
+        { updatedAt: staleTransactions.fetchedAt },
+      );
+
+      hydrateOffpayWalletDashboard({ queryClient, dashboard, limit: 20 });
+
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        )?.pages[0],
+      ).toEqual(dashboard.transactions);
+    } finally {
+      queryClient.clear();
+    }
+  });
 });

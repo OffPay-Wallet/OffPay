@@ -10,6 +10,7 @@ import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { buildWalletHistoryGroups } from '@/lib/api/offpay-wallet-data';
 import { TransactionCard } from './TransactionCard';
+import { getHistoryLoadingState } from './history-loading-state';
 
 import type {
   OffpayHistoryTransactionGroup,
@@ -35,6 +36,7 @@ const HISTORY_MIN_SKELETON_ROWS = 7;
 const HISTORY_MAX_SKELETON_ROWS = 10;
 const HISTORY_RENDER_AHEAD_MIN_PX = 900;
 const HISTORY_VISIBLE_FILL_TARGET = 8;
+const HISTORY_MAX_WARM_TOP_OFF_ROWS = 4;
 const EMPTY_HISTORY_ROWS: HistoryRow[] = [];
 
 interface HistoryListProps {
@@ -160,6 +162,24 @@ const HistorySkeletonPanel = React.memo(function HistorySkeletonPanel({
   );
 });
 
+const HistoryTopOffSkeleton = React.memo(function HistoryTopOffSkeleton({
+  compact,
+  contentFrameWidth,
+  rowCount,
+}: {
+  compact: boolean;
+  contentFrameWidth: number;
+  rowCount: number;
+}): React.JSX.Element {
+  return (
+    <View style={[styles.contentFrame, styles.topOffSkeleton, { width: contentFrameWidth }]}>
+      {Array.from({ length: rowCount }, (_, index) => (
+        <HistorySkeletonRow key={`history-topoff-skeleton-${index}`} compact={compact} />
+      ))}
+    </View>
+  );
+});
+
 export function HistoryList({
   transactionsQuery,
   localReceipts = [],
@@ -200,17 +220,16 @@ export function HistoryList({
     HISTORY_MAX_SKELETON_ROWS,
     Math.max(HISTORY_MIN_SKELETON_ROWS, Math.ceil(windowHeight / HISTORY_ROW_ESTIMATED_HEIGHT)),
   );
-  const renderAheadDistance = Math.max(
-    HISTORY_RENDER_AHEAD_MIN_PX,
-    Math.round(windowHeight * 1.4),
-  );
-  const showSparseWarmLoader =
-    historyItemRowCount > 0 &&
-    historyItemRowCount < HISTORY_VISIBLE_FILL_TARGET &&
-    transactionsQuery.isFetching &&
-    !transactionsQuery.isFetchingNextPage;
-  const showInitialLoader =
-    (rows.length === 0 && transactionsQuery.isInitialDataPending) || showSparseWarmLoader;
+  const renderAheadDistance = Math.max(HISTORY_RENDER_AHEAD_MIN_PX, Math.round(windowHeight * 1.4));
+  const { showInitialLoader, showWarmTopOffLoader, warmTopOffRowCount } = getHistoryLoadingState({
+    rowCount: rows.length,
+    itemRowCount: historyItemRowCount,
+    isInitialDataPending: transactionsQuery.isInitialDataPending,
+    isFetching: transactionsQuery.isFetching,
+    isFetchingNextPage: transactionsQuery.isFetchingNextPage,
+    visibleFillTarget: HISTORY_VISIBLE_FILL_TARGET,
+    maxWarmTopOffRows: HISTORY_MAX_WARM_TOP_OFF_ROWS,
+  });
   const emptyMessage = transactionsQuery.isCapabilityEnabled
     ? transactionsQuery.isError
       ? getQueryErrorMessage(transactionsQuery.error, 'Unable to load transaction history.')
@@ -319,6 +338,15 @@ export function HistoryList({
   );
 
   const ListFooter = useMemo(() => {
+    if (showWarmTopOffLoader) {
+      return (
+        <HistoryTopOffSkeleton
+          compact={compact}
+          contentFrameWidth={contentFrameWidth}
+          rowCount={warmTopOffRowCount}
+        />
+      );
+    }
     if (transactionsQuery.isFetchingNextPage) {
       return <View style={styles.footerSpacer} />;
     }
@@ -353,11 +381,14 @@ export function HistoryList({
     // does not invalidate every parent re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    compact,
     contentFrameWidth,
+    showWarmTopOffLoader,
     transactionsQuery.fetchNextPage,
     transactionsQuery.hasNextPage,
     transactionsQuery.isCapabilityEnabled,
     transactionsQuery.isFetchingNextPage,
+    warmTopOffRowCount,
   ]);
 
   return (
@@ -395,6 +426,10 @@ const styles = StyleSheet.create({
   skeletonDate: {
     marginLeft: spacing.xs,
     marginBottom: spacing.xs,
+  },
+  topOffSkeleton: {
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
   },
   skeletonRow: {
     minHeight: 78,

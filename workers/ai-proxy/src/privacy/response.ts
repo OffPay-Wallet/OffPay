@@ -10,16 +10,14 @@ const ALLOWED_INTENTS = new Set<AgentIntentName>([
   'unsupported',
   'intent_parse_error',
 ]);
-const ALLOWED_ROUTES = new Set<AgentIntentRoute>([
-  'normal',
-  'private',
-  'magicblock',
-  'unknown',
-]);
+const ALLOWED_ROUTES = new Set<AgentIntentRoute>(['normal', 'private', 'magicblock', 'unknown']);
 
 export function sanitizeProviderText(text: string): string {
   return text
-    .replace(/(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,88}(?![1-9A-HJ-NP-Za-km-z])/g, '[wallet reference]')
+    .replace(
+      /(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,88}(?![1-9A-HJ-NP-Za-km-z])/g,
+      '[wallet reference]',
+    )
     .replace(/\b\d+\.\d{7,}\b/g, '[exact amount]')
     .replace(/\s+/g, ' ')
     .trim()
@@ -28,7 +26,11 @@ export function sanitizeProviderText(text: string): string {
 
 export function parseIntentResult(text: string): AgentIntentResult {
   const parsed = parseJsonObject(text);
-  const candidate = isRecord(parsed) ? parsed : {};
+  if (!isRecord(parsed)) {
+    throw new Error('Provider returned invalid intent JSON.');
+  }
+
+  const candidate = parsed;
   const intent = normalizeIntent(candidate.intent);
 
   return {
@@ -41,22 +43,6 @@ export function parseIntentResult(text: string): AgentIntentResult {
     clarification: stringField(candidate.clarification),
     message: stringField(candidate.message),
     confidence: numberField(candidate.confidence),
-  };
-}
-
-export function fallbackIntent(message: string): AgentIntentResult {
-  return {
-    kind: 'intent_result',
-    intent: 'intent_parse_error',
-    clarification: sanitizeProviderText(message),
-    confidence: 0,
-  };
-}
-
-export function fallbackAgentTurn(): import('../types').AgentTurn {
-  return {
-    kind: 'agent_text',
-    text: 'I had trouble talking to the model just now. Try again in a sec.',
   };
 }
 

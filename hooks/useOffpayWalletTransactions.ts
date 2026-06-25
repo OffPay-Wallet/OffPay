@@ -18,6 +18,7 @@ import {
 import { shouldWaitForDashboardData } from '@/lib/api/offpay-home-loading-gates';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import {
+  hydrateWalletDisplayCacheIntoQueryClient,
   mergeWalletTransactionsWithDisplayCache,
   writeWalletDisplayCacheSlice,
 } from '@/lib/wallet/wallet-display-cache';
@@ -38,6 +39,7 @@ import type {
 // silently stall, focus / reconnect refetches still kick in.
 const TRANSACTION_STALE_TIME_MS = 1000 * 60 * 2;
 const TRANSACTION_GC_TIME_MS = 1000 * 60 * 30;
+const TRANSACTION_REQUEST_TIMEOUT_MS = 25_000;
 
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_PAGES: WalletTransactionsResponse[] = [];
@@ -99,6 +101,10 @@ export function useOffpayWalletTransactions(options?: {
   enabled?: boolean;
   requestOwner?: string;
   waitForDashboard?: boolean;
+  timeoutMs?: number;
+  hydrateDisplayCacheOnMount?: boolean;
+  allowPartialWarmData?: boolean;
+  retry?: false | number;
 }) {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
   const walletAddress = options?.walletAddress ?? activeWalletAddress;
@@ -110,8 +116,12 @@ export function useOffpayWalletTransactions(options?: {
   const enabledByCaller = options?.enabled ?? true;
   const requestOwner = options?.requestOwner ?? 'wallet.transactions';
   const waitForDashboard = options?.waitForDashboard ?? true;
+  const timeoutMs = options?.timeoutMs ?? TRANSACTION_REQUEST_TIMEOUT_MS;
+  const hydrateDisplayCacheOnMount = options?.hydrateDisplayCacheOnMount ?? false;
+  const allowPartialWarmData = options?.allowPartialWarmData ?? false;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const [freshRefetching, setFreshRefetching] = useState(false);
+  const [displayCacheHydrationVersion, setDisplayCacheHydrationVersion] = useState(0);
   const freshRefetchingRef = useRef(false);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
@@ -195,6 +205,52 @@ export function useOffpayWalletTransactions(options?: {
     };
   }, [deferUntilAfterInteractions, enabledByCaller, limit, network, walletAddress]);
 
+  // Cold-start paint accelerator. Deep-history screens request a large
+  // first page (`WALLET_DEEP_HISTORY_PAGE_SIZE`) whose enrichment can take
+  // many seconds on a release build over cellular, so without warm data
+  // the screen shows a skeleton the whole time. Pulling the persisted
+  // display cache into the shallow warm key lets `getWarmInitialTransactionsData`
+  // paint cached rows immediately while the deep network page loads in the
+  // background. Mirrors `useOffpayWalletTokenTransactions`. Best-effort:
+  // a miss or read failure just falls back to the network-only path.
+  useEffect(() => {
+    if (
+      !hydrateDisplayCacheOnMount ||
+      !enabledByCaller ||
+      walletAddress == null ||
+      network == null
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let transactionHydrationNotified = false;
+    void hydrateWalletDisplayCacheIntoQueryClient({
+      queryClient,
+      walletAddress,
+      network,
+      options: {
+        includeBalance: false,
+        includeTransactions: true,
+        includePendingBackupStats: false,
+        onTransactionsHydrated: () => {
+          if (cancelled) return;
+          transactionHydrationNotified = true;
+          setDisplayCacheHydrationVersion((version) => version + 1);
+        },
+      },
+    })
+      .catch(() => false)
+      .finally(() => {
+        if (cancelled || transactionHydrationNotified) return;
+        setDisplayCacheHydrationVersion((version) => version + 1);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabledByCaller, hydrateDisplayCacheOnMount, network, queryClient, walletAddress]);
+
   const getWarmInitialTransactionsData = useCallback(():
     | WalletTransactionsInfiniteData
     | undefined => {
@@ -211,7 +267,7 @@ export function useOffpayWalletTransactions(options?: {
       return undefined;
     }
 
-    if (minWarmTransactionRows > 0) {
+    if (!allowPartialWarmData && minWarmTransactionRows > 0) {
       const warmTransactionViews = selectWalletTransactionPages(warmData).transactionViews.length;
       if (warmTransactionViews < minWarmTransactionRows) {
         return undefined;
@@ -220,6 +276,8 @@ export function useOffpayWalletTransactions(options?: {
 
     return warmData;
   }, [
+    displayCacheHydrationVersion,
+    allowPartialWarmData,
     limit,
     minWarmTransactionRows,
     network,
@@ -240,6 +298,7 @@ export function useOffpayWalletTransactions(options?: {
         limit,
         useCache,
         signal,
+        timeoutMs,
         requestOwner,
       });
 
@@ -285,6 +344,7 @@ export function useOffpayWalletTransactions(options?: {
     initialDataUpdatedAt: () => (getWarmInitialTransactionsData() == null ? undefined : 0),
     refetchOnMount: options?.refetchOnMount ?? true,
     refetchOnReconnect: true,
+    retry: options?.retry,
   });
   const refetchTransactionsQuery = query.refetch;
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
@@ -365,6 +425,7 @@ export function useOffpayWalletTransactions(options?: {
           limit,
           useCache: refreshUseCache,
           signal: options?.signal,
+          timeoutMs,
           requestOwner: `${requestOwner}.${refreshUseCache ? 'refresh' : 'fresh'}`,
         });
         const mergedPage = await mergeWalletTransactionsWithDisplayCache({
@@ -419,6 +480,7 @@ export function useOffpayWalletTransactions(options?: {
       queryClient,
       refetchTransactionsQuery,
       requestOwner,
+      timeoutMs,
       transactionsQueryKey,
       walletAddress,
     ],

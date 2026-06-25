@@ -28,6 +28,7 @@ import type {
 const TOKEN_TRANSACTION_STALE_TIME_MS = 1000 * 60;
 const TOKEN_TRANSACTION_GC_TIME_MS = 1000 * 60 * 15;
 const TOKEN_HISTORY_FETCH_WAIT_MS = 6500;
+const TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS = 25_000;
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_TRANSACTION_VIEWS: WalletTransactionView[] = [];
 const EMPTY_HISTORY_GROUPS: WalletTransactionGroup[] = [];
@@ -126,6 +127,8 @@ export function useOffpayWalletTokenTransactions(options: {
   useCache?: boolean;
   enabled?: boolean;
   requestOwner?: string;
+  timeoutMs?: number;
+  allowPartialWarmData?: boolean;
 }) {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
   const walletAddress = options.walletAddress ?? activeWalletAddress;
@@ -136,6 +139,8 @@ export function useOffpayWalletTokenTransactions(options: {
   const useCache = options.useCache;
   const enabledByCaller = options.enabled ?? true;
   const requestOwner = options.requestOwner ?? 'wallet.tokenTransactions';
+  const timeoutMs = options.timeoutMs ?? TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS;
+  const allowPartialWarmData = options.allowPartialWarmData ?? false;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
@@ -286,7 +291,7 @@ export function useOffpayWalletTokenTransactions(options: {
       });
 
       if (page == null) continue;
-      if (page.transactions.length < minWarmTransactionRows) continue;
+      if (!allowPartialWarmData && page.transactions.length < minWarmTransactionRows) continue;
       if (bestPage == null || page.transactions.length > bestPage.transactions.length) {
         bestPage = page;
       }
@@ -295,6 +300,7 @@ export function useOffpayWalletTokenTransactions(options: {
     return bestPage;
   }, [
     displayCacheHydrationVersion,
+    allowPartialWarmData,
     limit,
     minWarmTransactionRows,
     mint,
@@ -334,6 +340,7 @@ export function useOffpayWalletTokenTransactions(options: {
         limit,
         useCache,
         signal,
+        timeoutMs,
         requestOwner,
       });
     },

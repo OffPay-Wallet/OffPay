@@ -1305,6 +1305,7 @@ export async function getWalletTransactions(
     limit?: number;
     useCache?: boolean;
     signal?: AbortSignal;
+    timeoutMs?: number;
     requestOwner?: string;
   },
 ): Promise<WalletTransactionsResponse> {
@@ -1318,6 +1319,7 @@ export async function getWalletTransactions(
       useCache: options?.useCache,
     },
     signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
     headers: await buildOffpayPublicReadHeaders(),
     requestOwner: options?.requestOwner,
   });
@@ -1332,6 +1334,7 @@ export async function getWalletTokenTransactions(
     limit?: number;
     useCache?: boolean;
     signal?: AbortSignal;
+    timeoutMs?: number;
     requestOwner?: string;
   },
 ): Promise<WalletTransactionsResponse> {
@@ -1346,6 +1349,7 @@ export async function getWalletTokenTransactions(
       useCache: options?.useCache,
     },
     signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
     headers: await buildOffpayPublicReadHeaders(),
     requestOwner: options?.requestOwner,
   });

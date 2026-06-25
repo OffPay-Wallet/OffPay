@@ -229,12 +229,7 @@ function parseGeminiAgentTurn(payload: GeminiResponse): AgentTurn {
 
   const text = sanitizeProviderText(textChunks.join('\n').trim());
   if (text.length === 0) {
-    // The model produced no visible parts. Surface a real, actionable
-    // message instead of a misleading "I am here." placeholder.
-    return {
-      kind: 'agent_text',
-      text: 'I did not catch a clear next step. Could you rephrase that?',
-    };
+    throw new ProviderError('gemini', 502, 'Gemini returned an empty agent response.');
   }
   return { kind: 'agent_text', text };
 }

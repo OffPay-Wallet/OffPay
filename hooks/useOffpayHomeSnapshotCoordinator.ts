@@ -9,6 +9,7 @@ import {
 } from '@/lib/api/offpay-dashboard-cache';
 import {
   offpayWalletDashboardQueryKey,
+  offpayWalletTransactionsQueryKey,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
 import {
@@ -43,11 +44,15 @@ export function useOffpayHomeSnapshotCoordinator({
   const queryClient = useQueryClient();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
   const [displayCacheStatus, setDisplayCacheStatus] = useState<HomeDisplayCacheStatus>('idle');
+  const [transactionsCacheStatus, setTransactionsCacheStatus] =
+    useState<HomeDisplayCacheStatus>('idle');
   const [fallbackDeadlineStatus, setFallbackDeadlineStatus] =
     useState<HomeFallbackDeadlineStatus>('idle');
   const [fallbackGateOpen, setFallbackGateOpen] = useState(false);
   const [idleGateOpen, setIdleGateOpen] = useState(false);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startupMeasureRef = useRef<number | null>(null);
+  const fallbackFetchMarkKeyRef = useRef<string | null>(null);
   const identity = useMemo(
     () => `${network ?? 'no-network'}:${walletAddress ?? 'no-wallet'}:${enabled ? 'on' : 'off'}`,
     [enabled, network, walletAddress],
@@ -82,11 +87,14 @@ export function useOffpayHomeSnapshotCoordinator({
       fallbackTimerRef.current = null;
     }
     setDisplayCacheStatus(canCoordinate ? 'pending' : 'idle');
+    setTransactionsCacheStatus(canCoordinate ? 'pending' : 'idle');
     setFallbackDeadlineStatus(canCoordinate ? 'pending' : 'idle');
     setFallbackGateOpen(false);
     setIdleGateOpen(false);
+    fallbackFetchMarkKeyRef.current = null;
 
     if (!enabled || walletAddress == null || network == null) {
+      startupMeasureRef.current = null;
       return undefined;
     }
 
@@ -94,6 +102,7 @@ export function useOffpayHomeSnapshotCoordinator({
     const currentNetwork = network;
     let cancelled = false;
     const startedAt = mark();
+    startupMeasureRef.current = startedAt;
 
     void hydrateWalletDisplayCacheIntoQueryClient({
       queryClient,
@@ -103,6 +112,11 @@ export function useOffpayHomeSnapshotCoordinator({
         includeBalance: true,
         includeTransactions: true,
         includePendingBackupStats: true,
+        measurePrefix: 'home.snapshot.hydrate',
+        onTransactionsHydrated: (status) => {
+          if (cancelled) return;
+          setTransactionsCacheStatus(status);
+        },
       },
     })
       .then((hydrated) => {
@@ -116,6 +130,7 @@ export function useOffpayHomeSnapshotCoordinator({
       .catch(() => {
         if (cancelled) return;
         setDisplayCacheStatus('miss');
+        setTransactionsCacheStatus('miss');
         measure('home.snapshot.displayCacheHydrate', startedAt, {
           network: currentNetwork,
           result: 'error',
@@ -158,28 +173,47 @@ export function useOffpayHomeSnapshotCoordinator({
   useEffect(() => {
     const dashboard = dashboardQuery.data;
     if (dashboard == null) return;
+    let cancelled = false;
 
     if (fallbackTimerRef.current != null) {
       clearTimeout(fallbackTimerRef.current);
       fallbackTimerRef.current = null;
     }
 
-    hydrateOffpayWalletDashboard({
-      queryClient,
-      dashboard,
-      limit: WALLET_TRANSACTIONS_PAGE_SIZE,
-    });
+    void (async () => {
+      await queryClient.cancelQueries({
+        queryKey: offpayWalletTransactionsQueryKey(
+          dashboard.address,
+          dashboard.network,
+          WALLET_TRANSACTIONS_PAGE_SIZE,
+          'cached',
+        ),
+        exact: true,
+      });
+      if (cancelled) return;
 
-    void persistWalletDisplayCacheFromQueryClient({
-      queryClient,
-      walletAddress: dashboard.address,
-      network: dashboard.network,
-      options: {
-        includeBalance: true,
-        includeTransactions: true,
-        includePendingBackupStats: false,
-      },
-    }).catch(() => undefined);
+      hydrateOffpayWalletDashboard({
+        queryClient,
+        dashboard,
+        limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+      });
+      setTransactionsCacheStatus('hit');
+
+      void persistWalletDisplayCacheFromQueryClient({
+        queryClient,
+        walletAddress: dashboard.address,
+        network: dashboard.network,
+        options: {
+          includeBalance: true,
+          includeTransactions: true,
+          includePendingBackupStats: false,
+        },
+      }).catch(() => undefined);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [dashboardQuery.data, queryClient]);
 
   useEffect(() => {
@@ -190,6 +224,7 @@ export function useOffpayHomeSnapshotCoordinator({
         isNetworkAccessSuspended,
         fallbackGateOpen,
         hasDashboardData: dashboardQuery.data != null,
+        hasUsableTransactions: transactionsCacheStatus === 'hit' || dashboardQuery.data != null,
         displayCacheStatus,
         fallbackDeadlineStatus,
       })
@@ -206,6 +241,7 @@ export function useOffpayHomeSnapshotCoordinator({
     fallbackDeadlineStatus,
     fallbackGateOpen,
     isNetworkAccessSuspended,
+    transactionsCacheStatus,
   ]);
 
   useEffect(() => {
@@ -252,6 +288,16 @@ export function useOffpayHomeSnapshotCoordinator({
     dashboardQuery.data == null &&
     !fallbackGateOpen &&
     displayCacheStatus !== 'hit';
+
+  useEffect(() => {
+    if (!foregroundFetchEnabled) return;
+    if (fallbackFetchMarkKeyRef.current === identity) return;
+    fallbackFetchMarkKeyRef.current = identity;
+    measure('home.snapshot.fallbackFetchStart', startupMeasureRef.current ?? mark(), {
+      network,
+      result: 'enabled',
+    });
+  }, [foregroundFetchEnabled, identity, network]);
 
   return {
     dashboardQuery,

@@ -1,31 +1,13 @@
-import {
-  ProviderError,
-  isStrictPrivacy,
-  jsonResponse,
-  maxChatBytes,
-  readJson,
-} from '../http';
-import {
-  generateGeminiAgentTurn,
-  generateGeminiIntent,
-} from '../providers/gemini';
+import { ProviderError, isStrictPrivacy, jsonResponse, maxChatBytes, readJson } from '../http';
+import { generateGeminiAgentTurn, generateGeminiIntent } from '../providers/gemini';
 import { sanitizeChatRequestForProvider } from '../privacy/firewall';
-import {
-  fallbackAgentTurn,
-  fallbackIntent,
-  sanitizeProviderText,
-} from '../privacy/response';
+import { sanitizeProviderText } from '../privacy/response';
 import {
   validateAgentTurnRequest,
   validateChatRequest,
   validateIntentChatRequest,
 } from '../schemas/requests';
-import type {
-  AgentChatRequest,
-  AgentIntentResult,
-  AgentTurn,
-  AiProxyEnv,
-} from '../types';
+import type { AgentChatRequest, AgentIntentResult, AgentTurn, AiProxyEnv } from '../types';
 
 export async function handleChat(
   request: Request,
@@ -105,32 +87,14 @@ export async function handleKindDispatch(
   );
 }
 
-async function generateIntent(
-  body: AgentChatRequest,
-  env: AiProxyEnv,
-): Promise<AgentIntentResult> {
+async function generateIntent(body: AgentChatRequest, env: AiProxyEnv): Promise<AgentIntentResult> {
   assertGeminiAllowed(env);
-
-  try {
-    return await generateGeminiIntent(body, env);
-  } catch (error) {
-    if (error instanceof ProviderError) throw error;
-    return fallbackIntent('I need a little more detail to safely draft that.');
-  }
+  return generateGeminiIntent(body, env);
 }
 
-async function generateAgentTurn(
-  body: AgentChatRequest,
-  env: AiProxyEnv,
-): Promise<AgentTurn> {
+async function generateAgentTurn(body: AgentChatRequest, env: AiProxyEnv): Promise<AgentTurn> {
   assertGeminiAllowed(env);
-
-  try {
-    return await generateGeminiAgentTurn(body, env);
-  } catch (error) {
-    if (error instanceof ProviderError) throw error;
-    return fallbackAgentTurn();
-  }
+  return generateGeminiAgentTurn(body, env);
 }
 
 function assertGeminiAllowed(env: AiProxyEnv): void {

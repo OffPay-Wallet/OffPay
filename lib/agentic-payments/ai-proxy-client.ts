@@ -16,6 +16,7 @@ import {
   OffpayAiSessionTokenUnavailableError,
 } from '@/lib/agentic-payments/session-token';
 import { sanitizeTextForCloudTts } from '@/lib/agentic-payments/voice-privacy';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { File as ExpoFile, UploadType } from 'expo-file-system';
 
 const DEFAULT_CHAT_TIMEOUT_MS = 25_000;
@@ -38,7 +39,13 @@ function isLocalDevelopmentOrigin(url: URL): boolean {
 
 function normalizeProxyOrigin(rawValue: string, envKey: string): string {
   const parsed = new URL(rawValue);
-  if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.pathname !== '/'
+  ) {
     throw new Error(`${envKey} must be an origin only.`);
   }
 
@@ -60,7 +67,9 @@ function resolveAiProxyOrigin(): string {
   const effectiveAllowedOrigins = allowedOrigins.length > 0 ? allowedOrigins : [origin];
 
   if (!effectiveAllowedOrigins.includes(origin)) {
-    throw new Error('EXPO_PUBLIC_OFFPAY_AI_PROXY_URL is not in EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS.');
+    throw new Error(
+      'EXPO_PUBLIC_OFFPAY_AI_PROXY_URL is not in EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS.',
+    );
   }
 
   return origin;
@@ -157,7 +166,10 @@ export async function sendAgentTurn(
   });
 
   const body = (await response.json()) as { turn?: AgentTurn };
-  if (body.turn != null && (body.turn.kind === 'agent_text' || body.turn.kind === 'agent_tool_calls')) {
+  if (
+    body.turn != null &&
+    (body.turn.kind === 'agent_text' || body.turn.kind === 'agent_tool_calls')
+  ) {
     return body.turn;
   }
 
@@ -336,6 +348,9 @@ async function proxyFetch(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort('ai proxy timeout'), init.timeoutMs);
   const abortListener = () => controller.abort(init.signal?.reason);
+  const startedAt = mark();
+  let responseStatus: number | null = null;
+  let errorCode: string | null = null;
   init.signal?.addEventListener('abort', abortListener, { once: true });
 
   try {
@@ -344,14 +359,18 @@ async function proxyFetch(
       headers,
       signal: controller.signal,
     });
+    responseStatus = response.status;
 
     if (!response.ok) {
-      throw await errorFromResponse(response);
+      const proxyError = await errorFromResponse(response);
+      errorCode = proxyError.code;
+      throw proxyError;
     }
 
     return response;
   } catch (error) {
     if (controller.signal.aborted && init.signal?.aborted !== true) {
+      errorCode = 'PROXY_TIMEOUT';
       throw new AgenticPaymentsProxyError({
         code: 'PROXY_TIMEOUT',
         message: 'Yuga timed out.',
@@ -359,10 +378,20 @@ async function proxyFetch(
       });
     }
 
+    if (error instanceof AgenticPaymentsProxyError) {
+      errorCode = error.code;
+      responseStatus = error.status > 0 ? error.status : responseStatus;
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
     init.signal?.removeEventListener('abort', abortListener);
+    measure('aiProxy.request', startedAt, {
+      method: init.method ?? 'GET',
+      route: path,
+      status: responseStatus,
+      code: errorCode,
+    });
   }
 }
 
@@ -390,18 +419,24 @@ async function proxyUploadFile(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort('ai proxy timeout'), params.timeoutMs);
   const abortListener = () => controller.abort(params.signal?.reason);
+  const startedAt = mark();
+  let responseStatus: number | null = null;
+  let errorCode: string | null = null;
   params.signal?.addEventListener('abort', abortListener, { once: true });
 
   try {
     const file = new ExpoFile(params.uri);
-    return await file.upload(buildProxyUrl(path), {
+    const result = await file.upload(buildProxyUrl(path), {
       httpMethod: 'POST',
       uploadType: UploadType.BINARY_CONTENT,
       headers,
       signal: controller.signal,
     });
+    responseStatus = result.status;
+    return result;
   } catch (error) {
     if (controller.signal.aborted && params.signal?.aborted !== true) {
+      errorCode = 'PROXY_TIMEOUT';
       throw new AgenticPaymentsProxyError({
         code: 'PROXY_TIMEOUT',
         message: 'Yuga timed out.',
@@ -409,10 +444,20 @@ async function proxyUploadFile(
       });
     }
 
+    if (error instanceof AgenticPaymentsProxyError) {
+      errorCode = error.code;
+      responseStatus = error.status > 0 ? error.status : responseStatus;
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
     params.signal?.removeEventListener('abort', abortListener);
+    measure('aiProxy.upload', startedAt, {
+      method: 'POST',
+      route: path,
+      status: responseStatus,
+      code: errorCode,
+    });
   }
 }
 

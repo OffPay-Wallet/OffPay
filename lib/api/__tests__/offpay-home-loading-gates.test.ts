@@ -12,10 +12,26 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        hasUsableTransactions: false,
         displayCacheStatus: 'pending',
         fallbackDeadlineStatus: 'elapsed',
       }),
     ).toBe(true);
+  });
+
+  it('keeps the snapshot fallback closed when usable transactions arrived before full hydration', () => {
+    expect(
+      shouldOpenHomeSnapshotFallbackGate({
+        canCoordinate: true,
+        canUseNetwork: true,
+        isNetworkAccessSuspended: false,
+        fallbackGateOpen: false,
+        hasDashboardData: false,
+        hasUsableTransactions: true,
+        displayCacheStatus: 'pending',
+        fallbackDeadlineStatus: 'elapsed',
+      }),
+    ).toBe(false);
   });
 
   it('keeps the snapshot fallback closed when display cache already hit', () => {
@@ -26,10 +42,26 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        hasUsableTransactions: true,
         displayCacheStatus: 'hit',
         fallbackDeadlineStatus: 'elapsed',
       }),
     ).toBe(false);
+  });
+
+  it('opens the snapshot fallback when display cache exists without usable transactions', () => {
+    expect(
+      shouldOpenHomeSnapshotFallbackGate({
+        canCoordinate: true,
+        canUseNetwork: true,
+        isNetworkAccessSuspended: false,
+        fallbackGateOpen: false,
+        hasDashboardData: false,
+        hasUsableTransactions: false,
+        displayCacheStatus: 'hit',
+        fallbackDeadlineStatus: 'elapsed',
+      }),
+    ).toBe(true);
   });
 
   it('does not open the snapshot fallback before the deadline', () => {
@@ -40,6 +72,7 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        hasUsableTransactions: false,
         displayCacheStatus: 'miss',
         fallbackDeadlineStatus: 'pending',
       }),

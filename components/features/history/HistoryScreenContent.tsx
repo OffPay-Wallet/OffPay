@@ -24,7 +24,7 @@ import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
@@ -46,7 +46,7 @@ const HEADER_CONTAINER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const HISTORY_BACKGROUND_PAGE_TARGET = 1;
 const HISTORY_BACKGROUND_PAGE_DELAY_MS = 180;
-const HISTORY_INITIAL_FILL_ROW_TARGET = 8;
+const HISTORY_VISIBLE_FILL_TARGET = 8;
 
 export function HistoryScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -72,12 +72,16 @@ export function HistoryScreenContent(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
     enabled: isFocused,
-    // History is the canonical activity surface, so it needs enough
-    // depth on first fetch to include SOL/custom-token rows that can be
-    // pushed behind repeated stablecoin activity.
-    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
-    minWarmTransactionRows: HISTORY_INITIAL_FILL_ROW_TARGET,
+    // Keep first paint shallow. More pages are loaded by scroll/background
+    // top-off instead of blocking the screen on a large enriched page.
+    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    allowPartialWarmData: true,
+    // Paint persisted cached rows immediately on cold start so the deep
+    // (and on cellular, slow) first page loads behind real content
+    // instead of a skeleton.
+    hydrateDisplayCacheOnMount: true,
     refetchOnMount: true,
+    retry: false,
     requestOwner: 'history.transactions',
     waitForDashboard: false,
   });
@@ -160,7 +164,7 @@ export function HistoryScreenContent(): React.JSX.Element {
     if (!transactionsQuery.isCapabilityEnabled) return undefined;
     if (backgroundPrefetchInFlightRef.current) return undefined;
     const shouldTopOffInitialFill =
-      loadedHistoryRows > 0 && loadedHistoryRows < HISTORY_INITIAL_FILL_ROW_TARGET;
+      loadedHistoryRows > 0 && loadedHistoryRows < HISTORY_VISIBLE_FILL_TARGET;
     if (
       loadedHistoryPages <= 0 ||
       (loadedHistoryPages >= HISTORY_BACKGROUND_PAGE_TARGET && !shouldTopOffInitialFill)

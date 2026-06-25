@@ -14,6 +14,7 @@ import {
   readPersistedJson,
   writePersistedJson,
 } from '@/lib/cache/persistent-json-cache';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { yieldToEventLoop, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 
 import type { PendingBackupQueueStats } from '@/lib/payments/pending-backup-queue';
@@ -55,6 +56,8 @@ interface WalletDisplayCacheHydrationOptions {
   includeBalance?: boolean;
   includeTransactions?: boolean;
   includePendingBackupStats?: boolean;
+  measurePrefix?: string;
+  onTransactionsHydrated?: (status: 'hit' | 'miss') => void;
 }
 
 interface WalletDisplayCachePersistenceOptions {
@@ -705,22 +708,42 @@ export async function hydrateWalletDisplayCacheIntoQueryClient(params: {
   network: OffpayNetwork;
   options?: WalletDisplayCacheHydrationOptions;
 }): Promise<boolean> {
+  const measurePrefix = params.options?.measurePrefix;
+  let yieldTotalMs = 0;
+  const timedYield = async (): Promise<void> => {
+    const startedAt = mark();
+    await yieldToUi();
+    yieldTotalMs += mark() - startedAt;
+  };
+  const measurePhase = (
+    phase: string,
+    since: number,
+    payload?: Record<string, string | number | boolean | null>,
+  ): void => {
+    if (measurePrefix == null) return;
+    measure(`${measurePrefix}.${phase}`, since, payload);
+  };
+
+  const readStartedAt = mark();
   const cache = await readWalletDisplayCache(params);
-  if (cache == null) return false;
+  measurePhase('read', readStartedAt, {
+    network: params.network,
+    result: cache == null ? 'miss' : 'hit',
+  });
+  if (cache == null) {
+    params.options?.onTransactionsHydrated?.('miss');
+    if (measurePrefix != null) {
+      measure(`${measurePrefix}.yieldTotal`, mark() - yieldTotalMs, {
+        network: params.network,
+      });
+    }
+    return false;
+  }
   const includeBalance = params.options?.includeBalance ?? true;
   const includeTransactions = params.options?.includeTransactions ?? true;
   const includePendingBackupStats = params.options?.includePendingBackupStats ?? true;
 
-  const balanceKey = offpayWalletBalanceQueryKey(params.walletAddress, params.network);
-  if (
-    includeBalance &&
-    cache.balance != null &&
-    params.queryClient.getQueryData(balanceKey) == null
-  ) {
-    await yieldToUi();
-    params.queryClient.setQueryData(balanceKey, cache.balance, { updatedAt: cache.updatedAt });
-  }
-
+  const transactionsPhaseStartedAt = mark();
   const transactionsKey = offpayWalletTransactionsQueryKey(
     params.walletAddress,
     params.network,
@@ -735,21 +758,76 @@ export async function hydrateWalletDisplayCacheIntoQueryClient(params: {
       pages: [cache.transactions],
       pageParams: [undefined],
     };
-    await yieldToUi();
+    await timedYield();
     params.queryClient.setQueryData(transactionsKey, infiniteData, {
       updatedAt: cache.updatedAt,
     });
+    params.options?.onTransactionsHydrated?.('hit');
+    measurePhase('txWrite', transactionsPhaseStartedAt, {
+      network: params.network,
+      result: 'hit',
+      source: 'cache-write',
+    });
+  } else {
+    const hasExistingTransactions =
+      includeTransactions && params.queryClient.getQueryData(transactionsKey) != null;
+    params.options?.onTransactionsHydrated?.(hasExistingTransactions ? 'hit' : 'miss');
+    measurePhase('txWrite', transactionsPhaseStartedAt, {
+      network: params.network,
+      result: hasExistingTransactions ? 'hit' : 'miss',
+      source: hasExistingTransactions ? 'existing' : 'none',
+    });
   }
 
+  const balancePhaseStartedAt = mark();
+  const balanceKey = offpayWalletBalanceQueryKey(params.walletAddress, params.network);
+  if (
+    includeBalance &&
+    cache.balance != null &&
+    params.queryClient.getQueryData(balanceKey) == null
+  ) {
+    await timedYield();
+    params.queryClient.setQueryData(balanceKey, cache.balance, { updatedAt: cache.updatedAt });
+    measurePhase('balanceWrite', balancePhaseStartedAt, {
+      network: params.network,
+      result: 'hit',
+    });
+  } else {
+    measurePhase('balanceWrite', balancePhaseStartedAt, {
+      network: params.network,
+      result:
+        includeBalance && params.queryClient.getQueryData(balanceKey) != null ? 'hit' : 'miss',
+    });
+  }
+
+  const statsPhaseStartedAt = mark();
   const statsKey = pendingBackupQueueStatsQueryKey(params.walletAddress, params.network);
   if (
     includePendingBackupStats &&
     cache.pendingBackupStats != null &&
     params.queryClient.getQueryData(statsKey) == null
   ) {
-    await yieldToUi();
+    await timedYield();
     params.queryClient.setQueryData(statsKey, cache.pendingBackupStats, {
       updatedAt: cache.updatedAt,
+    });
+    measurePhase('statsWrite', statsPhaseStartedAt, {
+      network: params.network,
+      result: 'hit',
+    });
+  } else {
+    measurePhase('statsWrite', statsPhaseStartedAt, {
+      network: params.network,
+      result:
+        includePendingBackupStats && params.queryClient.getQueryData(statsKey) != null
+          ? 'hit'
+          : 'miss',
+    });
+  }
+
+  if (measurePrefix != null) {
+    measure(`${measurePrefix}.yieldTotal`, mark() - yieldTotalMs, {
+      network: params.network,
     });
   }
 

@@ -57,14 +57,26 @@ export function hydrateOffpayWalletDashboard(params: {
     dashboard.balance,
     { updatedAt: dashboard.balance.fetchedAt },
   );
-  queryClient.setQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
-    offpayWalletTransactionsQueryKey(dashboard.address, dashboard.network, limit),
-    {
-      pages: [dashboard.transactions],
-      pageParams: [undefined],
-    },
-    { updatedAt: dashboard.transactions.fetchedAt },
+  const transactionsKey = offpayWalletTransactionsQueryKey(
+    dashboard.address,
+    dashboard.network,
+    limit,
   );
+  const existingTransactions =
+    queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+      transactionsKey,
+    );
+  const existingFetchedAt = existingTransactions?.pages[0]?.fetchedAt ?? 0;
+  if (dashboard.transactions.fetchedAt >= existingFetchedAt) {
+    queryClient.setQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+      transactionsKey,
+      {
+        pages: [dashboard.transactions],
+        pageParams: [undefined],
+      },
+      { updatedAt: dashboard.transactions.fetchedAt },
+    );
+  }
 }
 
 export async function prefetchOffpayWalletDashboard(params: {

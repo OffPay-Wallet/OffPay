@@ -10,6 +10,7 @@ import {
 } from '@/lib/wallet/wallet-display-cache';
 import {
   offpayWalletBalanceQueryKey,
+  pendingBackupQueueStatsQueryKey,
   offpayWalletTransactionsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 
@@ -116,6 +117,69 @@ describe('wallet-display-cache', () => {
           offpayWalletTransactionsQueryKey(WALLET, 'mainnet', 20),
         )?.pages[0]?.transactions,
       ).toHaveLength(3);
+    } finally {
+      queryClient.clear();
+    }
+  });
+
+  it('hydrates cached transactions before balance and pending stats', async () => {
+    await writeWalletDisplayCacheSlice({
+      walletAddress: WALLET,
+      network: 'mainnet',
+      balance: makeBalance(2),
+      transactions: makeTransactions(3),
+      pendingBackupStats: {
+        total: 1,
+        pending: 1,
+        uploadPending: 0,
+        recovered: 0,
+        confirmedAwaitingDelete: 0,
+        failed: 0,
+      },
+    });
+
+    const queryClient = new QueryClient();
+    const transactionStatuses: string[] = [];
+    try {
+      await hydrateWalletDisplayCacheIntoQueryClient({
+        queryClient,
+        walletAddress: WALLET,
+        network: 'mainnet',
+        options: {
+          measurePrefix: 'test.walletDisplayHydrate',
+          onTransactionsHydrated: (status) => {
+            transactionStatuses.push(status);
+            expect(
+              queryClient.getQueryData<InfiniteData<WalletTransactionsResponse>>(
+                offpayWalletTransactionsQueryKey(WALLET, 'mainnet', 20),
+              )?.pages[0]?.transactions,
+            ).toHaveLength(3);
+            expect(
+              queryClient.getQueryData<WalletBalanceResponse>(
+                offpayWalletBalanceQueryKey(WALLET, 'mainnet'),
+              ),
+            ).toBeUndefined();
+            expect(
+              queryClient.getQueryData(pendingBackupQueueStatsQueryKey(WALLET, 'mainnet')),
+            ).toBeUndefined();
+          },
+        },
+      });
+
+      expect(transactionStatuses).toEqual(['hit']);
+      expect(
+        queryClient.getQueryData<WalletBalanceResponse>(
+          offpayWalletBalanceQueryKey(WALLET, 'mainnet'),
+        ),
+      ).toBeTruthy();
+      expect(queryClient.getQueryData(pendingBackupQueueStatsQueryKey(WALLET, 'mainnet'))).toEqual({
+        total: 1,
+        pending: 1,
+        uploadPending: 0,
+        recovered: 0,
+        confirmedAwaitingDelete: 0,
+        failed: 0,
+      });
     } finally {
       queryClient.clear();
     }

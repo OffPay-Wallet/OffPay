@@ -302,6 +302,10 @@ async function connectWalletActivitySse(
     reader = response.body.getReader();
     result = 'connected';
     handlers.onOpen?.();
+    measure('walletActivity.sse.connect', startedAt, {
+      network,
+      result: 'connected',
+    });
 
     void readSseStream(reader, handlers)
       .then(() => {
