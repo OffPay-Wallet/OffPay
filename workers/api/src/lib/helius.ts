@@ -1,7 +1,7 @@
 import { AppError } from './errors.js';
 import { createNetworkCacheKey, memoryCache } from './cache.js';
 import { getOrSetSharedJsonCache } from './shared-cache.js';
-import { getRpcHttpUrlCandidates } from './solana-rpc-providers.js';
+import { getRpcHttpUrlCandidates, type RpcProviderEndpoint } from './solana-rpc-providers.js';
 import type { Bindings, Network } from './types.js';
 import { isRecord, isValidSolanaAddress } from './validation.js';
 
@@ -981,18 +981,35 @@ function isRetryableRpcError(errorValue: Record<string, unknown>): boolean {
   );
 }
 
-// Per-attempt ceiling for a single upstream Solana RPC call. Without this a
-// slow/hanging provider blocks the whole request (the 8-12s tails we saw), and
-// serial provider fallthrough never gets a chance. This bounds one attempt;
-// Phase 5 hedging removes the additive cost of trying providers in series.
-// Tune against the Phase 0 tx_signatures / tx_batch Server-Timing numbers.
-const RPC_HTTP_TIMEOUT_MS = 3000;
+// Per-attempt ceiling for a single upstream Solana RPC call. 3s proved too
+// tight: devnet getTransaction batches legitimately spike past it, and with a
+// single configured provider (no Alchemy hedge) that aborted call becomes a
+// hard 503 (the token-history failures). 6s absorbs that variance while still
+// capping a truly hung provider. Once a 2nd provider is configured, Phase 5
+// hedging races the slow one so this can be tightened again.
+const RPC_HTTP_TIMEOUT_MS = 6000;
 
-async function fetchJson(url: string, init: RequestInit, errorMessage: string): Promise<unknown> {
+async function fetchJson(
+  url: string,
+  init: RequestInit,
+  errorMessage: string,
+  externalSignal?: AbortSignal,
+): Promise<unknown> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort(new Error(`RPC request timed out after ${RPC_HTTP_TIMEOUT_MS}ms`));
   }, RPC_HTTP_TIMEOUT_MS);
+
+  // Allow an outer caller (the hedge orchestrator) to abort this attempt when a
+  // competing provider wins, so a losing request doesn't keep consuming quota.
+  const onExternalAbort = (): void => controller.abort(externalSignal?.reason);
+  if (externalSignal != null) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
 
   try {
     let response: Response;
@@ -1013,7 +1030,101 @@ async function fetchJson(url: string, init: RequestInit, errorMessage: string): 
     }
   } finally {
     clearTimeout(timeoutId);
+    if (externalSignal != null) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
   }
+}
+
+// Staggered hedged RPC across the configured providers. With a single provider
+// this is identical to one plain attempt (no concurrency, no extra load). With
+// >=2 providers we start the primary and, if it hasn't answered within
+// RPC_HEDGE_DELAY_MS, start the next provider concurrently and take whichever
+// responds first, aborting the losers. A provider error advances to the next
+// candidate immediately. This removes the additive cost of serial fallthrough
+// on a slow-but-not-failed provider without doubling load on the fast path.
+// NOTE: this only wraps standard JSON-RPC calls; Helius-only enhanced API
+// endpoints don't go through getRpcHttpUrlCandidates, so they're never hedged.
+const RPC_HEDGE_DELAY_MS = 600;
+
+async function requestWithHedge<T>(
+  candidates: readonly RpcProviderEndpoint[],
+  attempt: (candidate: RpcProviderEndpoint, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  if (candidates.length === 0) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    let nextIndex = 0;
+    let pending = 0;
+    let settled = false;
+    let lastError: unknown = null;
+    const controllers: AbortController[] = [];
+    let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearHedgeTimer = (): void => {
+      if (hedgeTimer != null) {
+        clearTimeout(hedgeTimer);
+        hedgeTimer = null;
+      }
+    };
+
+    const scheduleHedge = (): void => {
+      clearHedgeTimer();
+      if (nextIndex >= candidates.length) return;
+      hedgeTimer = setTimeout(() => {
+        hedgeTimer = null;
+        launchNext();
+      }, RPC_HEDGE_DELAY_MS);
+    };
+
+    const launchNext = (): void => {
+      if (settled || nextIndex >= candidates.length) return;
+      const candidate = candidates[nextIndex];
+      nextIndex += 1;
+      const controller = new AbortController();
+      controllers.push(controller);
+      pending += 1;
+      // Start the next provider after the hedge delay even if this one is still
+      // in flight (cancelled if this one settles first).
+      scheduleHedge();
+
+      attempt(candidate, controller.signal).then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          clearHedgeTimer();
+          for (const other of controllers) {
+            if (other !== controller) other.abort();
+          }
+          resolve(value);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          lastError = error;
+          pending -= 1;
+          // A failed provider advances immediately, without waiting for the
+          // hedge delay.
+          if (nextIndex < candidates.length) {
+            launchNext();
+          } else if (pending === 0) {
+            settled = true;
+            clearHedgeTimer();
+            reject(
+              toUpstreamUnavailable(
+                null,
+                'Wallet provider is temporarily unavailable.',
+                lastError ?? undefined,
+              ),
+            );
+          }
+        },
+      );
+    };
+
+    launchNext();
+  });
 }
 
 async function heliusRpcRequest(
@@ -1023,48 +1134,36 @@ async function heliusRpcRequest(
   params: RpcRequestParams,
 ): Promise<unknown> {
   const candidates = getRpcHttpUrlCandidates(bindings, network);
-  let lastError: unknown = null;
 
-  for (const candidate of candidates) {
-    try {
-      const payload = await fetchJson(
-        candidate.url,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: `${method}:${network}:${candidate.provider}`,
-            method,
-            params,
-          }),
+  return requestWithHedge(candidates, async (candidate, signal) => {
+    const payload = await fetchJson(
+      candidate.url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        'Wallet provider is temporarily unavailable.',
-      );
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: `${method}:${network}:${candidate.provider}`,
+          method,
+          params,
+        }),
+      },
+      'Wallet provider is temporarily unavailable.',
+      signal,
+    );
 
-      if (!isRecord(payload)) {
-        lastError = new Error('RPC provider returned a malformed payload.');
-        continue;
-      }
-
-      if ('error' in payload && payload.error !== null && payload.error !== undefined) {
-        lastError = payload.error;
-        continue;
-      }
-
-      return payload.result;
-    } catch (error) {
-      lastError = error;
+    if (!isRecord(payload)) {
+      throw new Error('RPC provider returned a malformed payload.');
     }
-  }
 
-  throw toUpstreamUnavailable(
-    null,
-    'Wallet provider is temporarily unavailable.',
-    lastError ?? undefined,
-  );
+    if ('error' in payload && payload.error !== null && payload.error !== undefined) {
+      throw new Error('RPC provider returned an error.', { cause: payload.error });
+    }
+
+    return payload.result;
+  });
 }
 
 async function heliusRpcBatchRequest(
@@ -1077,88 +1176,62 @@ async function heliusRpcBatchRequest(
   }
 
   const candidates = getRpcHttpUrlCandidates(bindings, network);
-  let lastError: unknown = null;
 
-  for (const candidate of candidates) {
-    try {
-      const payload = await fetchJson(
-        candidate.url,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(
-            requests.map((request) => ({
-              jsonrpc: '2.0',
-              id: `${request.id}:${network}:${candidate.provider}`,
-              method: request.method,
-              params: request.params,
-            })),
-          ),
+  return requestWithHedge(candidates, async (candidate, signal) => {
+    const payload = await fetchJson(
+      candidate.url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        'Wallet provider is temporarily unavailable.',
-      );
+        body: JSON.stringify(
+          requests.map((request) => ({
+            jsonrpc: '2.0',
+            id: `${request.id}:${network}:${candidate.provider}`,
+            method: request.method,
+            params: request.params,
+          })),
+        ),
+      },
+      'Wallet provider is temporarily unavailable.',
+      signal,
+    );
 
-      if (!Array.isArray(payload)) {
-        lastError = new Error('RPC provider returned a malformed batch payload.');
-        continue;
-      }
-
-      const resultsById = new Map<string, unknown>();
-      let failed = false;
-
-      for (const entry of payload) {
-        if (!isRecord(entry)) {
-          failed = true;
-          lastError = new Error('RPC provider returned a malformed batch entry.');
-          break;
-        }
-
-        const responseId = readTrimmedString(entry.id);
-        if (!responseId) {
-          failed = true;
-          lastError = new Error('RPC provider returned a batch entry without an id.');
-          break;
-        }
-
-        if ('error' in entry && entry.error !== null && entry.error !== undefined) {
-          failed = true;
-          lastError = entry.error;
-          break;
-        }
-
-        resultsById.set(responseId, entry.result ?? null);
-      }
-
-      if (failed) {
-        continue;
-      }
-
-      const orderedResults: unknown[] = [];
-      for (const request of requests) {
-        const responseId = `${request.id}:${network}:${candidate.provider}`;
-        if (!resultsById.has(responseId)) {
-          lastError = new Error('RPC provider omitted a batch result.');
-          failed = true;
-          break;
-        }
-        orderedResults.push(resultsById.get(responseId));
-      }
-
-      if (!failed) {
-        return orderedResults;
-      }
-    } catch (error) {
-      lastError = error;
+    if (!Array.isArray(payload)) {
+      throw new Error('RPC provider returned a malformed batch payload.');
     }
-  }
 
-  throw toUpstreamUnavailable(
-    null,
-    'Wallet provider is temporarily unavailable.',
-    lastError ?? undefined,
-  );
+    const resultsById = new Map<string, unknown>();
+
+    for (const entry of payload) {
+      if (!isRecord(entry)) {
+        throw new Error('RPC provider returned a malformed batch entry.');
+      }
+
+      const responseId = readTrimmedString(entry.id);
+      if (!responseId) {
+        throw new Error('RPC provider returned a batch entry without an id.');
+      }
+
+      if ('error' in entry && entry.error !== null && entry.error !== undefined) {
+        throw new Error('RPC provider returned a batch error.', { cause: entry.error });
+      }
+
+      resultsById.set(responseId, entry.result ?? null);
+    }
+
+    const orderedResults: unknown[] = [];
+    for (const request of requests) {
+      const responseId = `${request.id}:${network}:${candidate.provider}`;
+      if (!resultsById.has(responseId)) {
+        throw new Error('RPC provider omitted a batch result.');
+      }
+      orderedResults.push(resultsById.get(responseId));
+    }
+
+    return orderedResults;
+  });
 }
 
 async function getLatestBlockhash(
@@ -3764,6 +3837,7 @@ async function buildRpcTransactionRecordFromResult(
   fallbackTimestamp: number,
   fallbackStatus: 'success' | 'failed',
   result: unknown,
+  prefetchedTokenMetadata?: Map<string, TokenMetadata>,
 ): Promise<WalletTransactionRecord> {
   if (!isRecord(result)) {
     return {
@@ -3804,11 +3878,13 @@ async function buildRpcTransactionRecordFromResult(
           canUseNativeSolBalanceFallback(parsedInstructions, accountKeys, touchesUmbra),
       );
   const tokenBalanceDeltas = [...splTokenBalanceDeltas, ...nativeSolBalanceDeltas];
-  const tokenMetadata = await fetchTokenMetadataMap(
-    bindings,
-    network,
-    tokenBalanceDeltas.map((delta) => delta.mint),
-  );
+  const tokenMetadata =
+    prefetchedTokenMetadata ??
+    (await fetchTokenMetadataMap(
+      bindings,
+      network,
+      tokenBalanceDeltas.map((delta) => delta.mint),
+    ));
   const type =
     inferTypeFromTokenBalanceDeltas(tokenBalanceDeltas) ??
     inferParsedTransactionType(parsedInstructions);
@@ -3893,6 +3969,25 @@ async function fetchRpcTransactionRecord(
   );
 }
 
+function collectBatchTokenMints(results: readonly unknown[]): string[] {
+  const mints = new Set<string>();
+  for (const result of results) {
+    if (!isRecord(result)) continue;
+    const meta = isRecord(result.meta) ? result.meta : null;
+    if (meta == null) continue;
+    for (const listKey of ['preTokenBalances', 'postTokenBalances'] as const) {
+      const list = meta[listKey];
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        if (!isRecord(item)) continue;
+        const mint = readTrimmedString(item.mint);
+        if (mint) mints.add(mint);
+      }
+    }
+  }
+  return [...mints];
+}
+
 async function fetchRpcTransactionRecordsBatch(
   bindings: Bindings,
   network: Network,
@@ -3922,6 +4017,17 @@ async function fetchRpcTransactionRecordsBatch(
       })),
     );
 
+    // Resolve token metadata for the WHOLE batch in one getAssetBatch call. The
+    // per-record builds below run concurrently, so without this each would miss
+    // the per-mint memory cache and fire its own getAssetBatch — a fan-out of
+    // dozens of concurrent RPC calls per page that exhausted subrequest/rate
+    // limits (the multi-second tx_batch times and the 25s token-history hang).
+    const tokenMetadata = await fetchTokenMetadataMap(
+      bindings,
+      network,
+      collectBatchTokenMints(results),
+    );
+
     return Promise.all(
       entries.map((entry, index) =>
         buildRpcTransactionRecordFromResult(
@@ -3933,6 +4039,7 @@ async function fetchRpcTransactionRecordsBatch(
           entry.timestamp,
           entry.status,
           results[index],
+          tokenMetadata,
         ),
       ),
     );
@@ -4085,15 +4192,24 @@ async function fetchWalletTransactionsViaRpc(
       WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
       maxSignatureScan - scannedSignatures,
     );
-    const signaturePage = await fetchRpcWalletSignaturePage(
-      bindings,
-      network,
-      address,
-      scanCursor,
-      signatureLimit,
-      tokenAccounts,
-      scanTimings,
-    );
+    let signaturePage: RpcSignaturePage;
+    try {
+      signaturePage = await fetchRpcWalletSignaturePage(
+        bindings,
+        network,
+        address,
+        scanCursor,
+        signatureLimit,
+        tokenAccounts,
+        scanTimings,
+      );
+    } catch (error) {
+      // Degrade gracefully: if we already have rows, return them with the
+      // cursor reached so far rather than failing the whole request. Only
+      // surface the error when we have nothing to show.
+      if (filteredTransactions.length > 0) break;
+      throw error;
+    }
     const remainingDisplayableTransactions = Math.max(1, limit - filteredTransactions.length);
     const transactionBatchLimit = Math.min(
       signatureLimit,
@@ -4108,13 +4224,19 @@ async function fetchWalletTransactionsViaRpc(
     scannedSignatures += transactionRequests.length;
 
     const transactionBatchStartedAt = Date.now();
-    const parsedTransactions = await fetchRpcTransactionRecordsBatch(
-      bindings,
-      network,
-      address,
-      signaturePage.tokenAccounts,
-      transactionRequests,
-    );
+    let parsedTransactions: WalletTransactionRecord[];
+    try {
+      parsedTransactions = await fetchRpcTransactionRecordsBatch(
+        bindings,
+        network,
+        address,
+        signaturePage.tokenAccounts,
+        transactionRequests,
+      );
+    } catch (error) {
+      if (filteredTransactions.length > 0) break;
+      throw error;
+    }
     scanTimings.txBatchMs += Date.now() - transactionBatchStartedAt;
     scanTimings.pages += 1;
     let reachedLimit = false;
@@ -4322,10 +4444,18 @@ async function fetchWalletTokenTransactionsViaRpc(
     txBatchMs: 0,
     pages: 0,
   };
-  // Resolve token accounts ONCE for the whole scan (was 2 RPCs per page).
-  const tokenAccountsStartedAt = Date.now();
-  const tokenAccounts = await getWalletTokenAccountAddresses(bindings, address, network);
-  scanTimings.tokenAccountsMs += Date.now() - tokenAccountsStartedAt;
+  // Native SOL history comes from the wallet address itself and is parsed via
+  // native-balance deltas, so it needs NO token-account discovery. Skipping the
+  // 2 getTokenAccountsByOwner RPCs for SOL removes the most common token-detail
+  // view's biggest avoidable cost and a failure point — and, because empty
+  // token accounts make the native-SOL balance fallback kick in, it also
+  // surfaces more SOL rows. (SPL still needs them to resolve token accounts.)
+  let tokenAccounts: WalletTokenAccountAddress[] = [];
+  if (normalizedMint !== SOL_MINT) {
+    const tokenAccountsStartedAt = Date.now();
+    tokenAccounts = await getWalletTokenAccountAddresses(bindings, address, network);
+    scanTimings.tokenAccountsMs += Date.now() - tokenAccountsStartedAt;
+  }
   const scanStartedAt = Date.now();
   const filteredTransactions: WalletTransactionRecord[] = [];
   let scannedSignatures = 0;
@@ -4341,16 +4471,23 @@ async function fetchWalletTokenTransactionsViaRpc(
       TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE,
       maxSignatureScan - scannedSignatures,
     );
-    const signaturePage = await fetchRpcWalletTokenSignaturePage(
-      bindings,
-      network,
-      address,
-      normalizedMint,
-      scanCursor,
-      signatureLimit,
-      tokenAccounts,
-      scanTimings,
-    );
+    let signaturePage: RpcSignaturePage;
+    try {
+      signaturePage = await fetchRpcWalletTokenSignaturePage(
+        bindings,
+        network,
+        address,
+        normalizedMint,
+        scanCursor,
+        signatureLimit,
+        tokenAccounts,
+        scanTimings,
+      );
+    } catch (error) {
+      // Degrade gracefully: return whatever matched so far rather than 503.
+      if (filteredTransactions.length > 0) break;
+      throw error;
+    }
     const remainingDisplayableTransactions = Math.max(1, limit - filteredTransactions.length);
     const transactionBatchLimit = Math.min(
       signatureLimit,
@@ -4365,13 +4502,19 @@ async function fetchWalletTokenTransactionsViaRpc(
     scannedSignatures += transactionRequests.length;
 
     const transactionBatchStartedAt = Date.now();
-    const parsedTransactions = await fetchRpcTransactionRecordsBatch(
-      bindings,
-      network,
-      address,
-      signaturePage.tokenAccounts,
-      transactionRequests,
-    );
+    let parsedTransactions: WalletTransactionRecord[];
+    try {
+      parsedTransactions = await fetchRpcTransactionRecordsBatch(
+        bindings,
+        network,
+        address,
+        signaturePage.tokenAccounts,
+        transactionRequests,
+      );
+    } catch (error) {
+      if (filteredTransactions.length > 0) break;
+      throw error;
+    }
     scanTimings.txBatchMs += Date.now() - transactionBatchStartedAt;
     scanTimings.pages += 1;
     for (const transaction of parsedTransactions) {

@@ -893,7 +893,13 @@ export function TokenDetailsScreen(): React.JSX.Element {
     limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
     allowPartialWarmData: true,
-    refetchOnMount: true,
+    // Use the warm cache (populated by Home/History) for instant paint and do
+    // NOT fire a competing broad /wallet/transactions network scan here — that
+    // request raced the token-specific backfill for the same wallet RPC work
+    // and could hang to its client timeout. The token-transactions backfill is
+    // the single network path for deep token activity. Cold cache still does
+    // one initial fetch (bounded by the request timeout).
+    refetchOnMount: false,
     retry: false,
     requestOwner: 'tokenDetails.walletHistory',
     waitForDashboard: false,

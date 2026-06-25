@@ -157,6 +157,52 @@ describe('getWalletTransactions RPC fallback', () => {
     });
   });
 
+  it('hedges to the secondary provider when the primary RPC fails', async () => {
+    const multiProviderBindings = {
+      ...bindings,
+      ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test',
+    } as Bindings;
+    const calledUrls: string[] = [];
+    const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
+      calledUrls.push(input);
+      // Primary (Helius) is down: every call to it fails fast.
+      if (!input.includes('alchemy')) {
+        return new Response('upstream error', { status: 503 });
+      }
+      // Secondary (Alchemy) answers with an empty (but valid) result set.
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTokenAccountsByOwner') {
+          return { jsonrpc: '2.0', id: request.id, result: { value: [] } };
+        }
+        if (request.method === 'getSignaturesForAddress') {
+          return { jsonrpc: '2.0', id: request.id, result: [] };
+        }
+        return { jsonrpc: '2.0', id: request.id, result: null };
+      };
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(multiProviderBindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    // The failed primary did not throw; the secondary served the result.
+    expect(response.transactions).toEqual([]);
+    expect(calledUrls.some((url) => !url.includes('alchemy'))).toBe(true);
+    expect(calledUrls.some((url) => url.includes('alchemy'))).toBe(true);
+  });
+
   it('limits shallow wallet history transaction batches instead of parsing the whole signature page', async () => {
     const signatures = Array.from(
       { length: 100 },

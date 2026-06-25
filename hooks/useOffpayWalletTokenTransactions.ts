@@ -28,7 +28,12 @@ import type {
 const TOKEN_TRANSACTION_STALE_TIME_MS = 1000 * 60;
 const TOKEN_TRANSACTION_GC_TIME_MS = 1000 * 60 * 15;
 const TOKEN_HISTORY_FETCH_WAIT_MS = 6500;
-const TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS = 25_000;
+// The token-history backfill is a background enrichment — the screen has
+// already painted from cache/warm data by the time it runs. On a single RPC
+// provider a native-SOL deep scan legitimately needs several seconds, so this
+// gives it room to actually fetch (the worker degrades to partial results
+// rather than hanging). Far below the old 25s that produced no data.
+const TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS = 14_000;
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_TRANSACTION_VIEWS: WalletTransactionView[] = [];
 const EMPTY_HISTORY_GROUPS: WalletTransactionGroup[] = [];

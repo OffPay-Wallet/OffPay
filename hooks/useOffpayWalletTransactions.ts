@@ -39,7 +39,13 @@ import type {
 // silently stall, focus / reconnect refetches still kick in.
 const TRANSACTION_STALE_TIME_MS = 1000 * 60 * 2;
 const TRANSACTION_GC_TIME_MS = 1000 * 60 * 30;
-const TRANSACTION_REQUEST_TIMEOUT_MS = 25_000;
+// A legitimate cold transactions scan returns in ~5-8s, and the worker now
+// self-bounds (6s per-RPC cap + scan budget + graceful partial results), so a
+// 25s client wait only ever fires on a dead/stalled socket — e.g. a request
+// in flight when the app was backgrounded, which then hung the screen for the
+// full 25s on resume. 15s keeps ample headroom for a slow scan while bounding
+// that stall.
+const TRANSACTION_REQUEST_TIMEOUT_MS = 15_000;
 
 const EMPTY_TRANSACTIONS: WalletTransactionsResponse['transactions'] = [];
 const EMPTY_PAGES: WalletTransactionsResponse[] = [];
