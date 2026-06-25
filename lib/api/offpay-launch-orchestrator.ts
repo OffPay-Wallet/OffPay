@@ -8,10 +8,7 @@ import { prefetchOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache'
 import {
   buildUnavailableCapabilities,
 } from '@/lib/api/offpay-capability-fallback';
-import {
-  persistWalletDisplayCacheFromQueryClient,
-  prefetchWalletDisplayData,
-} from '@/lib/wallet/wallet-display-cache';
+import { persistWalletDisplayCacheFromQueryClient } from '@/lib/wallet/wallet-display-cache';
 
 import type { OffpayLaunchStep } from '@/store/offpayLaunchStore';
 import type { CapabilitiesResponse, OffpayNetwork } from '@/types/offpay-api';
@@ -94,39 +91,62 @@ export async function runOffpayLaunchSequence(
   );
 
   onStep('capabilities', 'running', 'Loading OffPay capability matrix.');
-  const dashboardPreload = await prefetchOffpayWalletDashboard({
+
+  // Launch must NOT block on the wallet dashboard, which is a multi-second
+  // cold call. Fire the dashboard prefetch in the background: it hydrates
+  // balance/transactions/capabilities/stream into the query cache and persists
+  // the display cache for the next cold start when it resolves. The home
+  // snapshot coordinator uses the same query key, so this does not double-fetch
+  // the dashboard.
+  void prefetchOffpayWalletDashboard({
     queryClient: params.queryClient,
     walletAddress,
     network,
     requestOwner: 'launch.dashboard',
-  });
+  })
+    .then((dashboard) => {
+      if (dashboard == null) return;
+      void persistWalletDisplayCacheFromQueryClient({
+        queryClient: params.queryClient,
+        walletAddress,
+        network,
+        options: {
+          includeBalance: true,
+          includeTransactions: true,
+          includePendingBackupStats: false,
+        },
+      }).catch(() => undefined);
+    })
+    .catch(() => undefined);
+
+  // Capabilities resolve from their own fast, separately-cached query (a cheap
+  // endpoint with a short timeout) or memory cache — never gated on the
+  // dashboard. This is what unblocks the launch sequence quickly. The
+  // background dashboard prefetch writes the same capability cache key, so it
+  // refreshes this value when it lands.
   const capabilitiesKey = offpayCapabilitiesQueryKey(network);
   const cachedCapabilities = params.queryClient.getQueryData<CapabilitiesResponse>(capabilitiesKey);
-  const capabilities =
-    dashboardPreload?.capabilities ??
-    (await params.queryClient
-      .fetchQuery(
-        offpayCapabilitiesQueryOptions({
-          network,
-          requestOwner: 'launch.capabilities',
-        }),
-      )
-      .catch(() =>
-        cachedCapabilities?.network === network
-          ? cachedCapabilities
-          : buildUnavailableCapabilities(
-              network,
-              'OffPay API capabilities were unavailable during launch.',
-            ),
-      ));
+  const capabilities = await params.queryClient
+    .fetchQuery(
+      offpayCapabilitiesQueryOptions({
+        network,
+        requestOwner: 'launch.capabilities',
+      }),
+    )
+    .catch(() =>
+      cachedCapabilities?.network === network
+        ? cachedCapabilities
+        : buildUnavailableCapabilities(
+            network,
+            'OffPay API capabilities were unavailable during launch.',
+          ),
+    );
   onStep(
     'capabilities',
     'complete',
-    dashboardPreload != null
-      ? 'Capabilities loaded from wallet dashboard.'
-      : cachedCapabilities?.network === network
-        ? 'Capabilities loaded from memory cache.'
-        : 'Capabilities loaded.',
+    cachedCapabilities?.network === network
+      ? 'Capabilities loaded from memory cache.'
+      : 'Capabilities loaded.',
   );
 
   onStep('pendingBackups', 'skipped', 'Blob backup recovery is no longer on the startup path.');
@@ -155,27 +175,10 @@ export async function runOffpayLaunchSequence(
   const canFetchTransactions = capabilities.capabilities.wallet.transactions.available;
   const canPreloadPortfolio = canFetchBalance || canFetchTransactions;
 
-  if (dashboardPreload != null) {
-    void persistWalletDisplayCacheFromQueryClient({
-      queryClient: params.queryClient,
-      walletAddress,
-      network,
-      options: {
-        includeBalance: true,
-        includeTransactions: true,
-        includePendingBackupStats: false,
-      },
-    }).catch(() => undefined);
-    onStep('portfolio', 'complete', 'Wallet overview loaded from dashboard.');
-  } else if (canPreloadPortfolio) {
-    void prefetchWalletDisplayData({
-      queryClient: params.queryClient,
-      walletAddress,
-      network,
-      canFetchBalance,
-      canFetchTransactions,
-      forceRefresh: false,
-    }).catch(() => undefined);
+  if (canPreloadPortfolio) {
+    // The background dashboard prefetch (above) is already warming balance +
+    // transactions and persisting the display cache when it lands; the home
+    // snapshot coordinator renders from that shared cache. No extra fetch here.
     onStep('portfolio', 'complete', 'Wallet overview is warming in the background.');
   } else {
     onStep(
@@ -192,6 +195,6 @@ export async function runOffpayLaunchSequence(
     capabilities,
     pendingBackupCount: 0,
     recoveredBackupCount: 0,
-    portfolioPreloaded: dashboardPreload != null || canPreloadPortfolio,
+    portfolioPreloaded: canPreloadPortfolio,
   };
 }

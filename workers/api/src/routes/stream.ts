@@ -11,6 +11,7 @@ import {
   getStreamCapabilities,
   getWalletTokenAccountAddresses,
   getWalletTransactions,
+  isWalletActivityStreamConfigured,
   type WalletTransactionRecord,
 } from '../lib/helius.js';
 import { ASSOCIATED_TOKEN_PROGRAM_ID, getSupportedStablecoins } from '../lib/offline.js';
@@ -18,6 +19,7 @@ import {
   getRpcWebSocketUrlCandidates,
   type RpcProviderEndpoint,
 } from '../lib/solana-rpc-providers.js';
+import { recordRequestTiming } from '../lib/timing.js';
 import type { AppEnv, Network } from '../lib/types.js';
 import { isValidSolanaAddress, networkSchema, readSearchParams } from '../lib/validation.js';
 
@@ -356,8 +358,12 @@ streamRoutes.get('/wallet-activity', async (context) => {
   assertWalletAddress(query.wallet);
   assertEventStreamRequest(context.req.header('Accept'));
 
-  const capabilities = await getStreamCapabilities(context.env, query.network);
-  if (!capabilities.capabilities.walletActivity) {
+  // Synchronous (no RPC) gate: only statically-unsupported networks 503 here,
+  // which routes the client cleanly to its poller fallback. Live RPC
+  // reachability is NOT checked before the response opens (that getSlot was
+  // keeping TTFB above target); it is emitted as a `capabilities` event after
+  // the stream is open instead.
+  if (!isWalletActivityStreamConfigured(query.network)) {
     throw new AppError({
       status: 503,
       code: 'UPSTREAM_UNAVAILABLE',
@@ -366,15 +372,7 @@ streamRoutes.get('/wallet-activity', async (context) => {
     });
   }
 
-  const initialTransactions = await getWalletTransactions(context.env, {
-    address: query.wallet,
-    network: query.network,
-    limit: DEFAULT_STREAM_ACTIVITY_LIMIT,
-    useCache: false,
-  });
-
   const trackedSignatures = new Set<string>();
-  rememberSignatures(trackedSignatures, initialTransactions.transactions);
 
   const response = streamSSE(
     context,
@@ -393,29 +391,70 @@ streamRoutes.get('/wallet-activity', async (context) => {
         data: JSON.stringify({ timestamp: Date.now() }),
       });
 
-      const refreshLatestActivity = async () => {
-        if (stream.aborted) return;
+      // Report live RPC reachability AFTER the stream is open so getSlot never
+      // blocks TTFB. This is informational: the stream stays open regardless,
+      // and if liveness is false (RPC down) the seed/refresh below no-op
+      // gracefully rather than closing (which would trigger a reconnect loop,
+      // since the client treats every stream error as retryable).
+      try {
+        const streamCapabilities = await getStreamCapabilities(context.env, query.network);
+        await stream.writeSSE({
+          event: 'capabilities',
+          data: JSON.stringify(streamCapabilities.capabilities),
+        });
+      } catch {
+        // Capability reporting is best-effort; never fail the stream over it.
+      }
 
-        const latestTransactions = await getWalletTransactions(context.env, {
+      // Seed the dedup set AFTER the stream is open, so a cold transaction scan
+      // no longer blocks time-to-first-byte (this was the ~10s TTFB). These
+      // rows are NOT sent to the client — the client loads its initial list
+      // over REST; the seed only stops the first refresh from re-emitting
+      // already-known activity. useCache:true keeps it cheap; failure is
+      // non-fatal (the client de-dupes by signature).
+      try {
+        const seedTransactions = await getWalletTransactions(context.env, {
           address: query.wallet,
           network: query.network,
           limit: DEFAULT_STREAM_ACTIVITY_LIMIT,
-          useCache: false,
+          useCache: true,
+          recordTiming: (name, durationMs) => recordRequestTiming(context, name, durationMs),
         });
+        rememberSignatures(trackedSignatures, seedTransactions.transactions);
+      } catch {
+        // Keep the stream open even if seeding fails.
+      }
 
-        const unseenTransactions = latestTransactions.transactions.filter(
-          (transaction) => !trackedSignatures.has(transaction.signature),
-        );
+      const refreshLatestActivity = async () => {
+        if (stream.aborted) return;
 
-        for (const transaction of [...unseenTransactions].reverse()) {
-          if (stream.aborted) break;
-          await stream.writeSSE({
-            event: 'activity',
-            data: serializeActivityEvent(transaction),
+        try {
+          const latestTransactions = await getWalletTransactions(context.env, {
+            address: query.wallet,
+            network: query.network,
+            limit: DEFAULT_STREAM_ACTIVITY_LIMIT,
+            useCache: false,
           });
-        }
 
-        rememberSignatures(trackedSignatures, latestTransactions.transactions);
+          const unseenTransactions = latestTransactions.transactions.filter(
+            (transaction) => !trackedSignatures.has(transaction.signature),
+          );
+
+          for (const transaction of [...unseenTransactions].reverse()) {
+            if (stream.aborted) break;
+            await stream.writeSSE({
+              event: 'activity',
+              data: serializeActivityEvent(transaction),
+            });
+          }
+
+          rememberSignatures(trackedSignatures, latestTransactions.transactions);
+        } catch {
+          // A transient upstream failure during a periodic refresh must NOT
+          // close the stream — that caused the ~45s reconnect storm where each
+          // reconnect re-paid the connect cost. The next WS trigger / poll tick
+          // retries; Phase 2 bounds the RPC so this fails fast, not hangs.
+        }
       };
 
       const enqueueRefresh = (): Promise<void> => {

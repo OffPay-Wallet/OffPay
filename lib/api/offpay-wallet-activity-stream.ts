@@ -403,7 +403,10 @@ async function connectWalletActivityPoller(
     try {
       const response = await getWalletTransactions(walletAddress, network, {
         limit: ACTIVITY_LIMIT,
-        useCache: false,
+        // Fallback (SSE-down) path: read through the worker cache instead of
+        // forcing a full uncached scan on every poll. Trades up to ~1 cache
+        // TTL of freshness for far less RPC load; SSE remains the live path.
+        useCache: true,
         signal,
         requestOwner: 'walletActivity.poll',
       });
@@ -432,7 +435,10 @@ async function connectWalletActivityPoller(
     } finally {
       inFlight = false;
       lastPollCompletedAt = Date.now();
-      schedule();
+      // Enforce a >=MIN_REFRESH_POLL_INTERVAL_MS floor between polls. The
+      // previous default (POLL_INTERVAL_MS, 4s) re-scanned far too often for a
+      // fallback path. WS/refresh triggers still use scheduleRefreshPoll.
+      schedule(MIN_REFRESH_POLL_INTERVAL_MS);
     }
   };
 

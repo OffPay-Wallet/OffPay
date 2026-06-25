@@ -43,8 +43,17 @@ const WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
 const MAX_WALLET_TRANSACTION_SIGNATURE_SCAN = 1_000;
 const MIN_WALLET_TRANSACTION_BATCH_SIZE = 20;
 const TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
-const MAX_NATIVE_SOL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 1_000;
+// Bounded first-page scan. Native SOL touches far more signatures (rent, fees,
+// internal movements) than displayable rows, so the old unbounded 1000-sig
+// scan was the ~12s token-history tail. Older rows load on demand via the
+// response cursor, so this only bounds the FIRST page.
+const MAX_NATIVE_SOL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 200;
 const MAX_SPL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 200;
+// Hard wall-clock ceiling for a single first-page scan loop. On hit we stop and
+// return the cursor reached so far (so the client knows more is available),
+// keeping endpoints < 3s even when most scanned signatures are non-displayable.
+// Tune against the Phase 0 tx_signatures / tx_batch / tx_pages numbers.
+const WALLET_TRANSACTION_SCAN_BUDGET_MS = 2_500;
 const DEFAULT_STREAM_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_STREAM_WEBSOCKET_FALLBACK_POLL_INTERVAL_MS = 45_000;
 const DEFAULT_STREAM_ACTIVITY_LIMIT = 10;
@@ -284,10 +293,26 @@ interface WalletLamportsRequest {
   network: Network;
 }
 
+export type TimingRecorder = (name: string, durationMs: number) => void;
+
+/**
+ * Phase 0 instrumentation: per-request accumulator for the RPC scan sub-steps
+ * so wallet-path latency can be attributed (token-account discovery vs.
+ * signature fetch vs. transaction-batch enrichment vs. page count) instead of
+ * guessed at. Flushed once per scan via a TimingRecorder.
+ */
+interface WalletScanTimings {
+  tokenAccountsMs: number;
+  signaturesMs: number;
+  txBatchMs: number;
+  pages: number;
+}
+
 interface WalletBalanceRequest {
   address: string;
   network: Network;
   useCache?: boolean;
+  recordTiming?: TimingRecorder;
 }
 
 interface WalletTransactionsRequest {
@@ -296,6 +321,7 @@ interface WalletTransactionsRequest {
   cursor?: string | null;
   limit?: number;
   useCache?: boolean;
+  recordTiming?: TimingRecorder;
 }
 
 interface WalletTokenTransactionsRequest extends WalletTransactionsRequest {
@@ -955,22 +981,38 @@ function isRetryableRpcError(errorValue: Record<string, unknown>): boolean {
   );
 }
 
+// Per-attempt ceiling for a single upstream Solana RPC call. Without this a
+// slow/hanging provider blocks the whole request (the 8-12s tails we saw), and
+// serial provider fallthrough never gets a chance. This bounds one attempt;
+// Phase 5 hedging removes the additive cost of trying providers in series.
+// Tune against the Phase 0 tx_signatures / tx_batch Server-Timing numbers.
+const RPC_HTTP_TIMEOUT_MS = 3000;
+
 async function fetchJson(url: string, init: RequestInit, errorMessage: string): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await heliusFetchImplementation(url, init);
-  } catch (error) {
-    throw toUpstreamUnavailable(null, errorMessage, error);
-  }
-
-  if (!response.ok) {
-    throw toUpstreamUnavailable(response, errorMessage);
-  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`RPC request timed out after ${RPC_HTTP_TIMEOUT_MS}ms`));
+  }, RPC_HTTP_TIMEOUT_MS);
 
   try {
-    return (await response.json()) as unknown;
-  } catch (error) {
-    throw toUpstreamUnavailable(response, errorMessage, error);
+    let response: Response;
+    try {
+      response = await heliusFetchImplementation(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      throw toUpstreamUnavailable(null, errorMessage, error);
+    }
+
+    if (!response.ok) {
+      throw toUpstreamUnavailable(response, errorMessage);
+    }
+
+    try {
+      return (await response.json()) as unknown;
+    } catch (error) {
+      throw toUpstreamUnavailable(response, errorMessage, error);
+    }
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -3938,8 +3980,9 @@ async function fetchRpcWalletSignaturePage(
   walletAddress: string,
   cursor: string | null,
   limit: number,
+  tokenAccounts: WalletTokenAccountAddress[],
+  timings?: WalletScanTimings,
 ): Promise<RpcSignaturePage> {
-  const tokenAccounts = await getWalletTokenAccountAddresses(bindings, walletAddress, network);
   const seenSources = new Set<string>();
   const sourceAddresses = [
     walletAddress,
@@ -3964,7 +4007,9 @@ async function fetchRpcWalletSignaturePage(
       params: [sourceAddress, config],
     };
   });
+  const signaturesStartedAt = Date.now();
   const results = await heliusRpcBatchRequest(bindings, network, requests);
+  if (timings != null) timings.signaturesMs += Date.now() - signaturesStartedAt;
   const entriesBySignature = new Map<string, RpcSignatureEntry>();
   let anySourceMayHaveMore = false;
 
@@ -4007,17 +4052,35 @@ async function fetchWalletTransactionsViaRpc(
   network: Network,
   cursor: string | null,
   limit: number,
+  recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
   const maxSignatureScan = Math.max(
     WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
     Math.min(MAX_WALLET_TRANSACTION_SIGNATURE_SCAN, limit * 5),
   );
+  const scanTimings: WalletScanTimings = {
+    tokenAccountsMs: 0,
+    signaturesMs: 0,
+    txBatchMs: 0,
+    pages: 0,
+  };
+  // Token accounts are stable across the whole scan, so resolve them ONCE here
+  // instead of re-fetching (2 RPCs) on every signature page.
+  const tokenAccountsStartedAt = Date.now();
+  const tokenAccounts = await getWalletTokenAccountAddresses(bindings, address, network);
+  scanTimings.tokenAccountsMs += Date.now() - tokenAccountsStartedAt;
+  const scanStartedAt = Date.now();
   const filteredTransactions: WalletTransactionRecord[] = [];
   let scannedSignatures = 0;
   let scanCursor = cursor;
   let nextCursor: string | null = null;
 
   while (filteredTransactions.length < limit && scannedSignatures < maxSignatureScan) {
+    if (scanTimings.pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
+      // Budget exhausted. nextCursor (set by the previous page) signals more is
+      // available so the client can load older rows on demand.
+      break;
+    }
     const signatureLimit = Math.min(
       WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
       maxSignatureScan - scannedSignatures,
@@ -4028,6 +4091,8 @@ async function fetchWalletTransactionsViaRpc(
       address,
       scanCursor,
       signatureLimit,
+      tokenAccounts,
+      scanTimings,
     );
     const remainingDisplayableTransactions = Math.max(1, limit - filteredTransactions.length);
     const transactionBatchLimit = Math.min(
@@ -4042,6 +4107,7 @@ async function fetchWalletTransactionsViaRpc(
 
     scannedSignatures += transactionRequests.length;
 
+    const transactionBatchStartedAt = Date.now();
     const parsedTransactions = await fetchRpcTransactionRecordsBatch(
       bindings,
       network,
@@ -4049,6 +4115,8 @@ async function fetchWalletTransactionsViaRpc(
       signaturePage.tokenAccounts,
       transactionRequests,
     );
+    scanTimings.txBatchMs += Date.now() - transactionBatchStartedAt;
+    scanTimings.pages += 1;
     let reachedLimit = false;
 
     for (const transaction of parsedTransactions) {
@@ -4076,6 +4144,13 @@ async function fetchWalletTransactionsViaRpc(
       break;
     }
     scanCursor = nextCursor;
+  }
+
+  if (recordTiming != null) {
+    recordTiming('tx_token_accounts', scanTimings.tokenAccountsMs);
+    recordTiming('tx_signatures', scanTimings.signaturesMs);
+    recordTiming('tx_batch', scanTimings.txBatchMs);
+    recordTiming('tx_pages', scanTimings.pages);
   }
 
   return buildWalletTransactionsResponse({
@@ -4157,12 +4232,9 @@ async function fetchRpcWalletTokenSignaturePage(
   mint: string,
   cursor: string | null,
   signatureLimit: number,
+  walletTokenAccounts: WalletTokenAccountAddress[],
+  timings?: WalletScanTimings,
 ): Promise<RpcSignaturePage> {
-  const walletTokenAccounts = await getWalletTokenAccountAddresses(
-    bindings,
-    walletAddress,
-    network,
-  );
   const normalizedMint = normalizeTokenTransactionMint(mint);
   const sourceAddresses =
     normalizedMint === SOL_MINT
@@ -4194,7 +4266,9 @@ async function fetchRpcWalletTokenSignaturePage(
       params: [sourceAddress, config],
     };
   });
+  const signaturesStartedAt = Date.now();
   const results = await heliusRpcBatchRequest(bindings, network, requests);
+  if (timings != null) timings.signaturesMs += Date.now() - signaturesStartedAt;
   const entriesBySignature = new Map<string, RpcSignatureEntry>();
   let anySourceMayHaveMore = false;
 
@@ -4238,15 +4312,31 @@ async function fetchWalletTokenTransactionsViaRpc(
   mint: string,
   cursor: string | null,
   limit: number,
+  recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
   const normalizedMint = normalizeTokenTransactionMint(mint);
   const maxSignatureScan = getTokenTransactionMaxSignatureScan(normalizedMint, limit);
+  const scanTimings: WalletScanTimings = {
+    tokenAccountsMs: 0,
+    signaturesMs: 0,
+    txBatchMs: 0,
+    pages: 0,
+  };
+  // Resolve token accounts ONCE for the whole scan (was 2 RPCs per page).
+  const tokenAccountsStartedAt = Date.now();
+  const tokenAccounts = await getWalletTokenAccountAddresses(bindings, address, network);
+  scanTimings.tokenAccountsMs += Date.now() - tokenAccountsStartedAt;
+  const scanStartedAt = Date.now();
   const filteredTransactions: WalletTransactionRecord[] = [];
   let scannedSignatures = 0;
   let scanCursor = cursor;
   let nextCursor: string | null = null;
 
   while (filteredTransactions.length < limit && scannedSignatures < maxSignatureScan) {
+    if (scanTimings.pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
+      // Budget exhausted; nextCursor signals more is available (load on demand).
+      break;
+    }
     const signatureLimit = Math.min(
       TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE,
       maxSignatureScan - scannedSignatures,
@@ -4258,6 +4348,8 @@ async function fetchWalletTokenTransactionsViaRpc(
       normalizedMint,
       scanCursor,
       signatureLimit,
+      tokenAccounts,
+      scanTimings,
     );
     const remainingDisplayableTransactions = Math.max(1, limit - filteredTransactions.length);
     const transactionBatchLimit = Math.min(
@@ -4272,6 +4364,7 @@ async function fetchWalletTokenTransactionsViaRpc(
 
     scannedSignatures += transactionRequests.length;
 
+    const transactionBatchStartedAt = Date.now();
     const parsedTransactions = await fetchRpcTransactionRecordsBatch(
       bindings,
       network,
@@ -4279,6 +4372,8 @@ async function fetchWalletTokenTransactionsViaRpc(
       signaturePage.tokenAccounts,
       transactionRequests,
     );
+    scanTimings.txBatchMs += Date.now() - transactionBatchStartedAt;
+    scanTimings.pages += 1;
     for (const transaction of parsedTransactions) {
       if (
         walletTransactionMatchesMint(transaction, normalizedMint) &&
@@ -4297,6 +4392,13 @@ async function fetchWalletTokenTransactionsViaRpc(
         : null;
     if (nextCursor === null) break;
     scanCursor = nextCursor;
+  }
+
+  if (recordTiming != null) {
+    recordTiming('ttx_token_accounts', scanTimings.tokenAccountsMs);
+    recordTiming('ttx_signatures', scanTimings.signaturesMs);
+    recordTiming('ttx_batch', scanTimings.txBatchMs);
+    recordTiming('ttx_pages', scanTimings.pages);
   }
 
   return buildWalletTransactionsResponse({
@@ -4339,6 +4441,8 @@ async function getWalletBalance(
           ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
           isValid: isWalletBalanceResponse,
           resolver,
+          recordTiming: request.recordTiming,
+          metricLabel: 'bal',
         }),
       )
     : resolver();
@@ -4364,6 +4468,7 @@ async function getWalletTransactions(
       request.network,
       normalizedCursor,
       normalizedLimit,
+      request.recordTiming,
     );
   };
 
@@ -4376,6 +4481,8 @@ async function getWalletTransactions(
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
           resolver,
+          recordTiming: request.recordTiming,
+          metricLabel: 'tx',
         }),
       )
     : resolver();
@@ -4403,6 +4510,7 @@ async function getWalletTokenTransactions(
       normalizedMint,
       normalizedCursor,
       normalizedLimit,
+      request.recordTiming,
     );
   };
 
@@ -4415,9 +4523,22 @@ async function getWalletTokenTransactions(
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
           resolver,
+          recordTiming: request.recordTiming,
+          metricLabel: 'ttx',
         }),
       )
     : resolver();
+}
+
+/**
+ * Synchronous check of whether wallet-activity streaming is configured for a
+ * network. Unlike getStreamCapabilities() this does NOT touch the RPC (no
+ * getSlot), so the SSE route can gate its 503 instantly and keep getSlot off
+ * the time-to-first-byte path. Live RPC reachability is reported as an event
+ * after the stream opens.
+ */
+function isWalletActivityStreamConfigured(network: Network): boolean {
+  return STREAM_DEFAULTS[network].walletActivity;
 }
 
 async function isWalletActivityLive(bindings: Bindings, network: Network): Promise<boolean> {
@@ -4541,6 +4662,7 @@ export {
   getRpcTokenLargestAccounts,
   getTransactionExecutionStatus,
   getStreamCapabilities,
+  isWalletActivityStreamConfigured,
   getWalletTokenAccountAddresses,
   getWalletLamports,
   getWalletMintRawBalance,

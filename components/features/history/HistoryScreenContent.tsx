@@ -25,6 +25,7 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
 import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
@@ -98,6 +99,23 @@ export function HistoryScreenContent(): React.JSX.Element {
   const backgroundPrefetchInFlightRef = useRef(false);
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
+
+  // First-meaningful-paint (Phase 0): when the first transaction rows render
+  // (cached/stale or fresh) instead of a skeleton, measured from screen mount.
+  // `stale` distinguishes a cached paint from a fresh one.
+  const [historyMountMark] = useState(() => mark());
+  const historyFirstPaintLoggedRef = useRef(false);
+  const historyRowCount = transactionsQuery.transactionViews.length;
+  useEffect(() => {
+    if (historyFirstPaintLoggedRef.current) return;
+    if (historyRowCount <= 0) return;
+    historyFirstPaintLoggedRef.current = true;
+    measure('history.firstPaint', historyMountMark, {
+      network,
+      stale: transactionsQuery.isStale,
+      count: historyRowCount,
+    });
+  }, [historyMountMark, historyRowCount, network, transactionsQuery.isStale]);
 
   const handleBack = () => {
     const target =

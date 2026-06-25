@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { z } from 'zod';
 import { getCapabilities } from '../lib/capabilities.js';
 import { getOrSetEdgeJsonCache } from '../lib/edge-cache.js';
@@ -9,6 +10,7 @@ import {
   getWalletTokenTransactions,
   getWalletTransactions,
 } from '../lib/helius.js';
+import { recordRequestTiming } from '../lib/timing.js';
 import type { AppEnv } from '../lib/types.js';
 import { isValidSolanaAddress, networkSchema, readSearchParams } from '../lib/validation.js';
 
@@ -64,6 +66,15 @@ function assertWalletAddress(value: string, message: string): void {
   }
 }
 
+/**
+ * Phase 0 instrumentation: a context-bound recorder so the helius data layer
+ * can attribute sub-step latency (token-account discovery, signatures,
+ * transaction batch, shared-cache get/set) into the Server-Timing header.
+ */
+function makeTimingRecorder(context: Context<AppEnv>) {
+  return (name: string, durationMs: number): void => recordRequestTiming(context, name, durationMs);
+}
+
 const walletRoutes = new Hono<AppEnv>();
 
 walletRoutes.get('/dashboard', async (context) => {
@@ -72,6 +83,7 @@ walletRoutes.get('/dashboard', async (context) => {
   assertWalletAddress(query.address, 'Wallet address is invalid.');
 
   const resolveDashboard = async () => {
+    const recordTiming = makeTimingRecorder(context);
     const [capabilities, streamCapabilities, balance, transactions] = await Promise.all([
       getCapabilities(context.env, query.network),
       getStreamCapabilities(context.env, query.network),
@@ -79,6 +91,7 @@ walletRoutes.get('/dashboard', async (context) => {
         address: query.address,
         network: query.network,
         useCache: query.useCache ?? true,
+        recordTiming,
       }),
       getWalletTransactions(context.env, {
         address: query.address,
@@ -86,6 +99,7 @@ walletRoutes.get('/dashboard', async (context) => {
         cursor: null,
         limit: query.limit,
         useCache: query.useCache ?? true,
+        recordTiming,
       }),
     ]);
 
@@ -130,6 +144,7 @@ walletRoutes.get('/balance', async (context) => {
       address: query.address,
       network: query.network,
       useCache: query.useCache ?? true,
+      recordTiming: makeTimingRecorder(context),
     });
 
   const payload =
@@ -164,6 +179,7 @@ walletRoutes.get('/transactions', async (context) => {
       cursor: query.cursor ?? null,
       limit: query.limit,
       useCache: query.useCache ?? true,
+      recordTiming: makeTimingRecorder(context),
     });
 
   const canUseEdgeCache = query.useCache !== false && query.cursor == null;
@@ -197,6 +213,7 @@ walletRoutes.get('/token-transactions', async (context) => {
       cursor: query.cursor ?? null,
       limit: query.limit,
       useCache: query.useCache ?? true,
+      recordTiming: makeTimingRecorder(context),
     });
 
   const canUseEdgeCache = query.useCache !== false && query.cursor == null;

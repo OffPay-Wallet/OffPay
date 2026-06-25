@@ -50,6 +50,7 @@ import { useOffpayTokenValuations } from '@/hooks/useOffpayTokenValuations';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayWalletTokenTransactions } from '@/hooks/useOffpayWalletTokenTransactions';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import {
   buildWalletHistoryGroups,
   buildStablecoinMetadataLookup,
@@ -930,6 +931,23 @@ export function TokenDetailsScreen(): React.JSX.Element {
     walletHistoryActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
     !walletHistoryQuery.isInitialDataPending &&
     !walletHistoryQuery.isFetching;
+
+  // First-meaningful-paint (Phase 0): when the token's activity rows first
+  // render. The deep token-transactions backfill tops this off afterward, so
+  // this captures the user-visible paint rather than backfill completion.
+  const [tokenDetailsMountMark] = useState(() => mark());
+  const tokenDetailsFirstPaintLoggedRef = useRef(false);
+  const tokenActivityRowCount = walletHistoryActivity.length;
+  useEffect(() => {
+    if (tokenDetailsFirstPaintLoggedRef.current) return;
+    if (tokenActivityRowCount <= 0) return;
+    tokenDetailsFirstPaintLoggedRef.current = true;
+    measure('tokenDetails.firstPaint', tokenDetailsMountMark, {
+      network,
+      stale: walletHistoryQuery.isStale,
+      count: tokenActivityRowCount,
+    });
+  }, [network, tokenActivityRowCount, tokenDetailsMountMark, walletHistoryQuery.isStale]);
   const tokenTransactionsQuery = useOffpayWalletTokenTransactions({
     mint: holding == null ? null : getTokenActionMint(holding),
     deferUntilAfterInteractions: true,

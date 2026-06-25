@@ -48,6 +48,12 @@ function sanitizeText(value: string | null | undefined, maxLength = 160): string
   return normalized.slice(0, maxLength);
 }
 
+// Upstash is a network hop on the read hot path, and a slow KV call blocks the
+// resolver it is supposed to accelerate. Bound it tightly: on timeout the
+// shared cache degrades to a miss (callers already treat a throw as
+// unavailable) and the authoritative upstream read proceeds.
+const KV_PIPELINE_TIMEOUT_MS = 1000;
+
 async function runKvPipeline(
   bindings: Bindings,
   commands: ReadonlyArray<ReadonlyArray<string | number>>,
@@ -56,47 +62,57 @@ async function runKvPipeline(
   const endpoint = getRequiredBinding(bindings, 'KV_REST_API_URL').replace(/\/$/, '');
   const token = getRequiredBinding(bindings, 'KV_REST_API_TOKEN');
 
-  let response: Response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`Shared cache request timed out after ${KV_PIPELINE_TIMEOUT_MS}ms`));
+  }, KV_PIPELINE_TIMEOUT_MS);
+
   try {
-    response = await fetch(`${endpoint}/pipeline`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(commands),
-    });
-  } catch (error) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: unavailableMessage,
-      retryable: true,
-      cause: error,
-    });
-  }
+    let response: Response;
+    try {
+      response = await fetch(`${endpoint}/pipeline`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(commands),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: unavailableMessage,
+        retryable: true,
+        cause: error,
+      });
+    }
 
-  if (!response.ok) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: unavailableMessage,
-      retryable: true,
-    });
-  }
+    if (!response.ok) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: unavailableMessage,
+        retryable: true,
+      });
+    }
 
-  const payload = (await response.json()) as Array<{ result?: unknown; error?: string }>;
-  const erroredEntry = payload.find((entry) => entry.error);
-  if (erroredEntry?.error) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: unavailableMessage,
-      retryable: true,
-    });
-  }
+    const payload = (await response.json()) as Array<{ result?: unknown; error?: string }>;
+    const erroredEntry = payload.find((entry) => entry.error);
+    if (erroredEntry?.error) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: unavailableMessage,
+        retryable: true,
+      });
+    }
 
-  return payload.map((entry) => entry.result ?? null);
+    return payload.map((entry) => entry.result ?? null);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export {

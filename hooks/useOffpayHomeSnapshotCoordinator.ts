@@ -53,6 +53,8 @@ export function useOffpayHomeSnapshotCoordinator({
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startupMeasureRef = useRef<number | null>(null);
   const fallbackFetchMarkKeyRef = useRef<string | null>(null);
+  const cachedPaintLoggedRef = useRef(false);
+  const freshPaintLoggedRef = useRef(false);
   const identity = useMemo(
     () => `${network ?? 'no-network'}:${walletAddress ?? 'no-wallet'}:${enabled ? 'on' : 'off'}`,
     [enabled, network, walletAddress],
@@ -92,6 +94,8 @@ export function useOffpayHomeSnapshotCoordinator({
     setFallbackGateOpen(false);
     setIdleGateOpen(false);
     fallbackFetchMarkKeyRef.current = null;
+    cachedPaintLoggedRef.current = false;
+    freshPaintLoggedRef.current = false;
 
     if (!enabled || walletAddress == null || network == null) {
       startupMeasureRef.current = null;
@@ -298,6 +302,28 @@ export function useOffpayHomeSnapshotCoordinator({
       result: 'enabled',
     });
   }, [foregroundFetchEnabled, identity, network]);
+
+  // First-meaningful-paint (Phase 0). These fire on the React commit that
+  // first makes usable data available, so the screen can show real content
+  // instead of a skeleton — a close proxy for paint, and the metric that
+  // matches the "screen keeps loading" complaint. `cached` = persisted/stale
+  // rows hydrated; `fresh` = the live dashboard landed. On a cold cache only
+  // `fresh` fires. Both measured from coordination start.
+  useEffect(() => {
+    if (cachedPaintLoggedRef.current) return;
+    if (startupMeasureRef.current == null) return;
+    if (displayCacheStatus !== 'hit') return;
+    cachedPaintLoggedRef.current = true;
+    measure('home.firstPaint.cached', startupMeasureRef.current, { network });
+  }, [displayCacheStatus, network]);
+
+  useEffect(() => {
+    if (freshPaintLoggedRef.current) return;
+    if (startupMeasureRef.current == null) return;
+    if (dashboardQuery.data == null) return;
+    freshPaintLoggedRef.current = true;
+    measure('home.firstPaint.fresh', startupMeasureRef.current, { network });
+  }, [dashboardQuery.data, network]);
 
   return {
     dashboardQuery,

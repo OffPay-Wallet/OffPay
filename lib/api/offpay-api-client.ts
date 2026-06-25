@@ -581,6 +581,64 @@ async function buildAuthenticatedHeaders(params: {
   });
 }
 
+interface OffpayServerTrace {
+  cache: string | null;
+  requestId: string | null;
+  protocol: string | null;
+  serverTiming: string | null;
+  serverMs: number | null;
+}
+
+const EMPTY_SERVER_TRACE: OffpayServerTrace = {
+  cache: null,
+  requestId: null,
+  protocol: null,
+  serverTiming: null,
+  serverMs: null,
+};
+
+/**
+ * Parse the `total;dur=NN` metric out of a `Server-Timing` header so client
+ * perf logs can separate server processing time from client/network wait.
+ * Returns null when the header is absent or malformed.
+ */
+function parseServerTimingTotalMs(serverTiming: string | null): number | null {
+  if (serverTiming == null || serverTiming.length === 0) return null;
+  for (const segment of serverTiming.split(',')) {
+    const tokens = segment.trim().split(';');
+    if (tokens[0]?.trim() !== 'total') continue;
+    for (const token of tokens.slice(1)) {
+      const trimmed = token.trim();
+      if (!trimmed.startsWith('dur=')) continue;
+      const value = Number(trimmed.slice(4));
+      return Number.isFinite(value) ? value : null;
+    }
+  }
+  return null;
+}
+
+function readResponseHeader(response: Response, name: string): string | null {
+  const headers = (response as { headers?: { get?: (name: string) => string | null } }).headers;
+  return typeof headers?.get === 'function' ? headers.get(name) : null;
+}
+
+/**
+ * Capture the OffPay worker's observability headers (cache status, request id,
+ * protocol, and the raw Server-Timing breakdown) so they can be attached to the
+ * client perf log. Reading headers does not consume the response body, so this
+ * is safe for both JSON requests and streaming (SSE) responses.
+ */
+function readOffpayServerTrace(response: Response): OffpayServerTrace {
+  const serverTiming = readResponseHeader(response, 'Server-Timing');
+  return {
+    cache: readResponseHeader(response, 'X-OffPay-Cache'),
+    requestId: readResponseHeader(response, 'X-Request-Id'),
+    protocol: readResponseHeader(response, 'X-Protocol'),
+    serverTiming,
+    serverMs: parseServerTimingTotalMs(serverTiming),
+  };
+}
+
 export async function offpayPublicRequest<T>(options: PublicRequestOptions): Promise<T> {
   assertOffpayNetworkAccessAllowed();
 
@@ -611,9 +669,12 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
     init.signal = handle.signal;
   }
 
+  let serverTrace: OffpayServerTrace = EMPTY_SERVER_TRACE;
+
   try {
     const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
     responseStatus = response.status;
+    serverTrace = readOffpayServerTrace(response);
     const payload = await parseJsonResponse(response);
     if (!response.ok) throwForErrorEnvelope(response.status, payload);
 
@@ -626,6 +687,11 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
       network: getPublicRequestNetwork(options.query),
       status: responseStatus,
       owner: options.requestOwner ?? null,
+      cache: serverTrace.cache,
+      requestId: serverTrace.requestId,
+      protocol: serverTrace.protocol,
+      serverMs: serverTrace.serverMs,
+      serverTiming: serverTrace.serverTiming,
     });
   }
 }
@@ -660,9 +726,12 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
     init.signal = handle.signal;
   }
 
+  let serverTrace: OffpayServerTrace = EMPTY_SERVER_TRACE;
+
   try {
     const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
     responseStatus = response.status;
+    serverTrace = readOffpayServerTrace(response);
     if (!response.ok) {
       const payload = await parseJsonResponse(response);
       throwForErrorEnvelope(response.status, payload);
@@ -677,6 +746,11 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
       network: getPublicRequestNetwork(options.query),
       status: responseStatus,
       owner: options.requestOwner ?? null,
+      cache: serverTrace.cache,
+      requestId: serverTrace.requestId,
+      protocol: serverTrace.protocol,
+      serverMs: serverTrace.serverMs,
+      serverTiming: serverTrace.serverTiming,
     });
   }
 }

@@ -62,14 +62,21 @@ async function getOrSetSharedJsonCache<T>(params: {
   ttlMs: number;
   isValid: (value: unknown) => value is T;
   resolver: () => Promise<T>;
+  recordTiming?: (name: string, durationMs: number) => void;
+  metricLabel?: string;
 }): Promise<T> {
+  const label = params.metricLabel ?? 'kv';
+  const getStartedAt = Date.now();
   const cached = await getSharedJsonCache<unknown>(params.bindings, params.namespace, params.key);
+  params.recordTiming?.(`${label}_kv_get`, Date.now() - getStartedAt);
   if (cached != null && params.isValid(cached)) {
     return cached;
   }
 
   const value = await params.resolver();
+  const setStartedAt = Date.now();
   await setSharedJsonCache(params.bindings, params.namespace, params.key, value, params.ttlMs);
+  params.recordTiming?.(`${label}_kv_set`, Date.now() - setStartedAt);
   return value;
 }
 
