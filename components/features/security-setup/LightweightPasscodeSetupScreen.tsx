@@ -72,7 +72,13 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
   const [entry, setEntry] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [settingsReady, setSettingsReady] = useState(() => cachedSettings != null);
+  // Accept keypad input immediately. The security-settings read is async
+  // and, on a cold cache (e.g. first-launch onboarding), resolves a few
+  // hundred ms after mount — long enough that an eager first tap would be
+  // dropped, making the entry appear to reset. We no longer gate input on
+  // it; the authoritative mode is resolved when an entry completes (see
+  // handleCompletedEntry).
+  const [settingsReady, setSettingsReady] = useState(true);
   const [processingEntry, setProcessingEntry] = useState(false);
 
   const modeRef = useRef<PasscodeMode>(
@@ -191,12 +197,28 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
 
   const handleCompletedEntry = useCallback(
     async (nextEntry: string): Promise<void> => {
-      if (!settingsReady || completingEntryRef.current) return;
+      if (completingEntryRef.current) return;
 
       completingEntryRef.current = true;
       setProcessingEntry(true);
 
       try {
+        // On a cold cache the async settings read may not have resolved by
+        // the time all six digits are entered. Resolve the authoritative
+        // mode now so we never mistake an existing passcode for a fresh
+        // setup (or vice versa). Skipped once a confirm step is in flight.
+        if (!initialSettingsAppliedRef.current && firstPasscodeRef.current.length === 0) {
+          try {
+            const settings = await getSecuritySettings();
+            setModeValue(settings.hasPasscode ? 'unlockExisting' : 'create');
+          } catch {
+            setModeValue('create');
+          } finally {
+            initialSettingsAppliedRef.current = true;
+            setSettingsReady(true);
+          }
+        }
+
         const activeMode = modeRef.current;
 
         if (activeMode === 'unlockExisting') {
@@ -248,12 +270,12 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         setProcessingEntry(false);
       }
     },
-    [intent, setEntryValue, setModeValue, settingsReady],
+    [intent, setEntryValue, setModeValue],
   );
 
   const handleDigit = useCallback(
     (digit: string): void => {
-      if (!settingsReady || saving || processingEntry || completingEntryRef.current) return;
+      if (saving || processingEntry || completingEntryRef.current) return;
       const currentEntry = entryRef.current;
       if (currentEntry.length >= 6) return;
 
@@ -264,20 +286,20 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         void handleCompletedEntry(nextEntry);
       }
     },
-    [handleCompletedEntry, processingEntry, saving, setEntryValue, settingsReady],
+    [handleCompletedEntry, processingEntry, saving, setEntryValue],
   );
 
   const handleDelete = useCallback((): void => {
-    if (!settingsReady || saving || processingEntry || completingEntryRef.current) return;
+    if (saving || processingEntry || completingEntryRef.current) return;
     setupTouchedRef.current = true;
     setEntryValue(entryRef.current.slice(0, -1));
-  }, [processingEntry, saving, setEntryValue, settingsReady]);
+  }, [processingEntry, saving, setEntryValue]);
 
   const handleClear = useCallback((): void => {
-    if (!settingsReady || saving || processingEntry || completingEntryRef.current) return;
+    if (saving || processingEntry || completingEntryRef.current) return;
     setupTouchedRef.current = true;
     setEntryValue('');
-  }, [processingEntry, saving, setEntryValue, settingsReady]);
+  }, [processingEntry, saving, setEntryValue]);
 
   const content = useMemo(() => {
     if (mode === 'unlockExisting') {

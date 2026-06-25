@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -11,7 +9,13 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSharedValue, withTiming, Easing } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  useAnimatedKeyboard,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -89,6 +93,15 @@ export default function InviteCodeScreen(): React.JSX.Element {
 
   const lookDownOffset = useSharedValue(0);
   const focusCount = useSharedValue(0);
+
+  // Live keyboard height (iOS + Android). We lift the centered content
+  // by the keyboard height so the input/button always clear the keypad,
+  // and settle back to the resting bottom padding when it dismisses.
+  const keyboard = useAnimatedKeyboard();
+  const baseBottomPadding = insets.bottom + spacing['3xl'];
+  const contentAnimatedStyle = useAnimatedStyle(() => ({
+    paddingBottom: Math.max(baseBottomPadding, keyboard.height.value + spacing.lg),
+  }));
 
   const compact = width < 390 || height < 740;
   const horizontalPadding = width < 340 ? spacing.lg : compact ? spacing.xl : spacing['3xl'];
@@ -232,24 +245,25 @@ export default function InviteCodeScreen(): React.JSX.Element {
   }, [email, inviteCode, setInviteAccessVerified, setInviteEmail, submitting]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={styles.screen}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[
-          styles.content,
-          {
-            paddingTop: insets.top + (compact ? spacing['2xl'] : spacing['4xl']),
-            paddingBottom: insets.bottom + spacing['3xl'],
-            paddingHorizontal: horizontalPadding,
-          },
-        ]}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         contentInsetAdjustmentBehavior="never"
         showsVerticalScrollIndicator={false}
       >
+        <Animated.View
+          style={[
+            styles.content,
+            {
+              paddingTop: insets.top + (compact ? spacing['2xl'] : spacing['4xl']),
+              paddingHorizontal: horizontalPadding,
+            },
+            contentAnimatedStyle,
+          ]}
+        >
         {/* Animated logo — eyes look down when user is typing */}
         <View style={styles.logoContainer}>
           <AnimatedOffPayLogo
@@ -427,8 +441,9 @@ export default function InviteCodeScreen(): React.JSX.Element {
             accessibilityLabel={stage === 'email' ? 'Continue with email' : 'Verify invite code'}
           />
         </View>
+        </Animated.View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -439,6 +454,9 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   content: {
     flexGrow: 1,
