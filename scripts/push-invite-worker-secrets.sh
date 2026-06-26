@@ -47,3 +47,4 @@ echo
 echo "Done."
 echo "Generate shareable invite codes with:"
 echo "OFFPAY_INVITE_CODE_PEPPER='${OFFPAY_INVITE_CODE_PEPPER}' npm run invite:generate -- --count 100 --segment B1 --expiry-days 30"
+echo "Codes are six uppercase alphanumeric characters."

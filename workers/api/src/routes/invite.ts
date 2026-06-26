@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
 import { meetsMinVersion } from '../lib/auth.js';
@@ -59,7 +59,7 @@ function ensureAllowedOrigin(origin: string | null | undefined, env: AppEnv['Bin
 
 const inviteRoutes = new Hono<AppEnv>();
 
-inviteRoutes.post('/verify', async (context) => {
+function parseInvitePublicHeaders(context: Context<AppEnv>): { deviceId: string } {
   ensureAllowedOrigin(context.req.header('Origin'), context.env);
 
   const appVersion = context.req.header('X-App-Version')?.trim() ?? '';
@@ -99,6 +99,12 @@ inviteRoutes.post('/verify', async (context) => {
     });
   }
 
+  return { deviceId };
+}
+
+inviteRoutes.post('/verify', async (context) => {
+  const { deviceId } = parseInvitePublicHeaders(context);
+
   const body = await readJsonBody(
     context.req.raw,
     inviteVerifyBodySchema,
@@ -117,14 +123,14 @@ inviteRoutes.post('/verify', async (context) => {
       verified: true,
       segment: verification.segment,
       gate: verification.gate,
-      email: body.email,
+      email: verification.email,
     },
     200,
   );
 });
 
 inviteRoutes.post('/check-email', async (context) => {
-  ensureAllowedOrigin(context.req.header('Origin'), context.env);
+  const { deviceId } = parseInvitePublicHeaders(context);
 
   const body = await readJsonBody(
     context.req.raw,
@@ -133,7 +139,7 @@ inviteRoutes.post('/check-email', async (context) => {
     'Malformed check-email request body.',
   );
 
-  const result = await checkInviteEmailForAccess(context.env, body.email);
+  const result = await checkInviteEmailForAccess(context.env, body.email, deviceId);
 
   return context.json(result, 200);
 });

@@ -11,6 +11,11 @@ import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
+import {
+  isWalletFlowInviteFresh,
+  WALLET_FLOW_INVITE_PURPOSE,
+} from '@/lib/invite/wallet-flow-invite';
+import { useAppStore } from '@/store/app';
 
 import type { ComponentProps } from 'react';
 
@@ -46,9 +51,15 @@ export default function RestoreWalletMethodScreen(): React.JSX.Element {
   const flowSource = Array.isArray(source) ? source[0] : source;
   const [selected, setSelected] = useState<ImportMethod>('seed-phrase');
   const { width, height } = useWindowDimensions();
+  const walletFlowInviteVerifiedAt = useAppStore((s) => s.walletFlowInviteVerifiedAt);
+  const clearWalletFlowInviteVerification = useAppStore((s) => s.clearWalletFlowInviteVerification);
   const compact = height < 700 || width < 360;
 
   function handleBack(): void {
+    if (flowSource === 'accounts') {
+      clearWalletFlowInviteVerification();
+    }
+
     if (router.canGoBack()) {
       router.back();
     } else {
@@ -57,6 +68,19 @@ export default function RestoreWalletMethodScreen(): React.JSX.Element {
   }
 
   function handleContinue(): void {
+    if (flowSource === 'accounts' && !isWalletFlowInviteFresh(walletFlowInviteVerifiedAt)) {
+      clearWalletFlowInviteVerification();
+      router.replace({
+        pathname: '/invite-code',
+        params: {
+          purpose: WALLET_FLOW_INVITE_PURPOSE,
+          next: 'restore-wallet',
+          source: 'accounts',
+        },
+      });
+      return;
+    }
+
     router.push({
       pathname: '/restore-wallet/input',
       params: { method: selected, source: flowSource },

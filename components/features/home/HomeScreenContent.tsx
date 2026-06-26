@@ -61,6 +61,7 @@ import {
   offpayWalletDashboardQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
+  WALLET_DEEP_HISTORY_PAGE_SIZE,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { useSettlementEngineStore } from '@/store/settlementEngineStore';
@@ -312,9 +313,12 @@ export function HomeScreenContent(): React.JSX.Element {
   });
   const transactionsQuery = useOffpayWalletTransactions({
     enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
+    allowPartialWarmData: true,
     waitForDashboard: false,
     refetchOnMount: false,
-    requestOwner: 'home.transactions.fallback',
+    hydrateDisplayCacheOnMount: true,
+    requestOwner: 'home.transactions.history',
   });
   const pendingBackupStatsQuery = usePendingBackupQueueStats({
     walletAddress: publicKey,
@@ -1050,11 +1054,16 @@ export function HomeScreenContent(): React.JSX.Element {
           const dashboardResult = await homeSnapshot.dashboardQuery.refetch({
             cancelRefetch: true,
           });
-          if (signal.aborted || (dashboardResult.data != null && !dashboardResult.isError)) {
+          if (signal.aborted) {
             return;
           }
 
           openHomeForegroundFetchGate();
+          if (dashboardResult.data != null && !dashboardResult.isError) {
+            await transactionsQuery.refetchFresh({ signal, useCache: false });
+            return;
+          }
+
           await Promise.allSettled([
             capabilitiesQuery.refetch({ cancelRefetch: true }),
             balanceQuery.refetch({ cancelRefetch: true }),

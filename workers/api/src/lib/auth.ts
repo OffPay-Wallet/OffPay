@@ -50,6 +50,7 @@ const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'POST /api/bootstrap/provision',
   'GET /api/capabilities',
   'POST /api/invite/verify',
+  'POST /api/invite/check-email',
   'GET /api/market/fx-rate',
   'POST /api/market/token-price',
   'POST /api/market/token-prices-batch',
@@ -67,6 +68,7 @@ const PUBLIC_RATE_LIMIT_FAIL_CLOSED_ROUTES = new Set([
   'GET /api/bootstrap/provision',
   'POST /api/bootstrap/provision',
   'POST /api/invite/verify',
+  'POST /api/invite/check-email',
   'GET /api/stream/wallet-activity',
 ]);
 

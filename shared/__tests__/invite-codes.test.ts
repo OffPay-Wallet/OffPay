@@ -1,59 +1,39 @@
 import {
   buildInviteCode,
-  calculateInviteCodeChecksum,
   getInviteCodeValidationMessage,
   normalizeInviteCodeInput,
   parseInviteCode,
 } from '@/shared/invite-codes';
 
 describe('invite code policy', () => {
-  it('builds and parses invite codes with the planned format', () => {
+  it('builds and parses six-character alphanumeric invite codes', () => {
     const code = buildInviteCode({
-      segment: 'b1',
-      random: 'ABCDEFGHJKLM',
+      code: 'a1b2c3',
     });
 
     const parsed = parseInviteCode(code);
 
-    expect(code).toMatch(/^OFFPAY-B1-[A-HJ-NP-Z2-9]{12}-\d{2}$/);
+    expect(code).toBe('A1B2C3');
+    expect(code).toMatch(/^[A-Z0-9]{6}$/);
     expect(parsed.valid).toBe(true);
     expect(parsed.normalizedCode).toBe(code);
-    expect(parsed.parsed?.segment).toBe('B1');
-    expect(parsed.parsed?.random).toBe('ABCDEFGHJKLM');
+    expect(parsed.parsed?.code).toBe('A1B2C3');
   });
 
   it('normalizes pasted invite codes before validation', () => {
     const code = buildInviteCode({
-      segment: 'B1',
-      random: 'K9X2MZQRTYLP',
+      code: 'K9X2MZ',
     });
 
-    expect(normalizeInviteCodeInput(`  offpay - b1 - k9x2mzqrtylp - ${code.slice(-2)}  `)).toBe(
-      code,
-    );
-    expect(parseInviteCode(`offpay - b1 - k9x2mzqrtylp - ${code.slice(-2)}`).valid).toBe(true);
+    expect(normalizeInviteCodeInput('  k9 x2-mz  ')).toBe(code);
+    expect(parseInviteCode('k9 x2-mz').valid).toBe(true);
   });
 
-  it('rejects checksum typos', () => {
-    const code = buildInviteCode({
-      segment: 'B1',
-      random: 'ABCDEFGHJKLM',
-    });
-    const wrongChecksum = code.endsWith('00') ? '01' : '00';
-    const invalidCode = `${code.slice(0, -2)}${wrongChecksum}`;
-
-    const parsed = parseInviteCode(invalidCode);
-
-    expect(calculateInviteCodeChecksum(code.slice(0, -3))).toBe(code.slice(-2));
-    expect(parsed.valid).toBe(false);
-    expect(parsed.reason).toBe('invalid_checksum');
-    expect(getInviteCodeValidationMessage(parsed.reason)).toContain('typo');
-  });
-
-  it('rejects ambiguous characters in the random segment', () => {
-    const parsed = parseInviteCode('OFFPAY-B1-ABCDEF1HJKLM-01');
+  it('rejects codes that are not exactly six alphanumeric characters', () => {
+    const parsed = parseInviteCode('ABC12');
 
     expect(parsed.valid).toBe(false);
     expect(parsed.reason).toBe('invalid_format');
+    expect(getInviteCodeValidationMessage(parsed.reason)).toContain('6-character');
   });
 });

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 
 import { CreateWalletScreenLayout } from '@/components/features/wallet-setup/CreateWalletScreenLayout';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
+import { normalizeWalletFlowInviteSource } from '@/lib/invite/wallet-flow-invite';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -53,11 +54,14 @@ function readLinkedPrivySolanaWalletAddress(user: unknown): string | null {
 }
 
 export default function PrivyWalletRoute(): React.JSX.Element {
+  const params = useLocalSearchParams<{ source?: string | string[] }>();
   const { width } = useWindowDimensions();
   const { user } = usePrivy();
   const solanaWallet = useEmbeddedSolanaWallet();
+  const flowSource = normalizeWalletFlowInviteSource(params.source);
   const username = useAppStore((s) => s.username);
   const setHasOnboarded = useAppStore((s) => s.setHasOnboarded);
+  const clearWalletFlowInviteVerification = useAppStore((s) => s.clearWalletFlowInviteVerification);
   const importFromPrivyEmbeddedWallet = useWalletStore((s) => s.importFromPrivyEmbeddedWallet);
   const [error, setError] = useState<string | null>(null);
   const createAttemptedRef = useRef(false);
@@ -80,9 +84,13 @@ export default function PrivyWalletRoute(): React.JSX.Element {
       try {
         await importFromPrivyEmbeddedWallet(address);
 
+        if (flowSource === 'accounts') {
+          clearWalletFlowInviteVerification();
+        }
+
         if (username != null) {
           setHasOnboarded(true);
-          router.replace('/');
+          router.replace(flowSource === 'accounts' ? '/accounts' : '/');
           return;
         }
 
@@ -95,7 +103,13 @@ export default function PrivyWalletRoute(): React.JSX.Element {
         setError(cause instanceof Error ? cause.message : 'Could not activate Privy wallet.');
       }
     },
-    [importFromPrivyEmbeddedWallet, setHasOnboarded, username],
+    [
+      clearWalletFlowInviteVerification,
+      flowSource,
+      importFromPrivyEmbeddedWallet,
+      setHasOnboarded,
+      username,
+    ],
   );
 
   useEffect(() => {
@@ -131,6 +145,12 @@ export default function PrivyWalletRoute(): React.JSX.Element {
   }, [finish, solanaWallet, user, walletAddress]);
 
   function handleBack(): void {
+    if (flowSource === 'accounts') {
+      clearWalletFlowInviteVerification();
+      router.replace('/accounts');
+      return;
+    }
+
     router.replace('/onboarding');
   }
 

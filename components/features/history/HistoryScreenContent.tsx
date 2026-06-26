@@ -71,11 +71,11 @@ export function HistoryScreenContent(): React.JSX.Element {
     deferUntilAfterInteractions: false,
     enabled: isFocused,
     // Canonical history should not be capped by the Home/dashboard snapshot.
-    // Ask the wallet API for its largest first page and only reuse warm data
-    // when it already represents the deep page, not the 20-row Home snapshot.
+    // Paint warm rows immediately, then let the deep 100-row query reconcile
+    // in the background. Requiring 100 warm rows blocks forever on wallets with
+    // fewer displayable rows, which is exactly the slow-render path.
     limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
-    minWarmTransactionRows: WALLET_DEEP_HISTORY_PAGE_SIZE,
-    allowPartialWarmData: false,
+    allowPartialWarmData: true,
     // Paint persisted cached rows immediately on cold start so the deep
     // (and on cellular, slow) first page loads behind real content
     // instead of a skeleton.

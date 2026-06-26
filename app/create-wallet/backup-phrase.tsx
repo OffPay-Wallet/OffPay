@@ -15,6 +15,10 @@ import { GlassInlineButton } from '@/components/ui/GlassInlineButton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
+import {
+  isWalletFlowInviteFresh,
+  WALLET_FLOW_INVITE_PURPOSE,
+} from '@/lib/invite/wallet-flow-invite';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
@@ -46,6 +50,8 @@ export default function BackupPhraseScreen(): React.JSX.Element {
 
   const setHasOnboarded = useAppStore((s) => s.setHasOnboarded);
   const username = useAppStore((s) => s.username);
+  const walletFlowInviteVerifiedAt = useAppStore((s) => s.walletFlowInviteVerifiedAt);
+  const clearWalletFlowInviteVerification = useAppStore((s) => s.clearWalletFlowInviteVerification);
   const createWallet = useWalletStore((s) => s.createWallet);
   const isLoading = useWalletStore((s) => s.isLoading);
   const walletError = useWalletStore((s) => s.error);
@@ -78,6 +84,19 @@ export default function BackupPhraseScreen(): React.JSX.Element {
     let cancelled = false;
 
     async function generate(): Promise<void> {
+      if (flowSource === 'accounts' && !isWalletFlowInviteFresh(walletFlowInviteVerifiedAt)) {
+        clearWalletFlowInviteVerification();
+        router.replace({
+          pathname: '/invite-code',
+          params: {
+            purpose: WALLET_FLOW_INVITE_PURPOSE,
+            next: 'create-wallet',
+            source: 'accounts',
+          },
+        });
+        return;
+      }
+
       try {
         const mnemonicWords = await createWallet(wordCount);
         if (!cancelled && mnemonicWords.length > 0) {
@@ -116,8 +135,11 @@ export default function BackupPhraseScreen(): React.JSX.Element {
   }, [toast]);
 
   const handleBack = useCallback((): void => {
+    if (flowSource === 'accounts') {
+      clearWalletFlowInviteVerification();
+    }
     router.back();
-  }, []);
+  }, [clearWalletFlowInviteVerification, flowSource]);
 
   const handleCopy = useCallback((): void => {
     if (words.length === 0) return;
@@ -135,6 +157,7 @@ export default function BackupPhraseScreen(): React.JSX.Element {
     if (words.length === 0) return;
     if (flowSource === 'accounts') {
       setHasOnboarded(true);
+      clearWalletFlowInviteVerification();
       router.dismissTo('/accounts');
     } else if (username != null) {
       setHasOnboarded(true);
@@ -145,7 +168,7 @@ export default function BackupPhraseScreen(): React.JSX.Element {
         params: { source: 'onboarding' },
       });
     }
-  }, [flowSource, words, setHasOnboarded, username]);
+  }, [clearWalletFlowInviteVerification, flowSource, words, setHasOnboarded, username]);
 
   const toastMessage =
     toast === 'copy'

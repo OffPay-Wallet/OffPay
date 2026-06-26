@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -7,10 +7,13 @@ import {
   useWindowDimensions,
   Pressable,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
+  runOnJS,
+  useAnimatedReaction,
   useAnimatedKeyboard,
   useAnimatedStyle,
   useSharedValue,
@@ -23,6 +26,7 @@ import { AnimatedOffPayLogo } from '@/components/ui/AnimatedOffPayLogo';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { Text } from '@/components/ui/Text';
 import { useAppToast } from '@/components/ui/AppToast';
+import { PuffyPasteIcon } from '@/components/ui/icons/PuffyPasteIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -34,6 +38,15 @@ import {
   storeInviteEmail,
 } from '@/lib/invite/invite-access';
 import {
+  firstRouteParam,
+  getWalletFlowInvitePathname,
+  isWalletFlowInviteFresh,
+  normalizeWalletFlowInviteNext,
+  normalizeWalletFlowInviteSource,
+  WALLET_FLOW_INVITE_PURPOSE,
+} from '@/lib/invite/wallet-flow-invite';
+import {
+  OFFPAY_INVITE_CODE_LENGTH,
   getInviteCodeValidationMessage,
   normalizeInviteCodeInput,
   parseInviteCode,
@@ -76,11 +89,23 @@ function getInviteApiErrorMessage(error: unknown): string {
 }
 
 export default function InviteCodeScreen(): React.JSX.Element {
+  const params = useLocalSearchParams<{
+    purpose?: string | string[];
+    next?: string | string[];
+    source?: string | string[];
+  }>();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const inviteAccessVerified = useAppStore((state) => state.inviteAccessVerified);
+  const appInviteEmail = useAppStore((state) => state.inviteEmail);
   const setInviteAccessVerified = useAppStore((state) => state.setInviteAccessVerified);
   const setInviteEmail = useAppStore((state) => state.setInviteEmail);
+  const walletFlowInviteVerifiedAt = useAppStore((state) => state.walletFlowInviteVerifiedAt);
+  const setWalletFlowInviteVerifiedAt = useAppStore((state) => state.setWalletFlowInviteVerifiedAt);
+  const scrollRef = useRef<ScrollView>(null);
+  const emailInputRef = useRef<TextInput>(null);
+  const inviteInputRef = useRef<TextInput>(null);
+  const shouldFocusEmailAfterBack = useRef(false);
   const [email, setEmail] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [stage, setStage] = useState<'email' | 'code'>('email');
@@ -89,44 +114,120 @@ export default function InviteCodeScreen(): React.JSX.Element {
   const [checkingEmail, setCheckingEmail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [registeredInviteEmail, setRegisteredInviteEmail] = useState<string | null>(null);
   const { showToast } = useAppToast();
+  const invitePurpose = firstRouteParam(params.purpose);
+  const isWalletFlowInvite = invitePurpose === WALLET_FLOW_INVITE_PURPOSE;
+  const walletFlowNext = normalizeWalletFlowInviteNext(params.next);
+  const walletFlowSource = normalizeWalletFlowInviteSource(params.source);
 
   const lookDownOffset = useSharedValue(0);
   const focusCount = useSharedValue(0);
+  const compact = width < 390 || height < 740;
+  const horizontalPadding = width < 340 ? spacing.md : compact ? spacing.xl : spacing['3xl'];
+  const cardPadding = width < 340 ? spacing.lg : compact ? spacing.xl : spacing['2xl'];
+  const codeBoxGap = width < 360 ? 3 : spacing.xs;
+  const codeRowGap = width < 360 ? spacing.xs : spacing.sm;
+  const logoSize = compact ? 100 : 120;
+  const topShaderHeight = Math.max(260, Math.min(420, height * 0.42));
 
   // Live keyboard height (iOS + Android). We lift the centered content
   // by the keyboard height so the input/button always clear the keypad,
   // and settle back to the resting bottom padding when it dismisses.
   const keyboard = useAnimatedKeyboard();
   const baseBottomPadding = insets.bottom + spacing['3xl'];
+  const keyboardLiftLimit = compact ? 220 : 170;
+  const keyboardLiftRatio = compact ? 0.72 : 0.5;
   const contentAnimatedStyle = useAnimatedStyle(() => ({
-    paddingBottom: Math.max(baseBottomPadding, keyboard.height.value + spacing.lg),
+    paddingBottom: Math.max(
+      baseBottomPadding,
+      keyboard.height.value + insets.bottom + spacing['3xl'],
+    ),
+    transform: [
+      {
+        translateY: -Math.min(keyboard.height.value * keyboardLiftRatio, keyboardLiftLimit),
+      },
+    ],
   }));
 
-  const compact = width < 390 || height < 740;
-  const horizontalPadding = width < 340 ? spacing.lg : compact ? spacing.xl : spacing['3xl'];
-  const logoSize = compact ? 100 : 120;
   const validation = useMemo(() => parseInviteCode(inviteCode), [inviteCode]);
+  const codeSlots = useMemo(
+    () => Array.from({ length: OFFPAY_INVITE_CODE_LENGTH }, (_, index) => inviteCode[index] ?? ''),
+    [inviteCode],
+  );
   const emailValid = isValidEmail(email);
   const canSubmit = validation.valid && emailValid && !submitting;
 
-  // Responsive placeholder text based on screen width
-  const inviteCodePlaceholder = width < 360 
-    ? 'OFFPAY-B1-XXXXXX-00' 
-    : width < 390 
-      ? 'OFFPAY-B1-XXXXXXXXX-00' 
-      : 'OFFPAY-B1-XXXXXXXXXXXX-00';
-
   const emailError =
-    emailTouched && !emailValid && email.trim().length > 0
-      ? 'Enter a valid email address.'
-      : null;
+    emailTouched && !emailValid && email.trim().length > 0 ? 'Enter a valid email address.' : null;
 
   const codeError =
     serverError ??
-    (codeTouched && !validation.valid
-      ? getInviteCodeValidationMessage(validation.reason)
-      : null);
+    (codeTouched && !validation.valid ? getInviteCodeValidationMessage(validation.reason) : null);
+
+  const scrollCardIntoView = useCallback((): void => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+  }, []);
+
+  useAnimatedReaction(
+    () => keyboard.height.value,
+    (currentHeight, previousHeight) => {
+      if (currentHeight > 40 && (previousHeight ?? 0) <= 40) {
+        runOnJS(scrollCardIntoView)();
+      }
+    },
+    [scrollCardIntoView],
+  );
+
+  const goToWalletFlow = useCallback((): void => {
+    router.replace({
+      pathname: getWalletFlowInvitePathname(walletFlowNext),
+      params: { source: walletFlowSource },
+    });
+  }, [walletFlowNext, walletFlowSource]);
+
+  const restoreWalletFlowInviteFromEmail = useCallback(
+    async (
+      emailAddress: string,
+      trustedRegisteredEmail: string | null | undefined,
+    ): Promise<boolean> => {
+      const normalizedEmail = emailAddress.trim().toLowerCase();
+      const normalizedRegisteredEmail = trustedRegisteredEmail?.trim().toLowerCase() ?? null;
+      if (
+        !isWalletFlowInvite ||
+        !isValidEmail(normalizedEmail) ||
+        normalizedRegisteredEmail == null ||
+        normalizedEmail !== normalizedRegisteredEmail
+      ) {
+        return false;
+      }
+
+      try {
+        const result = await checkInviteEmail(normalizedEmail);
+        if (!result.verified) {
+          return false;
+        }
+
+        await storeInviteEmail(normalizedEmail);
+        setInviteEmail(normalizedEmail);
+        setInviteAccessVerified(true);
+        setWalletFlowInviteVerifiedAt(Date.now());
+        goToWalletFlow();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [
+      goToWalletFlow,
+      isWalletFlowInvite,
+      setInviteAccessVerified,
+      setInviteEmail,
+      setWalletFlowInviteVerifiedAt,
+    ],
+  );
 
   const animateLookDown = useCallback(
     (focused: boolean) => {
@@ -152,7 +253,12 @@ export default function InviteCodeScreen(): React.JSX.Element {
   );
 
   useEffect(() => {
-    if (inviteAccessVerified) {
+    if (isWalletFlowInvite && isWalletFlowInviteFresh(walletFlowInviteVerifiedAt)) {
+      goToWalletFlow();
+      return;
+    }
+
+    if (!isWalletFlowInvite && inviteAccessVerified) {
       router.replace('/onboarding');
       return;
     }
@@ -162,25 +268,66 @@ export default function InviteCodeScreen(): React.JSX.Element {
       ([storedCode, storedEmail]) => {
         if (cancelled) return;
         if (storedCode != null) setInviteCode(storedCode);
-        if (storedEmail != null) setEmail(storedEmail);
+        const knownInviteEmail = storedEmail ?? appInviteEmail;
+        if (knownInviteEmail != null) {
+          setRegisteredInviteEmail(knownInviteEmail);
+          setEmail(knownInviteEmail);
+          if (isWalletFlowInvite) {
+            setCheckingEmail(true);
+            void restoreWalletFlowInviteFromEmail(knownInviteEmail, knownInviteEmail)
+              .then((restored) => {
+                if (!cancelled && !restored) {
+                  setStage('code');
+                }
+              })
+              .finally(() => {
+                if (!cancelled) {
+                  setCheckingEmail(false);
+                }
+              });
+          }
+        }
       },
     );
 
     return () => {
       cancelled = true;
     };
-  }, [inviteAccessVerified]);
+  }, [
+    appInviteEmail,
+    goToWalletFlow,
+    inviteAccessVerified,
+    isWalletFlowInvite,
+    restoreWalletFlowInviteFromEmail,
+    walletFlowInviteVerifiedAt,
+  ]);
 
-  const handleEmailChange = useCallback((value: string): void => {
-    setEmailTouched(true);
-    setServerError(null);
-    setEmail(value.trim());
-    if (stage === 'code') setStage('email');
+  useEffect(() => {
+    if (stage !== 'email' || !shouldFocusEmailAfterBack.current) return;
+    shouldFocusEmailAfterBack.current = false;
+    requestAnimationFrame(() => {
+      emailInputRef.current?.focus();
+    });
   }, [stage]);
+
+  const handleEmailChange = useCallback(
+    (value: string): void => {
+      setEmailTouched(true);
+      setServerError(null);
+      setEmail(value.trim());
+      if (stage === 'code') setStage('email');
+    },
+    [stage],
+  );
 
   const handleEmailBlur = useCallback((): void => {
     animateLookDown(false);
   }, [animateLookDown]);
+
+  const handleInputFocus = useCallback((): void => {
+    animateLookDown(true);
+    scrollCardIntoView();
+  }, [animateLookDown, scrollCardIntoView]);
 
   const handleEmailContinue = useCallback(async (): Promise<void> => {
     if (!isValidEmail(email) || checkingEmail) return;
@@ -188,6 +335,19 @@ export default function InviteCodeScreen(): React.JSX.Element {
     setEmailTouched(true);
     setCheckingEmail(true);
     setServerError(null);
+
+    if (isWalletFlowInvite) {
+      try {
+        const restored = await restoreWalletFlowInviteFromEmail(email, registeredInviteEmail);
+        if (!restored) {
+          setStage('code');
+        }
+      } finally {
+        setCheckingEmail(false);
+      }
+      return;
+    }
+
     try {
       const result = await checkInviteEmail(email.trim().toLowerCase());
       if (result.verified) {
@@ -209,13 +369,43 @@ export default function InviteCodeScreen(): React.JSX.Element {
     } finally {
       setCheckingEmail(false);
     }
-  }, [email, checkingEmail, setInviteEmail, setInviteAccessVerified, showToast]);
+  }, [
+    email,
+    checkingEmail,
+    isWalletFlowInvite,
+    registeredInviteEmail,
+    restoreWalletFlowInviteFromEmail,
+    setInviteEmail,
+    setInviteAccessVerified,
+    showToast,
+  ]);
 
   const handleInviteChange = useCallback((value: string): void => {
     setCodeTouched(true);
     setServerError(null);
     setInviteCode(normalizeInviteCodeInput(value));
   }, []);
+
+  const handleBackToEmail = useCallback((): void => {
+    shouldFocusEmailAfterBack.current = true;
+    setServerError(null);
+    setCodeTouched(false);
+    setStage('email');
+  }, []);
+
+  const focusInviteInput = useCallback((): void => {
+    inviteInputRef.current?.focus();
+  }, []);
+
+  const handlePasteInviteCode = useCallback(async (): Promise<void> => {
+    const content = await Clipboard.getStringAsync();
+    if (content) {
+      handleInviteChange(content);
+      requestAnimationFrame(() => {
+        inviteInputRef.current?.focus();
+      });
+    }
+  }, [handleInviteChange]);
 
   const handleVerify = useCallback(async (): Promise<void> => {
     if (submitting) return;
@@ -233,20 +423,50 @@ export default function InviteCodeScreen(): React.JSX.Element {
     try {
       await verifyInviteCode(parsed.normalizedCode, email.trim().toLowerCase());
       await storeInviteCode(parsed.normalizedCode);
-      await storeInviteEmail(email);
-      setInviteEmail(email.trim().toLowerCase());
+      const normalizedEmail = email.trim().toLowerCase();
+      await storeInviteEmail(normalizedEmail);
+      setRegisteredInviteEmail(normalizedEmail);
+      setInviteEmail(normalizedEmail);
       setInviteAccessVerified(true);
+      if (isWalletFlowInvite) {
+        setWalletFlowInviteVerifiedAt(Date.now());
+        goToWalletFlow();
+        return;
+      }
       router.replace('/onboarding');
     } catch (error) {
       setServerError(getInviteApiErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
-  }, [email, inviteCode, setInviteAccessVerified, setInviteEmail, submitting]);
+  }, [
+    email,
+    goToWalletFlow,
+    inviteCode,
+    isWalletFlowInvite,
+    setInviteAccessVerified,
+    setInviteEmail,
+    setWalletFlowInviteVerifiedAt,
+    submitting,
+  ]);
 
   return (
     <View style={styles.screen}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={[
+          'rgba(247, 247, 242, 0.32)',
+          'rgba(247, 247, 242, 0.18)',
+          'rgba(247, 247, 242, 0.06)',
+          'rgba(247, 247, 242, 0)',
+        ]}
+        locations={[0, 0.28, 0.66, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={[styles.topShaderLight, { height: topShaderHeight }]}
+      />
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -264,183 +484,194 @@ export default function InviteCodeScreen(): React.JSX.Element {
             contentAnimatedStyle,
           ]}
         >
-        {/* Animated logo — eyes look down when user is typing */}
-        <View style={styles.logoContainer}>
-          <AnimatedOffPayLogo
-            size={logoSize}
-            bodyColor={colors.brand.whiteStream}
-            eyeColor={colors.brand.deepShadow}
-            lookDownOffset={lookDownOffset}
-          />
-        </View>
-
-        <View style={styles.card}>
-          <View pointerEvents="none" style={styles.cardGloss} />
-          <View style={styles.header}>
-            <Text
-              variant="h1"
-              color={colors.text.primary}
-              align="center"
-              style={styles.title}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-            >
-              Invite access
-            </Text>
-            <Text variant="body" color={colors.text.secondary} align="center" style={styles.subtitle}>
-              Enter your email and private beta code to continue.
-            </Text>
+          {/* Animated logo — eyes look down when user is typing */}
+          <View style={styles.logoContainer}>
+            <AnimatedOffPayLogo
+              size={logoSize}
+              bodyColor={colors.brand.whiteStream}
+              eyeColor={colors.brand.deepShadow}
+              lookDownOffset={lookDownOffset}
+            />
           </View>
 
-          {/* Email input (Stage 1) or Summary (Stage 2) */}
-          {stage === 'email' ? (
-            <View style={styles.inputGroup}>
-              <Text variant="captionBold" color={colors.text.secondary} style={styles.inputLabel}>
-                Email
-              </Text>
-              <View
-                style={[
-                  styles.inputFrame,
-                  emailValid && emailTouched ? styles.inputFrameReady : null,
-                ]}
+          <View style={[styles.card, { padding: cardPadding }]}>
+            {stage === 'code' || isWalletFlowInvite ? (
+              <Pressable
+                onPress={stage === 'code' ? handleBackToEmail : () => router.replace('/accounts')}
+                accessibilityLabel={stage === 'code' ? 'Edit email address' : 'Back to accounts'}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.cardBackButton, { opacity: pressed ? 0.62 : 1 }]}
               >
-                <TextInput
-                  value={email}
-                  onChangeText={handleEmailChange}
-                  onFocus={() => animateLookDown(true)}
-                  onBlur={() => { void handleEmailBlur(); }}
-                  onSubmitEditing={() => {
-                    if (stage === 'email') void handleEmailContinue();
-                  }}
-                  placeholder="you@example.com"
-                  placeholderTextColor={colors.text.placeholder}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  spellCheck={false}
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
-                  autoComplete="email"
-                  returnKeyType="next"
-                  maxLength={320}
-                  numberOfLines={1}
-                  style={styles.emailInput}
-                />
-              </View>
-              <View style={styles.errorSlot}>
-                {emailError != null ? (
-                  <Text
-                    variant="small"
-                    color={colors.semantic.error}
-                    numberOfLines={1}
-                  >
-                    {emailError}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          ) : (
-            <View style={styles.inputGroup}>
-              <Text variant="captionBold" color={colors.text.secondary} style={styles.inputLabel}>
-                Email
+                <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
+              </Pressable>
+            ) : null}
+            <View style={styles.header}>
+              <Text
+                variant="h1"
+                color={colors.text.primary}
+                align="center"
+                style={styles.title}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                Invite access
               </Text>
-              <View style={[styles.inputFrame, styles.inputFrameReady]}>
-                <Text
-                  variant="body"
-                  color={colors.text.secondary}
-                  style={[styles.emailInput, { flex: 1, opacity: 0.6 }]}
-                  numberOfLines={1}
-                >
-                  {email}
-                </Text>
-                <Pressable
-                  onPress={() => {
-                    setStage('email');
-                    setServerError(null);
-                  }}
-                  accessibilityLabel="Change email address"
-                  accessibilityRole="button"
-                  style={({ pressed }) => [{ padding: 8, opacity: pressed ? 0.6 : 1 }]}
-                >
-                  <Text variant="captionBold" color={colors.semantic.info}>
-                    Edit
-                  </Text>
-                </Pressable>
-              </View>
+              <Text
+                variant="body"
+                color={colors.text.secondary}
+                align="center"
+                style={styles.subtitle}
+              >
+                Enter your email and private beta code to continue.
+              </Text>
             </View>
-          )}
 
-          {/* Invite code input */}
-          {stage === 'code' ? (
-            <View style={styles.inputGroup}>
-              <Text variant="captionBold" color={colors.text.secondary} style={styles.inputLabel}>
-                Invite code
-              </Text>
-              <View style={[styles.inputFrame, validation.valid ? styles.inputFrameReady : null]}>
-                <TextInput
-                  value={inviteCode}
-                  onChangeText={handleInviteChange}
-                  onFocus={() => animateLookDown(true)}
-                  onBlur={() => animateLookDown(false)}
-                  onSubmitEditing={() => {
-                    void handleVerify();
-                  }}
-                  placeholder={inviteCodePlaceholder}
-                  placeholderTextColor={colors.text.placeholder}
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  spellCheck={false}
-                  keyboardType="ascii-capable"
-                  textContentType="oneTimeCode"
-                  returnKeyType="done"
-                  maxLength={64}
-                  numberOfLines={1}
-                  style={[styles.input, { flex: 1 }]}
-                />
-                {inviteCode.length === 0 ? (
+            {/* Email input (Stage 1) or Summary (Stage 2) */}
+            {stage === 'email' ? (
+              <View style={styles.inputGroup}>
+                <Text variant="captionBold" color={colors.text.secondary} style={styles.inputLabel}>
+                  Email
+                </Text>
+                <View
+                  style={[
+                    styles.inputFrame,
+                    emailValid && emailTouched ? styles.inputFrameReady : null,
+                  ]}
+                >
+                  <TextInput
+                    ref={emailInputRef}
+                    value={email}
+                    onChangeText={handleEmailChange}
+                    onFocus={handleInputFocus}
+                    onBlur={() => {
+                      void handleEmailBlur();
+                    }}
+                    onSubmitEditing={() => {
+                      if (stage === 'email') void handleEmailContinue();
+                    }}
+                    placeholder="you@example.com"
+                    placeholderTextColor={colors.text.placeholder}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
+                    keyboardType="email-address"
+                    textContentType="emailAddress"
+                    autoComplete="email"
+                    returnKeyType="next"
+                    maxLength={320}
+                    numberOfLines={1}
+                    style={styles.emailInput}
+                  />
+                </View>
+                <View style={styles.errorSlot}>
+                  {emailError != null ? (
+                    <Text variant="small" color={colors.semantic.error} numberOfLines={1}>
+                      {emailError}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {/* Invite code input */}
+            {stage === 'code' ? (
+              <View style={styles.inputGroup}>
+                <Text variant="captionBold" color={colors.text.secondary} style={styles.inputLabel}>
+                  Invite code
+                </Text>
+                <View style={[styles.codeEntryRow, { gap: codeRowGap }]}>
                   <Pressable
-                    onPress={async () => {
-                      const content = await Clipboard.getStringAsync();
-                      if (content) {
-                        handleInviteChange(content);
-                      }
+                    onPress={focusInviteInput}
+                    accessibilityLabel="Enter six-character invite code"
+                    accessibilityRole="button"
+                    style={styles.codeEntryWrap}
+                  >
+                    <View style={[styles.codeBoxes, { gap: codeBoxGap }]}>
+                      {codeSlots.map((entry, index) => (
+                        <View
+                          key={`invite-code-slot-${index}`}
+                          style={[
+                            styles.codeBox,
+                            entry.length > 0 ? styles.codeBoxFilled : null,
+                            validation.valid ? styles.codeBoxReady : null,
+                          ]}
+                        >
+                          <Text
+                            variant="h2"
+                            color={colors.text.onAccent}
+                            align="center"
+                            style={styles.codeBoxText}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.72}
+                          >
+                            {entry}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    <TextInput
+                      ref={inviteInputRef}
+                      value={inviteCode}
+                      onChangeText={handleInviteChange}
+                      onFocus={handleInputFocus}
+                      onBlur={() => animateLookDown(false)}
+                      onSubmitEditing={() => {
+                        void handleVerify();
+                      }}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      spellCheck={false}
+                      keyboardType="ascii-capable"
+                      textContentType="oneTimeCode"
+                      returnKeyType="done"
+                      maxLength={OFFPAY_INVITE_CODE_LENGTH}
+                      caretHidden
+                      contextMenuHidden={false}
+                      numberOfLines={1}
+                      style={styles.codeInputHidden}
+                    />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      void handlePasteInviteCode();
                     }}
                     accessibilityLabel="Paste invite code"
                     accessibilityRole="button"
-                    style={({ pressed }) => [{ padding: 8, opacity: pressed ? 0.6 : 1 }]}
+                    hitSlop={4}
+                    style={({ pressed }) => [
+                      styles.codePasteButton,
+                      pressed ? styles.codePasteButtonPressed : null,
+                    ]}
                   >
-                    <Ionicons name="clipboard-outline" size={20} color={colors.text.secondary} />
+                    <PuffyPasteIcon size={22} color={colors.text.primary} />
                   </Pressable>
-                ) : null}
+                </View>
+                <View style={styles.errorSlot}>
+                  {codeError != null ? (
+                    <Text variant="small" color={colors.semantic.error} numberOfLines={1}>
+                      {codeError}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
-              <View style={styles.errorSlot}>
-                {codeError != null ? (
-                  <Text
-                    variant="small"
-                    color={colors.semantic.error}
-                    numberOfLines={1}
-                  >
-                    {codeError}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          ) : null}
+            ) : null}
 
-          <GlassActionButton
-            label={stage === 'email' ? 'Continue' : 'Verify invite'}
-            onPress={() => {
-              if (stage === 'email') {
-                void handleEmailContinue();
-              } else {
-                void handleVerify();
-              }
-            }}
-            loading={stage === 'email' ? checkingEmail : submitting}
-            disabled={stage === 'email' ? (!emailValid || checkingEmail) : !canSubmit}
-            accessibilityLabel={stage === 'email' ? 'Continue with email' : 'Verify invite code'}
-          />
-        </View>
+            <GlassActionButton
+              label={stage === 'email' ? 'Continue' : 'Verify invite'}
+              onPress={() => {
+                if (stage === 'email') {
+                  void handleEmailContinue();
+                } else {
+                  void handleVerify();
+                }
+              }}
+              loading={stage === 'email' ? checkingEmail : submitting}
+              disabled={stage === 'email' ? !emailValid || checkingEmail : !canSubmit}
+              accessibilityLabel={stage === 'email' ? 'Continue with email' : 'Verify invite code'}
+            />
+          </View>
         </Animated.View>
       </ScrollView>
     </View>
@@ -452,8 +683,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.background,
   },
+  topShaderLight: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 0,
+  },
   scroll: {
     flex: 1,
+    zIndex: 1,
   },
   scrollContent: {
     flexGrow: 1,
@@ -468,30 +707,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: {
+    position: 'relative',
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
     gap: spacing.xl,
-    padding: spacing['2xl'],
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.surface.cardElevated,
     overflow: 'hidden',
-    boxShadow: [
-      '0 24px 58px rgba(0, 0, 0, 0.48)',
-      'inset 0 1px 2px rgba(255, 255, 255, 0.14)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.42)',
-    ].join(', '),
+    boxShadow: '0 24px 58px rgba(0, 0, 0, 0.48)',
   },
-  cardGloss: {
+  cardBackButton: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '44%',
-    backgroundColor: colors.glass.smokeWash,
+    top: spacing.lg,
+    left: spacing.lg,
+    zIndex: 2,
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   header: {
     gap: spacing.sm,
@@ -528,6 +770,83 @@ const styles = StyleSheet.create({
   },
   inputFrameReady: {
     borderColor: colors.border.strong,
+  },
+  codeEntryWrap: {
+    position: 'relative',
+    flex: 1,
+    minWidth: 0,
+    minHeight: layout.minTouchTarget,
+    justifyContent: 'center',
+  },
+  codeEntryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  codeBoxes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  codeBox: {
+    flex: 1,
+    aspectRatio: 1,
+    minWidth: 0,
+    maxHeight: 66,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.lg,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border.subtle,
+    backgroundColor: 'rgba(247, 247, 242, 0.88)',
+    boxShadow: [
+      '0 10px 18px rgba(0, 0, 0, 0.24)',
+      'inset 0 1px 2px rgba(255, 255, 255, 0.9)',
+      'inset 0 -1px 2px rgba(0, 0, 0, 0.12)',
+    ].join(', '),
+  },
+  codeBoxFilled: {
+    backgroundColor: colors.brand.glossAccent,
+  },
+  codeBoxReady: {
+    borderColor: colors.border.accent,
+  },
+  codeBoxText: {
+    color: colors.text.onAccent,
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  codeInputHidden: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    opacity: 0.01,
+    color: 'transparent',
+  },
+  codePasteButton: {
+    width: layout.minTouchTarget,
+    height: layout.minTouchTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.textBacking,
+    boxShadow: ['0 8px 16px rgba(0, 0, 0, 0.24)', 'inset 0 1px 1px rgba(255, 255, 255, 0.16)'].join(
+      ', ',
+    ),
+  },
+  codePasteButtonPressed: {
+    opacity: 0.68,
+    transform: [{ scale: 0.96 }],
   },
   emailInput: {
     minHeight: 48,

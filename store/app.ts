@@ -21,6 +21,9 @@ interface AppState {
   /** Email address submitted during invite-code verification */
   inviteEmail: string | null;
 
+  /** Recent invite-code verification timestamp for post-onboarding wallet add/import flows */
+  walletFlowInviteVerifiedAt: number | null;
+
   /** User's preferred color scheme override (null = system default) */
   colorScheme: 'light' | 'dark' | null;
 
@@ -34,6 +37,8 @@ interface AppState {
   setHasOnboarded: (value: boolean) => void;
   setInviteAccessVerified: (value: boolean) => void;
   setInviteEmail: (email: string | null) => void;
+  setWalletFlowInviteVerifiedAt: (timestamp: number | null) => void;
+  clearWalletFlowInviteVerification: () => void;
   setColorScheme: (scheme: 'light' | 'dark' | null) => void;
   setUsername: (username: string | null) => void;
   setProfileImageUri: (uri: string | null) => void;
@@ -45,6 +50,7 @@ export const useAppStore = create<AppState>()(
       hasOnboarded: false,
       inviteAccessVerified: false,
       inviteEmail: null,
+      walletFlowInviteVerifiedAt: null,
       colorScheme: null,
       username: null,
       profileImageUri: null,
@@ -52,6 +58,8 @@ export const useAppStore = create<AppState>()(
       setHasOnboarded: (value) => set({ hasOnboarded: value }),
       setInviteAccessVerified: (value) => set({ inviteAccessVerified: value }),
       setInviteEmail: (email) => set({ inviteEmail: email ? email.trim().toLowerCase() : null }),
+      setWalletFlowInviteVerifiedAt: (timestamp) => set({ walletFlowInviteVerifiedAt: timestamp }),
+      clearWalletFlowInviteVerification: () => set({ walletFlowInviteVerifiedAt: null }),
       setColorScheme: (scheme) => set({ colorScheme: scheme }),
       setUsername: (username) => set({ username: formatOffpayUsername(username) }),
       setProfileImageUri: (uri) => set({ profileImageUri: uri }),

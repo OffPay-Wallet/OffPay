@@ -13,6 +13,8 @@ import { AccountListCard } from '@/components/features/settings/AccountListCard'
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
+import { WALLET_FLOW_INVITE_PURPOSE } from '@/lib/invite/wallet-flow-invite';
+import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { WalletAccount } from '@/store/walletStore';
@@ -44,6 +46,7 @@ export function AccountsScreenContent(): React.JSX.Element {
   const activeWalletId = useWalletStore((s) => s.activeWalletId);
   const setPrimaryWallet = useWalletStore((s) => s.setPrimaryWallet);
   const removeWallet = useWalletStore((s) => s.removeWallet);
+  const clearWalletFlowInviteVerification = useAppStore((s) => s.clearWalletFlowInviteVerification);
   const [optimisticPrimaryWalletId, setOptimisticPrimaryWalletId] = useState<string | null>(null);
   const [isAddWalletCardOpen, setIsAddWalletCardOpen] = useState(false);
   const [openActionWalletId, setOpenActionWalletId] = useState<string | null>(null);
@@ -76,9 +79,17 @@ export function AccountsScreenContent(): React.JSX.Element {
   const navigateWithTransition = useCallback(
     (pathname: '/create-wallet' | '/restore-wallet'): void => {
       setIsAddWalletCardOpen(false);
-      router.push({ pathname, params: { source: 'accounts' } });
+      clearWalletFlowInviteVerification();
+      router.push({
+        pathname: '/invite-code',
+        params: {
+          purpose: WALLET_FLOW_INVITE_PURPOSE,
+          next: pathname === '/restore-wallet' ? 'restore-wallet' : 'create-wallet',
+          source: 'accounts',
+        },
+      });
     },
-    [router],
+    [clearWalletFlowInviteVerification, router],
   );
 
   const handleBack = useCallback((): void => {

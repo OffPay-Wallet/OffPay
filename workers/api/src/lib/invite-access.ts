@@ -1,8 +1,5 @@
-import { MongoClient, type Collection, type Db } from 'mongodb';
-import {
-  getInviteCodeValidationMessage,
-  parseInviteCode,
-} from '../../../../shared/invite-codes';
+import { MongoClient, type Collection, type Db, type ObjectId } from 'mongodb';
+import { getInviteCodeValidationMessage, parseInviteCode } from '../../../../shared/invite-codes';
 import { AppError } from './errors.js';
 import type { Bindings } from './types.js';
 
@@ -21,11 +18,17 @@ interface InviteVerificationResult {
 
 interface InviteCodeDocument {
   code_hash?: string;
+  code_format?: string;
+  code_length?: number;
   segment?: string;
   status?: string;
   expires_at?: string;
+  reserved_by_email?: string | null;
+  reserved_by_device_id_hash?: string | null;
+  reservation_expires_at?: string | null;
   used_by_wallet_address?: string | null;
   used_by_device_id_hash?: string | null;
+  used_by_email?: string | null;
   locked?: boolean;
 }
 
@@ -39,6 +42,7 @@ interface InviteGateConfig {
 const INVITE_CODES_COLLECTION = 'invite_codes';
 const INVITE_ACCESS_COLLECTION = 'invite_access';
 const MIN_PEPPER_LENGTH = 32;
+const INVITE_CODE_RESERVATION_TTL_MS = 30 * 60 * 1000;
 
 function hasTruthyStringBinding(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
@@ -98,6 +102,15 @@ async function sha256Hex(input: string): Promise<string> {
   return bytesToHex(new Uint8Array(digest));
 }
 
+async function hashInviteDeviceId(
+  config: InviteGateConfig,
+  deviceId: string | null | undefined,
+): Promise<string | null> {
+  const normalizedDeviceId = typeof deviceId === 'string' ? deviceId.trim() : '';
+  if (normalizedDeviceId.length === 0) return null;
+  return sha256Hex(`${config.pepper}:${normalizedDeviceId}`);
+}
+
 async function hmacSha256Hex(secret: string, input: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
@@ -141,16 +154,24 @@ function inviteAccessCollection(db: Db): Collection {
   return db.collection(INVITE_ACCESS_COLLECTION);
 }
 
-async function findExistingInviteAccess(
+function isDuplicateKeyError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error != null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 11000
+  );
+}
+
+async function findExistingWalletInviteAccess(
   config: InviteGateConfig,
   walletAddress: string,
-  deviceIdHash: string,
 ): Promise<boolean> {
   const document = await withMongoDatabase(config, (db) =>
     inviteAccessCollection(db).findOne(
       {
         status: 'active',
-        $or: [{ wallet_address: walletAddress }, { device_id_hash: deviceIdHash }],
+        wallet_address: walletAddress,
       },
       {
         projection: {
@@ -191,27 +212,140 @@ async function findInviteAccessByCodeAndEmail(
 }
 
 /**
- * Look up an existing invite_access record by email.
- * This prevents a single email from consuming multiple invite codes.
+ * Look up an existing invite_access record by email and device.
+ * Email alone is not enough for a no-code restore, because knowing another
+ * registered email must not grant invite access on a new device.
  */
-async function findInviteAccessByEmail(
+async function findInviteAccessByEmailAndDevice(
   config: InviteGateConfig,
   email: string,
-): Promise<{ segment?: string } | null> {
+  deviceIdHash: string,
+): Promise<{ segment?: string; inviteCodeHash?: string } | null> {
   const document = await withMongoDatabase(config, (db) =>
     inviteAccessCollection(db).findOne(
       {
         email,
-        status: { $in: ['active', 'pending'] },
+        device_id_hash: deviceIdHash,
+        status: 'active',
       },
       {
-        projection: { invite_code_segment: 1 },
+        projection: { invite_code_hash: 1, invite_code_segment: 1 },
       },
     ),
   );
 
   if (document == null) return null;
-  return { segment: document.invite_code_segment };
+  return {
+    inviteCodeHash: document.invite_code_hash,
+    segment: document.invite_code_segment,
+  };
+}
+
+function buildInviteAccessSet(params: {
+  walletAddress: string;
+  deviceIdHash: string;
+  inviteCodeHash: string;
+  segment: string;
+  nowIso: string;
+  email?: string | null;
+}): Record<string, unknown> {
+  return {
+    status: 'active',
+    wallet_address: params.walletAddress,
+    device_id_hash: params.deviceIdHash,
+    invite_code_hash: params.inviteCodeHash,
+    invite_code_segment: params.segment,
+    updated_at: params.nowIso,
+    ...(params.email != null && params.email.length > 0 ? { email: params.email } : {}),
+  };
+}
+
+async function updateInviteAccessById(
+  collection: Collection,
+  id: ObjectId,
+  params: {
+    walletAddress: string;
+    deviceIdHash: string;
+    inviteCodeHash: string;
+    segment: string;
+    nowIso: string;
+    email?: string | null;
+  },
+): Promise<void> {
+  await collection.updateOne(
+    { _id: id },
+    {
+      $set: buildInviteAccessSet(params),
+    },
+  );
+}
+
+async function upsertWalletDeviceInviteAccess(
+  collection: Collection,
+  params: {
+    walletAddress: string;
+    deviceIdHash: string;
+    inviteCodeHash: string;
+    segment: string;
+    nowIso: string;
+    email?: string | null;
+  },
+): Promise<void> {
+  await collection.updateOne(
+    {
+      wallet_address: params.walletAddress,
+      device_id_hash: params.deviceIdHash,
+    },
+    {
+      $set: buildInviteAccessSet(params),
+      $setOnInsert: {
+        created_at: params.nowIso,
+      },
+    },
+    { upsert: true },
+  );
+}
+
+async function upsertInviteAccessWithLegacyFallback(
+  collection: Collection,
+  params: {
+    walletAddress: string;
+    deviceIdHash: string;
+    inviteCodeHash: string;
+    segment: string;
+    nowIso: string;
+    email?: string | null;
+  },
+): Promise<void> {
+  try {
+    await upsertWalletDeviceInviteAccess(collection, params);
+    return;
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) throw error;
+  }
+
+  const legacyFilters: Record<string, unknown>[] = [];
+  if (params.email != null && params.email.length > 0) {
+    legacyFilters.push({ email: params.email, status: 'active' });
+  }
+  legacyFilters.push(
+    { wallet_address: params.walletAddress, status: 'active' },
+    { device_id_hash: params.deviceIdHash, status: 'active' },
+  );
+
+  for (const filter of legacyFilters) {
+    const legacyRecord = await collection.findOne(filter, { projection: { _id: 1 } });
+    if (legacyRecord == null) continue;
+    await updateInviteAccessById(collection, legacyRecord._id, params);
+    return;
+  }
+
+  throw new AppError({
+    status: 503,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message: 'Invite access requires a database index migration.',
+    retryable: true,
+  });
 }
 
 async function upsertInviteAccess(params: {
@@ -224,93 +358,27 @@ async function upsertInviteAccess(params: {
   email?: string | null;
 }): Promise<void> {
   await withMongoDatabase(params.config, async (db) => {
-    // First, try to find and upgrade a pending record with matching email and code
+    const collection = inviteAccessCollection(db);
+
     if (params.email != null && params.email.length > 0) {
-      const pendingRecord = await inviteAccessCollection(db).findOne({
+      // Compatibility: upgrade pre-reservation pending records created by older clients.
+      const pendingRecord = await collection.findOne({
         invite_code_hash: params.inviteCodeHash,
         email: params.email,
         status: 'pending',
       });
 
       if (pendingRecord != null) {
-        // Upgrade pending record to active with wallet info
-        await inviteAccessCollection(db).updateOne(
-          {
-            _id: pendingRecord._id,
-          },
-          {
-            $set: {
-              status: 'active',
-              wallet_address: params.walletAddress,
-              device_id_hash: params.deviceIdHash,
-              updated_at: params.nowIso,
-            },
-          },
-        );
-        return;
+        try {
+          await updateInviteAccessById(collection, pendingRecord._id, params);
+          return;
+        } catch (error) {
+          if (!isDuplicateKeyError(error)) throw error;
+        }
       }
     }
 
-    // Otherwise, use the standard upsert logic
-    await inviteAccessCollection(db).updateOne(
-      {
-        wallet_address: params.walletAddress,
-        device_id_hash: params.deviceIdHash,
-      },
-      {
-        $set: {
-          status: 'active',
-          updated_at: params.nowIso,
-          ...(params.email != null && params.email.length > 0 ? { email: params.email } : {}),
-        },
-        $setOnInsert: {
-          wallet_address: params.walletAddress,
-          device_id_hash: params.deviceIdHash,
-          invite_code_hash: params.inviteCodeHash,
-          invite_code_segment: params.segment,
-          ...(params.email != null && params.email.length > 0 ? { email: params.email } : {}),
-          created_at: params.nowIso,
-        },
-      },
-      { upsert: true },
-    );
-  });
-}
-
-/**
- * Save a pending invite verification record with email before wallet creation.
- * This allows the email to be associated with the invite code during verification,
- * even before the user completes wallet setup.
- */
-async function savePendingInviteVerification(params: {
-  config: InviteGateConfig;
-  inviteCodeHash: string;
-  email: string;
-  deviceIdHash: string;
-  segment: string;
-  nowIso: string;
-}): Promise<void> {
-  await withMongoDatabase(params.config, async (db) => {
-    await inviteAccessCollection(db).updateOne(
-      {
-        invite_code_hash: params.inviteCodeHash,
-        email: params.email,
-      },
-      {
-        $set: {
-          status: 'pending',
-          email: params.email,
-          device_id_hash: params.deviceIdHash,
-          invite_code_hash: params.inviteCodeHash,
-          invite_code_segment: params.segment,
-          updated_at: params.nowIso,
-        },
-        $setOnInsert: {
-          created_at: params.nowIso,
-        },
-      },
-      { upsert: true },
-    );
+    await upsertInviteAccessWithLegacyFallback(collection, params);
   });
 }
 
@@ -326,11 +394,17 @@ async function findInviteCodeDocument(
       {
         projection: {
           code_hash: 1,
+          code_format: 1,
+          code_length: 1,
           segment: 1,
           status: 1,
           expires_at: 1,
+          reserved_by_email: 1,
+          reserved_by_device_id_hash: 1,
+          reservation_expires_at: 1,
           used_by_wallet_address: 1,
           used_by_device_id_hash: 1,
+          used_by_email: 1,
           locked: 1,
         },
       },
@@ -374,9 +448,9 @@ function throwInviteCodeStateError(document: InviteCodeDocument | null, nowIso: 
   });
 }
 
-function parseRequiredInviteCode(input: string | null | undefined): NonNullable<
-  ReturnType<typeof parseInviteCode>['parsed']
-> & { code: string } {
+function parseRequiredInviteCode(
+  input: string | null | undefined,
+): NonNullable<ReturnType<typeof parseInviteCode>['parsed']> & { code: string } {
   const parsedInvite = parseInviteCode(input ?? '');
   if (!parsedInvite.valid || parsedInvite.parsed == null) {
     throw new AppError({
@@ -392,21 +466,93 @@ function parseRequiredInviteCode(input: string | null | undefined): NonNullable<
   return parsedInvite.parsed;
 }
 
-async function redeemInviteCode(params: {
+function reservationExpired(document: InviteCodeDocument, nowIso: string): boolean {
+  return (
+    typeof document.reservation_expires_at !== 'string' ||
+    document.reservation_expires_at.length === 0 ||
+    document.reservation_expires_at <= nowIso
+  );
+}
+
+function isSameReservation(
+  document: InviteCodeDocument,
+  email: string,
+  deviceIdHash: string,
+): boolean {
+  return (
+    document.status === 'reserved' &&
+    document.reserved_by_email === email &&
+    document.reserved_by_device_id_hash === deviceIdHash
+  );
+}
+
+async function reserveInviteCode(params: {
   config: InviteGateConfig;
-  walletAddress: string;
-  deviceIdHash: string;
   codeHash: string;
-  segment: string;
+  email: string;
+  deviceIdHash: string;
   nowIso: string;
+  reservationExpiresAtIso: string;
 }): Promise<boolean> {
   const response = await withMongoDatabase(params.config, (db) =>
     inviteCodesCollection(db).updateOne(
       {
         code_hash: params.codeHash,
-        status: 'unused',
         locked: { $ne: true },
         expires_at: { $gt: params.nowIso },
+        $or: [
+          { status: 'unused' },
+          {
+            status: 'reserved',
+            reserved_by_email: params.email,
+            reserved_by_device_id_hash: params.deviceIdHash,
+          },
+          {
+            status: 'reserved',
+            reservation_expires_at: { $lte: params.nowIso },
+          },
+        ],
+      },
+      {
+        $set: {
+          status: 'reserved',
+          reserved_at: params.nowIso,
+          reserved_by_email: params.email,
+          reserved_by_device_id_hash: params.deviceIdHash,
+          reservation_expires_at: params.reservationExpiresAtIso,
+        },
+      },
+    ),
+  );
+
+  return response.modifiedCount === 1;
+}
+
+async function redeemInviteCode(params: {
+  config: InviteGateConfig;
+  walletAddress: string;
+  deviceIdHash: string;
+  codeHash: string;
+  nowIso: string;
+  email?: string | null;
+}): Promise<boolean> {
+  const reservationMatchers =
+    params.email != null && params.email.length > 0
+      ? [
+          {
+            status: 'reserved',
+            reserved_by_email: params.email,
+            reserved_by_device_id_hash: params.deviceIdHash,
+          },
+        ]
+      : [];
+  const response = await withMongoDatabase(params.config, (db) =>
+    inviteCodesCollection(db).updateOne(
+      {
+        code_hash: params.codeHash,
+        locked: { $ne: true },
+        expires_at: { $gt: params.nowIso },
+        $or: [{ status: 'unused' }, ...reservationMatchers],
       },
       {
         $set: {
@@ -414,6 +560,12 @@ async function redeemInviteCode(params: {
           used_at: params.nowIso,
           used_by_wallet_address: params.walletAddress,
           used_by_device_id_hash: params.deviceIdHash,
+          ...(params.email != null && params.email.length > 0
+            ? { used_by_email: params.email }
+            : {}),
+        },
+        $unset: {
+          reservation_expires_at: '',
         },
       },
     ),
@@ -434,50 +586,41 @@ export async function verifyInviteCodeForAccess(
 
   if (!config.enabled) {
     return {
-      segment: parsedInvite.segment,
+      segment: null,
       gate: 'disabled',
       email: normalizedEmail,
     };
   }
 
-  if (normalizedEmail != null && normalizedEmail.length > 0) {
-    const existingAccess = await findInviteAccessByEmail(config, normalizedEmail);
-    if (existingAccess != null) {
-      return {
-        segment: existingAccess.segment ?? parsedInvite.segment,
-        gate: 'required',
-        email: normalizedEmail,
-      };
-    }
-  }
-
   const codeHash = await hmacSha256Hex(config.pepper, parsedInvite.code);
   const nowIso = new Date().toISOString();
   const document = await findInviteCodeDocument(config, codeHash);
-  const deviceIdHash =
-    typeof deviceId === 'string' && deviceId.length > 0
-      ? await sha256Hex(`${config.pepper}:${deviceId}`)
-      : null;
+  const deviceIdHash = await hashInviteDeviceId(config, deviceId);
 
-  if (
-    document?.status === 'unused' &&
-    document.locked !== true &&
-    !isExpired(document.expires_at, nowIso)
-  ) {
-    // Save the pending invite verification with email
-    if (normalizedEmail != null && normalizedEmail.length > 0 && deviceIdHash != null) {
-      await savePendingInviteVerification({
-        config,
-        inviteCodeHash: codeHash,
-        email: normalizedEmail,
-        deviceIdHash,
-        segment: document.segment ?? parsedInvite.segment,
-        nowIso,
-      });
-    }
-    
+  if (normalizedEmail == null || normalizedEmail.length === 0 || deviceIdHash == null) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Email and device identifier are required.',
+    });
+  }
+
+  const reservationExpiresAtIso = new Date(
+    Date.now() + INVITE_CODE_RESERVATION_TTL_MS,
+  ).toISOString();
+  const reserved = await reserveInviteCode({
+    config,
+    codeHash,
+    email: normalizedEmail,
+    deviceIdHash,
+    nowIso,
+    reservationExpiresAtIso,
+  });
+
+  if (reserved) {
+    const reservedDocument = document ?? (await findInviteCodeDocument(config, codeHash));
     return {
-      segment: document.segment ?? parsedInvite.segment,
+      segment: reservedDocument?.segment ?? null,
       gate: 'required',
       email: normalizedEmail,
     };
@@ -489,7 +632,7 @@ export async function verifyInviteCodeForAccess(
     document.used_by_device_id_hash === deviceIdHash
   ) {
     return {
-      segment: document.segment ?? parsedInvite.segment,
+      segment: document.segment ?? null,
       gate: 'required',
       email: normalizedEmail,
     };
@@ -497,23 +640,27 @@ export async function verifyInviteCodeForAccess(
 
   // Case 3: Code is used + different device, but same email as original verification.
   // This handles cache wipes, device switches, and reinstalls.
-  if (
-    document?.status === 'used' &&
-    normalizedEmail != null &&
-    normalizedEmail.length > 0
-  ) {
-    const emailMatches = await findInviteAccessByCodeAndEmail(
-      config,
-      codeHash,
-      normalizedEmail,
-    );
+  if (document?.status === 'used' && normalizedEmail != null && normalizedEmail.length > 0) {
+    const emailMatches = await findInviteAccessByCodeAndEmail(config, codeHash, normalizedEmail);
     if (emailMatches) {
       return {
-        segment: document.segment ?? parsedInvite.segment,
+        segment: document.segment ?? null,
         gate: 'required',
         email: normalizedEmail,
       };
     }
+  }
+
+  if (
+    document != null &&
+    isSameReservation(document, normalizedEmail, deviceIdHash) &&
+    !reservationExpired(document, nowIso)
+  ) {
+    return {
+      segment: document.segment ?? null,
+      gate: 'required',
+      email: normalizedEmail,
+    };
   }
 
   throwInviteCodeStateError(document, nowIso);
@@ -526,9 +673,35 @@ export async function ensureInviteAccessForBootstrap(
   const config = getInviteGateConfig(bindings);
   if (!config.enabled) return;
 
-  const deviceIdHash = await sha256Hex(`${config.pepper}:${params.deviceId}`);
-  const normalizedEmail = typeof params.email === 'string' ? params.email.trim().toLowerCase() : null;
-  if (await findExistingInviteAccess(config, params.walletAddress, deviceIdHash)) {
+  const deviceIdHash = await hashInviteDeviceId(config, params.deviceId);
+  const normalizedEmail =
+    typeof params.email === 'string' ? params.email.trim().toLowerCase() : null;
+  if (deviceIdHash == null) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Device identifier is required.',
+    });
+  }
+
+  if (await findExistingWalletInviteAccess(config, params.walletAddress)) {
+    return;
+  }
+
+  const existingEmailAccess =
+    normalizedEmail != null && normalizedEmail.length > 0
+      ? await findInviteAccessByEmailAndDevice(config, normalizedEmail, deviceIdHash)
+      : null;
+  if (existingEmailAccess?.inviteCodeHash != null) {
+    await upsertInviteAccess({
+      config,
+      walletAddress: params.walletAddress,
+      deviceIdHash,
+      inviteCodeHash: existingEmailAccess.inviteCodeHash,
+      segment: existingEmailAccess.segment ?? 'unknown',
+      nowIso: new Date().toISOString(),
+      email: normalizedEmail,
+    });
     return;
   }
 
@@ -540,17 +713,18 @@ export async function ensureInviteAccessForBootstrap(
     walletAddress: params.walletAddress,
     deviceIdHash,
     codeHash,
-    segment: parsedInvite.segment,
     nowIso,
+    email: normalizedEmail,
   });
 
   if (redeemed) {
+    const document = await findInviteCodeDocument(config, codeHash);
     await upsertInviteAccess({
       config,
       walletAddress: params.walletAddress,
       deviceIdHash,
       inviteCodeHash: codeHash,
-      segment: parsedInvite.segment,
+      segment: document?.segment ?? 'unknown',
       nowIso,
       email: normalizedEmail,
     });
@@ -569,7 +743,7 @@ export async function ensureInviteAccessForBootstrap(
       walletAddress: params.walletAddress,
       deviceIdHash,
       inviteCodeHash: codeHash,
-      segment: document.segment ?? parsedInvite.segment,
+      segment: document.segment ?? 'unknown',
       nowIso,
       email: normalizedEmail,
     });
@@ -579,23 +753,15 @@ export async function ensureInviteAccessForBootstrap(
   // Case 4: Code is used by a different wallet+device, but same email
   // as the original invite_access record. This handles cache wipes and
   // device switches where the user is re-onboarding with the same email.
-  if (
-    document?.status === 'used' &&
-    normalizedEmail != null &&
-    normalizedEmail.length > 0
-  ) {
-    const emailMatches = await findInviteAccessByCodeAndEmail(
-      config,
-      codeHash,
-      normalizedEmail,
-    );
+  if (document?.status === 'used' && normalizedEmail != null && normalizedEmail.length > 0) {
+    const emailMatches = await findInviteAccessByCodeAndEmail(config, codeHash, normalizedEmail);
     if (emailMatches) {
       await upsertInviteAccess({
         config,
         walletAddress: params.walletAddress,
         deviceIdHash,
         inviteCodeHash: codeHash,
-        segment: document.segment ?? parsedInvite.segment,
+        segment: document.segment ?? 'unknown',
         nowIso,
         email: normalizedEmail,
       });
@@ -613,6 +779,7 @@ export function isInviteGateRequired(bindings: Bindings): boolean {
 export async function checkInviteEmailForAccess(
   bindings: Bindings,
   email: string,
+  deviceId?: string | null,
 ): Promise<{ verified: boolean; segment?: string }> {
   const config = getInviteGateConfig(bindings);
   if (!config.enabled) {
@@ -624,7 +791,16 @@ export async function checkInviteEmailForAccess(
     return { verified: false };
   }
 
-  const existingAccess = await findInviteAccessByEmail(config, normalizedEmail);
+  const deviceIdHash = await hashInviteDeviceId(config, deviceId);
+  if (deviceIdHash == null) {
+    return { verified: false };
+  }
+
+  const existingAccess = await findInviteAccessByEmailAndDevice(
+    config,
+    normalizedEmail,
+    deviceIdHash,
+  );
   if (existingAccess != null) {
     return { verified: true, segment: existingAccess.segment };
   }

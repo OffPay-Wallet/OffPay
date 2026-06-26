@@ -4,9 +4,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const PREFIX = 'OFFPAY';
-const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const RANDOM_LENGTH = 12;
+const CODE_FORMAT = 'alphanumeric_6';
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const CODE_LENGTH = 6;
 const SEGMENT_PATTERN = /^[A-Z0-9]{1,8}$/;
 
 function getArg(args, name, fallback = null) {
@@ -24,23 +24,12 @@ function requirePositiveInt(value, label) {
   return parsed;
 }
 
-function checksum(baseCode) {
-  const sum = baseCode.split('').reduce((total, char) => total + char.charCodeAt(0), 0);
-  return String(sum % 97).padStart(2, '0');
-}
-
-function randomInviteSegment() {
+function randomInviteCode() {
   let output = '';
-  for (let index = 0; index < RANDOM_LENGTH; index += 1) {
+  for (let index = 0; index < CODE_LENGTH; index += 1) {
     output += ALPHABET[crypto.randomInt(0, ALPHABET.length)];
   }
   return output;
-}
-
-function buildInviteCode(segment) {
-  const random = randomInviteSegment();
-  const base = `${PREFIX}-${segment}-${random}`;
-  return `${base}-${checksum(base)}`;
 }
 
 function hashInviteCode(code, pepper) {
@@ -51,7 +40,9 @@ function main() {
   const args = process.argv.slice(2);
   const count = requirePositiveInt(getArg(args, '--count', '10'), '--count');
   const expiryDays = requirePositiveInt(getArg(args, '--expiry-days', '14'), '--expiry-days');
-  const segment = String(getArg(args, '--segment', 'B1')).trim().toUpperCase();
+  const segment = String(getArg(args, '--segment', 'B1'))
+    .trim()
+    .toUpperCase();
   const outputDir = path.resolve(String(getArg(args, '--output-dir', 'invite-codes')));
   const pepper = String(
     getArg(args, '--pepper', process.env.OFFPAY_INVITE_CODE_PEPPER ?? ''),
@@ -67,20 +58,32 @@ function main() {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
   const plaintextCodes = [];
+  const seenCodes = new Set();
   const dbRecords = [];
 
   for (let index = 0; index < count; index += 1) {
-    const code = buildInviteCode(segment);
+    let code = randomInviteCode();
+    while (seenCodes.has(code)) {
+      code = randomInviteCode();
+    }
+    seenCodes.add(code);
     plaintextCodes.push(code);
     dbRecords.push({
       code_hash: hashInviteCode(code, pepper),
+      code_format: CODE_FORMAT,
+      code_length: CODE_LENGTH,
       segment,
       status: 'unused',
       created_at: now.toISOString(),
       expires_at: expiresAt.toISOString(),
+      reserved_at: null,
+      reserved_by_email: null,
+      reserved_by_device_id_hash: null,
+      reservation_expires_at: null,
       used_at: null,
       used_by_wallet_address: null,
       used_by_device_id_hash: null,
+      used_by_email: null,
       failed_attempts: 0,
       locked: false,
     });
@@ -96,6 +99,7 @@ function main() {
     [
       `OffPay invite codes`,
       `Segment: ${segment}`,
+      `Format: ${CODE_FORMAT}`,
       `Expires: ${expiresAt.toISOString()}`,
       '',
       ...plaintextCodes.map((code, index) => `${String(index + 1).padStart(3, ' ')}. ${code}`),

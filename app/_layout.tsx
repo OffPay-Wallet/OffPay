@@ -15,7 +15,13 @@ import { installQueryCachePersistence } from '@/lib/cache/query-persistence';
  */
 import { DefaultTheme, ThemeProvider } from 'expo-router/react-navigation';
 import { isRunningInExpoGo } from 'expo';
-import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
+import {
+  Stack,
+  useGlobalSearchParams,
+  useRootNavigationState,
+  useRouter,
+  useSegments,
+} from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -39,6 +45,12 @@ import {
   privatePaymentScreenOptions,
 } from '@/constants/navigation';
 import { formatOffpayUsername } from '@/lib/api/offpay-username';
+import {
+  firstRouteParam,
+  isWalletFlowInviteFresh,
+  WALLET_FLOW_INVITE_PURPOSE,
+  type WalletFlowInviteNext,
+} from '@/lib/invite/wallet-flow-invite';
 import {
   pruneManagedProfileImages,
   resolveStoredProfileImageUri,
@@ -126,6 +138,7 @@ export const unstable_settings = {
 export default function RootLayout(): React.JSX.Element | null {
   const hasOnboarded = useAppStore((s) => s.hasOnboarded);
   const inviteAccessVerified = useAppStore((s) => s.inviteAccessVerified);
+  const walletFlowInviteVerifiedAt = useAppStore((s) => s.walletFlowInviteVerifiedAt);
   const username = useAppStore((s) => s.username);
   const profileImageUri = useAppStore((s) => s.profileImageUri);
   const setHasOnboarded = useAppStore((s) => s.setHasOnboarded);
@@ -139,6 +152,10 @@ export default function RootLayout(): React.JSX.Element | null {
   const setActiveWalletName = useWalletStore((s) => s.setActiveWalletName);
   const router = useRouter();
   const segments = useSegments();
+  const routeParams = useGlobalSearchParams<{
+    purpose?: string | string[];
+    next?: string | string[];
+  }>();
   const rootNavigationState = useRootNavigationState();
   const [hasHiddenSplash, setHasHiddenSplash] = useState(false);
   const [rootLayoutReady, setRootLayoutReady] = useState(false);
@@ -222,6 +239,14 @@ export default function RootLayout(): React.JSX.Element | null {
   const inFlatFlow =
     inInviteCode || inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
   const showGradient = inAuthFlow && !inFlatFlow;
+  const invitePurpose = firstRouteParam(routeParams.purpose);
+  const isWalletFlowInviteRoute = inInviteCode && invitePurpose === WALLET_FLOW_INVITE_PURPOSE;
+  const walletFlowInviteFresh = isWalletFlowInviteFresh(walletFlowInviteVerifiedAt);
+  const walletFlowInviteNext: WalletFlowInviteNext = inRestoreWallet
+    ? 'restore-wallet'
+    : inPrivyWallet
+      ? 'privy-wallet'
+      : 'create-wallet';
 
   const storedWalletCount = walletHydrated && walletCount > 0;
   const restoredUsernameCandidate =
@@ -241,7 +266,7 @@ export default function RootLayout(): React.JSX.Element | null {
     shouldEnableLock && hasPasscode && locked && walletPublicKey == null;
 
   const routeReadyForDisplay = hasCompletedOnboarding
-    ? segments.length > 0 && !inInviteCode && !inOnboarding
+    ? segments.length > 0 && (!inInviteCode || isWalletFlowInviteRoute) && !inOnboarding
     : inviteAccessVerified || needsUsernameSetup
       ? inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup
       : inInviteCode;
@@ -321,6 +346,15 @@ export default function RootLayout(): React.JSX.Element | null {
         pathname: '/username-setup',
         params: { source: 'onboarding' },
       });
+    } else if (hasCompletedOnboarding && inWalletFlow && !walletFlowInviteFresh) {
+      router.replace({
+        pathname: '/invite-code',
+        params: {
+          purpose: WALLET_FLOW_INVITE_PURPOSE,
+          next: walletFlowInviteNext,
+          source: 'accounts',
+        },
+      });
     } else if (!hasCompletedOnboarding && !inviteAccessVerified && !inInviteCode) {
       router.replace('/invite-code');
     } else if (!hasCompletedOnboarding && inviteAccessVerified && inInviteCode) {
@@ -334,7 +368,10 @@ export default function RootLayout(): React.JSX.Element | null {
       !inSecuritySetup
     ) {
       router.replace('/onboarding');
-    } else if (hasCompletedOnboarding && (inInviteCode || inOnboarding)) {
+    } else if (
+      hasCompletedOnboarding &&
+      ((inInviteCode && !isWalletFlowInviteRoute) || inOnboarding)
+    ) {
       router.replace('/');
     } else if (shouldShowAppLockRoute && !inAppLock) {
       router.replace('/app-lock/passcode');
@@ -348,6 +385,7 @@ export default function RootLayout(): React.JSX.Element | null {
     inAppLock,
     inAuthFlow,
     inInviteCode,
+    isWalletFlowInviteRoute,
     inOnboarding,
     inSecuritySetup,
     inUsernameSetup,
@@ -360,6 +398,8 @@ export default function RootLayout(): React.JSX.Element | null {
     rootNavigationState.key,
     router,
     shouldShowAppLockRoute,
+    walletFlowInviteFresh,
+    walletFlowInviteNext,
   ]);
 
   // Hide the native splash only once the correct first screen is mounted.

@@ -11,6 +11,11 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import {
+  isWalletFlowInviteFresh,
+  WALLET_FLOW_INVITE_PURPOSE,
+} from '@/lib/invite/wallet-flow-invite';
+import { useAppStore } from '@/store/app';
 
 import type { RecoveryWordCount } from '@/types/wallet';
 
@@ -28,6 +33,8 @@ export default function CreateWalletWordCountScreen(): React.JSX.Element {
   const flowSource = Array.isArray(source) ? source[0] : source;
   const [selected, setSelected] = useState<RecoveryWordCount>(12);
   const [continuing, setContinuing] = useState(false);
+  const walletFlowInviteVerifiedAt = useAppStore((s) => s.walletFlowInviteVerifiedAt);
+  const clearWalletFlowInviteVerification = useAppStore((s) => s.clearWalletFlowInviteVerification);
   const continueInFlightRef = useRef(false);
   const titleFontSize = width < 360 ? 24 : width < 390 ? 27 : 30;
 
@@ -39,6 +46,10 @@ export default function CreateWalletWordCountScreen(): React.JSX.Element {
   );
 
   function handleBack(): void {
+    if (flowSource === 'accounts') {
+      clearWalletFlowInviteVerification();
+    }
+
     if (router.canGoBack()) {
       router.back();
     } else {
@@ -48,6 +59,20 @@ export default function CreateWalletWordCountScreen(): React.JSX.Element {
 
   function handleNext(): void {
     if (continueInFlightRef.current) return;
+
+    if (flowSource === 'accounts' && !isWalletFlowInviteFresh(walletFlowInviteVerifiedAt)) {
+      clearWalletFlowInviteVerification();
+      router.replace({
+        pathname: '/invite-code',
+        params: {
+          purpose: WALLET_FLOW_INVITE_PURPOSE,
+          next: 'create-wallet',
+          source: 'accounts',
+        },
+      });
+      return;
+    }
+
     continueInFlightRef.current = true;
     setContinuing(true);
 

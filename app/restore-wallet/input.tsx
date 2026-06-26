@@ -29,6 +29,10 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import {
+  isWalletFlowInviteFresh,
+  WALLET_FLOW_INVITE_PURPOSE,
+} from '@/lib/invite/wallet-flow-invite';
 import { useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -68,6 +72,8 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
   const isSeedPhrase = method === 'seed-phrase';
   const setHasOnboarded = useAppStore((s) => s.setHasOnboarded);
   const username = useAppStore((s) => s.username);
+  const walletFlowInviteVerifiedAt = useAppStore((s) => s.walletFlowInviteVerifiedAt);
+  const clearWalletFlowInviteVerification = useAppStore((s) => s.clearWalletFlowInviteVerification);
   const importFromMnemonic = useWalletStore((s) => s.importFromMnemonic);
   const importFromPrivateKey = useWalletStore((s) => s.importFromPrivateKey);
   const isLoading = useWalletStore((s) => s.isLoading);
@@ -91,8 +97,11 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
   );
 
   const handleBack = useCallback((): void => {
+    if (flowSource === 'accounts') {
+      clearWalletFlowInviteVerification();
+    }
     router.back();
-  }, []);
+  }, [clearWalletFlowInviteVerification, flowSource]);
 
   /** Toggle word count — preserve existing words */
   const handleWordCountChange = useCallback(
@@ -120,6 +129,7 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
   const completeImportFlow = useCallback((): void => {
     if (flowSource === 'accounts') {
       setHasOnboarded(true);
+      clearWalletFlowInviteVerification();
       router.dismissTo('/accounts');
       return;
     }
@@ -134,7 +144,24 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
       pathname: '/username-setup',
       params: { source: 'onboarding' },
     });
-  }, [flowSource, setHasOnboarded, username]);
+  }, [clearWalletFlowInviteVerification, flowSource, setHasOnboarded, username]);
+
+  const redirectToInviteIfNeeded = useCallback((): boolean => {
+    if (flowSource !== 'accounts' || isWalletFlowInviteFresh(walletFlowInviteVerifiedAt)) {
+      return false;
+    }
+
+    clearWalletFlowInviteVerification();
+    router.replace({
+      pathname: '/invite-code',
+      params: {
+        purpose: WALLET_FLOW_INVITE_PURPOSE,
+        next: 'restore-wallet',
+        source: 'accounts',
+      },
+    });
+    return true;
+  }, [clearWalletFlowInviteVerification, flowSource, walletFlowInviteVerifiedAt]);
 
   /** Read clipboard and distribute into the grid or private key input */
   const handlePaste = useCallback(async (): Promise<void> => {
@@ -174,6 +201,7 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
   /** Import the wallet — validates and stores securely */
   const handleImport = useCallback(async (): Promise<void> => {
     if (isLoading) return;
+    if (redirectToInviteIfNeeded()) return;
 
     if (isSeedPhrase) {
       if (filledWords.length === 0) {
@@ -219,6 +247,7 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
     importFromMnemonic,
     importFromPrivateKey,
     completeImportFlow,
+    redirectToInviteIfNeeded,
     showToast,
   ]);
 
