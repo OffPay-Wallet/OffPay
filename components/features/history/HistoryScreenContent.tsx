@@ -24,7 +24,7 @@ import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
@@ -70,19 +70,12 @@ export function HistoryScreenContent(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
     enabled: isFocused,
-    // Canonical history should not be capped by the Home/dashboard snapshot.
-    // Paint warm rows immediately, then let the deep 100-row query reconcile
-    // in the background. Requiring 100 warm rows blocks forever on wallets with
-    // fewer displayable rows, which is exactly the slow-render path.
-    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
-    allowPartialWarmData: true,
-    // Paint persisted cached rows immediately on cold start so the deep
-    // (and on cellular, slow) first page loads behind real content
-    // instead of a skeleton.
-    hydrateDisplayCacheOnMount: true,
-    refetchOnMount: true,
+    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
     retry: false,
     requestOwner: 'history.transactions',
+    useCache: false,
     waitForDashboard: false,
   });
   const tokenLogoMap = useOffpayTokenLogoMap();

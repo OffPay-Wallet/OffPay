@@ -107,6 +107,14 @@ describe('hydrateOffpayWalletDashboard', () => {
         pages: [dashboard.transactions],
         pageParams: [undefined],
       });
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20, 'network'),
+        ),
+      ).toEqual({
+        pages: [dashboard.transactions],
+        pageParams: [undefined],
+      });
     } finally {
       queryClient.clear();
     }
@@ -136,12 +144,22 @@ describe('hydrateOffpayWalletDashboard', () => {
         { pages: [fresherTransactions], pageParams: [undefined] },
         { updatedAt: fresherTransactions.fetchedAt },
       );
+      queryClient.setQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+        offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20, 'network'),
+        { pages: [fresherTransactions], pageParams: [undefined] },
+        { updatedAt: fresherTransactions.fetchedAt },
+      );
 
       hydrateOffpayWalletDashboard({ queryClient, dashboard, limit: 20 });
 
       expect(
         queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
           offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        )?.pages[0],
+      ).toBe(fresherTransactions);
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20, 'network'),
         )?.pages[0],
       ).toBe(fresherTransactions);
       expect(queryClient.getQueryData(offpayWalletBalanceQueryKey(WALLET, 'devnet'))).toBe(
@@ -171,6 +189,11 @@ describe('hydrateOffpayWalletDashboard', () => {
       expect(
         queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
           offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        )?.pages[0],
+      ).toEqual(dashboard.transactions);
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20, 'network'),
         )?.pages[0],
       ).toEqual(dashboard.transactions);
     } finally {

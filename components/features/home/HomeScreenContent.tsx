@@ -61,7 +61,6 @@ import {
   offpayWalletDashboardQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
-  WALLET_DEEP_HISTORY_PAGE_SIZE,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { useSettlementEngineStore } from '@/store/settlementEngineStore';
@@ -313,12 +312,12 @@ export function HomeScreenContent(): React.JSX.Element {
   });
   const transactionsQuery = useOffpayWalletTransactions({
     enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
-    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
-    allowPartialWarmData: true,
+    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     waitForDashboard: false,
-    refetchOnMount: false,
-    hydrateDisplayCacheOnMount: true,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
     requestOwner: 'home.transactions.history',
+    useCache: false,
   });
   const pendingBackupStatsQuery = usePendingBackupQueueStats({
     walletAddress: publicKey,
@@ -548,6 +547,18 @@ export function HomeScreenContent(): React.JSX.Element {
     hasWallet &&
     canUseNetwork &&
     (criticalSnapshotPending || transactionsQuery.isCapabilitiesPending);
+  const activityFirstPaintLoading =
+    recentActivity.length === 0 &&
+    hasWallet &&
+    canUseNetwork &&
+    !transactionsQuery.isError &&
+    (criticalSnapshotPending ||
+      activityWarmingUp ||
+      transactionsQuery.isInitialDataPending ||
+      (homeSnapshot.foregroundFetchEnabled &&
+        transactionsQuery.isCapabilityEnabled &&
+        !transactionsQuery.isFetched &&
+        (transactionsQuery.isLoading || transactionsQuery.isFetching)));
   const holdingsLoading =
     previewHoldings.length === 0 &&
     (criticalSnapshotPending ||
@@ -555,12 +566,7 @@ export function HomeScreenContent(): React.JSX.Element {
       firstBalancePayloadPending ||
       balanceQuery.isLoading ||
       balanceQuery.isCapabilitiesPending);
-  const activityLoading =
-    recentActivity.length === 0 &&
-    (criticalSnapshotPending ||
-      activityWarmingUp ||
-      transactionsQuery.isLoading ||
-      transactionsQuery.isCapabilitiesPending);
+  const activityLoading = activityFirstPaintLoading;
   const holdingsEmptyTitle = balanceQuery.isCapabilityEnabled
     ? holdingsLoading || balanceQuery.isLoading
       ? 'Loading holdings'
@@ -1039,6 +1045,9 @@ export function HomeScreenContent(): React.JSX.Element {
               queryClient,
               walletAddress: publicKey,
               network,
+              options: {
+                includeTransactions: false,
+              },
             }),
           );
         }

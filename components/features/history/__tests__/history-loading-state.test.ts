@@ -5,55 +5,39 @@ describe('history loading state', () => {
     expect(
       getHistoryLoadingState({
         rowCount: 0,
-        itemRowCount: 0,
         isInitialDataPending: true,
-        isFetching: true,
-        isFetchingNextPage: false,
       }),
     ).toEqual({
       showInitialLoader: true,
-      showWarmTopOffLoader: false,
-      warmTopOffRowCount: 0,
     });
   });
 
-  it('keeps partial cached rows visible while topping off the first viewport', () => {
+  it('keeps partial rows visible without adding top-off skeletons', () => {
     expect(
       getHistoryLoadingState({
         rowCount: 6,
-        itemRowCount: 4,
         isInitialDataPending: false,
-        isFetching: true,
-        isFetchingNextPage: false,
       }),
     ).toEqual({
       showInitialLoader: false,
-      showWarmTopOffLoader: true,
-      warmTopOffRowCount: 4,
     });
   });
 
-  it('does not replace existing rows with a full skeleton during a deep fetch', () => {
+  it('does not replace existing rows with a full skeleton during a refresh', () => {
     expect(
       getHistoryLoadingState({
         rowCount: 6,
-        itemRowCount: 4,
         isInitialDataPending: true,
-        isFetching: true,
-        isFetchingNextPage: false,
       }).showInitialLoader,
     ).toBe(false);
   });
 
-  it('does not show a top-off skeleton while fetching the next page', () => {
+  it('does not show the initial skeleton while paginating existing rows', () => {
     expect(
       getHistoryLoadingState({
         rowCount: 6,
-        itemRowCount: 4,
         isInitialDataPending: false,
-        isFetching: true,
-        isFetchingNextPage: true,
-      }).showWarmTopOffLoader,
+      }).showInitialLoader,
     ).toBe(false);
   });
 });

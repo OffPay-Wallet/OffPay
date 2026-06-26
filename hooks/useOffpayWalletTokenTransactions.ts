@@ -162,12 +162,14 @@ export function useOffpayWalletTokenTransactions(options: {
   minWarmTransactionRows?: number;
   deferUntilAfterInteractions?: boolean;
   refetchOnMount?: boolean | 'always';
+  refetchOnWindowFocus?: boolean | 'always';
   useCache?: boolean;
   enabled?: boolean;
   requestOwner?: string;
   timeoutMs?: number;
   allowPartialWarmData?: boolean;
   waitForWalletHistory?: boolean;
+  hydrateDisplayCacheOnMount?: boolean;
 }) {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
   const walletAddress = options.walletAddress ?? activeWalletAddress;
@@ -181,6 +183,7 @@ export function useOffpayWalletTokenTransactions(options: {
   const timeoutMs = options.timeoutMs ?? TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS;
   const allowPartialWarmData = options.allowPartialWarmData ?? false;
   const waitForWalletHistory = options.waitForWalletHistory ?? true;
+  const hydrateDisplayCacheOnMount = options.hydrateDisplayCacheOnMount ?? false;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
@@ -190,7 +193,9 @@ export function useOffpayWalletTokenTransactions(options: {
     [network, walletAddress],
   );
   const walletHistoryFetching = useIsFetching({ queryKey: walletHistoryBaseQueryKey }) > 0;
-  const [displayCacheHydrationSettled, setDisplayCacheHydrationSettled] = useState(false);
+  const [displayCacheHydrationSettled, setDisplayCacheHydrationSettled] = useState(
+    !hydrateDisplayCacheOnMount,
+  );
   const [displayCacheHydrationVersion, setDisplayCacheHydrationVersion] = useState(0);
   const [walletHistoryWaitExpired, setWalletHistoryWaitExpired] = useState(false);
   const nextPageRequestOwnerSuffixRef = useRef<string | null>(null);
@@ -262,9 +267,15 @@ export function useOffpayWalletTokenTransactions(options: {
   }, [deferUntilAfterInteractions, enabledByCaller, limit, mint, network, walletAddress]);
 
   useEffect(() => {
+    if (!hydrateDisplayCacheOnMount) {
+      setDisplayCacheHydrationSettled(true);
+      return undefined;
+    }
+
     setDisplayCacheHydrationSettled(false);
 
     if (!enabledByCaller || walletAddress == null || network == null || mint == null) {
+      setDisplayCacheHydrationSettled(true);
       return undefined;
     }
 
@@ -289,7 +300,7 @@ export function useOffpayWalletTokenTransactions(options: {
     return () => {
       cancelled = true;
     };
-  }, [enabledByCaller, mint, network, queryClient, walletAddress]);
+  }, [enabledByCaller, hydrateDisplayCacheOnMount, mint, network, queryClient, walletAddress]);
 
   useEffect(() => {
     setWalletHistoryWaitExpired(false);
@@ -315,6 +326,7 @@ export function useOffpayWalletTokenTransactions(options: {
   }, [enabledByCaller, mint, network, waitForWalletHistory, walletAddress, walletHistoryFetching]);
 
   const warmInitialData = useMemo<WalletTransactionsInfiniteData | undefined>(() => {
+    if (useCache === false) return undefined;
     if (walletAddress == null || network == null || mint == null) return undefined;
 
     const walletHistoryQueries = queryClient.getQueriesData<WalletTransactionsInfiniteData>({
@@ -348,6 +360,7 @@ export function useOffpayWalletTokenTransactions(options: {
     mint,
     network,
     queryClient,
+    useCache,
     walletAddress,
     walletHistoryBaseQueryKey,
   ]);
@@ -405,26 +418,43 @@ export function useOffpayWalletTokenTransactions(options: {
     initialDataUpdatedAt: () => (warmInitialData == null ? undefined : 0),
     placeholderData: warmInitialData,
     refetchOnMount: options.refetchOnMount ?? true,
+    refetchOnWindowFocus: options.refetchOnWindowFocus,
     refetchOnReconnect: true,
     retry: false,
   });
 
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
   const fetchNextPage = useCallback(
-    (
+    async (
       options?: Parameters<typeof query.fetchNextPage>[0] & {
         requestOwnerSuffix?: string;
       },
     ) => {
       const { requestOwnerSuffix = 'page', ...fetchOptions } = options ?? {};
-      nextPageRequestOwnerSuffixRef.current = requestOwnerSuffix;
-      const result = query.fetchNextPage(fetchOptions);
-      void result.finally(() => {
-        if (nextPageRequestOwnerSuffixRef.current === requestOwnerSuffix) {
-          nextPageRequestOwnerSuffixRef.current = null;
+      const skippedEmptyCursors = new Set<string>();
+
+      try {
+        nextPageRequestOwnerSuffixRef.current = requestOwnerSuffix;
+        let result = await query.fetchNextPage(fetchOptions);
+
+        while (true) {
+          const lastPage = result.data?.pages.at(-1);
+          const cursor = lastPage?.cursor?.trim() || null;
+          if (lastPage == null || cursor == null || lastPage.transactions.length > 0) {
+            return result;
+          }
+
+          if (skippedEmptyCursors.has(cursor)) {
+            return result;
+          }
+          skippedEmptyCursors.add(cursor);
+
+          nextPageRequestOwnerSuffixRef.current = `${requestOwnerSuffix}.emptyPage`;
+          result = await query.fetchNextPage(fetchOptions);
         }
-      });
-      return result;
+      } finally {
+        nextPageRequestOwnerSuffixRef.current = null;
+      }
     },
     [query.fetchNextPage],
   );

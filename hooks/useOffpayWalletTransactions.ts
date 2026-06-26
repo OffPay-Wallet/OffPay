@@ -103,6 +103,7 @@ export function useOffpayWalletTransactions(options?: {
   deferUntilAfterInteractions?: boolean;
   autoFetchAllPages?: boolean;
   refetchOnMount?: boolean | 'always';
+  refetchOnWindowFocus?: boolean | 'always';
   useCache?: boolean;
   enabled?: boolean;
   requestOwner?: string;
@@ -353,25 +354,42 @@ export function useOffpayWalletTransactions(options?: {
     // Mark it stale so React Query starts the full fetch immediately.
     initialDataUpdatedAt: () => (getWarmInitialTransactionsData() == null ? undefined : 0),
     refetchOnMount: options?.refetchOnMount ?? true,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus,
     refetchOnReconnect: true,
     retry: options?.retry,
   });
   const refetchTransactionsQuery = query.refetch;
   const fetchNextPage = useCallback(
-    (
+    async (
       options?: Parameters<typeof query.fetchNextPage>[0] & {
         requestOwnerSuffix?: string;
       },
     ) => {
       const { requestOwnerSuffix = 'page', ...fetchOptions } = options ?? {};
-      nextPageRequestOwnerSuffixRef.current = requestOwnerSuffix;
-      const result = query.fetchNextPage(fetchOptions);
-      void result.finally(() => {
-        if (nextPageRequestOwnerSuffixRef.current === requestOwnerSuffix) {
-          nextPageRequestOwnerSuffixRef.current = null;
+      const skippedEmptyCursors = new Set<string>();
+
+      try {
+        nextPageRequestOwnerSuffixRef.current = requestOwnerSuffix;
+        let result = await query.fetchNextPage(fetchOptions);
+
+        while (true) {
+          const lastPage = result.data?.pages.at(-1);
+          const cursor = lastPage?.cursor?.trim() || null;
+          if (lastPage == null || cursor == null || lastPage.transactions.length > 0) {
+            return result;
+          }
+
+          if (skippedEmptyCursors.has(cursor)) {
+            return result;
+          }
+          skippedEmptyCursors.add(cursor);
+
+          nextPageRequestOwnerSuffixRef.current = `${requestOwnerSuffix}.emptyPage`;
+          result = await query.fetchNextPage(fetchOptions);
         }
-      });
-      return result;
+      } finally {
+        nextPageRequestOwnerSuffixRef.current = null;
+      }
     },
     [query.fetchNextPage],
   );
@@ -448,7 +466,7 @@ export function useOffpayWalletTransactions(options?: {
         const fallback =
           queryClient.getQueryData<WalletTransactionsInfiniteData>(transactionsQueryKey)
             ?.pages[0] ?? null;
-        const refreshUseCache = options?.useCache ?? true;
+        const refreshUseCache = options?.useCache ?? useCache ?? true;
         const page = await getWalletTransactions(walletAddress, network, {
           limit,
           useCache: refreshUseCache,
@@ -482,8 +500,8 @@ export function useOffpayWalletTransactions(options?: {
           queryClient.setQueryData<WalletTransactionsInfiniteData>(
             queryKey,
             {
-              pages: [mergedPage, ...(existing?.pages.slice(1) ?? [])],
-              pageParams: existing?.pageParams.length ? existing.pageParams : [undefined],
+              pages: [mergedPage],
+              pageParams: [undefined],
             },
             { updatedAt },
           );

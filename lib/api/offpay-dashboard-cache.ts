@@ -62,20 +62,33 @@ export function hydrateOffpayWalletDashboard(params: {
     dashboard.network,
     limit,
   );
-  const existingTransactions =
-    queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
-      transactionsKey,
-    );
-  const existingFetchedAt = existingTransactions?.pages[0]?.fetchedAt ?? 0;
-  if (dashboard.transactions.fetchedAt >= existingFetchedAt) {
-    queryClient.setQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
-      transactionsKey,
-      {
-        pages: [dashboard.transactions],
-        pageParams: [undefined],
-      },
-      { updatedAt: dashboard.transactions.fetchedAt },
-    );
+  const networkTransactionsKey = offpayWalletTransactionsQueryKey(
+    dashboard.address,
+    dashboard.network,
+    limit,
+    'network',
+  );
+  const transactionKeys = [transactionsKey, networkTransactionsKey];
+  const seenTransactionKeys = new Set<string>();
+
+  for (const key of transactionKeys) {
+    const keyId = JSON.stringify(key);
+    if (seenTransactionKeys.has(keyId)) continue;
+    seenTransactionKeys.add(keyId);
+
+    const existingTransactions =
+      queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(key);
+    const existingFetchedAt = existingTransactions?.pages[0]?.fetchedAt ?? 0;
+    if (dashboard.transactions.fetchedAt >= existingFetchedAt) {
+      queryClient.setQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+        key,
+        {
+          pages: [dashboard.transactions],
+          pageParams: [undefined],
+        },
+        { updatedAt: dashboard.transactions.fetchedAt },
+      );
+    }
   }
 }
 
@@ -111,7 +124,7 @@ export async function prefetchOffpayWalletDashboard(params: {
           useCache: params.useCache,
           requestOwner: params.requestOwner ?? 'wallet.dashboard.prefetch',
         }),
-      staleTime: WALLET_DASHBOARD_WARM_STALE_TIME_MS,
+      staleTime: params.useCache === false ? 0 : WALLET_DASHBOARD_WARM_STALE_TIME_MS,
     });
 
     hydrateOffpayWalletDashboard({

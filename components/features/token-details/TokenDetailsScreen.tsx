@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type GestureResponderEvent,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
@@ -59,7 +60,7 @@ import {
   walletHistoryTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
@@ -84,9 +85,9 @@ import type { OffpayNetwork } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_ACTIVITY_INITIAL_FILL_ROWS = 8;
-const TOKEN_ACTIVITY_PAGE_SIZE = 50;
-const TOKEN_ACTIVITY_FOOTER_SKELETON_ROWS = 3;
+const TOKEN_ACTIVITY_PAGE_SIZE = WALLET_TRANSACTIONS_PAGE_SIZE;
 const TOKEN_ACTIVITY_SCROLL_PREFETCH_PX = 280;
+const TOKEN_ACTIVITY_SHORT_CONTENT_PREFETCH_PX = 96;
 const PRICE_CHART_VIEWBOX_WIDTH = 320;
 const PRICE_CHART_VIEWBOX_HEIGHT = 140;
 const PRICE_CHART_LEFT = 0;
@@ -886,7 +887,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
     enabled: false,
-    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
+    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
     allowPartialWarmData: false,
     // Token Details uses the token-specific endpoint as the first real source
@@ -939,9 +940,11 @@ export function TokenDetailsScreen(): React.JSX.Element {
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
     allowPartialWarmData: false,
     waitForWalletHistory: false,
-    refetchOnMount: false,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
     enabled: shouldLoadTokenTransactions,
     requestOwner: 'tokenDetails.transactions.backfill',
+    useCache: false,
   });
   const tokenEndpointActivity = useMemo<OffpayHistoryTransactionView[]>(
     () =>
@@ -993,17 +996,19 @@ export function TokenDetailsScreen(): React.JSX.Element {
     });
   }, [network, tokenActivityRowCount, tokenDetailsMountMark, tokenTransactionsQuery.isStale]);
   const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsQuery.isFetching;
-  // Bottom shimmer only belongs to explicit pagination. Initial token history
-  // now loads as one larger token-specific page instead of rendering a partial
-  // warm list plus filler rows.
-  const tokenActivityFooterSkeletonPending =
-    tokenActivity.length >= TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
-    tokenTransactionsQuery.isFetchingNextPage;
+  const tokenActivityPaginationPending =
+    tokenActivity.length > 0 && tokenTransactionsQuery.isFetchingNextPage;
   const tokenActivityLoading =
     tokenActivity.length === 0 &&
     (walletHistoryQuery.isInitialDataPending ||
       tokenTransactionsQuery.isInitialDataPending ||
       (tokenActivityFetching && walletHistoryQuery.transactions.length === 0));
+  const tokenActivityScrollMetricsRef = useRef({
+    contentHeight: 0,
+    layoutHeight: 0,
+    offsetY: 0,
+  });
+  const tokenActivityNextPageInFlightRef = useRef(false);
 
   const screenHorizontalPadding = viewportProfile.horizontalPadding;
   const actionCompact = dense || width < 360 || fontScale > 1.1;
@@ -1061,51 +1066,88 @@ export function TokenDetailsScreen(): React.JSX.Element {
     setSelectedTransaction(null);
   }, []);
 
-  const handleTokenDetailsScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
-      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-      const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-      if (distanceFromBottom > TOKEN_ACTIVITY_SCROLL_PREFETCH_PX) return;
-
+  const requestNextTokenActivityPage = useCallback(
+    (requestOwnerSuffix: string): void => {
       if (
-        tokenTransactionsQuery.isCapabilityEnabled &&
-        tokenTransactionsQuery.hasNextPage &&
-        !tokenTransactionsQuery.isFetchingNextPage
+        !tokenTransactionsQuery.isCapabilityEnabled ||
+        !tokenTransactionsQuery.hasNextPage ||
+        tokenTransactionsQuery.isFetching ||
+        tokenTransactionsQuery.isFetchingNextPage ||
+        tokenActivityNextPageInFlightRef.current
       ) {
-        void tokenTransactionsQuery.fetchNextPage({ requestOwnerSuffix: 'scrollPage' });
+        return;
       }
+
+      tokenActivityNextPageInFlightRef.current = true;
+      void tokenTransactionsQuery
+        .fetchNextPage({ requestOwnerSuffix })
+        .catch(() => undefined)
+        .finally(() => {
+          tokenActivityNextPageInFlightRef.current = false;
+        });
     },
-    // Depend on the stable inner accessors rather than the wrapper object,
-    // which is a fresh object every render (matches the HistoryList pattern).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       tokenTransactionsQuery.fetchNextPage,
       tokenTransactionsQuery.hasNextPage,
       tokenTransactionsQuery.isCapabilityEnabled,
+      tokenTransactionsQuery.isFetching,
       tokenTransactionsQuery.isFetchingNextPage,
     ],
   );
 
-  // Proactively page the token endpoint until the initial fill target is met
-  // (or the cursor is exhausted), rather than waiting for a scroll. The backend
-  // returns a bounded first page plus a cursor, so a wallet with sparse rows for
-  // this mint still fills the visible list without user interaction. Runs again
-  // after each page merges into tokenActivity.
-  useEffect(() => {
-    if (!tokenTransactionsQuery.isCapabilityEnabled) return;
-    if (!tokenTransactionsQuery.hasNextPage) return;
-    if (tokenTransactionsQuery.isFetchingNextPage) return;
-    if (tokenActivity.length >= TOKEN_ACTIVITY_INITIAL_FILL_ROWS) return;
+  const maybeRequestNextTokenActivityPage = useCallback(
+    (requestOwnerSuffix: string): void => {
+      const { contentHeight, layoutHeight, offsetY } = tokenActivityScrollMetricsRef.current;
+      if (contentHeight <= 0 || layoutHeight <= 0) return;
 
-    void tokenTransactionsQuery.fetchNextPage({ requestOwnerSuffix: 'autoFill' });
-    // Depend on the stable inner accessors rather than the wrapper object,
-    // which is a fresh object every render (matches the scroll handler above).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      const distanceFromBottom = contentHeight - (offsetY + layoutHeight);
+      const shortContentGap = contentHeight - layoutHeight;
+      const shouldPrefetch =
+        distanceFromBottom <= TOKEN_ACTIVITY_SCROLL_PREFETCH_PX ||
+        shortContentGap <= TOKEN_ACTIVITY_SHORT_CONTENT_PREFETCH_PX;
+      if (!shouldPrefetch) return;
+
+      requestNextTokenActivityPage(requestOwnerSuffix);
+    },
+    [requestNextTokenActivityPage],
+  );
+
+  const handleTokenDetailsScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      tokenActivityScrollMetricsRef.current = {
+        contentHeight: contentSize.height,
+        layoutHeight: layoutMeasurement.height,
+        offsetY: contentOffset.y,
+      };
+      maybeRequestNextTokenActivityPage('scrollPage');
+    },
+    [maybeRequestNextTokenActivityPage],
+  );
+
+  const handleTokenDetailsLayout = useCallback(
+    (event: LayoutChangeEvent): void => {
+      tokenActivityScrollMetricsRef.current.layoutHeight = event.nativeEvent.layout.height;
+      maybeRequestNextTokenActivityPage('shortContentPage');
+    },
+    [maybeRequestNextTokenActivityPage],
+  );
+
+  const handleTokenDetailsContentSizeChange = useCallback(
+    (_contentWidth: number, contentHeight: number): void => {
+      tokenActivityScrollMetricsRef.current.contentHeight = contentHeight;
+      maybeRequestNextTokenActivityPage('shortContentPage');
+    },
+    [maybeRequestNextTokenActivityPage],
+  );
+
+  useEffect(() => {
+    maybeRequestNextTokenActivityPage('shortContentPage');
   }, [
-    tokenActivity.length,
-    tokenTransactionsQuery.fetchNextPage,
+    maybeRequestNextTokenActivityPage,
+    tokenActivityRowCount,
     tokenTransactionsQuery.hasNextPage,
-    tokenTransactionsQuery.isCapabilityEnabled,
+    tokenTransactionsQuery.isFetching,
     tokenTransactionsQuery.isFetchingNextPage,
   ]);
 
@@ -1122,7 +1164,9 @@ export function TokenDetailsScreen(): React.JSX.Element {
         showsVerticalScrollIndicator={false}
         contentInsetAdjustmentBehavior="automatic"
         removeClippedSubviews={Platform.OS === 'android'}
+        onLayout={handleTokenDetailsLayout}
         onScroll={handleTokenDetailsScroll}
+        onContentSizeChange={handleTokenDetailsContentSizeChange}
         scrollEventThrottle={16}
         contentContainerStyle={[
           styles.scrollContent,
@@ -1230,11 +1274,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
                       />
                     );
                   })}
-                  {tokenActivityFooterSkeletonPending ? (
-                    <TokenActivitySkeletonList
-                      compact={compact}
-                      rowCount={TOKEN_ACTIVITY_FOOTER_SKELETON_ROWS}
-                    />
+                  {tokenActivityPaginationPending ? (
+                    <View style={styles.activityPaginationSpinner}>
+                      <LazyLoadingSpinner size={22} color={colors.text.secondary} />
+                    </View>
                   ) : null}
                 </View>
               ) : (
@@ -1503,6 +1546,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: spacing.xs,
+  },
+  activityPaginationSpinner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.md,
   },
   actionsRow: {
     flexDirection: 'row',

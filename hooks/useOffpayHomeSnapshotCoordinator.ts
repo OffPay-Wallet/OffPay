@@ -74,13 +74,15 @@ export function useOffpayHomeSnapshotCoordinator({
       return getWalletDashboard(walletAddress, network, {
         signal,
         limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+        useCache: false,
         requestOwner: 'home.snapshot.dashboard',
       });
     },
     enabled: canFetchDashboard,
     staleTime: WALLET_DASHBOARD_WARM_STALE_TIME_MS,
     gcTime: HOME_SNAPSHOT_GC_TIME_MS,
-    refetchOnMount: false,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
     refetchOnReconnect: true,
     retry: 1,
   });
@@ -118,7 +120,7 @@ export function useOffpayHomeSnapshotCoordinator({
       network: currentNetwork,
       options: {
         includeBalance: true,
-        includeTransactions: true,
+        includeTransactions: false,
         includePendingBackupStats: true,
         measurePrefix: 'home.snapshot.hydrate',
         onTransactionsHydrated: (status) => {
@@ -213,7 +215,7 @@ export function useOffpayHomeSnapshotCoordinator({
         network: dashboard.network,
         options: {
           includeBalance: true,
-          includeTransactions: true,
+          includeTransactions: false,
           includePendingBackupStats: false,
         },
       }).catch(() => undefined);
@@ -233,7 +235,7 @@ export function useOffpayHomeSnapshotCoordinator({
         fallbackGateOpen,
         hasDashboardData: dashboardQuery.data != null,
         dashboardFetching: dashboardQuery.isFetching,
-        hasUsableTransactions: transactionsCacheStatus === 'hit' || dashboardQuery.data != null,
+        hasUsableTransactions: dashboardQuery.data != null,
         displayCacheStatus,
         fallbackDeadlineStatus,
       })

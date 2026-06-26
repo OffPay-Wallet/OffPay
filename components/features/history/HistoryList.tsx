@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -35,9 +36,6 @@ const HISTORY_ROW_ESTIMATED_HEIGHT = 88;
 const HISTORY_MIN_SKELETON_ROWS = 7;
 const HISTORY_MAX_SKELETON_ROWS = 10;
 const HISTORY_RENDER_AHEAD_MIN_PX = 900;
-const HISTORY_VISIBLE_FILL_TARGET = 8;
-const HISTORY_MAX_WARM_TOP_OFF_ROWS = 4;
-const HISTORY_NEXT_PAGE_SKELETON_ROWS = 3;
 const EMPTY_HISTORY_ROWS: HistoryRow[] = [];
 
 interface HistoryListProps {
@@ -163,24 +161,6 @@ const HistorySkeletonPanel = React.memo(function HistorySkeletonPanel({
   );
 });
 
-const HistoryTopOffSkeleton = React.memo(function HistoryTopOffSkeleton({
-  compact,
-  contentFrameWidth,
-  rowCount,
-}: {
-  compact: boolean;
-  contentFrameWidth: number;
-  rowCount: number;
-}): React.JSX.Element {
-  return (
-    <View style={[styles.contentFrame, styles.topOffSkeleton, { width: contentFrameWidth }]}>
-      {Array.from({ length: rowCount }, (_, index) => (
-        <HistorySkeletonRow key={`history-topoff-skeleton-${index}`} compact={compact} />
-      ))}
-    </View>
-  );
-});
-
 export function HistoryList({
   transactionsQuery,
   localReceipts = [],
@@ -206,10 +186,6 @@ export function HistoryList({
     transactionsQuery.transactions,
   ]);
   const rows = useMemo(() => flattenHistorySections(sections), [sections]);
-  const historyItemRowCount = useMemo(
-    () => rows.reduce((count, row) => count + (row.kind === 'item' ? 1 : 0), 0),
-    [rows],
-  );
 
   // Extra padding at the bottom so we can scroll past the custom Tab Bar
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + layout.tabBarHeight + spacing.xl;
@@ -222,14 +198,9 @@ export function HistoryList({
     Math.max(HISTORY_MIN_SKELETON_ROWS, Math.ceil(windowHeight / HISTORY_ROW_ESTIMATED_HEIGHT)),
   );
   const renderAheadDistance = Math.max(HISTORY_RENDER_AHEAD_MIN_PX, Math.round(windowHeight * 1.4));
-  const { showInitialLoader, showWarmTopOffLoader, warmTopOffRowCount } = getHistoryLoadingState({
+  const { showInitialLoader } = getHistoryLoadingState({
     rowCount: rows.length,
-    itemRowCount: historyItemRowCount,
     isInitialDataPending: transactionsQuery.isInitialDataPending,
-    isFetching: transactionsQuery.isFetching,
-    isFetchingNextPage: transactionsQuery.isFetchingNextPage,
-    visibleFillTarget: HISTORY_VISIBLE_FILL_TARGET,
-    maxWarmTopOffRows: HISTORY_MAX_WARM_TOP_OFF_ROWS,
   });
   const emptyMessage = transactionsQuery.isCapabilityEnabled
     ? transactionsQuery.isError
@@ -339,22 +310,11 @@ export function HistoryList({
   );
 
   const ListFooter = useMemo(() => {
-    if (showWarmTopOffLoader) {
-      return (
-        <HistoryTopOffSkeleton
-          compact={compact}
-          contentFrameWidth={contentFrameWidth}
-          rowCount={warmTopOffRowCount}
-        />
-      );
-    }
     if (transactionsQuery.isFetchingNextPage) {
       return (
-        <HistoryTopOffSkeleton
-          compact={compact}
-          contentFrameWidth={contentFrameWidth}
-          rowCount={HISTORY_NEXT_PAGE_SKELETON_ROWS}
-        />
+        <View style={[styles.contentFrame, styles.paginationSpinner, { width: contentFrameWidth }]}>
+          <LazyLoadingSpinner size={22} color={colors.text.secondary} />
+        </View>
       );
     }
     if (!transactionsQuery.hasNextPage) return null;
@@ -388,14 +348,11 @@ export function HistoryList({
     // does not invalidate every parent re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    compact,
     contentFrameWidth,
-    showWarmTopOffLoader,
     transactionsQuery.fetchNextPage,
     transactionsQuery.hasNextPage,
     transactionsQuery.isCapabilityEnabled,
     transactionsQuery.isFetchingNextPage,
-    warmTopOffRowCount,
   ]);
 
   return (
@@ -434,9 +391,11 @@ const styles = StyleSheet.create({
     marginLeft: spacing.xs,
     marginBottom: spacing.xs,
   },
-  topOffSkeleton: {
-    gap: spacing.sm,
+  paginationSpinner: {
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
   },
   skeletonRow: {
     minHeight: 78,

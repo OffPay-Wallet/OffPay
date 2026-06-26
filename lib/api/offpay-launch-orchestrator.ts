@@ -5,9 +5,7 @@ import {
   offpayCapabilitiesQueryOptions,
 } from '@/lib/api/offpay-capabilities-query';
 import { prefetchOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
-import {
-  buildUnavailableCapabilities,
-} from '@/lib/api/offpay-capability-fallback';
+import { buildUnavailableCapabilities } from '@/lib/api/offpay-capability-fallback';
 import { persistWalletDisplayCacheFromQueryClient } from '@/lib/wallet/wallet-display-cache';
 
 import type { OffpayLaunchStep } from '@/store/offpayLaunchStore';
@@ -102,6 +100,7 @@ export async function runOffpayLaunchSequence(
     queryClient: params.queryClient,
     walletAddress,
     network,
+    useCache: false,
     requestOwner: 'launch.dashboard',
   })
     .then((dashboard) => {
@@ -112,7 +111,7 @@ export async function runOffpayLaunchSequence(
         network,
         options: {
           includeBalance: true,
-          includeTransactions: true,
+          includeTransactions: false,
           includePendingBackupStats: false,
         },
       }).catch(() => undefined);

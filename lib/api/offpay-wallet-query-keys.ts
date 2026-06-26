@@ -1,7 +1,6 @@
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 export const WALLET_TRANSACTIONS_PAGE_SIZE = 20;
-export const WALLET_DEEP_HISTORY_PAGE_SIZE = 100;
 
 export const offpayWalletDashboardBaseQueryKey = (
   walletAddress: string | null,

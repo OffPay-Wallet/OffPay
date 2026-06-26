@@ -1765,7 +1765,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('supplements deep enhanced wallet history with raw native SOL rows', async () => {
+  it('supplements first-page enhanced wallet history with raw native SOL rows', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const devnetIndexedBindings = {
       ...bindings,
@@ -1842,7 +1842,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     const response = await getWalletTransactions(devnetIndexedBindings, {
       address: WALLET,
       network: 'devnet',
-      limit: 100,
+      limit: 20,
       useCache: false,
     });
 

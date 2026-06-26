@@ -45,7 +45,7 @@ const STREAM_CAPABILITY_CACHE_TTL_MS = 60_000;
 const TOKEN_METADATA_CACHE_TTL_MS = 60 * 60_000;
 const DEFAULT_TRANSACTION_LIMIT = 25;
 const WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
-const WALLET_NATIVE_SOL_SUPPLEMENT_MIN_LIMIT = 50;
+const WALLET_NATIVE_SOL_SUPPLEMENT_MIN_LIMIT = 20;
 const WALLET_NATIVE_SOL_SUPPLEMENT_LIMIT = 50;
 const MAX_WALLET_TRANSACTION_SIGNATURE_SCAN = 1_000;
 const MIN_WALLET_TRANSACTION_BATCH_SIZE = 20;
@@ -5379,7 +5379,7 @@ async function getWalletTransactions(
   const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v7-sol-supplement', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v8-sol-supplement', [
     request.address,
     normalizedCursor ?? 'first-page',
     normalizedLimit,
@@ -5448,7 +5448,7 @@ async function getWalletTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v7-sol-supplement',
+          namespace: 'wallet-transactions-v8-sol-supplement',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
