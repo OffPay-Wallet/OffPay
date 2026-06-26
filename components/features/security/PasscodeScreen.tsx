@@ -351,7 +351,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
       await resetForgottenWallet({ queryClient });
       setUnlocking(false);
       setShowingReset(false);
-      router.replace('/onboarding');
+      router.replace('/invite-code');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not reset this wallet.';
       setToast(message);

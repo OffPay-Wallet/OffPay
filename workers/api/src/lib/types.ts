@@ -78,6 +78,7 @@ export type Bindings = {
   OFFPAY_PROTOTYPE_MODE?: string;
   OFFPAY_INVITE_GATE_MODE?: string;
   OFFPAY_INVITE_CODE_PEPPER?: string;
+  OFFPAY_INVITE_ADMIN_TOKEN?: string;
   MONGODB_URI?: string;
   MONGODB_DATABASE?: string;
   GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL?: string;

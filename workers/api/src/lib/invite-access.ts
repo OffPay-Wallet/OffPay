@@ -1,5 +1,11 @@
 import { MongoClient, type Collection, type Db, type ObjectId } from 'mongodb';
-import { getInviteCodeValidationMessage, parseInviteCode } from '../../../../shared/invite-codes';
+import {
+  OFFPAY_INVITE_ALPHABET,
+  OFFPAY_INVITE_CODE_FORMAT,
+  OFFPAY_INVITE_CODE_LENGTH,
+  getInviteCodeValidationMessage,
+  parseInviteCode,
+} from '../../../../shared/invite-codes';
 import { AppError } from './errors.js';
 import type { Bindings } from './types.js';
 
@@ -16,19 +22,28 @@ interface InviteVerificationResult {
   email: string | null;
 }
 
+interface GeneratedInviteCodeResult {
+  code: string;
+  codeHash: string;
+}
+
 interface InviteCodeDocument {
   code_hash?: string;
   code_format?: string;
   code_length?: number;
   segment?: string;
   status?: string;
+  created_at?: string;
   expires_at?: string;
+  reserved_at?: string | null;
   reserved_by_email?: string | null;
   reserved_by_device_id_hash?: string | null;
   reservation_expires_at?: string | null;
+  used_at?: string | null;
   used_by_wallet_address?: string | null;
   used_by_device_id_hash?: string | null;
   used_by_email?: string | null;
+  failed_attempts?: number;
   locked?: boolean;
 }
 
@@ -39,10 +54,22 @@ interface InviteGateConfig {
   pepper: string;
 }
 
+interface ActiveWalletInviteAccess {
+  inviteCodeHash?: string;
+  segment?: string;
+}
+
+interface EmailDeviceInviteAccess {
+  inviteCodeHash?: string;
+  segment?: string;
+  status?: string;
+}
+
 const INVITE_CODES_COLLECTION = 'invite_codes';
 const INVITE_ACCESS_COLLECTION = 'invite_access';
 const MIN_PEPPER_LENGTH = 32;
 const INVITE_CODE_RESERVATION_TTL_MS = 30 * 60 * 1000;
+const MAX_ADMIN_GENERATE_INVITE_CODES = 100;
 
 function hasTruthyStringBinding(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
@@ -123,6 +150,22 @@ async function hmacSha256Hex(secret: string, input: string): Promise<string> {
   return bytesToHex(new Uint8Array(signature));
 }
 
+function randomInviteCode(): string {
+  let output = '';
+  const randomBytes = new Uint8Array(1);
+  const maxUnbiasedByte =
+    Math.floor(256 / OFFPAY_INVITE_ALPHABET.length) * OFFPAY_INVITE_ALPHABET.length;
+
+  while (output.length < OFFPAY_INVITE_CODE_LENGTH) {
+    crypto.getRandomValues(randomBytes);
+    const value = randomBytes[0]!;
+    if (value >= maxUnbiasedByte) continue;
+    output += OFFPAY_INVITE_ALPHABET[value % OFFPAY_INVITE_ALPHABET.length];
+  }
+
+  return output;
+}
+
 async function withMongoDatabase<T>(
   config: InviteGateConfig,
   run: (db: Db) => Promise<T>,
@@ -163,10 +206,10 @@ function isDuplicateKeyError(error: unknown): boolean {
   );
 }
 
-async function findExistingWalletInviteAccess(
+async function findActiveWalletInviteAccess(
   config: InviteGateConfig,
   walletAddress: string,
-): Promise<boolean> {
+): Promise<ActiveWalletInviteAccess | null> {
   const document = await withMongoDatabase(config, (db) =>
     inviteAccessCollection(db).findOne(
       {
@@ -177,12 +220,19 @@ async function findExistingWalletInviteAccess(
         projection: {
           _id: 1,
           status: 1,
+          invite_code_hash: 1,
+          invite_code_segment: 1,
         },
       },
     ),
   );
 
-  return document?.status === 'active';
+  if (document?.status !== 'active') return null;
+
+  return {
+    inviteCodeHash: document.invite_code_hash,
+    segment: document.invite_code_segment,
+  };
 }
 
 /**
@@ -220,17 +270,22 @@ async function findInviteAccessByEmailAndDevice(
   config: InviteGateConfig,
   email: string,
   deviceIdHash: string,
-): Promise<{ segment?: string; inviteCodeHash?: string } | null> {
+  nowIso: string,
+): Promise<EmailDeviceInviteAccess | null> {
   const document = await withMongoDatabase(config, (db) =>
     inviteAccessCollection(db).findOne(
       {
         email,
         device_id_hash: deviceIdHash,
-        status: 'active',
+        $or: [
+          { status: 'active' },
+          {
+            status: 'pending',
+            reservation_expires_at: { $gt: nowIso },
+          },
+        ],
       },
-      {
-        projection: { invite_code_hash: 1, invite_code_segment: 1 },
-      },
+      { projection: { invite_code_hash: 1, invite_code_segment: 1, status: 1 } },
     ),
   );
 
@@ -238,7 +293,42 @@ async function findInviteAccessByEmailAndDevice(
   return {
     inviteCodeHash: document.invite_code_hash,
     segment: document.invite_code_segment,
+    status: document.status,
   };
+}
+
+async function recordPendingInviteAccess(params: {
+  config: InviteGateConfig;
+  deviceIdHash: string;
+  inviteCodeHash: string;
+  segment: string;
+  email: string;
+  nowIso: string;
+  reservationExpiresAtIso: string;
+}): Promise<void> {
+  await withMongoDatabase(params.config, (db) =>
+    inviteAccessCollection(db).updateOne(
+      {
+        device_id_hash: params.deviceIdHash,
+        status: 'pending',
+      },
+      {
+        $set: {
+          status: 'pending',
+          device_id_hash: params.deviceIdHash,
+          invite_code_hash: params.inviteCodeHash,
+          invite_code_segment: params.segment,
+          email: params.email,
+          updated_at: params.nowIso,
+          reservation_expires_at: params.reservationExpiresAtIso,
+        },
+        $setOnInsert: {
+          created_at: params.nowIso,
+        },
+      },
+      { upsert: true },
+    ),
+  );
 }
 
 function buildInviteAccessSet(params: {
@@ -574,6 +664,47 @@ async function redeemInviteCode(params: {
   return response.modifiedCount === 1;
 }
 
+async function bindUsedInviteEmailForDevice(params: {
+  config: InviteGateConfig;
+  walletAddress: string;
+  deviceIdHash: string;
+  codeHash: string;
+  segment: string;
+  email: string;
+  nowIso: string;
+}): Promise<void> {
+  await Promise.all([
+    withMongoDatabase(params.config, (db) =>
+      inviteCodesCollection(db).updateOne(
+        {
+          code_hash: params.codeHash,
+          status: 'used',
+          used_by_device_id_hash: params.deviceIdHash,
+          $or: [
+            { used_by_email: { $exists: false } },
+            { used_by_email: null },
+            { used_by_email: params.email },
+          ],
+        },
+        {
+          $set: {
+            used_by_email: params.email,
+          },
+        },
+      ),
+    ),
+    upsertInviteAccess({
+      config: params.config,
+      walletAddress: params.walletAddress,
+      deviceIdHash: params.deviceIdHash,
+      inviteCodeHash: params.codeHash,
+      segment: params.segment,
+      nowIso: params.nowIso,
+      email: params.email,
+    }),
+  ]);
+}
+
 export async function verifyInviteCodeForAccess(
   bindings: Bindings,
   inviteCode: string | null | undefined,
@@ -619,6 +750,16 @@ export async function verifyInviteCodeForAccess(
 
   if (reserved) {
     const reservedDocument = document ?? (await findInviteCodeDocument(config, codeHash));
+    await recordPendingInviteAccess({
+      config,
+      deviceIdHash,
+      inviteCodeHash: codeHash,
+      segment: reservedDocument?.segment ?? 'unknown',
+      email: normalizedEmail,
+      nowIso,
+      reservationExpiresAtIso,
+    });
+
     return {
       segment: reservedDocument?.segment ?? null,
       gate: 'required',
@@ -631,6 +772,23 @@ export async function verifyInviteCodeForAccess(
     deviceIdHash != null &&
     document.used_by_device_id_hash === deviceIdHash
   ) {
+    if (
+      document.used_by_wallet_address != null &&
+      document.used_by_wallet_address.length > 0 &&
+      normalizedEmail != null &&
+      normalizedEmail.length > 0
+    ) {
+      await bindUsedInviteEmailForDevice({
+        config,
+        walletAddress: document.used_by_wallet_address,
+        deviceIdHash,
+        codeHash,
+        segment: document.segment ?? 'unknown',
+        email: normalizedEmail,
+        nowIso,
+      });
+    }
+
     return {
       segment: document.segment ?? null,
       gate: 'required',
@@ -683,16 +841,49 @@ export async function ensureInviteAccessForBootstrap(
       message: 'Device identifier is required.',
     });
   }
+  const nowIso = new Date().toISOString();
 
-  if (await findExistingWalletInviteAccess(config, params.walletAddress)) {
+  const existingWalletAccess = await findActiveWalletInviteAccess(config, params.walletAddress);
+  if (existingWalletAccess != null) {
+    if (
+      normalizedEmail != null &&
+      normalizedEmail.length > 0 &&
+      existingWalletAccess.inviteCodeHash != null
+    ) {
+      await upsertInviteAccess({
+        config,
+        walletAddress: params.walletAddress,
+        deviceIdHash,
+        inviteCodeHash: existingWalletAccess.inviteCodeHash,
+        segment: existingWalletAccess.segment ?? 'unknown',
+        nowIso,
+        email: normalizedEmail,
+      });
+    }
     return;
   }
 
   const existingEmailAccess =
     normalizedEmail != null && normalizedEmail.length > 0
-      ? await findInviteAccessByEmailAndDevice(config, normalizedEmail, deviceIdHash)
+      ? await findInviteAccessByEmailAndDevice(config, normalizedEmail, deviceIdHash, nowIso)
       : null;
   if (existingEmailAccess?.inviteCodeHash != null) {
+    if (existingEmailAccess.status === 'pending') {
+      const redeemed = await redeemInviteCode({
+        config,
+        walletAddress: params.walletAddress,
+        deviceIdHash,
+        codeHash: existingEmailAccess.inviteCodeHash,
+        nowIso,
+        email: normalizedEmail,
+      });
+
+      if (!redeemed) {
+        const document = await findInviteCodeDocument(config, existingEmailAccess.inviteCodeHash);
+        throwInviteCodeStateError(document, nowIso);
+      }
+    }
+
     await upsertInviteAccess({
       config,
       walletAddress: params.walletAddress,
@@ -707,7 +898,6 @@ export async function ensureInviteAccessForBootstrap(
 
   const parsedInvite = parseRequiredInviteCode(params.inviteCode);
   const codeHash = await hmacSha256Hex(config.pepper, parsedInvite.code);
-  const nowIso = new Date().toISOString();
   const redeemed = await redeemInviteCode({
     config,
     walletAddress: params.walletAddress,
@@ -776,6 +966,104 @@ export function isInviteGateRequired(bindings: Bindings): boolean {
   return getInviteGateConfig(bindings).enabled;
 }
 
+export async function generateInviteCodesForAccess(
+  bindings: Bindings,
+  params: {
+    count: number;
+    segment: string;
+    expiresAtIso: string;
+  },
+): Promise<{
+  codeFormat: string;
+  codeLength: number;
+  expiresAt: string;
+  segment: string;
+  codes: GeneratedInviteCodeResult[];
+}> {
+  const config = getInviteGateConfig(bindings);
+  if (!config.enabled) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Invite gate is disabled.',
+    });
+  }
+
+  if (
+    !Number.isInteger(params.count) ||
+    params.count <= 0 ||
+    params.count > MAX_ADMIN_GENERATE_INVITE_CODES
+  ) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: `Invite code count must be between 1 and ${MAX_ADMIN_GENERATE_INVITE_CODES}.`,
+    });
+  }
+
+  const normalizedSegment = params.segment.trim().toUpperCase();
+  if (!/^[A-Z0-9]{1,8}$/.test(normalizedSegment)) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Invite segment must be 1-8 letters or digits.',
+    });
+  }
+
+  const expiresAt = new Date(params.expiresAtIso);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Invite expiry must be a future timestamp.',
+    });
+  }
+
+  const nowIso = new Date().toISOString();
+  const expiresAtIso = expiresAt.toISOString();
+  const generatedCodes: GeneratedInviteCodeResult[] = [];
+  const seenCodes = new Set<string>();
+  const records: InviteCodeDocument[] = [];
+
+  for (let index = 0; index < params.count; index += 1) {
+    let code = randomInviteCode();
+    while (seenCodes.has(code)) {
+      code = randomInviteCode();
+    }
+    seenCodes.add(code);
+    const codeHash = await hmacSha256Hex(config.pepper, code);
+    generatedCodes.push({ code, codeHash });
+    records.push({
+      code_hash: codeHash,
+      code_format: OFFPAY_INVITE_CODE_FORMAT,
+      code_length: OFFPAY_INVITE_CODE_LENGTH,
+      segment: normalizedSegment,
+      status: 'unused',
+      created_at: nowIso,
+      expires_at: expiresAtIso,
+      reserved_by_email: null,
+      reserved_by_device_id_hash: null,
+      reservation_expires_at: null,
+      used_by_wallet_address: null,
+      used_by_device_id_hash: null,
+      used_by_email: null,
+      locked: false,
+    });
+  }
+
+  await withMongoDatabase(config, async (db) => {
+    await inviteCodesCollection(db).insertMany(records, { ordered: true });
+  });
+
+  return {
+    codeFormat: OFFPAY_INVITE_CODE_FORMAT,
+    codeLength: OFFPAY_INVITE_CODE_LENGTH,
+    expiresAt: expiresAtIso,
+    segment: normalizedSegment,
+    codes: generatedCodes,
+  };
+}
+
 export async function checkInviteEmailForAccess(
   bindings: Bindings,
   email: string,
@@ -800,6 +1088,7 @@ export async function checkInviteEmailForAccess(
     config,
     normalizedEmail,
     deviceIdHash,
+    new Date().toISOString(),
   );
   if (existingAccess != null) {
     return { verified: true, segment: existingAccess.segment };

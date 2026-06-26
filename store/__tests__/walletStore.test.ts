@@ -116,6 +116,9 @@ describe('walletStore hydration lock state', () => {
     await setWalletLocked(true);
     await useWalletStore.getState().hydrate();
     useAppStore.getState().setHasOnboarded(true);
+    useAppStore.getState().setInviteAccessVerified(true);
+    useAppStore.getState().setInviteEmail('tester@example.com');
+    useAppStore.getState().setWalletFlowInviteVerifiedAt(Date.now());
     useAppStore.getState().setUsername('karan');
 
     const queryClient = new QueryClient();
@@ -128,6 +131,9 @@ describe('walletStore hydration lock state', () => {
     expect(useWalletStore.getState().wallets).toHaveLength(0);
     expect(useWalletStore.getState().publicKey).toBeNull();
     expect(useAppStore.getState().hasOnboarded).toBe(false);
+    expect(useAppStore.getState().inviteAccessVerified).toBe(false);
+    expect(useAppStore.getState().inviteEmail).toBeNull();
+    expect(useAppStore.getState().walletFlowInviteVerifiedAt).toBeNull();
     expect(useAppStore.getState().username).toBeNull();
     await expect(getStoredWalletSnapshot()).resolves.toEqual({
       wallets: [],

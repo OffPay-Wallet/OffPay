@@ -103,8 +103,12 @@ export async function resetForgottenWallet(params: ResetForgottenWalletParams): 
 
   params.queryClient.clear();
   resetWalletScopedStores();
-  useAppStore.getState().setUsername(null);
+  const appStore = useAppStore.getState();
+  appStore.setUsername(null);
   deleteAllManagedProfileImages();
-  useAppStore.getState().setProfileImageUri(null);
-  useAppStore.getState().setHasOnboarded(false);
+  appStore.setProfileImageUri(null);
+  appStore.setHasOnboarded(false);
+  appStore.setInviteAccessVerified(false);
+  appStore.setInviteEmail(null);
+  appStore.clearWalletFlowInviteVerification();
 }

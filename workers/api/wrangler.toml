@@ -57,6 +57,8 @@ id = "dc1e56579a7145989f69bc34a8b069d4"
 # npx wrangler secret put MONGODB_URI
 # npx wrangler secret put MONGODB_DATABASE
 # npx wrangler secret put OFFPAY_INVITE_CODE_PEPPER
+# Required only for worker-side invite-code generation:
+# npx wrangler secret put OFFPAY_INVITE_ADMIN_TOKEN
 # Required only when OFFPAY_ANDROID_ATTESTATION_MODE = "play_integrity":
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY

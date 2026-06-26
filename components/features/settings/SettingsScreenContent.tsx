@@ -265,12 +265,12 @@ export function SettingsScreenContent({
     void (async () => {
       try {
         await resetForgottenWallet({ queryClient });
-        // Reset succeeded — close the modal and route to onboarding
-        // as a fresh user. `replace` removes the settings tab from
-        // the back stack so the back gesture can't return to a
+        // Reset succeeded — close the modal and route through the invite
+        // gate as a fresh local install. `replace` removes the settings tab
+        // from the back stack so the back gesture can't return to a
         // half-destroyed app.
         setConfirmVisible(false);
-        router.replace('/onboarding');
+        router.replace('/invite-code');
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Could not reset this device. Try again.';
