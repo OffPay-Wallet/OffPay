@@ -167,6 +167,7 @@ export function useOffpayWalletTokenTransactions(options: {
   requestOwner?: string;
   timeoutMs?: number;
   allowPartialWarmData?: boolean;
+  waitForWalletHistory?: boolean;
 }) {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
   const walletAddress = options.walletAddress ?? activeWalletAddress;
@@ -179,6 +180,7 @@ export function useOffpayWalletTokenTransactions(options: {
   const requestOwner = options.requestOwner ?? 'wallet.tokenTransactions';
   const timeoutMs = options.timeoutMs ?? TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS;
   const allowPartialWarmData = options.allowPartialWarmData ?? false;
+  const waitForWalletHistory = options.waitForWalletHistory ?? true;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
@@ -297,6 +299,7 @@ export function useOffpayWalletTokenTransactions(options: {
       walletAddress == null ||
       network == null ||
       mint == null ||
+      !waitForWalletHistory ||
       !walletHistoryFetching
     ) {
       return undefined;
@@ -309,7 +312,7 @@ export function useOffpayWalletTokenTransactions(options: {
     return () => {
       clearTimeout(timeout);
     };
-  }, [enabledByCaller, mint, network, walletAddress, walletHistoryFetching]);
+  }, [enabledByCaller, mint, network, waitForWalletHistory, walletAddress, walletHistoryFetching]);
 
   const warmInitialData = useMemo<WalletTransactionsInfiniteData | undefined>(() => {
     if (walletAddress == null || network == null || mint == null) return undefined;
@@ -349,7 +352,8 @@ export function useOffpayWalletTokenTransactions(options: {
     walletHistoryBaseQueryKey,
   ]);
 
-  const shouldWaitForWalletHistory = walletHistoryFetching && !walletHistoryWaitExpired;
+  const shouldWaitForWalletHistory =
+    waitForWalletHistory && walletHistoryFetching && !walletHistoryWaitExpired;
   const enabled =
     canRequestTransactions &&
     enabledByCaller &&

@@ -191,11 +191,285 @@ function enhancedSolTransferItem(
   };
 }
 
+function enhancedUnknownSystemTransferItem(
+  signature: string,
+  timestamp: number,
+  lamports: number,
+  direction: 'send' | 'receive' = 'send',
+): Record<string, unknown> {
+  const source = direction === 'send' ? WALLET : RECIPIENT;
+  const destination = direction === 'send' ? RECIPIENT : WALLET;
+  return {
+    signature,
+    timestamp,
+    fee: 5000,
+    type: 'UNKNOWN',
+    nativeTransfers: [
+      {
+        fromUserAccount: source,
+        toUserAccount: destination,
+        amount: lamports,
+      },
+    ],
+    tokenTransfers: [],
+    instructions: [
+      {
+        programId: '11111111111111111111111111111111',
+        parsed: {
+          type: 'transfer',
+          info: {
+            source,
+            destination,
+            lamports,
+          },
+        },
+      },
+    ],
+  };
+}
+
+function enhancedNonceWithdrawalItem(
+  signature: string,
+  timestamp: number,
+  lamports: number,
+): Record<string, unknown> {
+  return {
+    signature,
+    timestamp,
+    fee: 5000,
+    type: 'UNKNOWN',
+    nativeTransfers: [
+      {
+        fromUserAccount: RECIPIENT,
+        toUserAccount: WALLET,
+        amount: lamports,
+      },
+    ],
+    tokenTransfers: [],
+    instructions: [
+      {
+        programId: '11111111111111111111111111111111',
+        parsed: {
+          type: 'withdrawFromNonce',
+          info: {
+            nonceAccount: RECIPIENT,
+            recipient: WALLET,
+            lamports,
+          },
+        },
+      },
+    ],
+  };
+}
+
+function enhancedOpaqueNativeTransferItem(params: {
+  signature: string;
+  timestamp: number;
+  lamports: number;
+  direction: 'send' | 'receive';
+}): Record<string, unknown> {
+  const source = params.direction === 'send' ? WALLET : RECIPIENT;
+  const destination = params.direction === 'send' ? RECIPIENT : WALLET;
+  return {
+    signature: params.signature,
+    timestamp: params.timestamp,
+    fee: 5000,
+    type: 'UNKNOWN',
+    nativeTransfers: [
+      {
+        fromUserAccount: source,
+        toUserAccount: destination,
+        amount: params.lamports,
+      },
+    ],
+    tokenTransfers: [],
+  };
+}
+
+function rpcSystemTransferResult(params: {
+  signature: string;
+  blockTime: number;
+  lamports: number;
+  direction: 'send' | 'receive';
+}): Record<string, unknown> {
+  const source = params.direction === 'send' ? WALLET : RECIPIENT;
+  const destination = params.direction === 'send' ? RECIPIENT : WALLET;
+  return {
+    blockTime: params.blockTime,
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [1_000_000_000, 0],
+      postBalances:
+        params.direction === 'send'
+          ? [1_000_000_000 - params.lamports - 5000, params.lamports]
+          : [1_000_000_000 + params.lamports - 5000, 0],
+      preTokenBalances: [],
+      postTokenBalances: [],
+    },
+    transaction: {
+      signatures: [params.signature],
+      message: {
+        accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+        instructions: [
+          {
+            program: 'system',
+            programId: '11111111111111111111111111111111',
+            parsed: {
+              type: 'transfer',
+              info: {
+                source,
+                destination,
+                lamports: params.lamports,
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+function rpcNonceAccountFundingResult(params: {
+  signature: string;
+  blockTime: number;
+  lamports: number;
+}): Record<string, unknown> {
+  return {
+    blockTime: params.blockTime,
+    meta: {
+      err: null,
+      fee: 10000,
+      preBalances: [1_000_000_000, 0],
+      postBalances: [1_000_000_000 - params.lamports - 10000, params.lamports],
+      preTokenBalances: [],
+      postTokenBalances: [],
+    },
+    transaction: {
+      signatures: [params.signature],
+      message: {
+        accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+        instructions: [
+          {
+            program: 'system',
+            programId: '11111111111111111111111111111111',
+            parsed: {
+              type: 'createAccount',
+              info: {
+                source: WALLET,
+                newAccount: RECIPIENT,
+                lamports: params.lamports,
+                space: 80,
+              },
+            },
+          },
+          {
+            program: 'system',
+            programId: '11111111111111111111111111111111',
+            parsed: {
+              type: 'initializeNonce',
+              info: {
+                nonceAccount: RECIPIENT,
+                nonceAuthority: WALLET,
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+function rpcNonceWithdrawalResult(params: {
+  signature: string;
+  blockTime: number;
+  lamports: number;
+}): Record<string, unknown> {
+  return {
+    blockTime: params.blockTime,
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [1_000_000_000, 0],
+      postBalances: [1_000_000_000 + params.lamports - 5000, 0],
+      preTokenBalances: [],
+      postTokenBalances: [],
+    },
+    transaction: {
+      signatures: [params.signature],
+      message: {
+        accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+        instructions: [
+          {
+            program: 'system',
+            programId: '11111111111111111111111111111111',
+            parsed: {
+              type: 'withdrawFromNonce',
+              info: {
+                nonceAccount: RECIPIENT,
+                nonceAuthority: WALLET,
+                recipient: WALLET,
+                lamports: params.lamports,
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+function enhancedNonceAccountFundingItem(
+  signature: string,
+  timestamp: number,
+  lamports: number,
+): Record<string, unknown> {
+  return {
+    signature,
+    timestamp,
+    fee: 10000,
+    type: 'UNKNOWN',
+    nativeTransfers: [
+      {
+        fromUserAccount: WALLET,
+        toUserAccount: RECIPIENT,
+        amount: lamports,
+      },
+    ],
+    tokenTransfers: [],
+    instructions: [
+      {
+        programId: '11111111111111111111111111111111',
+        parsed: {
+          type: 'createAccount',
+          info: {
+            source: WALLET,
+            newAccount: RECIPIENT,
+            lamports,
+            space: 80,
+          },
+        },
+      },
+      {
+        programId: '11111111111111111111111111111111',
+        parsed: {
+          type: 'initializeNonce',
+          info: {
+            nonceAccount: RECIPIENT,
+            nonceAuthority: WALLET,
+          },
+        },
+      },
+    ],
+  };
+}
+
 function createIndexedPlanGateThenEnhancedRestMock(options: {
   enhancedItems: readonly Record<string, unknown>[];
   onRestUrl?: (url: URL) => void;
   onRpcMethod?: (method: string) => void;
   assets?: unknown[];
+  rpcTransactionsBySignature?: ReadonlyMap<string, unknown>;
 }) {
   return jest.fn(async (input: string, init: RequestInit) => {
     if ((init.method ?? 'GET').toUpperCase() === 'GET') {
@@ -230,6 +504,15 @@ function createIndexedPlanGateThenEnhancedRestMock(options: {
       }
       if (method === 'getAssetBatch') {
         return { jsonrpc: '2.0', id: request.id, result: options.assets ?? [] };
+      }
+      if (method === 'getTransaction') {
+        const params = Array.isArray(request.params) ? request.params : [];
+        const signature = String(params[0] ?? '');
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: options.rpcTransactionsBySignature?.get(signature) ?? null,
+        };
       }
       throw new Error(`Unexpected RPC method: ${method}`);
     };
@@ -1268,6 +1551,356 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(restUrls[0]?.searchParams.get('api-key')).toBe('test-devnet-key');
     expect(restUrls[0]?.searchParams.get('sort-order')).toBe('desc');
     expect(restUrls[0]?.searchParams.get('token-accounts')).toBe('balanceChanged');
+    warnSpy.mockRestore();
+  });
+
+  it('shows enhanced REST UNKNOWN rows when parsed instructions prove a SOL transfer', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const devnetIndexedBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+    } as Bindings;
+    const sendSignature = `${SIGNATURE}unknown-send`;
+    const receiveSignature = `${SIGNATURE}unknown-receive`;
+    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+      enhancedItems: [
+        enhancedUnknownSystemTransferItem(sendSignature, 1781794440, 20_000_000, 'send'),
+        enhancedNonceWithdrawalItem(receiveSignature, 1781794439, 1_447_680),
+      ],
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: SOL_MINT,
+      limit: 4,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(2);
+    expect(response.transactions[0]).toMatchObject({
+      signature: sendSignature,
+      type: 'TRANSFER',
+      tokenMint: SOL_MINT,
+      direction: 'send',
+      rawAmount: '20000000',
+    });
+    expect(response.transactions[1]).toMatchObject({
+      signature: receiveSignature,
+      type: 'TRANSFER',
+      tokenMint: SOL_MINT,
+      direction: 'receive',
+      rawAmount: '1447680',
+    });
+    warnSpy.mockRestore();
+  });
+
+  it('resolves opaque enhanced REST native SOL rows through raw instructions', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const devnetIndexedBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+    } as Bindings;
+    const transferSignature = `${SIGNATURE}opaque-transfer`;
+    const nonceSignature = `${SIGNATURE}opaque-nonce`;
+    const seenMethods: string[] = [];
+    const rpcTransactionsBySignature = new Map<string, unknown>([
+      [
+        transferSignature,
+        rpcSystemTransferResult({
+          signature: transferSignature,
+          blockTime: 1781794440,
+          lamports: 20_000_000,
+          direction: 'send',
+        }),
+      ],
+      [
+        nonceSignature,
+        rpcNonceAccountFundingResult({
+          signature: nonceSignature,
+          blockTime: 1781794439,
+          lamports: 1_447_680,
+        }),
+      ],
+    ]);
+    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+      enhancedItems: [
+        enhancedOpaqueNativeTransferItem({
+          signature: nonceSignature,
+          timestamp: 1781794441,
+          lamports: 1_447_680,
+          direction: 'send',
+        }),
+        enhancedOpaqueNativeTransferItem({
+          signature: transferSignature,
+          timestamp: 1781794440,
+          lamports: 20_000_000,
+          direction: 'send',
+        }),
+      ],
+      onRpcMethod: (method) => seenMethods.push(method),
+      rpcTransactionsBySignature,
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: SOL_MINT,
+      limit: 4,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: transferSignature,
+      type: 'TRANSFER',
+      tokenMint: SOL_MINT,
+      direction: 'send',
+      rawAmount: '20000000',
+    });
+    expect(seenMethods.filter((method) => method === 'getTransaction')).toHaveLength(2);
+    warnSpy.mockRestore();
+  });
+
+  it('supplements underfilled enhanced SOL history with raw nonce withdrawals', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const devnetIndexedBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+    } as Bindings;
+    const transferSignature = `${SIGNATURE}enhanced-transfer`;
+    const withdrawalSignature = `${SIGNATURE}nonce-withdraw`;
+    const seenMethods: string[] = [];
+    const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
+      if ((init.method ?? 'GET').toUpperCase() === 'GET') {
+        return jsonResponse([enhancedSolTransferItem(transferSignature, 1781794440, 20_000_000)]);
+      }
+
+      const requestBody = JSON.parse(init.body as string);
+      const respond = (request: Record<string, unknown>) => {
+        const method = String(request.method);
+        seenMethods.push(method);
+
+        if (method === 'getTransactionsForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            error: { code: -32403, message: 'This feature is only available for paid plans.' },
+          };
+        }
+
+        if (method === 'getSignaturesForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [
+              { signature: withdrawalSignature, blockTime: 1781794441, err: null },
+              { signature: transferSignature, blockTime: 1781794440, err: null },
+            ],
+          };
+        }
+
+        if (method === 'getTransaction') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const signature = String(params[0] ?? '');
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result:
+              signature === withdrawalSignature
+                ? rpcNonceWithdrawalResult({
+                    signature: withdrawalSignature,
+                    blockTime: 1781794441,
+                    lamports: 1_447_680,
+                  })
+                : rpcSystemTransferResult({
+                    signature: transferSignature,
+                    blockTime: 1781794440,
+                    lamports: 20_000_000,
+                    direction: 'send',
+                  }),
+          };
+        }
+
+        if (method === 'getAssetBatch') {
+          return { jsonrpc: '2.0', id: request.id, result: [] };
+        }
+
+        throw new Error(`Unexpected RPC method: ${method}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: SOL_MINT,
+      limit: 4,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(2);
+    expect(response.transactions[0]).toMatchObject({
+      signature: withdrawalSignature,
+      type: 'RECEIVE',
+      direction: 'receive',
+      rawAmount: '1447680',
+    });
+    expect(response.transactions[1]).toMatchObject({
+      signature: transferSignature,
+      type: 'TRANSFER',
+      direction: 'send',
+      rawAmount: '20000000',
+    });
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    warnSpy.mockRestore();
+  });
+
+  it('supplements deep enhanced wallet history with raw native SOL rows', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const devnetIndexedBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+    } as Bindings;
+    const enhancedSignature = `${SIGNATURE}history-enhanced-transfer`;
+    const withdrawalSignature = `${SIGNATURE}history-nonce-withdraw`;
+    const seenMethods: string[] = [];
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      if ((init.method ?? 'GET').toUpperCase() === 'GET') {
+        return jsonResponse([enhancedSolTransferItem(enhancedSignature, 1781794440, 20_000_000)]);
+      }
+
+      const requestBody = JSON.parse(init.body as string);
+      const respond = (request: Record<string, unknown>) => {
+        const method = String(request.method);
+        seenMethods.push(method);
+
+        if (method === 'getTransactionsForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            error: { code: -32403, message: 'This feature is only available for paid plans.' },
+          };
+        }
+
+        if (method === 'getSignaturesForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [
+              { signature: withdrawalSignature, blockTime: 1781794441, err: null },
+              { signature: enhancedSignature, blockTime: 1781794440, err: null },
+            ],
+          };
+        }
+
+        if (method === 'getTransaction') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const signature = String(params[0] ?? '');
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result:
+              signature === withdrawalSignature
+                ? rpcNonceWithdrawalResult({
+                    signature: withdrawalSignature,
+                    blockTime: 1781794441,
+                    lamports: 1_447_680,
+                  })
+                : rpcSystemTransferResult({
+                    signature: enhancedSignature,
+                    blockTime: 1781794440,
+                    lamports: 20_000_000,
+                    direction: 'send',
+                  }),
+          };
+        }
+
+        if (method === 'getAssetBatch') {
+          return { jsonrpc: '2.0', id: request.id, result: [] };
+        }
+
+        throw new Error(`Unexpected RPC method: ${method}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(devnetIndexedBindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 100,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(2);
+    expect(response.transactions[0]).toMatchObject({
+      signature: withdrawalSignature,
+      type: 'RECEIVE',
+      direction: 'receive',
+      tokenMint: SOL_MINT,
+      rawAmount: '1447680',
+    });
+    expect(response.transactions[1]).toMatchObject({
+      signature: enhancedSignature,
+      type: 'TRANSFER',
+      direction: 'send',
+      tokenMint: SOL_MINT,
+      rawAmount: '20000000',
+    });
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    warnSpy.mockRestore();
+  });
+
+  it('does not treat enhanced REST nonce-account rent funding as SOL token activity', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const devnetIndexedBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+    } as Bindings;
+    const nonceSignature = `${SIGNATURE}nonce-rent`;
+    const transferSignature = `${SIGNATURE}real-sol`;
+    const seenMethods: string[] = [];
+    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+      enhancedItems: [
+        enhancedNonceAccountFundingItem(nonceSignature, 1781794440, 1_447_680),
+        enhancedSolTransferItem(transferSignature, 1781794439, 250_000_000),
+      ],
+      onRpcMethod: (method) => seenMethods.push(method),
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: SOL_MINT,
+      limit: 2,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: transferSignature,
+      tokenMint: SOL_MINT,
+      direction: 'send',
+    });
+    expect(
+      response.transactions.some((transaction) => transaction.signature === nonceSignature),
+    ).toBe(false);
     warnSpy.mockRestore();
   });
 

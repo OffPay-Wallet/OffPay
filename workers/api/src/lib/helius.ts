@@ -45,6 +45,8 @@ const STREAM_CAPABILITY_CACHE_TTL_MS = 60_000;
 const TOKEN_METADATA_CACHE_TTL_MS = 60 * 60_000;
 const DEFAULT_TRANSACTION_LIMIT = 25;
 const WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
+const WALLET_NATIVE_SOL_SUPPLEMENT_MIN_LIMIT = 50;
+const WALLET_NATIVE_SOL_SUPPLEMENT_LIMIT = 50;
 const MAX_WALLET_TRANSACTION_SIGNATURE_SCAN = 1_000;
 const MIN_WALLET_TRANSACTION_BATCH_SIZE = 20;
 const TOKEN_TRANSACTION_SIGNATURE_PAGE_SIZE = 100;
@@ -2567,6 +2569,25 @@ function readEnhancedNativeTransferRawAmount(transfer: Record<string, unknown>):
   return readNonNegativeBigInt(transfer.amount) ?? readNonNegativeBigInt(transfer.lamports);
 }
 
+function getEnhancedInstructionRecords(
+  payload: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const instructions = Array.isArray(payload.instructions) ? payload.instructions : [];
+  return instructions.filter(isRecord);
+}
+
+function readEnhancedParsedInstructionType(instruction: Record<string, unknown>): string | null {
+  const parsed = isRecord(instruction.parsed) ? instruction.parsed : null;
+  return parsed ? (readTrimmedString(parsed.type)?.toLowerCase() ?? null) : null;
+}
+
+function enhancedInstructionInfo(
+  instruction: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const parsed = isRecord(instruction.parsed) ? instruction.parsed : null;
+  return parsed && isRecord(parsed.info) ? parsed.info : null;
+}
+
 function buildEnhancedTransactionTokenFields(
   network: Network,
   payload: Record<string, unknown>,
@@ -2640,6 +2661,211 @@ function buildEnhancedTransactionTokenFields(
   );
 }
 
+function isEnhancedNativeAccountSetupDebit(
+  payload: Record<string, unknown>,
+  walletAddress: string,
+  tokenFields: TransactionTokenFields,
+): boolean {
+  if (!isNativeSolMint(tokenFields.tokenMint) || tokenFields.direction !== 'send') {
+    return false;
+  }
+
+  const rawAmount = readNonNegativeBigInt(tokenFields.rawAmount);
+  const instructions = getEnhancedInstructionRecords(payload);
+  let walletFundedNewAccount = false;
+  let initializedNonceAccount = false;
+
+  for (const instruction of instructions) {
+    const type = readEnhancedParsedInstructionType(instruction);
+    const info = enhancedInstructionInfo(instruction);
+    if (type == null || info == null) continue;
+
+    if (type === 'createaccount' || type === 'createaccountwithseed') {
+      const source = readTrimmedString(info.source);
+      const lamports = readNonNegativeBigInt(info.lamports);
+      if (
+        source === walletAddress &&
+        (rawAmount === null || lamports === null || lamports === rawAmount)
+      ) {
+        walletFundedNewAccount = true;
+      }
+    }
+
+    if (type === 'initializenonce') {
+      const nonceAuthority = readTrimmedString(info.nonceAuthority);
+      if (nonceAuthority === walletAddress) {
+        initializedNonceAccount = true;
+      }
+    }
+  }
+
+  return walletFundedNewAccount || initializedNonceAccount;
+}
+
+function classifyEnhancedTransactionType(
+  payload: Record<string, unknown>,
+  walletAddress: string,
+  providerType: string,
+  tokenFields: TransactionTokenFields,
+): string {
+  if (isEnhancedNativeAccountSetupDebit(payload, walletAddress, tokenFields)) {
+    return 'ACCOUNT_SETUP';
+  }
+
+  if (providerType !== 'UNKNOWN') {
+    return providerType;
+  }
+
+  const instructionTypes = getEnhancedInstructionRecords(payload)
+    .map(readEnhancedParsedInstructionType)
+    .filter((type): type is string => type != null);
+
+  if (
+    instructionTypes.some(
+      (type) =>
+        type === 'transfer' ||
+        type === 'transferchecked' ||
+        type === 'withdrawfromnonce' ||
+        type === 'closeaccount',
+    )
+  ) {
+    return 'TRANSFER';
+  }
+
+  if (
+    tokenFields.tokenMint != null &&
+    !isNativeSolMint(tokenFields.tokenMint) &&
+    tokenFields.direction != null
+  ) {
+    return 'TOKEN_TRANSFER';
+  }
+
+  return providerType;
+}
+
+function classifyRpcNativeSolInstructionActivity(
+  result: unknown,
+  walletAddress: string,
+): 'transfer' | 'account_setup' | 'hidden' {
+  if (!isRecord(result)) {
+    return 'hidden';
+  }
+
+  const transaction = isRecord(result.transaction) ? result.transaction : null;
+  const message = transaction && isRecord(transaction.message) ? transaction.message : null;
+  const instructions = message && Array.isArray(message.instructions) ? message.instructions : [];
+  const meta = isRecord(result.meta) ? result.meta : null;
+  const parsedInstructions = collectRpcParsedInstructions(instructions, meta);
+  let walletFundedNewAccount = false;
+  let initializedNonceAccount = false;
+  let walletSystemTransfer = false;
+  let walletNonceWithdrawal = false;
+
+  for (const instruction of parsedInstructions) {
+    if (!isRecord(instruction)) {
+      continue;
+    }
+    const program = readTrimmedString(instruction.program)?.toLowerCase() ?? '';
+    const parsed = isRecord(instruction.parsed) ? instruction.parsed : null;
+    const type = parsed ? (readTrimmedString(parsed.type)?.toLowerCase() ?? '') : '';
+    const info = parsed && isRecord(parsed.info) ? parsed.info : null;
+
+    if (program === 'system' && info != null) {
+      if (type === 'createaccount' || type === 'createaccountwithseed') {
+        if (readTrimmedString(info.source) === walletAddress) {
+          walletFundedNewAccount = true;
+        }
+      }
+
+      if (type === 'initializenonce') {
+        if (readTrimmedString(info.nonceAuthority) === walletAddress) {
+          initializedNonceAccount = true;
+        }
+      }
+
+      if (type === 'transfer') {
+        if (
+          readTrimmedString(info.source) === walletAddress ||
+          readTrimmedString(info.destination) === walletAddress
+        ) {
+          walletSystemTransfer = true;
+        }
+      }
+
+      if (type === 'withdrawfromnonce') {
+        if (
+          readTrimmedString(info.nonceAuthority) === walletAddress ||
+          readTrimmedString(info.recipient) === walletAddress
+        ) {
+          walletNonceWithdrawal = true;
+        }
+      }
+    }
+  }
+
+  if (walletFundedNewAccount || initializedNonceAccount) {
+    return 'account_setup';
+  }
+
+  if (walletSystemTransfer || walletNonceWithdrawal) {
+    return 'transfer';
+  }
+
+  return 'hidden';
+}
+
+async function refineEnhancedNativeSolUnknownRecords(
+  bindings: Bindings,
+  network: Network,
+  walletAddress: string,
+  records: WalletTransactionRecord[],
+): Promise<void> {
+  const candidates = records
+    .map((record, index) => ({ record, index }))
+    .filter(
+      ({ record }) =>
+        record.type === 'UNKNOWN' &&
+        isNativeSolMint(record.tokenMint) &&
+        record.direction != null &&
+        record.signature.trim().length > 0,
+    );
+  if (candidates.length === 0) {
+    return;
+  }
+
+  try {
+    const results = await heliusRpcBatchRequest(
+      bindings,
+      network,
+      candidates.map(({ record }, index) => ({
+        id: `enhanced-native-unknown:${index}`,
+        method: 'getTransaction',
+        params: [
+          record.signature,
+          {
+            commitment: 'confirmed',
+            encoding: 'jsonParsed',
+            maxSupportedTransactionVersion: 0,
+          },
+        ],
+      })),
+    );
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      if (candidate == null) continue;
+      const classification = classifyRpcNativeSolInstructionActivity(results[index], walletAddress);
+      if (classification === 'transfer') {
+        candidate.record.type = 'TRANSFER';
+      } else if (classification === 'account_setup') {
+        candidate.record.type = 'ACCOUNT_SETUP';
+      }
+    }
+  } catch {
+    // Keep unresolved UNKNOWN native-SOL rows hidden by the display filter.
+  }
+}
+
 function findCounterpartyAddress(
   counterparties: readonly WalletTransactionCounterparty[],
   rolePattern: RegExp,
@@ -2668,6 +2894,10 @@ function isDisplayableWalletTransactionRecord(transaction: WalletTransactionReco
     transaction.tokenMint?.trim() && (transaction.amount?.trim() || transaction.rawAmount?.trim()),
   );
   if (!hasTokenAmount) {
+    return false;
+  }
+
+  if (isNativeSolMint(transaction.tokenMint) && normalizedType === 'unknown') {
     return false;
   }
 
@@ -3250,7 +3480,12 @@ function parseEnhancedTransactions(
       walletAddress,
       metadataByMint,
     );
-    const providerType = sanitizeProviderTransactionType(readString(entry.type));
+    const providerType = classifyEnhancedTransactionType(
+      entry,
+      walletAddress,
+      sanitizeProviderTransactionType(readString(entry.type)),
+      tokenFields,
+    );
     const providerDescription =
       buildEnhancedTokenDescription(entry, walletAddress, metadataByMint) ??
       sanitizeText(readString(entry.description), 240);
@@ -3342,6 +3577,7 @@ async function fetchEnhancedRestTransactionsPage(
     extractEnhancedTokenMints(payload),
   );
   const records = parseEnhancedTransactions(payload, network, address, metadataByMint);
+  await refineEnhancedNativeSolUnknownRecords(bindings, network, address, records);
   const lastEntry = rawTransactions.at(-1);
 
   return {
@@ -3443,7 +3679,79 @@ async function fetchWalletTransactionsViaEnhancedRestApi(
     matches: isDisplayableWalletTransactionRecord,
   });
   recordTiming?.('etx_ms', Date.now() - startedAt);
-  return response;
+
+  if (limit < WALLET_NATIVE_SOL_SUPPLEMENT_MIN_LIMIT) {
+    return response;
+  }
+
+  const supplementStartedAt = Date.now();
+  const supplemented = await supplementWalletHistoryWithNativeSolRpc({
+    bindings,
+    address,
+    network,
+    cursor,
+    limit,
+    response,
+    recordTiming,
+  });
+  recordTiming?.('tx_sol_supplement_ms', Date.now() - supplementStartedAt);
+  return supplemented;
+}
+
+async function supplementWalletHistoryWithNativeSolRpc(params: {
+  bindings: Bindings;
+  address: string;
+  network: Network;
+  cursor: string | null;
+  limit: number;
+  response: WalletTransactionsResponse;
+  recordTiming?: TimingRecorder;
+}): Promise<WalletTransactionsResponse> {
+  let supplement: WalletTransactionsResponse;
+  try {
+    supplement = await fetchWalletTokenTransactionsViaRpc(
+      params.bindings,
+      params.address,
+      params.network,
+      SOL_MINT,
+      params.cursor,
+      Math.min(WALLET_NATIVE_SOL_SUPPLEMENT_LIMIT, params.limit),
+      params.recordTiming,
+    );
+  } catch {
+    return params.response;
+  }
+
+  if (supplement.transactions.length === 0) {
+    return params.response;
+  }
+
+  const transactionsBySignature = new Map<string, WalletTransactionRecord>();
+  for (const transaction of [...params.response.transactions, ...supplement.transactions]) {
+    if (!transactionsBySignature.has(transaction.signature)) {
+      transactionsBySignature.set(transaction.signature, transaction);
+    }
+  }
+
+  const mergedTransactions = sortWalletTransactionsMostRecent(
+    Array.from(transactionsBySignature.values()),
+  );
+  const visibleTransactions = mergedTransactions.slice(0, params.limit);
+  const hasMore =
+    mergedTransactions.length > params.limit ||
+    params.response.cursor !== null ||
+    supplement.cursor !== null;
+  const fallbackCursor = params.response.cursor ?? supplement.cursor;
+  const nextCursor = hasMore
+    ? (visibleTransactions.at(-1)?.signature ?? fallbackCursor ?? null)
+    : null;
+
+  return buildWalletTransactionsResponse({
+    address: params.address,
+    network: params.network,
+    transactions: visibleTransactions,
+    cursor: nextCursor,
+  });
 }
 
 interface IndexedTransactionPage {
@@ -3644,7 +3952,10 @@ function inferParsedTransactionType(instructions: readonly unknown[]): string {
     const parsed = isRecord(instruction.parsed) ? instruction.parsed : null;
     const parsedType = parsed ? (readTrimmedString(parsed.type)?.toLowerCase() ?? '') : '';
 
-    if (program === 'system' && parsedType.includes('transfer')) {
+    if (
+      program === 'system' &&
+      (parsedType.includes('transfer') || parsedType === 'withdrawfromnonce')
+    ) {
       return 'TRANSFER';
     }
 
@@ -3767,7 +4078,9 @@ function canUseInstructionForNativeSolBalanceFallback(
 
   const parsed = isRecord(instruction.parsed) ? instruction.parsed : null;
   const parsedType = parsed ? (readTrimmedString(parsed.type)?.toLowerCase() ?? '') : '';
-  return parsedType.length === 0 || parsedType.includes('transfer');
+  return (
+    parsedType.length === 0 || parsedType.includes('transfer') || parsedType === 'withdrawfromnonce'
+  );
 }
 
 function canUseNativeSolBalanceFallback(
@@ -3832,15 +4145,7 @@ function extractWalletNativeSolTransferDeltas(
     const parsedType = parsed ? (readTrimmedString(parsed.type)?.toLowerCase() ?? '') : '';
     const info = parsed && isRecord(parsed.info) ? parsed.info : null;
     const isSystemProgram = program === 'system' || programId === SYSTEM_PROGRAM_ID;
-    if (!isSystemProgram || !parsedType.includes('transfer') || info === null) {
-      continue;
-    }
-
-    const source = readTrimmedString(info.source);
-    const destination = readTrimmedString(info.destination);
-    const walletIsSource = source === walletAddress;
-    const walletIsDestination = destination === walletAddress;
-    if (!walletIsSource && !walletIsDestination) {
+    if (!isSystemProgram || info === null) {
       continue;
     }
 
@@ -3849,11 +4154,22 @@ function extractWalletNativeSolTransferDeltas(
       continue;
     }
 
-    if (walletIsSource) {
-      rawDelta -= lamports;
-    }
-    if (walletIsDestination) {
-      rawDelta += lamports;
+    if (parsedType.includes('transfer')) {
+      const source = readTrimmedString(info.source);
+      const destination = readTrimmedString(info.destination);
+      const walletIsSource = source === walletAddress;
+      const walletIsDestination = destination === walletAddress;
+      if (walletIsSource) {
+        rawDelta -= lamports;
+      }
+      if (walletIsDestination) {
+        rawDelta += lamports;
+      }
+    } else if (parsedType === 'withdrawfromnonce') {
+      const recipient = readTrimmedString(info.recipient);
+      if (recipient === walletAddress) {
+        rawDelta += lamports;
+      }
     }
   }
 
@@ -4766,7 +5082,44 @@ async function fetchWalletTokenTransactionsViaEnhancedRestApi(
       isDisplayableWalletTransactionRecord(transaction),
   });
   recordTiming?.('ettx_ms', Date.now() - startedAt);
-  return response;
+  if (normalizedMint !== SOL_MINT || cursor !== null || response.cursor !== null) {
+    return response;
+  }
+
+  const remainingLimit = limit - response.transactions.length;
+  if (remainingLimit <= 0) {
+    return response;
+  }
+
+  let supplement: WalletTransactionsResponse;
+  try {
+    supplement = await fetchWalletTokenTransactionsViaRpc(
+      bindings,
+      address,
+      network,
+      normalizedMint,
+      null,
+      limit,
+      recordTiming,
+    );
+  } catch {
+    return response;
+  }
+  const transactionsBySignature = new Map<string, WalletTransactionRecord>();
+  for (const transaction of [...response.transactions, ...supplement.transactions]) {
+    if (!transactionsBySignature.has(transaction.signature)) {
+      transactionsBySignature.set(transaction.signature, transaction);
+    }
+  }
+
+  return buildWalletTransactionsResponse({
+    address,
+    network,
+    transactions: sortWalletTransactionsMostRecent(
+      Array.from(transactionsBySignature.values()),
+    ).slice(0, limit),
+    cursor: supplement.cursor,
+  });
 }
 
 async function fetchRpcWalletTokenSignaturePage(
@@ -5026,7 +5379,7 @@ async function getWalletTransactions(
   const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v6-indexed', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v7-sol-supplement', [
     request.address,
     normalizedCursor ?? 'first-page',
     normalizedLimit,
@@ -5095,7 +5448,7 @@ async function getWalletTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v6-indexed',
+          namespace: 'wallet-transactions-v7-sol-supplement',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,

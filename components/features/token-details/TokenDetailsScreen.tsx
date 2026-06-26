@@ -59,7 +59,7 @@ import {
   walletHistoryTransactionMatchesTokenFilter,
 } from '@/lib/api/offpay-wallet-data';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
@@ -84,7 +84,7 @@ import type { OffpayNetwork } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_ACTIVITY_INITIAL_FILL_ROWS = 8;
-const TOKEN_ACTIVITY_PAGE_SIZE = 10;
+const TOKEN_ACTIVITY_PAGE_SIZE = 50;
 const TOKEN_ACTIVITY_FOOTER_SKELETON_ROWS = 3;
 const TOKEN_ACTIVITY_SCROLL_PREFETCH_PX = 280;
 const PRICE_CHART_VIEWBOX_WIDTH = 320;
@@ -885,16 +885,14 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const walletHistoryQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
-    enabled: requestedMint != null,
-    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    enabled: false,
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
-    allowPartialWarmData: true,
-    // Use the warm cache (populated by Home/History) for instant paint and do
-    // NOT fire a competing broad /wallet/transactions network scan here — that
-    // request raced the token-specific backfill for the same wallet RPC work
-    // and could hang to its client timeout. The token-transactions backfill is
-    // the single network path for deep token activity. Cold cache still does
-    // one initial fetch (bounded by the request timeout).
+    allowPartialWarmData: false,
+    // Token Details uses the token-specific endpoint as the first real source
+    // of activity. Broad wallet history is intentionally disabled here so the
+    // screen never paints a few dashboard rows and then shows filler skeletons
+    // while the precise token query catches up.
     refetchOnMount: false,
     retry: false,
     requestOwner: 'tokenDetails.walletHistory',
@@ -928,36 +926,21 @@ export function TokenDetailsScreen(): React.JSX.Element {
       walletHistoryQuery.transactions,
     ],
   );
-  const shouldBackfillTokenTransactions =
-    holding != null &&
-    walletHistoryActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
-    !walletHistoryQuery.isInitialDataPending &&
-    !walletHistoryQuery.isFetching;
+  const shouldLoadTokenTransactions = holding != null;
 
   // First-meaningful-paint (Phase 0): when the token's activity rows first
-  // render. The deep token-transactions backfill tops this off afterward, so
-  // this captures the user-visible paint rather than backfill completion.
+  // render from the token-specific history source.
   const [tokenDetailsMountMark] = useState(() => mark());
   const tokenDetailsFirstPaintLoggedRef = useRef(false);
-  const tokenActivityRowCount = walletHistoryActivity.length;
-  useEffect(() => {
-    if (tokenDetailsFirstPaintLoggedRef.current) return;
-    if (tokenActivityRowCount <= 0) return;
-    tokenDetailsFirstPaintLoggedRef.current = true;
-    measure('tokenDetails.firstPaint', tokenDetailsMountMark, {
-      network,
-      stale: walletHistoryQuery.isStale,
-      count: tokenActivityRowCount,
-    });
-  }, [network, tokenActivityRowCount, tokenDetailsMountMark, walletHistoryQuery.isStale]);
   const tokenTransactionsQuery = useOffpayWalletTokenTransactions({
     mint: holding == null ? null : getTokenActionMint(holding),
-    deferUntilAfterInteractions: true,
+    deferUntilAfterInteractions: false,
     limit: TOKEN_ACTIVITY_PAGE_SIZE,
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
-    allowPartialWarmData: true,
+    allowPartialWarmData: false,
+    waitForWalletHistory: false,
     refetchOnMount: false,
-    enabled: shouldBackfillTokenTransactions,
+    enabled: shouldLoadTokenTransactions,
     requestOwner: 'tokenDetails.transactions.backfill',
   });
   const tokenEndpointActivity = useMemo<OffpayHistoryTransactionView[]>(
@@ -998,13 +981,24 @@ export function TokenDetailsScreen(): React.JSX.Element {
       return left.id.localeCompare(right.id);
     });
   }, [tokenEndpointActivity, walletHistoryActivity]);
+  const tokenActivityRowCount = tokenActivity.length;
+  useEffect(() => {
+    if (tokenDetailsFirstPaintLoggedRef.current) return;
+    if (tokenActivityRowCount <= 0) return;
+    tokenDetailsFirstPaintLoggedRef.current = true;
+    measure('tokenDetails.firstPaint', tokenDetailsMountMark, {
+      network,
+      stale: tokenTransactionsQuery.isStale,
+      count: tokenActivityRowCount,
+    });
+  }, [network, tokenActivityRowCount, tokenDetailsMountMark, tokenTransactionsQuery.isStale]);
   const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsQuery.isFetching;
-  // Bottom shimmer skeleton (no spinner) while a warm list is still filling in
-  // or the next page is being fetched on scroll.
+  // Bottom shimmer only belongs to explicit pagination. Initial token history
+  // now loads as one larger token-specific page instead of rendering a partial
+  // warm list plus filler rows.
   const tokenActivityFooterSkeletonPending =
-    tokenActivity.length > 0 &&
-    (tokenTransactionsQuery.isFetchingNextPage ||
-      (tokenActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS && tokenActivityFetching));
+    tokenActivity.length >= TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
+    tokenTransactionsQuery.isFetchingNextPage;
   const tokenActivityLoading =
     tokenActivity.length === 0 &&
     (walletHistoryQuery.isInitialDataPending ||

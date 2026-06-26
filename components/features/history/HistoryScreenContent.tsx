@@ -24,7 +24,7 @@ import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
@@ -70,10 +70,12 @@ export function HistoryScreenContent(): React.JSX.Element {
     autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
     enabled: isFocused,
-    // Keep first paint shallow. More pages are loaded by scroll/background
-    // top-off instead of blocking the screen on a large enriched page.
-    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
-    allowPartialWarmData: true,
+    // Canonical history should not be capped by the Home/dashboard snapshot.
+    // Ask the wallet API for its largest first page and only reuse warm data
+    // when it already represents the deep page, not the 20-row Home snapshot.
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
+    minWarmTransactionRows: WALLET_DEEP_HISTORY_PAGE_SIZE,
+    allowPartialWarmData: false,
     // Paint persisted cached rows immediately on cold start so the deep
     // (and on cellular, slow) first page loads behind real content
     // instead of a skeleton.

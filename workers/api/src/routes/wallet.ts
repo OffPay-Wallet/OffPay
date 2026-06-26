@@ -186,7 +186,7 @@ walletRoutes.get('/transactions', async (context) => {
   const payload = canUseEdgeCache
     ? await getOrSetEdgeJsonCache({
         context,
-        namespace: 'wallet_transactions_first_page_v5_display_rpc',
+        namespace: 'wallet_transactions_first_page_v6_sol_supplement',
         keyParts: [query.network, query.address, query.limit],
         freshTtlMs: WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS,
         staleTtlMs: WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS,
