@@ -212,14 +212,13 @@ export function useOffpayWalletTransactions(options?: {
     };
   }, [deferUntilAfterInteractions, enabledByCaller, limit, network, walletAddress]);
 
-  // Cold-start paint accelerator. Deep-history screens request a large
-  // first page (`WALLET_DEEP_HISTORY_PAGE_SIZE`) whose enrichment can take
-  // many seconds on a release build over cellular, so without warm data
-  // the screen shows a skeleton the whole time. Pulling the persisted
-  // display cache into the shallow warm key lets `getWarmInitialTransactionsData`
-  // paint cached rows immediately while the deep network page loads in the
-  // background. Mirrors `useOffpayWalletTokenTransactions`. Best-effort:
-  // a miss or read failure just falls back to the network-only path.
+  // Cold-start paint accelerator. Transaction history enrichment can take
+  // several seconds on a release build over cellular, so without warm data the
+  // screen shows a skeleton the whole time. Pulling the persisted display cache
+  // into the query client lets cached rows paint immediately while the first
+  // network page loads in the background. Mirrors
+  // `useOffpayWalletTokenTransactions`. Best-effort: a miss or read failure
+  // just falls back to the network-only path.
   useEffect(() => {
     if (
       !hydrateDisplayCacheOnMount ||

@@ -42,7 +42,247 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-describe('getWalletTransactions RPC fallback', () => {
+// getTransactionsForAddress (transactionDetails: 'full') item for a native SOL
+// transfer from WALLET to RECIPIENT.
+function indexedSolTransferItem(
+  signature: string,
+  blockTime: number,
+  lamports: number,
+): Record<string, unknown> {
+  return {
+    slot: 1000,
+    transactionIndex: 0,
+    blockTime,
+    transaction: {
+      signatures: [signature],
+      message: {
+        accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+        instructions: [
+          {
+            programId: '11111111111111111111111111111111',
+            parsed: {
+              type: 'transfer',
+              info: { source: WALLET, destination: RECIPIENT, lamports },
+            },
+          },
+        ],
+      },
+    },
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [1_000_000_000, 0],
+      postBalances: [1_000_000_000 - lamports - 5000, lamports],
+      preTokenBalances: [],
+      postTokenBalances: [],
+    },
+  };
+}
+
+// Item where WALLET only paid the fee (no transfer touching it). Not displayable.
+function indexedFeeOnlyItem(signature: string, blockTime: number): Record<string, unknown> {
+  return {
+    slot: 1000,
+    transactionIndex: 0,
+    blockTime,
+    transaction: {
+      signatures: [signature],
+      message: {
+        accountKeys: [{ pubkey: WALLET }],
+        instructions: [{ programId: 'ComputeBudget111111111111111111111111111111' }],
+      },
+    },
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [1_000_000_000],
+      postBalances: [999_995_000],
+      preTokenBalances: [],
+      postTokenBalances: [],
+    },
+  };
+}
+
+// Item for a SOL -> SPL swap: a wrapped-SOL debit and an SPL credit, both owned
+// by WALLET. The parser classifies this as a SWAP whose description reads
+// "Swapped <sol> SOL to <amount> <symbol>".
+function indexedSolToTokenSwapItem(params: {
+  signature: string;
+  blockTime: number;
+  solLamports: number;
+  tokenMint: string;
+  tokenRawAmount: string;
+  tokenDecimals: number;
+}): Record<string, unknown> {
+  return {
+    slot: 1000,
+    transactionIndex: 0,
+    blockTime: params.blockTime,
+    transaction: {
+      signatures: [params.signature],
+      message: { accountKeys: [{ pubkey: WALLET }], instructions: [] },
+    },
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [1_000_000_000],
+      postBalances: [999_000_000],
+      preTokenBalances: [
+        {
+          owner: WALLET,
+          accountIndex: 0,
+          mint: SOL_MINT,
+          uiTokenAmount: { amount: String(params.solLamports), decimals: 9 },
+        },
+        {
+          owner: WALLET,
+          accountIndex: 1,
+          mint: params.tokenMint,
+          uiTokenAmount: { amount: '0', decimals: params.tokenDecimals },
+        },
+      ],
+      postTokenBalances: [
+        {
+          owner: WALLET,
+          accountIndex: 0,
+          mint: SOL_MINT,
+          uiTokenAmount: { amount: '0', decimals: 9 },
+        },
+        {
+          owner: WALLET,
+          accountIndex: 1,
+          mint: params.tokenMint,
+          uiTokenAmount: { amount: params.tokenRawAmount, decimals: params.tokenDecimals },
+        },
+      ],
+    },
+  };
+}
+
+function indexedItemTouchesMint(item: Record<string, unknown>, mint: string): boolean {
+  const meta = (item.meta ?? {}) as Record<string, unknown>;
+  for (const key of ['preTokenBalances', 'postTokenBalances'] as const) {
+    const list = meta[key];
+    if (Array.isArray(list) && list.some((entry) => (entry as { mint?: string })?.mint === mint)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function enhancedSolTransferItem(
+  signature: string,
+  timestamp: number,
+  lamports: number,
+): Record<string, unknown> {
+  return {
+    signature,
+    timestamp,
+    fee: 5000,
+    type: 'TRANSFER',
+    nativeTransfers: [
+      {
+        fromUserAccount: WALLET,
+        toUserAccount: RECIPIENT,
+        amount: lamports,
+      },
+    ],
+    tokenTransfers: [],
+  };
+}
+
+function createIndexedPlanGateThenEnhancedRestMock(options: {
+  enhancedItems: readonly Record<string, unknown>[];
+  onRestUrl?: (url: URL) => void;
+  onRpcMethod?: (method: string) => void;
+  assets?: unknown[];
+}) {
+  return jest.fn(async (input: string, init: RequestInit) => {
+    if ((init.method ?? 'GET').toUpperCase() === 'GET') {
+      const url = new URL(input);
+      options.onRestUrl?.(url);
+      const limit = Number(url.searchParams.get('limit') ?? '100');
+      const beforeSignature = url.searchParams.get('before-signature');
+      const startIndex =
+        beforeSignature == null
+          ? 0
+          : options.enhancedItems.findIndex((item) => item.signature === beforeSignature) + 1;
+      const normalizedStartIndex = startIndex > 0 ? startIndex : 0;
+      return jsonResponse(
+        options.enhancedItems.slice(normalizedStartIndex, normalizedStartIndex + limit),
+      );
+    }
+
+    const requestBody = JSON.parse(init.body as string);
+    const respond = (request: Record<string, unknown>) => {
+      const method = String(request.method);
+      options.onRpcMethod?.(method);
+
+      if (method === 'getTransactionsForAddress') {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: {
+            code: -32403,
+            message: 'This feature is only available for paid plans.',
+          },
+        };
+      }
+      if (method === 'getAssetBatch') {
+        return { jsonrpc: '2.0', id: request.id, result: options.assets ?? [] };
+      }
+      throw new Error(`Unexpected RPC method: ${method}`);
+    };
+
+    return jsonResponse(
+      Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+    );
+  });
+}
+
+// Mock that serves Helius getTransactionsForAddress (JSON-RPC POST) from a
+// fixed, newest-first list of full-transaction items. It paginates via an
+// index-based paginationToken and honors the server-side
+// filters.tokenTransfer.mint filter. getAssetBatch metadata resolves to empty
+// unless provided.
+function createGetTransactionsForAddressMock(
+  items: readonly Record<string, unknown>[],
+  options: { onConfig?: (config: Record<string, unknown>) => void; assets?: unknown[] } = {},
+) {
+  return jest.fn(async (_input: string, init: RequestInit) => {
+    const requestBody = JSON.parse(init.body as string);
+    const respond = (request: Record<string, unknown>) => {
+      if (request.method === 'getTransactionsForAddress') {
+        const params = Array.isArray(request.params) ? request.params : [];
+        const config = (params[1] ?? {}) as Record<string, unknown>;
+        options.onConfig?.(config);
+        const filters = (config.filters ?? {}) as Record<string, unknown>;
+        const tokenTransfer = (filters.tokenTransfer ?? null) as { mint?: string } | null;
+        const mintFilter = tokenTransfer?.mint ?? null;
+        const limit = typeof config.limit === 'number' ? config.limit : 100;
+        const token = typeof config.paginationToken === 'string' ? config.paginationToken : null;
+        const matching =
+          mintFilter == null
+            ? items
+            : items.filter((item) => indexedItemTouchesMint(item, mintFilter));
+        const startIndex = token == null ? 0 : Number(token.split(':')[0]);
+        const page = matching.slice(startIndex, startIndex + limit);
+        const nextIndex = startIndex + page.length;
+        const paginationToken = nextIndex < matching.length ? `${nextIndex}:0` : null;
+        return { jsonrpc: '2.0', id: request.id, result: { data: page, paginationToken } };
+      }
+      if (request.method === 'getAssetBatch') {
+        return { jsonrpc: '2.0', id: request.id, result: options.assets ?? [] };
+      }
+      throw new Error(`Unexpected RPC method on indexed path: ${String(request.method)}`);
+    };
+    return jsonResponse(
+      Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+    );
+  });
+}
+
+describe('wallet transaction history (indexed getTransactionsForAddress with RPC fallback)', () => {
   afterEach(() => {
     resetHeliusFetchImplementation();
   });
@@ -627,30 +867,476 @@ describe('getWalletTransactions RPC fallback', () => {
     });
   });
 
-  it('uses raw RPC for mainnet wallet history instead of indexed enhanced history', async () => {
-    const seenMethods: string[] = [];
-    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
-      const requestBody =
-        typeof init.body === 'string'
-          ? JSON.parse(init.body)
-          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
-      const respond = (request: Record<string, unknown>) => {
-        seenMethods.push(String(request.method));
+  it('uses the indexed getTransactionsForAddress method for mainnet wallet history', async () => {
+    const configs: Record<string, unknown>[] = [];
+    const fetchMock = createGetTransactionsForAddressMock(
+      [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+      { onConfig: (config) => configs.push(config) },
+    );
 
-        if (request.method === 'getTokenAccountsByOwner') {
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: SIGNATURE,
+      description: 'Sent 0.25 SOL',
+      amount: '0.25',
+      rawAmount: '250000000',
+      tokenMint: SOL_MINT,
+      tokenSymbol: 'SOL',
+      tokenName: 'Solana',
+      direction: 'send',
+      sender: WALLET,
+      recipient: RECIPIENT,
+    });
+    // Single indexed call with full details, newest-first, ATA-aware, and (for
+    // broad history) without a token-transfer mint filter — no signature scan.
+    expect(configs).toHaveLength(1);
+    expect(configs[0]).toMatchObject({
+      transactionDetails: 'full',
+      sortOrder: 'desc',
+      encoding: 'jsonParsed',
+    });
+    expect((configs[0]?.filters as Record<string, unknown>)?.tokenAccounts).toBe('balanceChanged');
+    expect((configs[0]?.filters as Record<string, unknown>)?.tokenTransfer).toBeUndefined();
+  });
+
+  it('uses the indexed getTransactionsForAddress method for devnet when a Helius API key is configured', async () => {
+    const devnetIndexedBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+    } as Bindings;
+    const configs: Record<string, unknown>[] = [];
+    const fetchMock = createGetTransactionsForAddressMock(
+      [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+      { onConfig: (config) => configs.push(config) },
+    );
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(devnetIndexedBindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: SIGNATURE,
+      tokenMint: SOL_MINT,
+      tokenSymbol: 'SOL',
+      direction: 'send',
+    });
+    // Devnet uses the same indexed method (no raw signature scan).
+    expect(configs).toHaveLength(1);
+    expect(configs[0]).toMatchObject({ transactionDetails: 'full', sortOrder: 'desc' });
+  });
+
+  it('routes the indexed Helius-only method only to Helius when Alchemy fallbacks exist', async () => {
+    const multiProviderBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+      ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test',
+      ALCHEMY_DEVNET_FALLBACK_RPC_URL: 'https://alchemy-fallback.offpay.test',
+    } as Bindings;
+    const calledUrls: string[] = [];
+    const seenIndexedRequestIds: string[] = [];
+    const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
+      calledUrls.push(input);
+      if (input.includes('alchemy')) {
+        throw new Error('getTransactionsForAddress must not be sent to Alchemy');
+      }
+
+      const requestBody = JSON.parse(init.body as string);
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTransactionsForAddress') {
+          seenIndexedRequestIds.push(String(request.id));
           return {
             jsonrpc: '2.0',
             id: request.id,
-            result: { value: [] },
+            result: {
+              data: [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+              paginationToken: null,
+            },
           };
+        }
+        if (request.method === 'getAssetBatch') {
+          return { jsonrpc: '2.0', id: request.id, result: [] };
+        }
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(multiProviderBindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(calledUrls.every((url) => !url.includes('alchemy'))).toBe(true);
+    expect(calledUrls[0]).toContain('api-key=test-devnet-key');
+    expect(seenIndexedRequestIds).toEqual(['getTransactionsForAddress:devnet:helius']);
+  });
+
+  it('pages getTransactionsForAddress for SOL token history until the limit is filled', async () => {
+    // 300 full items newest-first: 3 SOL transfers in page 1 (of 100) and 5 in
+    // page 2; the rest are fee-only noise. Filling a limit of 8 SOL rows
+    // therefore REQUIRES paging. SOL is not a token transfer, so there is no
+    // server-side mint filter and rows are matched locally.
+    const items: Record<string, unknown>[] = [];
+    const baseTime = 1781800000;
+    for (let index = 0; index < 300; index += 1) {
+      const signature = `${SIGNATURE}page${String(index).padStart(3, '0')}`;
+      const isSol = (index < 100 && index % 34 === 0) || (index >= 100 && index % 20 === 0);
+      items.push(
+        isSol
+          ? indexedSolTransferItem(signature, baseTime - index, 100_000_000 + index)
+          : indexedFeeOnlyItem(signature, baseTime - index),
+      );
+    }
+    const configs: Record<string, unknown>[] = [];
+    const fetchMock = createGetTransactionsForAddressMock(items, {
+      onConfig: (config) => configs.push(config),
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      mint: SOL_MINT,
+      limit: 8,
+      useCache: false,
+    });
+
+    expect(response.transactions.length).toBeGreaterThanOrEqual(8);
+    expect(response.transactions.every((transaction) => transaction.tokenMint === SOL_MINT)).toBe(
+      true,
+    );
+    // No server-side token-transfer filter for SOL, and at least two indexed
+    // pages were fetched to fill the limit. Fee-only items are excluded.
+    expect(
+      configs.every((config) => (config.filters as Record<string, unknown>)?.tokenTransfer == null),
+    ).toBe(true);
+    expect(configs.length).toBeGreaterThanOrEqual(2);
+    // More matching rows remain, so a cursor is returned for the client.
+    expect(response.cursor).not.toBeNull();
+  });
+
+  it('filters SPL token history server-side via getTransactionsForAddress tokenTransfer.mint', async () => {
+    const tokenItem = (signature: string, blockTime: number, rawAmount: string) => ({
+      slot: 1000,
+      transactionIndex: 0,
+      blockTime,
+      transaction: {
+        signatures: [signature],
+        message: { accountKeys: [{ pubkey: WALLET }], instructions: [] },
+      },
+      meta: {
+        err: null,
+        fee: 5000,
+        preBalances: [1_000_000_000],
+        postBalances: [999_995_000],
+        preTokenBalances: [
+          {
+            owner: WALLET,
+            accountIndex: 0,
+            mint: OTHER_TOKEN_MINT,
+            uiTokenAmount: { amount: '0', decimals: 6 },
+          },
+        ],
+        postTokenBalances: [
+          {
+            owner: WALLET,
+            accountIndex: 0,
+            mint: OTHER_TOKEN_MINT,
+            uiTokenAmount: { amount: rawAmount, decimals: 6 },
+          },
+        ],
+      },
+    });
+    const items = [
+      tokenItem(`${SIGNATURE}t0`, 1781800000, '1000000'),
+      indexedSolTransferItem(`${SIGNATURE}s0`, 1781799999, 250_000_000),
+      tokenItem(`${SIGNATURE}t1`, 1781799998, '2000000'),
+    ];
+    const configs: Record<string, unknown>[] = [];
+    const fetchMock = createGetTransactionsForAddressMock(items, {
+      onConfig: (config) => configs.push(config),
+      assets: [
+        {
+          id: OTHER_TOKEN_MINT,
+          content: { metadata: { name: 'Bonk', symbol: 'BONK' } },
+          token_info: { symbol: 'BONK', decimals: 6 },
+        },
+      ],
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      mint: OTHER_TOKEN_MINT,
+      limit: 8,
+      useCache: false,
+    });
+
+    // Helius filtered server-side to the two SPL transactions; the SOL noise is
+    // excluded before it ever reaches the client.
+    expect(response.transactions).toHaveLength(2);
+    expect(response.transactions.every((t) => t.tokenMint === OTHER_TOKEN_MINT)).toBe(true);
+    expect((configs[0]?.filters as Record<string, unknown>)?.tokenTransfer).toMatchObject({
+      mint: OTHER_TOKEN_MINT,
+    });
+  });
+
+  it('keeps SOL swaps in broad wallet history (previously dropped by the null-direction gate)', async () => {
+    const fetchMock = createGetTransactionsForAddressMock(
+      [
+        indexedSolToTokenSwapItem({
+          signature: `${SIGNATURE}swap`,
+          blockTime: 1781800000,
+          solLamports: 500_000_000,
+          tokenMint: OTHER_TOKEN_MINT,
+          tokenRawAmount: '75000000',
+          tokenDecimals: 6,
+        }),
+      ],
+      {
+        assets: [
+          {
+            id: OTHER_TOKEN_MINT,
+            content: { metadata: { name: 'USD Coin', symbol: 'USDC' } },
+            token_info: { symbol: 'USDC', decimals: 6 },
+          },
+        ],
+      },
+    );
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    // A two-legged swap has a null direction; it must still be displayable.
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]?.type.toLowerCase()).toContain('swap');
+    expect(response.transactions[0]?.description).toContain('SOL');
+  });
+
+  it('includes SOL swaps in SOL token activity even when the primary token is the swap output', async () => {
+    const fetchMock = createGetTransactionsForAddressMock(
+      [
+        indexedSolToTokenSwapItem({
+          signature: `${SIGNATURE}swap`,
+          blockTime: 1781800000,
+          solLamports: 500_000_000,
+          tokenMint: OTHER_TOKEN_MINT,
+          tokenRawAmount: '75000000',
+          tokenDecimals: 6,
+        }),
+      ],
+      {
+        assets: [
+          {
+            id: OTHER_TOKEN_MINT,
+            content: { metadata: { name: 'USD Coin', symbol: 'USDC' } },
+            token_info: { symbol: 'USDC', decimals: 6 },
+          },
+        ],
+      },
+    );
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      mint: SOL_MINT,
+      limit: 8,
+      useCache: false,
+    });
+
+    // The swap collapses to USDC as its primary token, but it still moved SOL,
+    // so it must appear in the SOL token-details view.
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]?.type.toLowerCase()).toContain('swap');
+  });
+
+  it('falls back to Helius enhanced REST when the paid indexed method is unavailable', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const seenMethods: string[] = [];
+    const restUrls: URL[] = [];
+    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+      enhancedItems: [enhancedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+      onRpcMethod: (method) => seenMethods.push(method),
+      onRestUrl: (url) => restUrls.push(url),
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      limit: 1,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: SIGNATURE,
+      tokenMint: SOL_MINT,
+      direction: 'send',
+    });
+    // The paid indexed method was attempted, then REST served it. No raw
+    // getSignaturesForAddress + getTransaction scan is needed.
+    expect(seenMethods).toContain('getTransactionsForAddress');
+    expect(seenMethods).not.toContain('getSignaturesForAddress');
+    expect(seenMethods).not.toContain('getTransaction');
+    expect(restUrls).toHaveLength(1);
+    expect(restUrls[0]?.origin).toBe('https://mainnet.helius-rpc.com');
+    expect(restUrls[0]?.pathname).toBe(`/v0/addresses/${WALLET}/transactions`);
+    expect(restUrls[0]?.searchParams.get('sort-order')).toBe('desc');
+    expect(restUrls[0]?.searchParams.get('token-accounts')).toBe('balanceChanged');
+    warnSpy.mockRestore();
+  });
+
+  it('uses devnet enhanced REST for SOL token history after the paid indexed gate', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const devnetIndexedBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
+    } as Bindings;
+    const seenMethods: string[] = [];
+    const restUrls: URL[] = [];
+    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+      enhancedItems: [
+        enhancedSolTransferItem(`${SIGNATURE}rest0`, 1781794440, 250_000_000),
+        {
+          signature: `${SIGNATURE}fee-only`,
+          timestamp: 1781794439,
+          fee: 5000,
+          type: 'TRANSFER',
+          nativeTransfers: [],
+          tokenTransfers: [],
+        },
+        enhancedSolTransferItem(`${SIGNATURE}rest1`, 1781794438, 100_000_000),
+      ],
+      onRpcMethod: (method) => seenMethods.push(method),
+      onRestUrl: (url) => restUrls.push(url),
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+      address: WALLET,
+      network: 'devnet',
+      mint: SOL_MINT,
+      limit: 2,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(2);
+    expect(response.transactions.every((transaction) => transaction.tokenMint === SOL_MINT)).toBe(
+      true,
+    );
+    expect(seenMethods).toContain('getTransactionsForAddress');
+    expect(seenMethods).not.toContain('getSignaturesForAddress');
+    expect(restUrls).toHaveLength(1);
+    expect(restUrls[0]?.origin).toBe('https://devnet.helius-rpc.com');
+    expect(restUrls[0]?.searchParams.get('api-key')).toBe('test-devnet-key');
+    expect(restUrls[0]?.searchParams.get('sort-order')).toBe('desc');
+    expect(restUrls[0]?.searchParams.get('token-accounts')).toBe('balanceChanged');
+    warnSpy.mockRestore();
+  });
+
+  it('falls back to the raw RPC scan when both indexed Helius transaction APIs fail', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const seenMethods: string[] = [];
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      if ((init.method ?? 'GET').toUpperCase() === 'GET') {
+        return new Response('enhanced transactions unavailable', { status: 503 });
+      }
+
+      const requestBody = JSON.parse(init.body as string);
+      const respond = (request: Record<string, unknown>) => {
+        seenMethods.push(String(request.method));
+
+        if (request.method === 'getTransactionsForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            error: { code: -32403, message: 'Method not available on plan' },
+          };
+        }
+
+        if (request.method === 'getTokenAccountsByOwner') {
+          return { jsonrpc: '2.0', id: request.id, result: { value: [] } };
         }
 
         if (request.method === 'getSignaturesForAddress') {
           return {
             jsonrpc: '2.0',
             id: request.id,
-            result: [],
+            result: [{ signature: SIGNATURE, blockTime: 1781794440, err: null }],
           };
+        }
+
+        if (request.method === 'getTransaction') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              blockTime: 1781794440,
+              meta: {
+                err: null,
+                fee: 5000,
+                preBalances: [1_000_000_000, 0],
+                postBalances: [749_995_000, 250_000_000],
+                preTokenBalances: [],
+                postTokenBalances: [],
+              },
+              transaction: {
+                message: {
+                  accountKeys: [{ pubkey: WALLET }, { pubkey: RECIPIENT }],
+                  instructions: [
+                    {
+                      programId: '11111111111111111111111111111111',
+                      parsed: {
+                        type: 'transfer',
+                        info: { source: WALLET, destination: RECIPIENT },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          return { jsonrpc: '2.0', id: request.id, result: [] };
         }
 
         throw new Error(`Unexpected RPC method: ${String(request.method)}`);
@@ -663,18 +1349,23 @@ describe('getWalletTransactions RPC fallback', () => {
 
     setHeliusFetchImplementation(fetchMock);
 
-    await getWalletTransactions(bindings, {
+    const response = await getWalletTransactions(bindings, {
       address: WALLET,
       network: 'mainnet',
-      limit: 5,
+      limit: 1,
       useCache: false,
     });
 
-    expect(seenMethods).toEqual([
-      'getTokenAccountsByOwner',
-      'getTokenAccountsByOwner',
-      'getSignaturesForAddress',
-    ]);
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: SIGNATURE,
+      tokenMint: SOL_MINT,
+      direction: 'send',
+    });
+    expect(seenMethods).toContain('getTransactionsForAddress');
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    expect(seenMethods).toContain('getTransaction');
+    warnSpy.mockRestore();
   });
 
   it('deep-scans token-specific RPC history and returns balance-only SOL rows', async () => {

@@ -978,10 +978,26 @@ export function TokenDetailsScreen(): React.JSX.Element {
       tokenTransactionsQuery.transactions,
     ],
   );
-  const tokenActivity =
-    tokenEndpointActivity.length > walletHistoryActivity.length
-      ? tokenEndpointActivity
-      : walletHistoryActivity;
+  const tokenActivity = useMemo<OffpayHistoryTransactionView[]>(() => {
+    // Merge the deep token-endpoint history with the warm wallet-history rows
+    // instead of picking whichever list is longer (which silently dropped valid
+    // rows when both sources differed at the same length). Dedupe by id — the
+    // row id is the signature for on-chain rows and a stable id for local
+    // receipts, and the list below is keyed by id — then sort newest-first.
+    const rowsById = new Map<string, OffpayHistoryTransactionView>();
+    for (const row of tokenEndpointActivity) {
+      if (!rowsById.has(row.id)) rowsById.set(row.id, row);
+    }
+    for (const row of walletHistoryActivity) {
+      if (!rowsById.has(row.id)) rowsById.set(row.id, row);
+    }
+
+    return Array.from(rowsById.values()).sort((left, right) => {
+      const timestampDiff = (right.detailTimestampMs ?? 0) - (left.detailTimestampMs ?? 0);
+      if (timestampDiff !== 0) return timestampDiff;
+      return left.id.localeCompare(right.id);
+    });
+  }, [tokenEndpointActivity, walletHistoryActivity]);
   const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsQuery.isFetching;
   // Bottom shimmer skeleton (no spinner) while a warm list is still filling in
   // or the next page is being fetched on scroll.
@@ -1075,6 +1091,29 @@ export function TokenDetailsScreen(): React.JSX.Element {
       tokenTransactionsQuery.isFetchingNextPage,
     ],
   );
+
+  // Proactively page the token endpoint until the initial fill target is met
+  // (or the cursor is exhausted), rather than waiting for a scroll. The backend
+  // returns a bounded first page plus a cursor, so a wallet with sparse rows for
+  // this mint still fills the visible list without user interaction. Runs again
+  // after each page merges into tokenActivity.
+  useEffect(() => {
+    if (!tokenTransactionsQuery.isCapabilityEnabled) return;
+    if (!tokenTransactionsQuery.hasNextPage) return;
+    if (tokenTransactionsQuery.isFetchingNextPage) return;
+    if (tokenActivity.length >= TOKEN_ACTIVITY_INITIAL_FILL_ROWS) return;
+
+    void tokenTransactionsQuery.fetchNextPage({ requestOwnerSuffix: 'autoFill' });
+    // Depend on the stable inner accessors rather than the wrapper object,
+    // which is a fresh object every render (matches the scroll handler above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tokenActivity.length,
+    tokenTransactionsQuery.fetchNextPage,
+    tokenTransactionsQuery.hasNextPage,
+    tokenTransactionsQuery.isCapabilityEnabled,
+    tokenTransactionsQuery.isFetchingNextPage,
+  ]);
 
   const bottomPadding =
     Math.max(insets.bottom, dense ? spacing.md : spacing.lg) +

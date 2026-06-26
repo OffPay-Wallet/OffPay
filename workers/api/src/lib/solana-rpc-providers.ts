@@ -75,14 +75,65 @@ function readAlchemyFallbackRpcUrl(bindings: Bindings, network: Network): string
     : bindings.ALCHEMY_MAINNET_FALLBACK_RPC_URL;
 }
 
+function readHeliusApiKey(bindings: Bindings, network: Network): string | null {
+  const apiKey =
+    network === 'devnet' ? bindings.HELIUS_DEVNET_API_KEY : bindings.HELIUS_MAINNET_API_KEY;
+  if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+    return null;
+  }
+
+  return apiKey.trim();
+}
+
+function applyHeliusApiKey(url: string, apiKey: string | null): string {
+  if (apiKey == null) {
+    return url;
+  }
+
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has('api-key')) {
+    parsed.searchParams.set('api-key', apiKey);
+  }
+  return parsed.toString();
+}
+
+function deriveHeliusRpcUrlFromApiKey(bindings: Bindings, network: Network): string | null {
+  const apiKey = readHeliusApiKey(bindings, network);
+  if (apiKey == null) {
+    return null;
+  }
+
+  const url = new URL(
+    network === 'devnet' ? 'https://devnet.helius-rpc.com/' : 'https://mainnet.helius-rpc.com/',
+  );
+  url.searchParams.set('api-key', apiKey);
+  return url.toString();
+}
+
+export function getHeliusRpcHttpUrlCandidate(
+  bindings: Bindings,
+  network: Network,
+): RpcProviderEndpoint | null {
+  const configuredUrl = readConfiguredUrl(readNetworkUrl(bindings, network, 'helius', 'http'), [
+    'http:',
+    'https:',
+  ]);
+  const derivedUrl =
+    configuredUrl == null
+      ? deriveHeliusRpcUrlFromApiKey(bindings, network)
+      : applyHeliusApiKey(configuredUrl, readHeliusApiKey(bindings, network));
+  if (derivedUrl == null) {
+    return null;
+  }
+
+  return { provider: 'helius', transport: 'http', url: derivedUrl };
+}
+
 export function getRpcHttpUrlCandidates(
   bindings: Bindings,
   network: Network,
 ): RpcProviderEndpoint[] {
-  const heliusUrl = readConfiguredUrl(readNetworkUrl(bindings, network, 'helius', 'http'), [
-    'http:',
-    'https:',
-  ]);
+  const heliusEndpoint = getHeliusRpcHttpUrlCandidate(bindings, network);
   const alchemyUrl = readConfiguredUrl(readNetworkUrl(bindings, network, 'alchemy', 'http'), [
     'http:',
     'https:',
@@ -93,9 +144,7 @@ export function getRpcHttpUrlCandidates(
   ]);
 
   return uniqueEndpoints([
-    ...(heliusUrl != null
-      ? [{ provider: 'helius' as const, transport: 'http' as const, url: heliusUrl }]
-      : []),
+    ...(heliusEndpoint != null ? [heliusEndpoint] : []),
     ...(alchemyUrl != null
       ? [{ provider: 'alchemy' as const, transport: 'http' as const, url: alchemyUrl }]
       : []),

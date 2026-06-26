@@ -1,13 +1,18 @@
 import { AppError } from './errors.js';
 import { createNetworkCacheKey, memoryCache } from './cache.js';
+import { writeOperationalLog } from './logging.js';
 import { getOrSetSharedJsonCache } from './shared-cache.js';
-import { getRpcHttpUrlCandidates, type RpcProviderEndpoint } from './solana-rpc-providers.js';
+import {
+  getHeliusRpcHttpUrlCandidate,
+  getRpcHttpUrlCandidates,
+  type RpcProviderEndpoint,
+} from './solana-rpc-providers.js';
 import type { Bindings, Network } from './types.js';
 import { isRecord, isValidSolanaAddress } from './validation.js';
 
 const MAINNET_WALLET_API_BASE_URL = 'https://api.helius.xyz';
-const MAINNET_ENHANCED_API_BASE_URL = 'https://api-mainnet.helius-rpc.com';
-const DEVNET_ENHANCED_API_BASE_URL = 'https://devnet.helius-rpc.com';
+const MAINNET_ENHANCED_TRANSACTIONS_API_BASE_URL = 'https://mainnet.helius-rpc.com';
+const DEVNET_ENHANCED_TRANSACTIONS_API_BASE_URL = 'https://devnet.helius-rpc.com';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const HELIUS_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
 const SOL_DECIMALS = 9;
@@ -54,6 +59,17 @@ const MAX_SPL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 200;
 // keeping endpoints < 3s even when most scanned signatures are non-displayable.
 // Tune against the Phase 0 tx_signatures / tx_batch / tx_pages numbers.
 const WALLET_TRANSACTION_SCAN_BUDGET_MS = 2_500;
+// Helius getTransactionsForAddress returns full, newest-first transactions in a
+// single indexed JSON-RPC call (no per-signature getTransaction fan-out) and
+// supports up to 1000 per page. We page backwards with `paginationToken`,
+// collecting displayable (or mint-matching) rows until the requested count is
+// reached or a budget is hit; the response cursor lets the client continue.
+const INDEXED_TRANSACTION_PAGE_SIZE = 100;
+// First-page scan ceiling for token-specific history. Native SOL has no
+// server-side mint filter (it is not a token transfer), so matching rows can be
+// sparse and we allow a few indexed pages; older rows load on demand via the
+// cursor. SPL mints are filtered server-side and fill far sooner.
+const MAX_INDEXED_TOKEN_TRANSACTION_SCAN = 500;
 const DEFAULT_STREAM_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_STREAM_WEBSOCKET_FALLBACK_POLL_INTERVAL_MS = 45_000;
 const DEFAULT_STREAM_ACTIVITY_LIMIT = 10;
@@ -363,7 +379,7 @@ interface TransactionExecutionStatusResponse {
 
 type HeliusFetchImplementation = (input: string, init: RequestInit) => Promise<Response>;
 
-type RpcRequestParams = ReadonlyArray<unknown> | Readonly<Record<string, unknown>>;
+type RpcRequestParams = readonly unknown[] | Readonly<Record<string, unknown>>;
 
 interface RpcBatchRequest {
   id: string;
@@ -576,6 +592,14 @@ function sanitizeTokenLabel(
   return sanitized ?? fallback;
 }
 
+function sanitizeProviderTransactionType(value: string | null | undefined): string {
+  const sanitized = sanitizeText(value, 64)
+    ?.toUpperCase()
+    .replace(/[^A-Z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return sanitized && sanitized.length > 0 ? sanitized : 'UNKNOWN';
+}
+
 function isHttpUrl(value: string | null | undefined): value is string {
   if (!value) {
     return false;
@@ -677,18 +701,6 @@ function formatTokenAmount(rawAmount: bigint, decimals: number): string {
   const fractional = digits.slice(-decimals).replace(/0+$/, '');
   const value = fractional.length > 0 ? `${whole}.${fractional}` : whole;
   return negative ? `-${value}` : value;
-}
-
-function sanitizeTransactionType(value: string | null | undefined): string {
-  if (!value) {
-    return 'UNKNOWN';
-  }
-
-  const normalized = value
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9_]/g, '_');
-  return normalized.length > 0 ? normalized.slice(0, 64) : 'UNKNOWN';
 }
 
 function normalizeCounterpartyRole(value: string): string {
@@ -937,8 +949,19 @@ function getHeliusApiKey(bindings: Bindings, network: Network): string {
     : getRequiredBinding(bindings, 'HELIUS_MAINNET_API_KEY');
 }
 
-function getEnhancedApiBaseUrl(network: Network): string {
-  return network === 'devnet' ? DEVNET_ENHANCED_API_BASE_URL : MAINNET_ENHANCED_API_BASE_URL;
+// Whether the Helius API key needed for the indexed Enhanced Transactions API
+// is configured for this network. When absent (e.g. RPC-only deployments) we
+// skip the indexed path and use the raw RPC signature scan instead.
+function hasHeliusApiKey(bindings: Bindings, network: Network): boolean {
+  const apiKey =
+    network === 'devnet' ? bindings.HELIUS_DEVNET_API_KEY : bindings.HELIUS_MAINNET_API_KEY;
+  return typeof apiKey === 'string' && apiKey.trim().length > 0;
+}
+
+function getEnhancedTransactionsApiBaseUrl(network: Network): string {
+  return network === 'devnet'
+    ? DEVNET_ENHANCED_TRANSACTIONS_API_BASE_URL
+    : MAINNET_ENHANCED_TRANSACTIONS_API_BASE_URL;
 }
 
 function toUpstreamUnavailable(
@@ -960,6 +983,45 @@ function toUpstreamUnavailable(
     ...(retryAfterMs && retryAfterMs > 0 ? { retryAfterMs } : {}),
     ...(cause === undefined ? {} : { cause }),
   });
+}
+
+function describeIndexedFallbackCause(error: unknown): Record<string, unknown> {
+  if (error instanceof AppError) {
+    const cause = (error as Error & { cause?: unknown }).cause;
+    if (isRecord(cause)) {
+      return {
+        status: error.status,
+        code: error.code,
+        httpStatus: readFiniteNumber(cause.httpStatus),
+        statusText: readTrimmedString(cause.statusText),
+        causeCode: readFiniteNumber(cause.code),
+        causeMessage: readTrimmedString(cause.message),
+        upstreamText: readTrimmedString(cause.upstreamText),
+      };
+    }
+    if (cause instanceof Error) {
+      return {
+        status: error.status,
+        code: error.code,
+        causeName: cause.name,
+        causeMessage: cause.message,
+      };
+    }
+
+    return {
+      status: error.status,
+      code: error.code,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      causeName: error.name,
+      causeMessage: error.message,
+    };
+  }
+
+  return { causeType: typeof error };
 }
 
 function isRetryableRpcError(errorValue: Record<string, unknown>): boolean {
@@ -1020,7 +1082,17 @@ async function fetchJson(
     }
 
     if (!response.ok) {
-      throw toUpstreamUnavailable(response, errorMessage);
+      let upstreamText: string | null = null;
+      try {
+        upstreamText = sanitizeText(await response.text(), 240);
+      } catch {
+        upstreamText = null;
+      }
+      throw toUpstreamUnavailable(response, errorMessage, {
+        httpStatus: response.status,
+        statusText: response.statusText,
+        upstreamText,
+      });
     }
 
     try {
@@ -1164,6 +1236,45 @@ async function heliusRpcRequest(
 
     return payload.result;
   });
+}
+
+async function heliusExclusiveRpcRequest(
+  bindings: Bindings,
+  network: Network,
+  method: string,
+  params: RpcRequestParams,
+): Promise<unknown> {
+  const candidate = getHeliusRpcHttpUrlCandidate(bindings, network);
+  if (candidate == null) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+
+  const payload = await fetchJson(
+    candidate.url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: `${method}:${network}:helius`,
+        method,
+        params,
+      }),
+    },
+    'Wallet provider is temporarily unavailable.',
+  );
+
+  if (!isRecord(payload)) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+
+  if ('error' in payload && payload.error !== null && payload.error !== undefined) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.', payload.error);
+  }
+
+  return payload.result;
 }
 
 async function heliusRpcBatchRequest(
@@ -2358,7 +2469,7 @@ function extractEnhancedTokenMints(payload: unknown): string[] {
     }
   }
 
-  return Array.from(mints);
+  return [...mints];
 }
 
 function resolveEnhancedTokenSymbol(
@@ -2548,10 +2659,13 @@ function isDisplayableWalletTransactionRecord(transaction: WalletTransactionReco
     return false;
   }
 
+  // A row is displayable if it carries a concrete token amount AND it is either
+  // a directional transfer (send/receive) or a swap. Swaps legitimately have a
+  // null direction (both a debit and a credit leg), so direction is NOT part of
+  // the amount check — otherwise the trailing swap check below is unreachable
+  // and every swap is dropped.
   const hasTokenAmount = Boolean(
-    transaction.tokenMint?.trim() &&
-    (transaction.amount?.trim() || transaction.rawAmount?.trim()) &&
-    transaction.direction != null,
+    transaction.tokenMint?.trim() && (transaction.amount?.trim() || transaction.rawAmount?.trim()),
   );
   if (!hasTokenAmount) {
     return false;
@@ -3052,7 +3166,10 @@ function buildEnhancedTokenDescription(
     }
 
     const symbol = resolveEnhancedTokenSymbol(transfer, metadataByMint);
-    const formattedAmount = `${formatTokenAmount(decimalStringToScaledInteger(amount, 9), 9)} ${symbol}`;
+    const formattedAmount = `${formatTokenAmount(
+      decimalStringToScaledInteger(amount, 9),
+      9,
+    )} ${symbol}`;
     if (readTrimmedString(transfer.fromUserAccount) === walletAddress) {
       debits.push(formattedAmount);
     }
@@ -3133,7 +3250,7 @@ function parseEnhancedTransactions(
       walletAddress,
       metadataByMint,
     );
-    const providerType = sanitizeTransactionType(readString(entry.type));
+    const providerType = sanitizeProviderTransactionType(readString(entry.type));
     const providerDescription =
       buildEnhancedTokenDescription(entry, walletAddress, metadataByMint) ??
       sanitizeText(readString(entry.description), 240);
@@ -3173,67 +3290,112 @@ function parseEnhancedTransactions(
   return transactions;
 }
 
-async function fetchWalletTransactionsViaEnhancedApi(
+interface EnhancedRestTransactionPage {
+  records: WalletTransactionRecord[];
+  rawCount: number;
+  nextCursor: string | null;
+}
+
+async function fetchEnhancedRestTransactionsPage(
   bindings: Bindings,
   network: Network,
   address: string,
   cursor: string | null,
   limit: number,
-): Promise<WalletTransactionsResponse> {
+): Promise<EnhancedRestTransactionPage> {
   const apiKey = getHeliusApiKey(bindings, network);
-  const filteredTransactions: WalletTransactionRecord[] = [];
-  const maxSignatureScan = Math.max(
-    WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
-    Math.min(MAX_WALLET_TRANSACTION_SIGNATURE_SCAN, limit * 5),
+  const url = new URL(
+    `${getEnhancedTransactionsApiBaseUrl(network)}/v0/addresses/${address}/transactions`,
   );
+  url.searchParams.set('api-key', apiKey);
+  url.searchParams.set('limit', Math.min(100, Math.max(1, limit)).toString());
+  url.searchParams.set('commitment', 'confirmed');
+  url.searchParams.set('sort-order', 'desc');
+  url.searchParams.set('token-accounts', 'balanceChanged');
+  if (cursor) {
+    url.searchParams.set('before-signature', cursor);
+  }
+
+  const payload = await fetchJson(
+    url.toString(),
+    {
+      method: 'GET',
+    },
+    'Wallet provider is temporarily unavailable.',
+  );
+  if (!Array.isArray(payload)) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+
+  const rawTransactions = payload;
+  if (rawTransactions.length === 0) {
+    return {
+      records: [],
+      rawCount: 0,
+      nextCursor: null,
+    };
+  }
+
+  const metadataByMint = await fetchTokenMetadataMap(
+    bindings,
+    network,
+    extractEnhancedTokenMints(payload),
+  );
+  const records = parseEnhancedTransactions(payload, network, address, metadataByMint);
+  const lastEntry = rawTransactions.at(-1);
+
+  return {
+    records,
+    rawCount: rawTransactions.length,
+    nextCursor:
+      rawTransactions.length >= limit && isRecord(lastEntry)
+        ? readTrimmedString(lastEntry.signature)
+        : null,
+  };
+}
+
+async function collectEnhancedRestWalletTransactions(params: {
+  bindings: Bindings;
+  network: Network;
+  address: string;
+  cursor: string | null;
+  limit: number;
+  maxScan: number;
+  matches: (transaction: WalletTransactionRecord) => boolean;
+}): Promise<WalletTransactionsResponse> {
+  const { bindings, network, address, cursor, limit, maxScan, matches } = params;
+  const scanStartedAt = Date.now();
+  const collected: WalletTransactionRecord[] = [];
   let scannedTransactions = 0;
   let scanCursor = cursor;
   let nextCursor: string | null = null;
+  let pages = 0;
 
-  while (filteredTransactions.length < limit && scannedTransactions < maxSignatureScan) {
-    const pageLimit = Math.min(
-      WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
-      maxSignatureScan - scannedTransactions,
-    );
-    const url = new URL(`${getEnhancedApiBaseUrl(network)}/v0/addresses/${address}/transactions`);
-    url.searchParams.set('api-key', apiKey);
-    url.searchParams.set('limit', pageLimit.toString());
-    url.searchParams.set('commitment', 'confirmed');
-    url.searchParams.set('sort-order', 'desc');
-    url.searchParams.set('token-accounts', 'balanceChanged');
-
-    if (scanCursor) {
-      url.searchParams.set('before-signature', scanCursor);
-    }
-
-    const payload = await fetchJson(
-      url.toString(),
-      {
-        method: 'GET',
-      },
-      'Wallet provider is temporarily unavailable.',
-    );
-    const rawTransactions = Array.isArray(payload) ? payload : [];
-    if (rawTransactions.length === 0) {
-      nextCursor = null;
+  while (collected.length < limit && scannedTransactions < maxScan) {
+    if (pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
       break;
     }
 
-    scannedTransactions += rawTransactions.length;
-
-    const tokenMetadata = await fetchTokenMetadataMap(
+    const pageLimit = Math.min(
+      WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
+      maxScan - scannedTransactions,
+    );
+    const page = await fetchEnhancedRestTransactionsPage(
       bindings,
       network,
-      extractEnhancedTokenMints(payload),
+      address,
+      scanCursor,
+      pageLimit,
     );
-    const parsedTransactions = parseEnhancedTransactions(payload, network, address, tokenMetadata);
-    let reachedLimit = false;
+    pages += 1;
+    scannedTransactions += page.rawCount;
 
-    for (const transaction of parsedTransactions) {
-      if (isDisplayableWalletTransactionRecord(transaction)) {
-        filteredTransactions.push(transaction);
+    let reachedLimit = false;
+    for (const transaction of page.records) {
+      if (matches(transaction)) {
+        collected.push(transaction);
       }
-      if (filteredTransactions.length >= limit) {
+      if (collected.length >= limit) {
         nextCursor = transaction.signature;
         reachedLimit = true;
         break;
@@ -3244,12 +3406,8 @@ async function fetchWalletTransactionsViaEnhancedApi(
       break;
     }
 
-    const lastEntry = rawTransactions.at(-1);
-    nextCursor =
-      rawTransactions.length >= pageLimit && isRecord(lastEntry)
-        ? readTrimmedString(lastEntry.signature)
-        : null;
-    if (nextCursor === null) {
+    nextCursor = page.nextCursor;
+    if (page.rawCount === 0 || nextCursor === null) {
       break;
     }
     scanCursor = nextCursor;
@@ -3258,9 +3416,222 @@ async function fetchWalletTransactionsViaEnhancedApi(
   return buildWalletTransactionsResponse({
     address,
     network,
-    transactions: filteredTransactions.slice(0, limit),
+    transactions: collected,
     cursor: nextCursor,
   });
+}
+
+async function fetchWalletTransactionsViaEnhancedRestApi(
+  bindings: Bindings,
+  network: Network,
+  address: string,
+  cursor: string | null,
+  limit: number,
+  recordTiming?: TimingRecorder,
+): Promise<WalletTransactionsResponse> {
+  const startedAt = Date.now();
+  const response = await collectEnhancedRestWalletTransactions({
+    bindings,
+    network,
+    address,
+    cursor,
+    limit,
+    maxScan: Math.max(
+      WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
+      Math.min(MAX_WALLET_TRANSACTION_SIGNATURE_SCAN, limit * 5),
+    ),
+    matches: isDisplayableWalletTransactionRecord,
+  });
+  recordTiming?.('etx_ms', Date.now() - startedAt);
+  return response;
+}
+
+interface IndexedTransactionPage {
+  records: WalletTransactionRecord[];
+  rawCount: number;
+  // Opaque "slot:position" cursor for the next (older) page; null at the end of
+  // history.
+  paginationToken: string | null;
+}
+
+/**
+ * Fetch and parse a single page of Helius `getTransactionsForAddress`
+ * (transactionDetails: 'full'). This is the indexed replacement for
+ * getSignaturesForAddress + batched getTransaction: one JSON-RPC call returns
+ * complete transaction + meta objects already sorted newest-first, including a
+ * wallet's associated-token-account activity via `tokenAccounts:
+ * 'balanceChanged'`, so there is no per-signature fan-out. When
+ * `tokenTransferMint` is set, Helius filters server-side to transactions where
+ * the address participated in a transfer of that SPL mint. Native SOL is not a
+ * token transfer and cannot be filtered this way, so SOL is matched locally.
+ * Results are parsed with the shared raw-transaction parser.
+ */
+async function fetchIndexedTransactionsPage(
+  bindings: Bindings,
+  network: Network,
+  address: string,
+  paginationToken: string | null,
+  limit: number,
+  tokenTransferMint: string | null,
+): Promise<IndexedTransactionPage> {
+  const filters: Record<string, unknown> = { tokenAccounts: 'balanceChanged' };
+  if (tokenTransferMint != null) {
+    filters.tokenTransfer = { mint: tokenTransferMint };
+  }
+
+  const config: Record<string, unknown> = {
+    transactionDetails: 'full',
+    sortOrder: 'desc',
+    limit: Math.min(INDEXED_TRANSACTION_PAGE_SIZE, Math.max(1, limit)),
+    commitment: 'confirmed',
+    encoding: 'jsonParsed',
+    maxSupportedTransactionVersion: 0,
+    filters,
+  };
+  if (paginationToken) {
+    config.paginationToken = paginationToken;
+  }
+
+  const result = await heliusExclusiveRpcRequest(bindings, network, 'getTransactionsForAddress', [
+    address,
+    config,
+  ]);
+  const data = isRecord(result) && Array.isArray(result.data) ? result.data : [];
+  const nextToken = isRecord(result) ? readTrimmedString(result.paginationToken) : null;
+
+  // Resolve token metadata once per page and reuse it per record so the parser
+  // does not issue a getAssetBatch per transaction.
+  const metadataByMint = await fetchTokenMetadataMap(
+    bindings,
+    network,
+    collectBatchTokenMints(data),
+  );
+  const records: WalletTransactionRecord[] = [];
+  for (const item of data) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const transaction = isRecord(item.transaction) ? item.transaction : null;
+    const signatures =
+      transaction && Array.isArray(transaction.signatures) ? transaction.signatures : [];
+    const signature = readTrimmedString(signatures[0]);
+    if (!signature) {
+      continue;
+    }
+    const meta = isRecord(item.meta) ? item.meta : null;
+    const status: 'success' | 'failed' =
+      meta != null && meta.err !== null && meta.err !== undefined ? 'failed' : 'success';
+    const fallbackTimestamp = readFiniteNumber(item.blockTime) ?? 0;
+    records.push(
+      await buildRpcTransactionRecordFromResult(
+        bindings,
+        network,
+        address,
+        [],
+        signature,
+        fallbackTimestamp,
+        status,
+        item,
+        metadataByMint,
+      ),
+    );
+  }
+
+  return {
+    records,
+    rawCount: data.length,
+    paginationToken: nextToken,
+  };
+}
+
+/**
+ * Page-walking loop over `getTransactionsForAddress` shared by broad wallet
+ * history and token-specific history. It pages backwards via `paginationToken`,
+ * keeping records that pass `matches`, until at least `limit` rows are
+ * collected, the scan budget (page count or wall-clock) is exhausted, or the
+ * provider runs out of history. The `paginationToken` cursor is page granular
+ * ("slot:position"), so pages are consumed whole and rows are never sliced off
+ * mid-page (that would silently drop history). The returned cursor lets the
+ * client continue on demand.
+ */
+async function collectIndexedWalletTransactions(params: {
+  bindings: Bindings;
+  network: Network;
+  address: string;
+  cursor: string | null;
+  limit: number;
+  maxScan: number;
+  tokenTransferMint: string | null;
+  matches: (transaction: WalletTransactionRecord) => boolean;
+}): Promise<WalletTransactionsResponse> {
+  const { bindings, network, address, cursor, limit, maxScan, tokenTransferMint, matches } = params;
+  const scanStartedAt = Date.now();
+  const collected: WalletTransactionRecord[] = [];
+  let scannedTransactions = 0;
+  let pageToken = cursor;
+  let nextCursor: string | null = null;
+  let pages = 0;
+
+  while (collected.length < limit && scannedTransactions < maxScan) {
+    if (pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
+      // Budget exhausted; nextCursor (from the previous page) signals more.
+      break;
+    }
+    const pageLimit = Math.min(INDEXED_TRANSACTION_PAGE_SIZE, maxScan - scannedTransactions);
+    const page = await fetchIndexedTransactionsPage(
+      bindings,
+      network,
+      address,
+      pageToken,
+      pageLimit,
+      tokenTransferMint,
+    );
+    pages += 1;
+    scannedTransactions += page.rawCount;
+    for (const transaction of page.records) {
+      if (matches(transaction)) {
+        collected.push(transaction);
+      }
+    }
+    nextCursor = page.paginationToken;
+    if (page.rawCount === 0 || nextCursor === null) {
+      break;
+    }
+    pageToken = nextCursor;
+  }
+
+  return buildWalletTransactionsResponse({
+    address,
+    network,
+    transactions: collected,
+    cursor: nextCursor,
+  });
+}
+
+async function fetchWalletTransactionsViaIndexedApi(
+  bindings: Bindings,
+  network: Network,
+  address: string,
+  cursor: string | null,
+  limit: number,
+  recordTiming?: TimingRecorder,
+): Promise<WalletTransactionsResponse> {
+  const startedAt = Date.now();
+  const response = await collectIndexedWalletTransactions({
+    bindings,
+    network,
+    address,
+    cursor,
+    limit,
+    maxScan: Math.max(
+      INDEXED_TRANSACTION_PAGE_SIZE,
+      Math.min(MAX_WALLET_TRANSACTION_SIGNATURE_SCAN, limit * 5),
+    ),
+    tokenTransferMint: null,
+    matches: isDisplayableWalletTransactionRecord,
+  });
+  recordTiming?.('itx_ms', Date.now() - startedAt);
+  return response;
 }
 
 function inferParsedTransactionType(instructions: readonly unknown[]): string {
@@ -4153,6 +4524,13 @@ async function fetchRpcWalletSignaturePage(
   };
 }
 
+/**
+ * Fallback wallet history via raw RPC (getSignaturesForAddress + batched
+ * getTransaction). Used only when the indexed Enhanced Transactions API is not
+ * configured for the network or is temporarily unavailable. This path is
+ * heavier (per-signature fan-out, bounded scan budget) and exists for
+ * resilience and RPC-only/devnet deployments.
+ */
 async function fetchWalletTransactionsViaRpc(
   bindings: Bindings,
   address: string,
@@ -4307,44 +4685,88 @@ function walletTransactionMatchesMint(
   normalizedMint: string,
 ): boolean {
   if (normalizedMint === SOL_MINT) {
-    return (
+    if (
       isNativeSolMint(transaction.tokenMint) ||
       transaction.tokenSymbol?.trim().toUpperCase() === 'SOL'
+    ) {
+      return true;
+    }
+    // A swap collapses to a single primary token, so a SOL->X swap can surface
+    // with X as its primary mint. Still treat it as SOL activity when the swap
+    // description references a SOL leg (descriptions are generated as
+    // "Swapped <amount> SOL to <amount> X").
+    return (
+      transaction.type.trim().toLowerCase().includes('swap') &&
+      /\bSOL\b/.test(transaction.description ?? '')
     );
   }
 
   return transaction.tokenMint === normalizedMint;
 }
 
-async function fetchWalletTokenTransactionsViaEnhancedApi(
+async function fetchWalletTokenTransactionsViaIndexedApi(
   bindings: Bindings,
+  network: Network,
   address: string,
   mint: string,
   cursor: string | null,
   limit: number,
+  recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
-  const scanLimit = getTokenTransactionScanLimit(limit);
-  const page = await fetchWalletTransactionsViaEnhancedApi(
+  const normalizedMint = normalizeTokenTransactionMint(mint);
+  // SPL mints are filtered server-side via filters.tokenTransfer.mint, which
+  // fills the requested limit in (usually) a single page. Native SOL is not a
+  // token transfer, so it has no server-side filter and is matched locally
+  // while paging.
+  const tokenTransferMint = normalizedMint === SOL_MINT ? null : normalizedMint;
+  // When the server already filtered by mint, only require displayability — re-
+  // checking the collapsed primary token would drop swaps where the queried
+  // mint is the non-primary leg. SOL (no server filter) is matched locally.
+  const matches =
+    tokenTransferMint != null
+      ? isDisplayableWalletTransactionRecord
+      : (transaction: WalletTransactionRecord): boolean =>
+          walletTransactionMatchesMint(transaction, normalizedMint) &&
+          isDisplayableWalletTransactionRecord(transaction);
+  const startedAt = Date.now();
+  const response = await collectIndexedWalletTransactions({
     bindings,
-    'mainnet',
+    network,
     address,
     cursor,
-    scanLimit,
-  );
-  const normalizedMint = normalizeTokenTransactionMint(mint);
-
-  return buildWalletTransactionsResponse({
-    address: page.address,
-    network: page.network,
-    transactions: page.transactions
-      .filter(
-        (transaction) =>
-          walletTransactionMatchesMint(transaction, normalizedMint) &&
-          isDisplayableWalletTransactionRecord(transaction),
-      )
-      .slice(0, limit),
-    cursor: page.cursor,
+    limit,
+    maxScan: MAX_INDEXED_TOKEN_TRANSACTION_SCAN,
+    tokenTransferMint,
+    matches,
   });
+  recordTiming?.('ittx_ms', Date.now() - startedAt);
+  return response;
+}
+
+async function fetchWalletTokenTransactionsViaEnhancedRestApi(
+  bindings: Bindings,
+  network: Network,
+  address: string,
+  mint: string,
+  cursor: string | null,
+  limit: number,
+  recordTiming?: TimingRecorder,
+): Promise<WalletTransactionsResponse> {
+  const normalizedMint = normalizeTokenTransactionMint(mint);
+  const startedAt = Date.now();
+  const response = await collectEnhancedRestWalletTransactions({
+    bindings,
+    network,
+    address,
+    cursor,
+    limit,
+    maxScan: MAX_INDEXED_TOKEN_TRANSACTION_SCAN,
+    matches: (transaction): boolean =>
+      walletTransactionMatchesMint(transaction, normalizedMint) &&
+      isDisplayableWalletTransactionRecord(transaction),
+  });
+  recordTiming?.('ettx_ms', Date.now() - startedAt);
+  return response;
 }
 
 async function fetchRpcWalletTokenSignaturePage(
@@ -4427,6 +4849,12 @@ async function fetchRpcWalletTokenSignaturePage(
   };
 }
 
+/**
+ * Fallback token-specific history via raw RPC. Used only when the indexed
+ * Enhanced Transactions API is unavailable for the network. For native SOL it
+ * scans the wallet address and reconstructs transfers from native-balance
+ * deltas (fees excluded); for SPL it scans the relevant token accounts.
+ */
 async function fetchWalletTokenTransactionsViaRpc(
   bindings: Bindings,
   address: string,
@@ -4598,13 +5026,61 @@ async function getWalletTransactions(
   const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v5-display-rpc', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v6-indexed', [
     request.address,
     normalizedCursor ?? 'first-page',
     normalizedLimit,
   ]);
 
   const resolver = async () => {
+    // Prefer paid indexed getTransactionsForAddress on both networks. If that
+    // plan-gated method is unavailable, use Helius enhanced REST before the raw
+    // RPC signature scan; REST is still indexed and avoids per-signature
+    // getTransaction fan-out.
+    if (hasHeliusApiKey(bindings, request.network)) {
+      try {
+        return await fetchWalletTransactionsViaIndexedApi(
+          bindings,
+          request.network,
+          request.address,
+          normalizedCursor,
+          normalizedLimit,
+          request.recordTiming,
+        );
+      } catch (error) {
+        if (!(error instanceof AppError) || error.status !== 503) {
+          throw error;
+        }
+        request.recordTiming?.('itx_fallback_503', 1);
+        writeOperationalLog('warn', {
+          event: 'wallet_transactions_indexed_fallback',
+          network: request.network,
+          details: describeIndexedFallbackCause(error),
+        });
+      }
+
+      try {
+        return await fetchWalletTransactionsViaEnhancedRestApi(
+          bindings,
+          request.network,
+          request.address,
+          normalizedCursor,
+          normalizedLimit,
+          request.recordTiming,
+        );
+      } catch (error) {
+        if (!(error instanceof AppError) || error.status !== 503) {
+          throw error;
+        }
+        request.recordTiming?.('etx_fallback_503', 1);
+        writeOperationalLog('warn', {
+          event: 'wallet_transactions_enhanced_rest_fallback',
+          network: request.network,
+          details: describeIndexedFallbackCause(error),
+        });
+      }
+    }
+
     return fetchWalletTransactionsViaRpc(
       bindings,
       request.address,
@@ -4619,7 +5095,7 @@ async function getWalletTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v5-display-rpc',
+          namespace: 'wallet-transactions-v6-indexed',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
@@ -4639,13 +5115,70 @@ async function getWalletTokenTransactions(
   const normalizedCursor = request.cursor?.trim() || null;
   const normalizedMint = normalizeTokenTransactionMint(request.mint.trim());
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(
-    request.network,
-    'wallet-token-transactions-v3-display-rpc',
-    [request.address, normalizedMint, normalizedCursor ?? 'first-page', normalizedLimit],
-  );
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-token-transactions-v4-indexed', [
+    request.address,
+    normalizedMint,
+    normalizedCursor ?? 'first-page',
+    normalizedLimit,
+  ]);
 
   const resolver = async () => {
+    // Prefer paid indexed getTransactionsForAddress on both networks: SPL mints
+    // are filtered server-side there, native SOL is matched locally while
+    // paging. If unavailable, use enhanced REST before falling back to the raw
+    // RPC scan.
+    if (hasHeliusApiKey(bindings, request.network)) {
+      try {
+        return await fetchWalletTokenTransactionsViaIndexedApi(
+          bindings,
+          request.network,
+          request.address,
+          normalizedMint,
+          normalizedCursor,
+          normalizedLimit,
+          request.recordTiming,
+        );
+      } catch (error) {
+        if (!(error instanceof AppError) || error.status !== 503) {
+          throw error;
+        }
+        request.recordTiming?.('ittx_fallback_503', 1);
+        writeOperationalLog('warn', {
+          event: 'wallet_token_transactions_indexed_fallback',
+          network: request.network,
+          details: {
+            mint: normalizedMint === SOL_MINT ? 'native-sol' : 'spl',
+            ...describeIndexedFallbackCause(error),
+          },
+        });
+      }
+
+      try {
+        return await fetchWalletTokenTransactionsViaEnhancedRestApi(
+          bindings,
+          request.network,
+          request.address,
+          normalizedMint,
+          normalizedCursor,
+          normalizedLimit,
+          request.recordTiming,
+        );
+      } catch (error) {
+        if (!(error instanceof AppError) || error.status !== 503) {
+          throw error;
+        }
+        request.recordTiming?.('ettx_fallback_503', 1);
+        writeOperationalLog('warn', {
+          event: 'wallet_token_transactions_enhanced_rest_fallback',
+          network: request.network,
+          details: {
+            mint: normalizedMint === SOL_MINT ? 'native-sol' : 'spl',
+            ...describeIndexedFallbackCause(error),
+          },
+        });
+      }
+    }
+
     return fetchWalletTokenTransactionsViaRpc(
       bindings,
       request.address,
@@ -4661,7 +5194,7 @@ async function getWalletTokenTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-token-transactions-v3-display-rpc',
+          namespace: 'wallet-token-transactions-v4-indexed',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
