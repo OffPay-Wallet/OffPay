@@ -37,6 +37,7 @@ const HISTORY_MAX_SKELETON_ROWS = 10;
 const HISTORY_RENDER_AHEAD_MIN_PX = 900;
 const HISTORY_VISIBLE_FILL_TARGET = 8;
 const HISTORY_MAX_WARM_TOP_OFF_ROWS = 4;
+const HISTORY_NEXT_PAGE_SKELETON_ROWS = 3;
 const EMPTY_HISTORY_ROWS: HistoryRow[] = [];
 
 interface HistoryListProps {
@@ -284,7 +285,7 @@ export function HistoryList({
       transactionsQuery.hasNextPage &&
       !transactionsQuery.isFetchingNextPage
     ) {
-      void transactionsQuery.fetchNextPage();
+      void transactionsQuery.fetchNextPage({ requestOwnerSuffix: 'scrollPage' });
     }
     // Depending on the stable inner accessors instead of the wrapper
     // object keeps this callback memoised across renders.
@@ -348,7 +349,13 @@ export function HistoryList({
       );
     }
     if (transactionsQuery.isFetchingNextPage) {
-      return <View style={styles.footerSpacer} />;
+      return (
+        <HistoryTopOffSkeleton
+          compact={compact}
+          contentFrameWidth={contentFrameWidth}
+          rowCount={HISTORY_NEXT_PAGE_SKELETON_ROWS}
+        />
+      );
     }
     if (!transactionsQuery.hasNextPage) return null;
     return (
@@ -357,7 +364,7 @@ export function HistoryList({
           style={({ pressed }) => [styles.loadMoreButton, pressed && styles.loadMoreButtonPressed]}
           onPress={() => {
             if (!transactionsQuery.isCapabilityEnabled) return;
-            void transactionsQuery.fetchNextPage();
+            void transactionsQuery.fetchNextPage({ requestOwnerSuffix: 'buttonPage' });
           }}
           accessibilityRole="button"
           accessibilityLabel="Load more transactions"

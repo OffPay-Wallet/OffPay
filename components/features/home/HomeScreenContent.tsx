@@ -1046,12 +1046,23 @@ export function HomeScreenContent(): React.JSX.Element {
         void Promise.allSettled(cacheRefreshes).finally(finishRefresh);
         return;
       } else {
-        openHomeForegroundFetchGate();
+        const refreshWalletSnapshot = async (): Promise<void> => {
+          const dashboardResult = await homeSnapshot.dashboardQuery.refetch({
+            cancelRefetch: true,
+          });
+          if (signal.aborted || (dashboardResult.data != null && !dashboardResult.isError)) {
+            return;
+          }
+
+          openHomeForegroundFetchGate();
+          await Promise.allSettled([
+            capabilitiesQuery.refetch({ cancelRefetch: true }),
+            balanceQuery.refetch({ cancelRefetch: true }),
+            transactionsQuery.refetchFresh({ signal, useCache: false }),
+          ]);
+        };
         const networkRefreshes: Promise<unknown>[] = [
-          capabilitiesQuery.refetch({ cancelRefetch: true }),
-          homeSnapshot.dashboardQuery.refetch({ cancelRefetch: true }),
-          balanceQuery.refetch({ cancelRefetch: true }),
-          transactionsQuery.refetchFresh({ signal, useCache: false }),
+          refreshWalletSnapshot(),
           pendingBackupStatsQuery.refetch({ cancelRefetch: true }),
           portfolioValuationQuery.refetch({ cancelRefetch: true }),
         ];

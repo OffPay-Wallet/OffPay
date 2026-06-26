@@ -84,9 +84,9 @@ import type { OffpayNetwork } from '@/types/offpay-api';
 
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_ACTIVITY_INITIAL_FILL_ROWS = 8;
-const TOKEN_ACTIVITY_BATCH_ROWS = 8;
+const TOKEN_ACTIVITY_PAGE_SIZE = 10;
+const TOKEN_ACTIVITY_FOOTER_SKELETON_ROWS = 3;
 const TOKEN_ACTIVITY_SCROLL_PREFETCH_PX = 280;
-const MAX_TOKEN_ACTIVITY_ROWS = 32;
 const PRICE_CHART_VIEWBOX_WIDTH = 320;
 const PRICE_CHART_VIEWBOX_HEIGHT = 140;
 const PRICE_CHART_LEFT = 0;
@@ -239,8 +239,7 @@ function buildTokenActivityRows(params: {
     network: params.network,
   })
     .flatMap((group) => group.data)
-    .filter((transaction) => walletHistoryTransactionMatchesTokenFilter(transaction, filter))
-    .slice(0, MAX_TOKEN_ACTIVITY_ROWS);
+    .filter((transaction) => walletHistoryTransactionMatchesTokenFilter(transaction, filter));
 }
 
 function holdingSupportsPrivateSend(holding: TokenHolding, network: OffpayNetwork | null): boolean {
@@ -833,9 +832,6 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const [selectedTimeframe, setSelectedTimeframe] = useState<TokenPriceHistoryTimeframeId>('24H');
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
-  const [visibleTokenActivityLimit, setVisibleTokenActivityLimit] = useState(
-    TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
-  );
   const localReceipts = useMemo<OffpayLocalReceiptViewInput[]>(() => {
     return buildLocalHistoryReceiptInputs({
       network,
@@ -957,7 +953,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const tokenTransactionsQuery = useOffpayWalletTokenTransactions({
     mint: holding == null ? null : getTokenActionMint(holding),
     deferUntilAfterInteractions: true,
-    limit: MAX_TOKEN_ACTIVITY_ROWS,
+    limit: TOKEN_ACTIVITY_PAGE_SIZE,
     minWarmTransactionRows: TOKEN_ACTIVITY_INITIAL_FILL_ROWS,
     allowPartialWarmData: true,
     refetchOnMount: false,
@@ -987,34 +983,17 @@ export function TokenDetailsScreen(): React.JSX.Element {
       ? tokenEndpointActivity
       : walletHistoryActivity;
   const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsQuery.isFetching;
-  const tokenActivityWarmFillPending =
+  // Bottom shimmer skeleton (no spinner) while a warm list is still filling in
+  // or the next page is being fetched on scroll.
+  const tokenActivityFooterSkeletonPending =
     tokenActivity.length > 0 &&
-    tokenActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS &&
-    tokenActivityFetching;
-  const visibleTokenActivity = tokenActivity.slice(0, visibleTokenActivityLimit);
-  const tokenActivityTopOffRowCount = Math.max(
-    1,
-    Math.min(4, TOKEN_ACTIVITY_INITIAL_FILL_ROWS - visibleTokenActivity.length),
-  );
+    (tokenTransactionsQuery.isFetchingNextPage ||
+      (tokenActivity.length < TOKEN_ACTIVITY_INITIAL_FILL_ROWS && tokenActivityFetching));
   const tokenActivityLoading =
     tokenActivity.length === 0 &&
     (walletHistoryQuery.isInitialDataPending ||
       tokenTransactionsQuery.isInitialDataPending ||
       (tokenActivityFetching && walletHistoryQuery.transactions.length === 0));
-
-  useEffect(() => {
-    setVisibleTokenActivityLimit(TOKEN_ACTIVITY_INITIAL_FILL_ROWS);
-  }, [holding?.mint, requestedMint]);
-
-  useEffect(() => {
-    setVisibleTokenActivityLimit((currentLimit) => {
-      const initialLimit = Math.min(
-        Math.max(TOKEN_ACTIVITY_INITIAL_FILL_ROWS, currentLimit),
-        MAX_TOKEN_ACTIVITY_ROWS,
-      );
-      return tokenActivity.length < initialLimit ? tokenActivity.length : initialLimit;
-    });
-  }, [tokenActivity.length]);
 
   const screenHorizontalPadding = viewportProfile.horizontalPadding;
   const actionCompact = dense || width < 360 || fontScale > 1.1;
@@ -1074,17 +1053,27 @@ export function TokenDetailsScreen(): React.JSX.Element {
 
   const handleTokenDetailsScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
-      if (visibleTokenActivityLimit >= tokenActivity.length) return;
-
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
       if (distanceFromBottom > TOKEN_ACTIVITY_SCROLL_PREFETCH_PX) return;
 
-      setVisibleTokenActivityLimit((currentLimit) =>
-        Math.min(tokenActivity.length, currentLimit + TOKEN_ACTIVITY_BATCH_ROWS),
-      );
+      if (
+        tokenTransactionsQuery.isCapabilityEnabled &&
+        tokenTransactionsQuery.hasNextPage &&
+        !tokenTransactionsQuery.isFetchingNextPage
+      ) {
+        void tokenTransactionsQuery.fetchNextPage({ requestOwnerSuffix: 'scrollPage' });
+      }
     },
-    [tokenActivity.length, visibleTokenActivityLimit],
+    // Depend on the stable inner accessors rather than the wrapper object,
+    // which is a fresh object every render (matches the HistoryList pattern).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      tokenTransactionsQuery.fetchNextPage,
+      tokenTransactionsQuery.hasNextPage,
+      tokenTransactionsQuery.isCapabilityEnabled,
+      tokenTransactionsQuery.isFetchingNextPage,
+    ],
   );
 
   const bottomPadding =
@@ -1186,9 +1175,9 @@ export function TokenDetailsScreen(): React.JSX.Element {
               </Text>
               {tokenActivityLoading ? (
                 <TokenActivitySkeletonList compact={compact} />
-              ) : visibleTokenActivity.length > 0 ? (
+              ) : tokenActivity.length > 0 ? (
                 <View style={styles.activityList}>
-                  {visibleTokenActivity.map((transaction) => {
+                  {tokenActivity.map((transaction) => {
                     const activityDate = formatActivityDateTime(transaction.detailTimestampMs);
 
                     return (
@@ -1208,10 +1197,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
                       />
                     );
                   })}
-                  {tokenActivityWarmFillPending ? (
+                  {tokenActivityFooterSkeletonPending ? (
                     <TokenActivitySkeletonList
                       compact={compact}
-                      rowCount={tokenActivityTopOffRowCount}
+                      rowCount={TOKEN_ACTIVITY_FOOTER_SKELETON_ROWS}
                     />
                   ) : null}
                 </View>

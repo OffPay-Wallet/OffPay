@@ -1,5 +1,5 @@
-import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useInfiniteQuery, useIsFetching, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -52,6 +52,39 @@ function getPageTransactionViews(
   return page.transactions
     .map((transaction) => transaction.display)
     .filter((view): view is WalletTransactionView => view != null);
+}
+
+interface TokenTransactionsSelectResult {
+  pages: WalletTransactionsResponse[];
+  transactions: WalletTransactionsResponse['transactions'];
+  transactionViews: WalletTransactionView[];
+  historyGroups: WalletTransactionGroup[];
+}
+
+// Flatten the cursor-paginated pages into a single list (mirrors
+// selectWalletTransactionPages). React Query memoizes the output via structural
+// sharing, so renders that don't add a page skip the work.
+function selectTokenTransactionPages(
+  data: WalletTransactionsInfiniteData,
+): TokenTransactionsSelectResult {
+  const transactions: WalletTransactionsResponse['transactions'] = [];
+  const transactionViews: WalletTransactionView[] = [];
+  const groupsByTitle = new Map<string, WalletTransactionView[]>();
+  for (const page of data.pages) {
+    for (const transaction of page.transactions) transactions.push(transaction);
+    for (const view of getPageTransactionViews(page)) transactionViews.push(view);
+    for (const group of page.historyGroups ?? []) {
+      const grouped = groupsByTitle.get(group.title) ?? [];
+      grouped.push(...group.data);
+      groupsByTitle.set(group.title, grouped);
+    }
+  }
+  return {
+    pages: data.pages,
+    transactions,
+    transactionViews,
+    historyGroups: Array.from(groupsByTitle.entries()).map(([title, data]) => ({ title, data })),
+  };
 }
 
 function isNativeSolMint(value: string | null | undefined): boolean {
@@ -158,6 +191,7 @@ export function useOffpayWalletTokenTransactions(options: {
   const [displayCacheHydrationSettled, setDisplayCacheHydrationSettled] = useState(false);
   const [displayCacheHydrationVersion, setDisplayCacheHydrationVersion] = useState(0);
   const [walletHistoryWaitExpired, setWalletHistoryWaitExpired] = useState(false);
+  const nextPageRequestOwnerSuffixRef = useRef<string | null>(null);
   const capabilitiesQuery = useOffpayCapabilities({
     enabled: enabledByCaller,
     requestOwner: `${requestOwner}.capabilities`,
@@ -277,7 +311,7 @@ export function useOffpayWalletTokenTransactions(options: {
     };
   }, [enabledByCaller, mint, network, walletAddress, walletHistoryFetching]);
 
-  const warmInitialData = useMemo(() => {
+  const warmInitialData = useMemo<WalletTransactionsInfiniteData | undefined>(() => {
     if (walletAddress == null || network == null || mint == null) return undefined;
 
     const walletHistoryQueries = queryClient.getQueriesData<WalletTransactionsInfiniteData>({
@@ -302,7 +336,7 @@ export function useOffpayWalletTokenTransactions(options: {
       }
     }
 
-    return bestPage;
+    return bestPage == null ? undefined : { pages: [bestPage], pageParams: [undefined] };
   }, [
     displayCacheHydrationVersion,
     allowPartialWarmData,
@@ -326,32 +360,43 @@ export function useOffpayWalletTokenTransactions(options: {
   useEffect(() => {
     if (warmInitialData == null) return;
 
-    const existing = queryClient.getQueryData<WalletTransactionsResponse>(transactionsQueryKey);
-    if (existing != null && existing.transactions.length >= warmInitialData.transactions.length) {
+    const existing = queryClient.getQueryData<WalletTransactionsInfiniteData>(transactionsQueryKey);
+    const existingCount =
+      existing?.pages.reduce((sum, page) => sum + page.transactions.length, 0) ?? 0;
+    const warmCount = warmInitialData.pages[0]?.transactions.length ?? 0;
+    if (existing != null && existingCount >= warmCount) {
       return;
     }
 
     queryClient.setQueryData(transactionsQueryKey, warmInitialData, { updatedAt: 0 });
   }, [queryClient, transactionsQueryKey, warmInitialData]);
 
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: transactionsQueryKey,
-    queryFn: ({ signal }) => {
+    queryFn: ({ pageParam, signal }) => {
       if (walletAddress == null || network == null || mint == null) {
         throw new Error('Token transactions require an active wallet, network, and token mint.');
       }
 
+      const pageRequestOwner =
+        pageParam == null
+          ? `${requestOwner}.initial`
+          : `${requestOwner}.${nextPageRequestOwnerSuffixRef.current ?? 'page'}`;
       return getWalletTokenTransactions(walletAddress, network, mint, {
+        cursor: pageParam ?? undefined,
         limit,
         useCache,
         signal,
         timeoutMs,
-        requestOwner,
+        requestOwner: pageRequestOwner,
       });
     },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage: WalletTransactionsResponse) => lastPage.cursor ?? undefined,
     enabled,
     staleTime: TOKEN_TRANSACTION_STALE_TIME_MS,
     gcTime: TOKEN_TRANSACTION_GC_TIME_MS,
+    select: selectTokenTransactionPages,
     initialData: warmInitialData,
     initialDataUpdatedAt: () => (warmInitialData == null ? undefined : 0),
     placeholderData: warmInitialData,
@@ -361,7 +406,25 @@ export function useOffpayWalletTokenTransactions(options: {
   });
 
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
-  const transactionViews = getPageTransactionViews(query.data);
+  const fetchNextPage = useCallback(
+    (
+      options?: Parameters<typeof query.fetchNextPage>[0] & {
+        requestOwnerSuffix?: string;
+      },
+    ) => {
+      const { requestOwnerSuffix = 'page', ...fetchOptions } = options ?? {};
+      nextPageRequestOwnerSuffixRef.current = requestOwnerSuffix;
+      const result = query.fetchNextPage(fetchOptions);
+      void result.finally(() => {
+        if (nextPageRequestOwnerSuffixRef.current === requestOwnerSuffix) {
+          nextPageRequestOwnerSuffixRef.current = null;
+        }
+      });
+      return result;
+    },
+    [query.fetchNextPage],
+  );
+  const transactionViews = query.data?.transactionViews ?? EMPTY_TRANSACTION_VIEWS;
   const historyGroups = query.data?.historyGroups ?? EMPTY_HISTORY_GROUPS;
   const isInitialDataPending =
     enabledByCaller &&
@@ -381,6 +444,7 @@ export function useOffpayWalletTokenTransactions(options: {
 
   return {
     ...query,
+    fetchNextPage,
     walletAddress,
     network,
     capability,

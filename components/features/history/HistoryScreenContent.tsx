@@ -45,9 +45,6 @@ function runAfterTapFrame(task: () => void): void {
 
 const HEADER_CONTAINER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
-const HISTORY_BACKGROUND_PAGE_TARGET = 1;
-const HISTORY_BACKGROUND_PAGE_DELAY_MS = 180;
-const HISTORY_VISIBLE_FILL_TARGET = 8;
 
 export function HistoryScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -94,9 +91,7 @@ export function HistoryScreenContent(): React.JSX.Element {
   const canRefreshHistory = transactionsQuery.isCapabilityEnabled;
   const isHistoryStale = transactionsQuery.isStale;
   const refetchFreshHistoryQuery = transactionsQuery.refetchFresh;
-  const prefetchHistoryPageQuery = transactionsQuery.fetchNextPage;
   const refreshHistoryInFlightRef = useRef(false);
-  const backgroundPrefetchInFlightRef = useRef(false);
   const [selectedTransaction, setSelectedTransaction] =
     useState<OffpayHistoryTransactionView | null>(null);
 
@@ -174,61 +169,6 @@ export function HistoryScreenContent(): React.JSX.Element {
       return undefined;
     }, []),
   );
-
-  const loadedHistoryPages = transactionsQuery.data?.pages.length ?? 0;
-  const loadedHistoryRows = transactionsQuery.transactionViews.length;
-  useEffect(() => {
-    if (!isFocused) return undefined;
-    if (!transactionsQuery.isCapabilityEnabled) return undefined;
-    if (backgroundPrefetchInFlightRef.current) return undefined;
-    const shouldTopOffInitialFill =
-      loadedHistoryRows > 0 && loadedHistoryRows < HISTORY_VISIBLE_FILL_TARGET;
-    if (
-      loadedHistoryPages <= 0 ||
-      (loadedHistoryPages >= HISTORY_BACKGROUND_PAGE_TARGET && !shouldTopOffInitialFill)
-    ) {
-      return undefined;
-    }
-    if (
-      !transactionsQuery.hasNextPage ||
-      transactionsQuery.isFetchingNextPage ||
-      transactionsQuery.isLoading ||
-      transactionsQuery.isRefetching
-    ) {
-      return undefined;
-    }
-
-    const signal = getScreenSignal();
-    backgroundPrefetchInFlightRef.current = true;
-    const timer = setTimeout(() => {
-      if (signal.aborted) {
-        backgroundPrefetchInFlightRef.current = false;
-        return;
-      }
-
-      void prefetchHistoryPageQuery()
-        .catch(() => undefined)
-        .finally(() => {
-          backgroundPrefetchInFlightRef.current = false;
-        });
-    }, HISTORY_BACKGROUND_PAGE_DELAY_MS);
-
-    return () => {
-      clearTimeout(timer);
-      backgroundPrefetchInFlightRef.current = false;
-    };
-  }, [
-    getScreenSignal,
-    isFocused,
-    loadedHistoryPages,
-    loadedHistoryRows,
-    prefetchHistoryPageQuery,
-    transactionsQuery.hasNextPage,
-    transactionsQuery.isCapabilityEnabled,
-    transactionsQuery.isFetchingNextPage,
-    transactionsQuery.isLoading,
-    transactionsQuery.isRefetching,
-  ]);
 
   const handleRefresh = useCallback(() => refreshHistory({ force: true }), [refreshHistory]);
 

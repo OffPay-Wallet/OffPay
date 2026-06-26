@@ -32,6 +32,7 @@ const MAX_CACHED_TOKENS = 24;
 const MAX_CACHED_TRANSACTIONS = 20;
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const cacheWriteLocks = new Map<string, Promise<void>>();
+const cacheHydrationReadLocks = new Map<string, Promise<WalletDisplayCache | null>>();
 
 interface WalletDisplayCache {
   version: 2;
@@ -526,6 +527,23 @@ async function readWalletDisplayCache(params: {
   );
 }
 
+async function readWalletDisplayCacheForHydration(params: {
+  walletAddress: string;
+  network: OffpayNetwork;
+}): Promise<WalletDisplayCache | null> {
+  const key = cacheKey(params.walletAddress, params.network);
+  const activeRead = cacheHydrationReadLocks.get(key);
+  if (activeRead != null) return activeRead;
+
+  const read = readWalletDisplayCache(params).finally(() => {
+    if (cacheHydrationReadLocks.get(key) === read) {
+      cacheHydrationReadLocks.delete(key);
+    }
+  });
+  cacheHydrationReadLocks.set(key, read);
+  return read;
+}
+
 export async function writeWalletDisplayCacheSlice(slice: WalletDisplayCacheSlice): Promise<void> {
   const key = cacheKey(slice.walletAddress, slice.network);
   await withCacheWriteLock(key, async () => {
@@ -725,7 +743,7 @@ export async function hydrateWalletDisplayCacheIntoQueryClient(params: {
   };
 
   const readStartedAt = mark();
-  const cache = await readWalletDisplayCache(params);
+  const cache = await readWalletDisplayCacheForHydration(params);
   measurePhase('read', readStartedAt, {
     network: params.network,
     result: cache == null ? 'miss' : 'hit',

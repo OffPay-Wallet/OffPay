@@ -122,6 +122,57 @@ describe('wallet-display-cache', () => {
     }
   });
 
+  it('hydrates concurrent display-cache readers into the same query client safely', async () => {
+    await writeWalletDisplayCacheSlice({
+      walletAddress: WALLET,
+      network: 'mainnet',
+      balance: makeBalance(2),
+      transactions: makeTransactions(3),
+    });
+
+    const queryClient = new QueryClient();
+    const transactionStatuses: string[] = [];
+    try {
+      await Promise.all([
+        hydrateWalletDisplayCacheIntoQueryClient({
+          queryClient,
+          walletAddress: WALLET,
+          network: 'mainnet',
+          options: {
+            includeBalance: true,
+            includeTransactions: true,
+            onTransactionsHydrated: (status) => transactionStatuses.push(`full:${status}`),
+          },
+        }),
+        hydrateWalletDisplayCacheIntoQueryClient({
+          queryClient,
+          walletAddress: WALLET,
+          network: 'mainnet',
+          options: {
+            includeBalance: false,
+            includeTransactions: true,
+            onTransactionsHydrated: (status) => transactionStatuses.push(`tx:${status}`),
+          },
+        }),
+      ]);
+
+      expect(
+        queryClient.getQueryData<WalletBalanceResponse>(
+          offpayWalletBalanceQueryKey(WALLET, 'mainnet'),
+        ),
+      ).toBeTruthy();
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'mainnet', 20),
+        )?.pages[0]?.transactions,
+      ).toHaveLength(3);
+      expect(transactionStatuses).toContain('full:hit');
+      expect(transactionStatuses).toContain('tx:hit');
+    } finally {
+      queryClient.clear();
+    }
+  });
+
   it('hydrates cached transactions before balance and pending stats', async () => {
     await writeWalletDisplayCacheSlice({
       walletAddress: WALLET,

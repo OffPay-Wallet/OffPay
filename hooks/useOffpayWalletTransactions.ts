@@ -129,6 +129,7 @@ export function useOffpayWalletTransactions(options?: {
   const [freshRefetching, setFreshRefetching] = useState(false);
   const [displayCacheHydrationVersion, setDisplayCacheHydrationVersion] = useState(0);
   const freshRefetchingRef = useRef(false);
+  const nextPageRequestOwnerSuffixRef = useRef<string | null>(null);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
   const dashboardFetching =
@@ -299,13 +300,17 @@ export function useOffpayWalletTransactions(options?: {
         throw new Error('Wallet transactions require an active wallet and supported network.');
       }
 
+      const pageRequestOwner =
+        pageParam == null
+          ? `${requestOwner}.initial`
+          : `${requestOwner}.${nextPageRequestOwnerSuffixRef.current ?? 'page'}`;
       const page = await getWalletTransactions(walletAddress, network, {
         cursor: pageParam,
         limit,
         useCache,
         signal,
         timeoutMs,
-        requestOwner,
+        requestOwner: pageRequestOwner,
       });
 
       if (pageParam != null) return page;
@@ -353,6 +358,24 @@ export function useOffpayWalletTransactions(options?: {
     retry: options?.retry,
   });
   const refetchTransactionsQuery = query.refetch;
+  const fetchNextPage = useCallback(
+    (
+      options?: Parameters<typeof query.fetchNextPage>[0] & {
+        requestOwnerSuffix?: string;
+      },
+    ) => {
+      const { requestOwnerSuffix = 'page', ...fetchOptions } = options ?? {};
+      nextPageRequestOwnerSuffixRef.current = requestOwnerSuffix;
+      const result = query.fetchNextPage(fetchOptions);
+      void result.finally(() => {
+        if (nextPageRequestOwnerSuffixRef.current === requestOwnerSuffix) {
+          nextPageRequestOwnerSuffixRef.current = null;
+        }
+      });
+      return result;
+    },
+    [query.fetchNextPage],
+  );
   const transactions = query.data?.transactions ?? EMPTY_TRANSACTIONS;
   const transactionViews = query.data?.transactionViews ?? EMPTY_TRANSACTION_VIEWS;
   const historyGroups = query.data?.historyGroups ?? EMPTY_HISTORY_GROUPS;
@@ -383,12 +406,12 @@ export function useOffpayWalletTransactions(options?: {
       return;
     }
 
-    void query.fetchNextPage();
+    void fetchNextPage({ requestOwnerSuffix: 'autoPage' });
   }, [
     autoFetchAllPages,
     enabled,
     pages.length,
-    query.fetchNextPage,
+    fetchNextPage,
     query.hasNextPage,
     query.isFetchingNextPage,
     query.isLoading,
@@ -515,6 +538,7 @@ export function useOffpayWalletTransactions(options?: {
     transactionViews,
     historyGroups,
     refetchFresh,
+    fetchNextPage,
     isInitialDataPending,
     isCapabilitiesPending:
       canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardPending),

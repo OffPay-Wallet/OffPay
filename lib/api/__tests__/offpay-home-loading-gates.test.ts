@@ -12,6 +12,7 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        dashboardFetching: false,
         hasUsableTransactions: false,
         displayCacheStatus: 'pending',
         fallbackDeadlineStatus: 'elapsed',
@@ -27,6 +28,7 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        dashboardFetching: false,
         hasUsableTransactions: true,
         displayCacheStatus: 'pending',
         fallbackDeadlineStatus: 'elapsed',
@@ -42,6 +44,7 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        dashboardFetching: false,
         hasUsableTransactions: true,
         displayCacheStatus: 'hit',
         fallbackDeadlineStatus: 'elapsed',
@@ -57,6 +60,7 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        dashboardFetching: false,
         hasUsableTransactions: false,
         displayCacheStatus: 'hit',
         fallbackDeadlineStatus: 'elapsed',
@@ -72,9 +76,26 @@ describe('OffPay home loading gates', () => {
         isNetworkAccessSuspended: false,
         fallbackGateOpen: false,
         hasDashboardData: false,
+        dashboardFetching: false,
         hasUsableTransactions: false,
         displayCacheStatus: 'miss',
         fallbackDeadlineStatus: 'pending',
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps the snapshot fallback closed while the dashboard request is still in flight', () => {
+    expect(
+      shouldOpenHomeSnapshotFallbackGate({
+        canCoordinate: true,
+        canUseNetwork: true,
+        isNetworkAccessSuspended: false,
+        fallbackGateOpen: false,
+        hasDashboardData: false,
+        dashboardFetching: true,
+        hasUsableTransactions: false,
+        displayCacheStatus: 'miss',
+        fallbackDeadlineStatus: 'elapsed',
       }),
     ).toBe(false);
   });

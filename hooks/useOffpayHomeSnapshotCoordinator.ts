@@ -29,6 +29,7 @@ import type { OffpayNetwork, WalletDashboardResponse } from '@/types/offpay-api'
 const HOME_SNAPSHOT_FALLBACK_DELAY_MS = 450;
 const HOME_SNAPSHOT_IDLE_DELAY_MS = 900;
 const HOME_SNAPSHOT_GC_TIME_MS = 1000 * 60 * 30;
+const HOME_FIRST_PAINT_FRESH_MAX_SESSION_MS = 30_000;
 
 interface UseOffpayHomeSnapshotCoordinatorParams {
   walletAddress: string | null;
@@ -52,6 +53,7 @@ export function useOffpayHomeSnapshotCoordinator({
   const [idleGateOpen, setIdleGateOpen] = useState(false);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startupMeasureRef = useRef<number | null>(null);
+  const startupWallClockRef = useRef<number | null>(null);
   const fallbackFetchMarkKeyRef = useRef<string | null>(null);
   const cachedPaintLoggedRef = useRef(false);
   const freshPaintLoggedRef = useRef(false);
@@ -99,6 +101,7 @@ export function useOffpayHomeSnapshotCoordinator({
 
     if (!enabled || walletAddress == null || network == null) {
       startupMeasureRef.current = null;
+      startupWallClockRef.current = null;
       return undefined;
     }
 
@@ -107,6 +110,7 @@ export function useOffpayHomeSnapshotCoordinator({
     let cancelled = false;
     const startedAt = mark();
     startupMeasureRef.current = startedAt;
+    startupWallClockRef.current = Date.now();
 
     void hydrateWalletDisplayCacheIntoQueryClient({
       queryClient,
@@ -228,6 +232,7 @@ export function useOffpayHomeSnapshotCoordinator({
         isNetworkAccessSuspended,
         fallbackGateOpen,
         hasDashboardData: dashboardQuery.data != null,
+        dashboardFetching: dashboardQuery.isFetching,
         hasUsableTransactions: transactionsCacheStatus === 'hit' || dashboardQuery.data != null,
         displayCacheStatus,
         fallbackDeadlineStatus,
@@ -241,6 +246,7 @@ export function useOffpayHomeSnapshotCoordinator({
     canCoordinate,
     canUseNetwork,
     dashboardQuery.data,
+    dashboardQuery.isFetching,
     displayCacheStatus,
     fallbackDeadlineStatus,
     fallbackGateOpen,
@@ -319,11 +325,23 @@ export function useOffpayHomeSnapshotCoordinator({
 
   useEffect(() => {
     if (freshPaintLoggedRef.current) return;
-    if (startupMeasureRef.current == null) return;
+    const startedAt = startupMeasureRef.current;
+    const startedWallClock = startupWallClockRef.current;
+    if (startedAt == null || startedWallClock == null) return;
     if (dashboardQuery.data == null) return;
+    if (dashboardQuery.dataUpdatedAt < startedWallClock) return;
     freshPaintLoggedRef.current = true;
-    measure('home.firstPaint.fresh', startupMeasureRef.current, { network });
-  }, [dashboardQuery.data, network]);
+    const elapsedMs = mark() - startedAt;
+    if (elapsedMs > HOME_FIRST_PAINT_FRESH_MAX_SESSION_MS) {
+      measure('home.firstPaint.fresh.discarded', mark(), {
+        network,
+        elapsedMs: Math.round(elapsedMs),
+        reason: 'session_elapsed',
+      });
+      return;
+    }
+    measure('home.firstPaint.fresh', startedAt, { network });
+  }, [dashboardQuery.data, dashboardQuery.dataUpdatedAt, network]);
 
   return {
     dashboardQuery,

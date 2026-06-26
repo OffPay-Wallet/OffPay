@@ -7,6 +7,7 @@ export function shouldOpenHomeSnapshotFallbackGate({
   isNetworkAccessSuspended,
   fallbackGateOpen,
   hasDashboardData,
+  dashboardFetching,
   hasUsableTransactions,
   fallbackDeadlineStatus,
 }: {
@@ -15,12 +16,14 @@ export function shouldOpenHomeSnapshotFallbackGate({
   isNetworkAccessSuspended: boolean;
   fallbackGateOpen: boolean;
   hasDashboardData: boolean;
+  dashboardFetching: boolean;
   hasUsableTransactions: boolean;
   displayCacheStatus: HomeDisplayCacheStatus;
   fallbackDeadlineStatus: HomeFallbackDeadlineStatus;
 }): boolean {
   if (!canCoordinate || !canUseNetwork || isNetworkAccessSuspended) return false;
-  if (fallbackGateOpen || hasDashboardData || hasUsableTransactions) return false;
+  if (fallbackGateOpen || hasDashboardData || dashboardFetching || hasUsableTransactions)
+    return false;
   if (fallbackDeadlineStatus !== 'elapsed') return false;
   return true;
 }
