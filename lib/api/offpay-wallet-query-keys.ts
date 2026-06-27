@@ -1,6 +1,9 @@
 import type { OffpayNetwork } from '@/types/offpay-api';
 
 export const WALLET_TRANSACTIONS_PAGE_SIZE = 20;
+export const WALLET_DEEP_HISTORY_PAGE_SIZE = 100;
+
+export type WalletTransactionsCacheMode = 'cached' | 'network' | 'server-cache';
 
 export const offpayWalletDashboardBaseQueryKey = (
   walletAddress: string | null,
@@ -32,7 +35,7 @@ export const offpayWalletTransactionsQueryKey = (
   walletAddress: string | null,
   network: OffpayNetwork | null,
   limit: number,
-  cacheMode: 'cached' | 'network' = 'cached',
+  cacheMode: WalletTransactionsCacheMode = 'cached',
 ) =>
   [...offpayWalletTransactionsBaseQueryKey(walletAddress, network), { limit, cacheMode }] as const;
 

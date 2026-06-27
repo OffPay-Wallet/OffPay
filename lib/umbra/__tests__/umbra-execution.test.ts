@@ -22,6 +22,7 @@ const mockCreateEncryptedReceiverUtxo = jest.fn();
 const mockLegacyCreateEncryptedReceiverUtxo = jest.fn();
 const mockAssertUmbraVaultFeeAccountsReady = jest.fn();
 const mockMarkUmbraProtocolVersionUnsupported = jest.fn();
+const mockGetRpcFeeForMessage = jest.fn();
 const mockGetRpcSignatureStatuses = jest.fn();
 const mockGetUmbraUtxos = jest.fn();
 const mockQueryUser = jest.fn();
@@ -257,6 +258,7 @@ jest.mock('@/lib/umbra/umbra-offpay-providers', () => ({
 
 jest.mock('@/lib/api/offpay-api-client', () => ({
   __esModule: true,
+  getRpcFeeForMessage: mockGetRpcFeeForMessage,
   getRpcSignatureStatuses: mockGetRpcSignatureStatuses,
   getUmbraTreeProofs: mockGetUmbraTreeProofs,
   getUmbraTreeSummaries: mockGetUmbraTreeSummaries,
@@ -269,6 +271,7 @@ const {
   fetchUmbraEncryptedBalances,
   __resetUmbraClaimScanCacheForTests,
   claimUmbraPrivateP2PToEncryptedBalance,
+  estimateUmbraPrivateP2PFromPublicBalanceFee,
   repairUmbraVaultEncryptionKey,
   resolveUmbraToken,
   scanUmbraPrivateP2PClaims,
@@ -474,6 +477,7 @@ describe('umbra-execution', () => {
       mockLegacyCreateEncryptedReceiverUtxo,
       mockAssertUmbraVaultFeeAccountsReady,
       mockMarkUmbraProtocolVersionUnsupported,
+      mockGetRpcFeeForMessage,
       mockGetRpcSignatureStatuses,
       mockGetUmbraUtxos,
       mockGetUmbraTreeSummaries,
@@ -535,6 +539,7 @@ describe('umbra-execution', () => {
         { available: true, checkedAccounts: [], missingAccounts: [], protocolVersion: 'legacy' },
       ],
     });
+    mockGetRpcFeeForMessage.mockResolvedValue({ lamports: 5000 });
     mockGetRpcSignatureStatuses.mockImplementation(
       async ({ signatures }: { signatures: string[] }) => ({
         statuses: signatures.map(() => ({
@@ -1222,6 +1227,73 @@ describe('umbra-execution', () => {
       signatures: ['create-proof-sig', 'create-utxo-sig'],
     });
     expect(mockGetRpcSignatureStatuses).not.toHaveBeenCalled();
+  });
+
+  it('estimates public-balance private P2P fees from SDK-built transaction messages without broadcasting', async () => {
+    mockQueryUser.mockResolvedValue({
+      state: 'exists',
+      data: {
+        isInitialised: true,
+        isUserAccountX25519KeyRegistered: true,
+        isUserCommitmentRegistered: true,
+        isActiveForAnonymousUsage: true,
+      },
+    });
+    mockGetRpcFeeForMessage.mockResolvedValueOnce({ lamports: 5000 }).mockResolvedValueOnce({
+      lamports: 7000,
+    });
+    mockCreatePublicReceiverUtxo.mockImplementationOnce(async () => {
+      const publicP2PForwarder = (
+        getPublicBalanceToReceiverClaimableUtxoCreatorFunction.mock.calls[0]?.[1] as {
+          rpc?: {
+            transactionForwarder?: {
+              forwardSequentially?: (
+                transactions: readonly unknown[],
+              ) => Promise<readonly string[]>;
+            };
+          };
+        }
+      ).rpc?.transactionForwarder;
+      const signatures = await publicP2PForwarder?.forwardSequentially?.([
+        { messageBytes: Uint8Array.of(1, 2, 3), signatures: {} },
+        { messageBytes: Uint8Array.of(4, 5, 6), signatures: {} },
+      ]);
+
+      return {
+        createProofAccountSignature: signatures?.[0],
+        createUtxoSignature: signatures?.[1],
+      };
+    });
+
+    const result = await estimateUmbraPrivateP2PFromPublicBalanceFee({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      token: 'dUSDC',
+      amount: '1',
+      recipient: mockRecipientAddress,
+    });
+
+    expect(mockGetRpcFeeForMessage).toHaveBeenCalledTimes(2);
+    expect(mockGetRpcFeeForMessage).toHaveBeenNthCalledWith(1, {
+      network: 'devnet',
+      messageBase64: Buffer.from(Uint8Array.of(1, 2, 3)).toString('base64'),
+      signal: undefined,
+    });
+    expect(mockGetRpcFeeForMessage).toHaveBeenNthCalledWith(2, {
+      network: 'devnet',
+      messageBase64: Buffer.from(Uint8Array.of(4, 5, 6)).toString('base64'),
+      signal: undefined,
+    });
+    expect(mockSdkDeps.transactionForwarder.fireAndForget).not.toHaveBeenCalled();
+    expect(mockSdkDeps.transactionForwarder.forwardSequentially).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      lamports: 12000,
+      transactionCount: 2,
+      mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+      network: 'devnet',
+      protocol: 'current',
+    });
   });
 
   it('accepts a token mint for public-balance private P2P sends', async () => {

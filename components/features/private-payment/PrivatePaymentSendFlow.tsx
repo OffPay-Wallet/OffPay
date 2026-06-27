@@ -44,6 +44,7 @@ import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useMagicBlockPrivatePaymentFeeEstimate } from '@/hooks/useMagicBlockPrivatePaymentFeeEstimate';
 import { useNormalTransferFeeEstimate } from '@/hooks/useNormalTransferFeeEstimate';
+import { useUmbraPrivateP2PFeeEstimate } from '@/hooks/useUmbraPrivateP2PFeeEstimate';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
@@ -629,6 +630,32 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       !normalSending &&
       !privateSending,
   });
+  const umbraFeeEstimate = useUmbraPrivateP2PFeeEstimate({
+    walletAddress,
+    walletId,
+    recipient: effectiveRecipientAddress,
+    token: selectedToken?.mint ?? null,
+    amount:
+      selectedToken == null || feeEstimateAmountRaw == null
+        ? null
+        : sanitizeDecimalInput(amount, selectedToken.decimals),
+    rawAmount: feeEstimateAmountRaw,
+    network,
+    enabled:
+      step === 'summary' &&
+      effectiveWalletMode !== 'offline' &&
+      effectivePaymentRoute === 'umbra' &&
+      selectedToken != null &&
+      effectiveRecipientAddress != null &&
+      feeEstimateAmountRaw != null &&
+      feeEstimateMatchesAmount &&
+      walletAddress != null &&
+      walletId != null &&
+      network != null &&
+      !offlineSending &&
+      !normalSending &&
+      !privateSending,
+  });
   const networkFeeLabel = useMemo(() => {
     if (effectiveWalletMode === 'offline') return 'Paid at settlement';
     if (effectivePaymentRoute === 'normal') {
@@ -647,6 +674,14 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       if (magicBlockFeeEstimate.isError) return 'Fee unavailable';
       return 'Fee unavailable';
     }
+    if (effectivePaymentRoute === 'umbra') {
+      if (feeEstimateMatchesAmount && umbraFeeEstimate.estimate?.lamports != null) {
+        return `${formatLamportsAsSol(umbraFeeEstimate.estimate.lamports, 9)} SOL`;
+      }
+      if (!feeEstimateMatchesAmount || umbraFeeEstimate.isFetching) return 'Estimating';
+      if (umbraFeeEstimate.isError) return 'Fee unavailable';
+      return 'Fee unavailable';
+    }
     return 'Fee unavailable';
   }, [
     effectivePaymentRoute,
@@ -658,6 +693,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     normalFeeEstimate.estimate,
     normalFeeEstimate.isError,
     normalFeeEstimate.isFetching,
+    umbraFeeEstimate.estimate,
+    umbraFeeEstimate.isError,
+    umbraFeeEstimate.isFetching,
   ]);
   const viewportProfile = getViewportProfile({
     width,

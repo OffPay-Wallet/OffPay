@@ -1,6 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
+import bs58 from 'bs58';
 import {
   deriveNullifierFromModifiedGenerationIndex,
   expandModifiedGenerationIndex,
@@ -51,6 +52,7 @@ import {
 } from '@umbra-privacy/umbra-codama';
 
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
+import { getRpcFeeForMessage } from '@/lib/api/offpay-api-client';
 import { getUmbraFriendlyErrorMessage } from '@/lib/umbra/umbra-error-messages';
 import {
   assertRecipientAddress,
@@ -1317,8 +1319,40 @@ type UmbraSubmitOnlyForwarderPayload = {
   source: 'public-balance';
 };
 
+type UmbraFeeEstimateForwarderPayload = UmbraSubmitOnlyForwarderPayload & {
+  signal?: AbortSignal;
+};
+
+interface UmbraFeeEstimateAccumulator {
+  lamports: number | null;
+  transactionCount: number;
+}
+
+export interface UmbraPrivateP2PFeeEstimate {
+  /** Total network fee, in lamports. `null` if the cluster could not price a built message. */
+  lamports: number | null;
+  transactionCount: number;
+  mint: string;
+  network: OffpayNetwork;
+  protocol: UmbraProtocolVersion;
+}
+
 function toTransactionList(transactions: unknown): readonly unknown[] {
   return Array.isArray(transactions) ? transactions : [transactions];
+}
+
+function getSignedTransactionMessageBase64(transaction: unknown): string {
+  const messageBytes = (transaction as { messageBytes?: unknown } | null)?.messageBytes;
+  if (!(messageBytes instanceof Uint8Array)) {
+    throw new Error('Umbra fee estimation could not read the built transaction message.');
+  }
+  return Buffer.from(messageBytes).toString('base64');
+}
+
+function createSyntheticUmbraFeeSignature(index: number): string {
+  const bytes = new Uint8Array(64);
+  bytes.fill((index % 255) + 1);
+  return bs58.encode(bytes);
 }
 
 function createSubmitOnlyUmbraTransactionForwarder<
@@ -1373,6 +1407,84 @@ function createSubmitOnlyUmbraTransactionForwarder<
   };
 }
 
+function createFeeEstimatingUmbraTransactionForwarder<
+  TForwarder extends {
+    fireAndForget: (...args: never[]) => unknown;
+    forwardInParallel: (...args: never[]) => unknown;
+    forwardSequentially: (...args: never[]) => unknown;
+  },
+>(
+  forwarder: TForwarder,
+  payload: UmbraFeeEstimateForwarderPayload,
+  accumulator: UmbraFeeEstimateAccumulator,
+): TForwarder {
+  const measurementPayload = {
+    mint: payload.mint,
+    network: payload.network,
+    protocol: payload.protocol,
+    source: payload.source,
+  };
+  const priceTransaction = async (transaction: unknown, index: number): Promise<string> => {
+    const messageBase64 = getSignedTransactionMessageBase64(transaction);
+    const fee = await getRpcFeeForMessage({
+      network: payload.network,
+      messageBase64,
+      signal: payload.signal,
+    });
+    accumulator.transactionCount += 1;
+    accumulator.lamports =
+      accumulator.lamports == null || fee.lamports == null
+        ? null
+        : accumulator.lamports + fee.lamports;
+    return createSyntheticUmbraFeeSignature(index);
+  };
+
+  return {
+    ...forwarder,
+    fireAndForget: (async (transaction: unknown) => {
+      const startedAt = mark();
+      try {
+        return await priceTransaction(transaction, 0);
+      } finally {
+        measure('umbra.txForwarder.feeEstimate.fireAndForget', startedAt, {
+          ...measurementPayload,
+          transactionCount: 1,
+        });
+      }
+    }) as TForwarder['fireAndForget'],
+    forwardInParallel: (async (transactions: unknown) => {
+      const transactionList = toTransactionList(transactions);
+      const startedAt = mark();
+      try {
+        return await Promise.all(
+          transactionList.map((transaction, index) => priceTransaction(transaction, index)),
+        );
+      } finally {
+        measure('umbra.txForwarder.feeEstimate.forwardInParallel', startedAt, {
+          ...measurementPayload,
+          transactionCount: transactionList.length,
+        });
+      }
+    }) as TForwarder['forwardInParallel'],
+    forwardSequentially: (async (transactions: unknown) => {
+      const transactionList = toTransactionList(transactions);
+      const startedAt = mark();
+      const signatures: string[] = [];
+      try {
+        for (const transaction of transactionList) {
+          signatures.push(await priceTransaction(transaction, signatures.length));
+        }
+        return signatures;
+      } finally {
+        measure('umbra.txForwarder.feeEstimate.forwardSequentially', startedAt, {
+          ...measurementPayload,
+          transactionCount: transactionList.length,
+        });
+      }
+    }) as TForwarder['forwardSequentially'],
+  };
+}
+
 function buildPublicP2PSubmitOnlyRpcDeps(runtime: UmbraRuntime, token: UmbraSupportedToken) {
   return {
     ...buildRpcDeps(runtime),
@@ -1384,6 +1496,28 @@ function buildPublicP2PSubmitOnlyRpcDeps(runtime: UmbraRuntime, token: UmbraSupp
         protocol: 'current',
         source: 'public-balance',
       },
+    ),
+  };
+}
+
+function buildPublicP2PFeeEstimateRpcDeps(
+  runtime: UmbraRuntime,
+  token: UmbraSupportedToken,
+  accumulator: UmbraFeeEstimateAccumulator,
+  signal?: AbortSignal,
+) {
+  return {
+    ...buildRpcDeps(runtime),
+    transactionForwarder: createFeeEstimatingUmbraTransactionForwarder(
+      runtime.rpc.transactionForwarder,
+      {
+        mint: token.mint,
+        network: runtime.network,
+        protocol: 'current',
+        source: 'public-balance',
+        signal,
+      },
+      accumulator,
     ),
   };
 }
@@ -1402,6 +1536,28 @@ function buildLegacyPublicP2PSubmitOnlyRpcDeps(
         protocol: 'legacy',
         source: 'public-balance',
       },
+    ),
+  };
+}
+
+function buildLegacyPublicP2PFeeEstimateRpcDeps(
+  runtime: LegacyUmbraRuntime,
+  token: UmbraSupportedToken,
+  accumulator: UmbraFeeEstimateAccumulator,
+  signal?: AbortSignal,
+) {
+  return {
+    ...buildLegacyRpcDeps(runtime),
+    transactionForwarder: createFeeEstimatingUmbraTransactionForwarder(
+      runtime.rpc.transactionForwarder,
+      {
+        mint: token.mint,
+        network: runtime.network,
+        protocol: 'legacy',
+        source: 'public-balance',
+        signal,
+      },
+      accumulator,
     ),
   };
 }
@@ -1971,6 +2127,192 @@ export async function shieldTokenWithUmbra(
       return runLegacyShield();
     }
     throw error;
+  }
+}
+
+export async function estimateUmbraPrivateP2PFromPublicBalanceFee(
+  params: UmbraPrivateP2PParams & { signal?: AbortSignal },
+): Promise<UmbraPrivateP2PFeeEstimate> {
+  const totalStartedAt = mark();
+  let ok = false;
+  let transactionCount = 0;
+  let tokenMint: string | null = null;
+  let selectedProtocol: UmbraProtocolVersion | null = null;
+  assertUmbraNetworkSupported(params.network);
+
+  try {
+    const walletAddress = assertWalletAddress(params.walletAddress);
+    const recipient = assertRecipientAddress(params.recipient);
+    const token = await resolveUmbraToken({ ...params, requireMixer: true });
+    tokenMint = token.metadata.mint;
+
+    await Promise.all([
+      verifyOffpayUmbraRpcReadiness(params.network),
+      assertOffpayUmbraVaultFeeAccountsReady({
+        action: 'privateP2pFromPublic',
+        mint: token.metadata.mint,
+        network: params.network,
+      }),
+    ]);
+
+    const runLegacyEstimate = (): Promise<UmbraPrivateP2PFeeEstimate> =>
+      withLegacyUmbraRuntime(params, async (runtime) => {
+        selectedProtocol = 'legacy';
+        const recipientIsSender = recipient === walletAddress;
+        if (!recipientIsSender) {
+          const receiverRegistrationStatus = await queryLegacyUmbraVaultRegistrationStatus(
+            runtime,
+            recipient,
+          );
+          if (!receiverRegistrationStatus.mixerRegistered) {
+            throw new Error(
+              'Recipient has not set up Umbra private P2P yet. Ask them to open Receive, choose Umbra private P2P, complete setup, then retry.',
+            );
+          }
+        }
+
+        const senderRegistrationStatus = await ensureLegacyUmbraPrivateP2PSenderReady(
+          runtime,
+          walletAddress,
+          { autoSetup: false },
+        );
+        if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
+          throw new Error(
+            'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
+          );
+        }
+
+        const accumulator: UmbraFeeEstimateAccumulator = {
+          lamports: 0,
+          transactionCount: 0,
+        };
+        const createUtxo = getLegacyPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+          { client: runtime.client },
+          {
+            zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
+            rpc: buildLegacyPublicP2PFeeEstimateRpcDeps(
+              runtime,
+              token.metadata,
+              accumulator,
+              params.signal,
+            ),
+          } as never,
+        );
+
+        await createUtxo(
+          {
+            amount: BigInt(token.amountAtomic) as never,
+            destinationAddress: recipient as never,
+            mint: token.metadata.mint as never,
+          } as never,
+          {
+            optionalData: new Uint8Array(32) as never,
+          } as never,
+        );
+
+        if (accumulator.transactionCount <= 0) {
+          throw new Error('Umbra fee estimation did not build a transaction to price.');
+        }
+
+        transactionCount = accumulator.transactionCount;
+        return {
+          lamports: accumulator.lamports,
+          transactionCount: accumulator.transactionCount,
+          mint: token.metadata.mint,
+          network: params.network,
+          protocol: 'legacy',
+        };
+      });
+
+    const runCurrentEstimate = (): Promise<UmbraPrivateP2PFeeEstimate> =>
+      withUmbraRuntime(params, async (runtime) => {
+        selectedProtocol = 'current';
+        const recipientIsSender = recipient === walletAddress;
+        if (!recipientIsSender) {
+          const receiverRegistrationStatus = await queryUmbraVaultRegistrationStatus(
+            runtime,
+            recipient,
+          );
+          if (!receiverRegistrationStatus.mixerRegistered) {
+            throw new Error(
+              'Recipient has not set up Umbra private P2P yet. Ask them to open Receive, choose Umbra private P2P, complete setup, then retry.',
+            );
+          }
+        }
+
+        const senderRegistrationStatus = await ensureUmbraPrivateP2PSenderReady(
+          runtime,
+          walletAddress,
+          params,
+          { autoSetup: false },
+        );
+        if (recipientIsSender && !senderRegistrationStatus.mixerRegistered) {
+          throw new Error(
+            'Umbra private P2P setup is not confirmed yet. Try again after setup lands.',
+          );
+        }
+
+        const accumulator: UmbraFeeEstimateAccumulator = {
+          lamports: 0,
+          transactionCount: 0,
+        };
+        const createUtxo = getPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+          { client: runtime.client },
+          {
+            zkProver: getRnCreateReceiverClaimableUtxoFromPublicBalanceProver(),
+            rpc: buildPublicP2PFeeEstimateRpcDeps(
+              runtime,
+              token.metadata,
+              accumulator,
+              params.signal,
+            ),
+          } as never,
+        );
+
+        await createUtxo(
+          {
+            amount: BigInt(token.amountAtomic) as never,
+            destinationAddress: recipient as never,
+            mint: token.metadata.mint as never,
+          } as never,
+          {
+            optionalData: new Uint8Array(32) as never,
+          } as never,
+        );
+
+        if (accumulator.transactionCount <= 0) {
+          throw new Error('Umbra fee estimation did not build a transaction to price.');
+        }
+
+        transactionCount = accumulator.transactionCount;
+        return {
+          lamports: accumulator.lamports,
+          transactionCount: accumulator.transactionCount,
+          mint: token.metadata.mint,
+          network: params.network,
+          protocol: 'current',
+        };
+      });
+
+    const estimate = shouldPreferLegacyUmbraProtocol(params.network)
+      ? await runLegacyEstimate()
+      : await runCurrentEstimate().catch(async (error) => {
+          if (!isUmbraInstructionFallbackNotFound(error)) throw error;
+          if (!isLegacyUmbraProtocolAccepted(params.network)) throw error;
+          markOffpayUmbraProtocolVersionUnsupported(params.network, 'current');
+          return runLegacyEstimate();
+        });
+
+    ok = true;
+    return estimate;
+  } finally {
+    measure('umbra.p2p.public.feeEstimate.total', totalStartedAt, {
+      mint: tokenMint,
+      network: params.network,
+      ok,
+      protocol: selectedProtocol,
+      transactionCount,
+    });
   }
 }
 

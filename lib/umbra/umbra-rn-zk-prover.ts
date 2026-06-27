@@ -666,7 +666,7 @@ async function generateAndVerifyNativeCircomProof(
   const candidates = getNativeProofLibCandidates(nativeProver);
   const failures: string[] = [];
 
-  for (const candidate of candidates) {
+  for (const [candidateIndex, candidate] of candidates.entries()) {
     const proofStartedAt = mark();
     const proofStartTime = Date.now();
     try {
@@ -723,12 +723,20 @@ async function generateAndVerifyNativeCircomProof(
     } catch (proofError) {
       const proofDuration = Date.now() - proofStartTime;
       const message = proofError instanceof Error ? proofError.message : String(proofError);
+      const hasFallbackCandidate = candidateIndex < candidates.length - 1;
 
       if (__DEV__) {
-        console.error(
-          `[umbra-prover] ${candidate.name} proof failed after ${(proofDuration / 1000).toFixed(2)}s:`,
-          message,
-        );
+        if (hasFallbackCandidate) {
+          console.log(
+            `[umbra-prover] ${candidate.name} proof failed after ${(proofDuration / 1000).toFixed(2)}s; trying next prover:`,
+            message,
+          );
+        } else {
+          console.error(
+            `[umbra-prover] ${candidate.name} proof failed after ${(proofDuration / 1000).toFixed(2)}s:`,
+            message,
+          );
+        }
       }
 
       measure('umbra.zkProver.generateProof', proofStartedAt, {
