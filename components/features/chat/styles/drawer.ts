@@ -6,8 +6,7 @@ import { fontFamily } from '@/constants/typography';
 
 import { HEADER_BUTTON_SIZE } from '../constants';
 
-const DRAWER_SHADOW =
-  '12px 0 36px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.12)';
+const DRAWER_SHADOW = '12px 0 38px rgba(0, 0, 0, 0.62), inset 0 1px 1px rgba(255, 255, 255, 0.1)';
 
 export const drawerStyles = StyleSheet.create({
   drawerRoot: {
@@ -16,17 +15,18 @@ export const drawerStyles = StyleSheet.create({
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.62)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   drawerPanel: {
-    height: '100%',
-    backgroundColor: colors.surface.backgroundAlt,
+    alignSelf: 'stretch',
+    backgroundColor: colors.brand.graphiteDepth,
     borderTopRightRadius: radii['2xl'],
     borderBottomRightRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
     borderRightWidth: StyleSheet.hairlineWidth,
     borderTopWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderLeftWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     boxShadow: DRAWER_SHADOW,
@@ -49,8 +49,8 @@ export const drawerStyles = StyleSheet.create({
   },
   drawerTitle: {
     fontFamily: fontFamily.moneyBold,
-    fontSize: 24,
-    lineHeight: 28,
+    fontSize: 23,
+    lineHeight: 27,
   },
   drawerSubtitle: {
     fontFamily: fontFamily.ui,
@@ -64,9 +64,14 @@ export const drawerStyles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface.backgroundTint,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.solidControl,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.08)',
+  },
+  drawerIconButtonPressed: {
+    transform: [{ scale: 0.96 }],
+    backgroundColor: colors.surface.solidControlPressed,
   },
   newChatRow: {
     minHeight: 52,
@@ -78,9 +83,13 @@ export const drawerStyles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
     backgroundColor: colors.brand.glossAccent,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    boxShadow: '0 8px 20px rgba(0, 0, 0, 0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+    boxShadow: '0 10px 22px rgba(0, 0, 0, 0.42)',
+  },
+  newChatRowPressed: {
+    transform: [{ scale: 0.985 }],
+    backgroundColor: colors.surface.glossPressed,
   },
   newChatLabel: {
     fontFamily: fontFamily.uiSemiBold,
@@ -91,10 +100,11 @@ export const drawerStyles = StyleSheet.create({
   drawerList: {
     flex: 1,
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
   },
   drawerListContent: {
-    paddingTop: spacing.xs,
-    paddingBottom: spacing['2xl'],
+    paddingTop: 0,
+    paddingBottom: spacing.xl,
     gap: spacing.sm,
   },
   drawerSectionHeader: {
@@ -111,8 +121,15 @@ export const drawerStyles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   drawerEmptyText: {
+    minHeight: 80,
+    borderRadius: radii.lg,
+    borderCurve: 'continuous',
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.lg,
     fontFamily: fontFamily.ui,
+    backgroundColor: colors.surface.solidCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   drawerRow: {
     minHeight: 72,
@@ -120,24 +137,29 @@ export const drawerStyles = StyleSheet.create({
     borderCurve: 'continuous',
     flexDirection: 'row',
     alignItems: 'stretch',
-    backgroundColor: colors.surface.backgroundTint,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.solidCardElevated,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     overflow: 'hidden',
+    position: 'relative',
+    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.05)',
   },
   drawerRowActive: {
-    borderColor: colors.glass.rim,
-    backgroundColor: colors.glass.smokeWash,
+    borderColor: 'rgba(247, 247, 242, 0.22)',
+    backgroundColor: colors.surface.solidControl,
   },
   drawerRowMain: {
     flex: 1,
     minWidth: 0,
     justifyContent: 'center',
     paddingLeft: spacing.md,
+    paddingRight: spacing.sm,
     paddingVertical: spacing.sm,
   },
   drawerRowPressed: {
-    opacity: 0.82,
+    transform: [{ scale: 0.985 }],
+    backgroundColor: colors.surface.solidControl,
+    borderColor: 'rgba(247, 247, 242, 0.18)',
   },
   drawerRowText: {
     minWidth: 0,
@@ -159,20 +181,19 @@ export const drawerStyles = StyleSheet.create({
     fontFamily: fontFamily.ui,
   },
   drawerRowActions: {
-    width: 48,
+    width: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingRight: spacing.xs,
+    paddingRight: spacing.sm,
   },
   drawerMiniButton: {
-    width: 36,
-    height: 36,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
+    width: 32,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 77, 90, 0.12)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 77, 90, 0.28)',
+  },
+  drawerMiniButtonPressed: {
+    transform: [{ scale: 0.92 }],
+    opacity: 0.68,
   },
 });

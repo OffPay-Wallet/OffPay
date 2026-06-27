@@ -6,11 +6,10 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-
-type ChatCtaId = 'send' | 'swap' | 'payroll' | 'flash';
+import type { AgenticChatCtaId } from '@/lib/agentic-payments/agent-tools';
 
 interface ChatCta {
-  id: ChatCtaId;
+  id: AgenticChatCtaId;
   title: string;
   caption: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -18,6 +17,7 @@ interface ChatCta {
 }
 
 interface ChatCtaCardsProps {
+  ctaIds: readonly AgenticChatCtaId[];
   disabled?: boolean;
   compact?: boolean;
   onSelect: (prompt: string) => void;
@@ -25,11 +25,32 @@ interface ChatCtaCardsProps {
 
 const CHAT_CTAS: readonly ChatCta[] = [
   {
+    id: 'balance',
+    title: 'Balance',
+    caption: 'Wallet overview',
+    icon: 'wallet-outline',
+    prompt: 'Show my wallet balance',
+  },
+  {
+    id: 'activity',
+    title: 'Activity',
+    caption: 'Recent history',
+    icon: 'time-outline',
+    prompt: 'Show my recent wallet activity',
+  },
+  {
     id: 'send',
     title: 'Send',
     caption: 'Start transfer',
     icon: 'paper-plane-outline',
     prompt: 'I want to send money',
+  },
+  {
+    id: 'private-send',
+    title: 'Private',
+    caption: 'Shielded send',
+    icon: 'lock-closed-outline',
+    prompt: 'I want to send a private payment',
   },
   {
     id: 'swap',
@@ -46,6 +67,27 @@ const CHAT_CTAS: readonly ChatCta[] = [
     prompt: 'Run batch send',
   },
   {
+    id: 'private-balance',
+    title: 'Private Bal',
+    caption: 'MagicBlock rail',
+    icon: 'shield-outline',
+    prompt: 'Show my MagicBlock private-payment balance',
+  },
+  {
+    id: 'umbra-vault',
+    title: 'Umbra',
+    caption: 'Vault balance',
+    icon: 'key-outline',
+    prompt: 'Show my Umbra vault balance',
+  },
+  {
+    id: 'umbra-claims',
+    title: 'Claims',
+    caption: 'Scan Umbra',
+    icon: 'search-outline',
+    prompt: 'Scan my Umbra claims',
+  },
+  {
     id: 'flash',
     title: 'Flash',
     caption: 'Positions & orders',
@@ -55,13 +97,17 @@ const CHAT_CTAS: readonly ChatCta[] = [
 ];
 
 export function ChatCtaCards({
+  ctaIds,
   disabled = false,
   compact = false,
   onSelect,
 }: ChatCtaCardsProps): React.JSX.Element {
+  const allowedCtaIds = new Set(ctaIds);
+  const cards = CHAT_CTAS.filter((cta) => allowedCtaIds.has(cta.id));
+
   return (
     <View style={[styles.grid, compact && styles.gridCompact]}>
-      {CHAT_CTAS.map((cta) => (
+      {cards.map((cta) => (
         <Pressable
           key={cta.id}
           disabled={disabled}

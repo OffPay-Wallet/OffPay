@@ -36,7 +36,9 @@ import { useAgenticChatScope } from '@/hooks/agentic-chat/useAgenticChatScope';
 import { useAgenticConfirmSend } from '@/hooks/agentic-chat/useAgenticConfirmSend';
 import { useAgenticPendingSweep } from '@/hooks/agentic-chat/useAgenticPendingSweep';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
+import { getAvailableAgenticChatCtaIds } from '@/lib/agentic-payments/agent-tools';
 import { buildAgentWalletBalanceResponse } from '@/lib/agentic-payments/safe-context';
+import { walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 import {
   type AgenticChatAction,
   type AgenticChatMessage,
@@ -240,6 +242,19 @@ export function ChatScreen(): React.JSX.Element {
       })),
     [scope.walletAddress, wallets],
   );
+  const activeWalletId = useWalletStore((s) => s.activeWalletId);
+  const activeImportMethod = useMemo(() => {
+    const active = wallets.find((wallet) => wallet.publicKey === scope.walletAddress);
+    return active?.importMethod ?? null;
+  }, [wallets, scope.walletAddress]);
+  const activeWalletCanUseUmbra = useMemo(
+    () =>
+      walletCanSignWithApp({
+        importMethod: activeImportMethod,
+        walletAddress: scope.walletAddress,
+      }),
+    [activeImportMethod, scope.walletAddress],
+  );
   const agentBalance = useMemo(
     () =>
       balanceQuery.data == null
@@ -247,16 +262,32 @@ export function ChatScreen(): React.JSX.Element {
         : buildAgentWalletBalanceResponse(balanceQuery.data, capabilitiesQuery.capabilities),
     [balanceQuery.data, capabilitiesQuery.capabilities],
   );
+  const availableCtaIds = useMemo(
+    () =>
+      getAvailableAgenticChatCtaIds({
+        network: scope.network,
+        walletAddress: scope.walletAddress,
+        walletId: activeWalletId,
+        walletMode: effectiveWalletMode,
+        canUseNetwork,
+        canUseUmbraWallet: activeWalletCanUseUmbra,
+        capabilities: capabilitiesQuery.capabilities,
+      }),
+    [
+      activeWalletCanUseUmbra,
+      activeWalletId,
+      canUseNetwork,
+      capabilitiesQuery.capabilities,
+      effectiveWalletMode,
+      scope.network,
+      scope.walletAddress,
+    ],
+  );
 
   // Outcome read-aloud. Speaks short, sanitized status lines after a send or
   // batch-send run resolves. Silent-fail and privacy-gated inside the hook.
   const speech = useAgenticSpeech();
   const voiceLanguageRef = useRef<string | null>(null);
-  const activeWalletId = useWalletStore((s) => s.activeWalletId);
-  const activeImportMethod = useMemo(() => {
-    const active = wallets.find((wallet) => wallet.publicKey === scope.walletAddress);
-    return active?.importMethod ?? null;
-  }, [wallets, scope.walletAddress]);
 
   const { submit, busy: agentBusy } = useAgenticAgentSubmit({
     scope,
@@ -722,9 +753,10 @@ export function ChatScreen(): React.JSX.Element {
             </View>
           ) : null}
 
-          {showEmptyState ? (
+          {showEmptyState && availableCtaIds.length > 0 ? (
             <View style={headerStyles.emptyCtaWrap}>
               <ChatCtaCards
+                ctaIds={availableCtaIds}
                 compact={compact}
                 disabled={agentBusy || payrollIntake.busy}
                 onSelect={handleCtaPrompt}

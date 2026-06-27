@@ -40,6 +40,7 @@ export function ConfirmDialogCard({
   const { mounted, progress } = useReanimatedModalProgress(visible, {
     name: 'ui.confirmDialog',
   });
+  const confirmTextColor = destructive ? colors.text.primary : colors.text.onAccent;
 
   const layerStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
@@ -129,14 +130,11 @@ export function ConfirmDialogCard({
               accessibilityState={{ busy, disabled: busy }}
             >
               {busy ? (
-                <LazyLoadingSpinner
-                  size={18}
-                  color={destructive ? colors.text.onAccent : colors.text.onAccent}
-                />
+                <LazyLoadingSpinner size={18} color={confirmTextColor} />
               ) : (
                 <Text
                   variant="buttonSmall"
-                  color={destructive ? colors.text.onAccent : colors.text.onAccent}
+                  color={confirmTextColor}
                   align="center"
                   style={styles.buttonLabel}
                   numberOfLines={1}
@@ -162,21 +160,22 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.58)',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
   },
   card: {
     width: '100%',
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.surface.cardElevated,
+    backgroundColor: colors.surface.backgroundTint,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     padding: spacing.xl,
     gap: spacing.md,
-    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.14), 0 18px 36px rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 22px 42px rgba(0, 0, 0, 0.58)',
   },
   title: {
     fontFamily: fontFamily.moneyBold,
@@ -193,6 +192,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: spacing.md,
     marginTop: spacing.xs,
+    alignSelf: 'stretch',
   },
   button: {
     flex: 1,
@@ -205,27 +205,30 @@ const styles = StyleSheet.create({
   },
   buttonLabel: {
     fontFamily: fontFamily.uiSemiBold,
+    lineHeight: 20,
   },
   cancelButton: {
-    backgroundColor: colors.surface.backgroundTint,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.solidControl,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   cancelButtonPressed: {
-    backgroundColor: colors.surface.pressed,
+    transform: [{ scale: 0.985 }],
+    backgroundColor: colors.surface.solidControlPressed,
   },
   confirmButtonPrimary: {
     backgroundColor: colors.brand.glossAccent,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.82)',
   },
   confirmButtonDestructive: {
     backgroundColor: colors.semantic.error,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: 'rgba(255, 77, 90, 0.45)',
   },
   confirmButtonPressed: {
-    opacity: 0.9,
+    transform: [{ scale: 0.985 }],
+    opacity: 0.92,
   },
   confirmButtonBusy: {
     opacity: 0.72,

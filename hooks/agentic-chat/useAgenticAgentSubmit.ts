@@ -22,7 +22,7 @@ import {
   sendAgentTurn,
 } from '@/lib/agentic-payments/ai-proxy-client';
 import {
-  AGENTIC_TOOL_SCHEMAS,
+  getAvailableAgenticModelToolSchemas,
   runAgenticTools,
   type AgenticToolDraft,
   type AgenticToolRunnerContext,
@@ -289,13 +289,22 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     importMethod: params.walletImportMethod,
     walletAddress: params.scope.walletAddress,
   });
+  const toolSchemas = getAvailableAgenticModelToolSchemas({
+    network: params.scope.network,
+    walletAddress: params.scope.walletAddress,
+    walletId: params.walletId,
+    walletMode: params.walletMode,
+    canUseNetwork: params.canUseNetwork,
+    canUseUmbraWallet: activeWalletCanUseUmbra,
+    capabilities: params.capabilities,
+  });
 
   for (let turnIndex = 0; turnIndex < MAX_TOOL_TURNS; turnIndex += 1) {
     const turn = await sendAgentTurn(
       {
         responseMode: 'agent_turn',
         messages: conversationMessages,
-        toolSchemas: [...AGENTIC_TOOL_SCHEMAS],
+        toolSchemas,
         toolResults: pendingToolResults.length > 0 ? pendingToolResults : undefined,
         assistantToolCalls: pendingToolCalls.length > 0 ? pendingToolCalls : undefined,
         context: {

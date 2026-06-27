@@ -154,8 +154,10 @@ export function ChatHistoryDrawer({
             styles.drawerPanel,
             {
               width,
-              paddingTop: topInset + spacing.md,
-              paddingBottom: Math.max(bottomInset, spacing.lg),
+              marginTop: Math.max(topInset, spacing.md),
+              marginBottom: Math.max(bottomInset, spacing.md),
+              paddingTop: spacing.lg,
+              paddingBottom: spacing.md,
             },
             panelStyle,
           ]}
@@ -173,7 +175,7 @@ export function ChatHistoryDrawer({
               <Pressable
                 style={({ pressed }) => [
                   styles.drawerIconButton,
-                  pressed && styles.drawerRowPressed,
+                  pressed && styles.drawerIconButtonPressed,
                 ]}
                 onPress={onClose}
                 accessibilityRole="button"
@@ -185,7 +187,7 @@ export function ChatHistoryDrawer({
             </View>
 
             <Pressable
-              style={({ pressed }) => [styles.newChatRow, pressed && styles.drawerRowPressed]}
+              style={({ pressed }) => [styles.newChatRow, pressed && styles.newChatRowPressed]}
               onPress={onNewChat}
               accessibilityRole="button"
               accessibilityLabel="Create new chat"

@@ -7,7 +7,7 @@ import { fontFamily } from '@/constants/typography';
 import { PROMPT_ICON_SIZE, PROMPT_INPUT_ROW_MIN_HEIGHT } from '../constants';
 
 const COMPOSER_SHADOW =
-  '0 14px 32px rgba(0, 0, 0, 0.52), inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.35)';
+  '0 16px 34px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.12), inset 0 -1px 2px rgba(0, 0, 0, 0.36)';
 
 export const promptStyles = StyleSheet.create({
   promptDock: {
@@ -21,7 +21,7 @@ export const promptStyles = StyleSheet.create({
   prompt: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.surface.cardElevated,
+    backgroundColor: colors.surface.solidCardElevated,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
@@ -30,17 +30,21 @@ export const promptStyles = StyleSheet.create({
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     boxShadow: COMPOSER_SHADOW,
+  },
+  promptPressed: {
+    transform: [{ scale: 0.997 }],
+    backgroundColor: colors.surface.solidControl,
   },
   promptInputRow: {
     minHeight: PROMPT_INPUT_ROW_MIN_HEIGHT,
     justifyContent: 'center',
     borderRadius: radii.xl,
     borderCurve: 'continuous',
-    backgroundColor: colors.surface.backgroundTint,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.backgroundAlt,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
@@ -70,9 +74,13 @@ export const promptStyles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface.backgroundTint,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.solidControl,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  promptAccessoryPressed: {
+    transform: [{ scale: 0.93 }],
+    backgroundColor: colors.surface.solidControlPressed,
   },
   voiceOrb: {
     width: PROMPT_ICON_SIZE,
@@ -85,7 +93,8 @@ export const promptStyles = StyleSheet.create({
     borderColor: colors.glass.rim,
   },
   voiceOrbPressed: {
-    opacity: 0.88,
+    transform: [{ scale: 0.94 }],
+    opacity: 0.9,
   },
   promptSend: {
     width: PROMPT_ICON_SIZE,
@@ -102,13 +111,14 @@ export const promptStyles = StyleSheet.create({
     borderColor: colors.glass.rimSubtle,
   },
   promptSendPressed: {
+    transform: [{ scale: 0.94 }],
     opacity: 0.88,
   },
 
   voiceCard: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
-    backgroundColor: colors.surface.cardElevated,
+    backgroundColor: colors.surface.solidCardElevated,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.md,
@@ -117,7 +127,7 @@ export const promptStyles = StyleSheet.create({
     borderLeftWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     boxShadow: COMPOSER_SHADOW,
   },
   voiceTranscript: {
@@ -151,9 +161,13 @@ export const promptStyles = StyleSheet.create({
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface.backgroundTint,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.solidControl,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  voiceControlNeutralPressed: {
+    transform: [{ scale: 0.93 }],
+    backgroundColor: colors.surface.solidControlPressed,
   },
   voiceControlPrimary: {
     width: PROMPT_ICON_SIZE,
@@ -165,6 +179,10 @@ export const promptStyles = StyleSheet.create({
     backgroundColor: colors.brand.glossAccent,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+  },
+  voiceControlPrimaryPressed: {
+    transform: [{ scale: 0.93 }],
+    opacity: 0.9,
   },
   voiceControlDisabled: {
     opacity: 0.5,

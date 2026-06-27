@@ -30,13 +30,17 @@ export function ConversationRow({
   onDelete,
 }: ConversationRowProps): React.JSX.Element {
   return (
-    <View style={[styles.drawerRow, active && styles.drawerRowActive]}>
-      <Pressable
-        style={({ pressed }) => [styles.drawerRowMain, pressed && styles.drawerRowPressed]}
-        onPress={onOpen}
-        accessibilityRole="button"
-        accessibilityLabel={`Open chat ${conversation.title}`}
-      >
+    <Pressable
+      style={({ pressed }) => [
+        styles.drawerRow,
+        active && styles.drawerRowActive,
+        pressed && styles.drawerRowPressed,
+      ]}
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={`Open chat ${conversation.title}`}
+    >
+      <View style={styles.drawerRowMain}>
         <View style={styles.drawerRowText}>
           <View style={styles.drawerRowTitleLine}>
             <Text
@@ -60,18 +64,21 @@ export function ConversationRow({
             {preview}
           </Text>
         </View>
-      </Pressable>
+      </View>
       <View style={styles.drawerRowActions}>
         <Pressable
-          style={({ pressed }) => [styles.drawerMiniButton, pressed && styles.drawerRowPressed]}
+          style={({ pressed }) => [
+            styles.drawerMiniButton,
+            pressed && styles.drawerMiniButtonPressed,
+          ]}
           onPress={onDelete}
           accessibilityRole="button"
           accessibilityLabel="Delete chat"
           hitSlop={6}
         >
-          <Ionicons name="trash-outline" size={18} color={colors.semantic.error} />
+          <Ionicons name="trash" size={20} color={colors.semantic.error} />
         </Pressable>
       </View>
-    </View>
+    </Pressable>
   );
 }

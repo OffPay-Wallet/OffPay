@@ -216,7 +216,10 @@ function ComposerCard({
   const transcribing = voice?.state === 'transcribing';
 
   return (
-    <Pressable style={styles.prompt} onPress={() => inputRef.current?.focus()}>
+    <Pressable
+      style={({ pressed }) => [styles.prompt, pressed && styles.promptPressed]}
+      onPress={() => inputRef.current?.focus()}
+    >
       <View style={styles.promptInputRow}>
         <TextInput
           ref={inputRef}
@@ -241,7 +244,10 @@ function ComposerCard({
               onPress={onUpload}
               onLongPress={onUploadLongPress}
               disabled={uploadBusy}
-              style={styles.promptAccessory}
+              style={({ pressed }) => [
+                styles.promptAccessory,
+                pressed && !uploadBusy && styles.promptAccessoryPressed,
+              ]}
               accessibilityRole="button"
               accessibilityLabel="Upload batch send file"
               accessibilityHint="Long press to paste batch send rows"
@@ -258,7 +264,10 @@ function ComposerCard({
             <Pressable
               onPress={onPastePayroll}
               disabled={uploadBusy}
-              style={styles.promptAccessory}
+              style={({ pressed }) => [
+                styles.promptAccessory,
+                pressed && !uploadBusy && styles.promptAccessoryPressed,
+              ]}
               accessibilityRole="button"
               accessibilityLabel="Paste batch send rows"
               hitSlop={8}
@@ -272,7 +281,10 @@ function ComposerCard({
           {speech != null ? (
             <Pressable
               onPress={speech.state !== 'idle' ? speech.onStop : speech.onToggleMuted}
-              style={styles.promptAccessory}
+              style={({ pressed }) => [
+                styles.promptAccessory,
+                pressed && styles.promptAccessoryPressed,
+              ]}
               accessibilityRole="button"
               accessibilityLabel={
                 speech.state !== 'idle'
@@ -414,7 +426,10 @@ function VoiceCard({ voice }: { voice: ChatVoiceControl }): React.JSX.Element {
         <View style={styles.voiceControls}>
           <Pressable
             onPress={voice.onCancel}
-            style={styles.voiceControlNeutral}
+            style={({ pressed }) => [
+              styles.voiceControlNeutral,
+              pressed && styles.voiceControlNeutralPressed,
+            ]}
             accessibilityRole="button"
             accessibilityLabel="Discard voice input"
             hitSlop={8}
@@ -425,9 +440,10 @@ function VoiceCard({ voice }: { voice: ChatVoiceControl }): React.JSX.Element {
           <Pressable
             onPress={isReview ? voice.onAccept : voice.onPress}
             disabled={isReview && !canAccept}
-            style={[
+            style={({ pressed }) => [
               styles.voiceControlPrimary,
               isReview && !canAccept && styles.voiceControlDisabled,
+              pressed && !(isReview && !canAccept) && styles.voiceControlPrimaryPressed,
             ]}
             accessibilityRole="button"
             accessibilityLabel={isReview ? 'Send voice input' : 'Stop and transcribe'}

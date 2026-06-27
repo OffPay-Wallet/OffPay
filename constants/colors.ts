@@ -88,6 +88,16 @@ const surface = {
   backgroundAlt: '#101010',
   /** Tint for selected/hovered surfaces */
   backgroundTint: '#181818',
+  /** Opaque card fill for modal/drawer/composer surfaces */
+  solidCard: '#171717',
+  /** Opaque raised card fill for repeated rows and composer shells */
+  solidCardElevated: '#1A1A1A',
+  /** Opaque control fill for icon buttons and secondary actions */
+  solidControl: '#242424',
+  /** Opaque pressed fill for icon buttons and secondary actions */
+  solidControlPressed: '#2E2E2E',
+  /** Opaque pressed fill for light gloss controls */
+  glossPressed: '#E7E7DF',
   /** Card surfaces - semi-opaque fallback for glass panels */
   card: 'rgba(22, 22, 22, 0.76)',
   /** Elevated glass surface */
