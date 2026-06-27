@@ -72,7 +72,7 @@ export function useOffpayWalletWarmStart(): void {
               walletAddress,
               network,
               options: {
-                includeBalance: true,
+                includeBalance: false,
                 includeTransactions: false,
                 includePendingBackupStats: true,
               },
@@ -186,6 +186,7 @@ async function prefetchWalletDashboardInBackground(params: {
     network: params.network,
     limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     useCache: false,
+    includeTransactions: false,
     requestOwner: 'wallet.warmStart.dashboard',
   });
 

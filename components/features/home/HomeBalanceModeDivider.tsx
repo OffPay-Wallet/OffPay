@@ -23,12 +23,6 @@ interface HomeBalanceModeDividerProps {
   selectedMode: HomeBalanceMode;
   onChangeMode: (mode: HomeBalanceMode) => void;
   loading?: boolean;
-  /**
-   * Fires when the user touches down on the Shielded segment. The
-   * parent uses it to schedule a lazy Umbra chunk warm-up outside the
-   * touch frame, keeping the thumb transition responsive.
-   */
-  onShieldedPressIn?: () => void;
 }
 
 const MODES: { id: HomeBalanceMode; label: string; accessibilityLabel: string }[] = [
@@ -53,7 +47,6 @@ const ModeSegment = memo(function ModeSegment({
   labelFontSize,
   labelLineHeight,
   onSelect,
-  onShieldedPressIn,
 }: {
   mode: (typeof MODES)[number];
   selected: boolean;
@@ -61,7 +54,6 @@ const ModeSegment = memo(function ModeSegment({
   labelFontSize: number;
   labelLineHeight: number;
   onSelect: (mode: HomeBalanceMode) => void;
-  onShieldedPressIn?: () => void;
 }): React.JSX.Element {
   const [pressed, setPressed] = useState(false);
 
@@ -71,10 +63,7 @@ const ModeSegment = memo(function ModeSegment({
 
   const handlePressIn = useCallback((): void => {
     setPressed(true);
-    if (mode.id === 'shielded') {
-      onShieldedPressIn?.();
-    }
-  }, [mode.id, onShieldedPressIn]);
+  }, []);
 
   const handlePress = useCallback((): void => {
     resetPressed();
@@ -136,7 +125,6 @@ export function HomeBalanceModeDivider({
   selectedMode,
   onChangeMode,
   loading = false,
-  onShieldedPressIn,
 }: HomeBalanceModeDividerProps): React.JSX.Element {
   const { width, height, fontScale } = useWindowDimensions();
   const viewportProfile = getViewportProfile({ width, height, fontScale });
@@ -245,7 +233,6 @@ export function HomeBalanceModeDivider({
                     labelFontSize={labelFontSize}
                     labelLineHeight={labelLineHeight}
                     onSelect={handleSelect}
-                    onShieldedPressIn={onShieldedPressIn}
                   />
                 );
               })}

@@ -1434,7 +1434,13 @@ export async function getWalletTokenTransactions(
 export async function getWalletDashboard(
   walletAddress: string,
   network: OffpayNetwork,
-  options?: { limit?: number; useCache?: boolean; signal?: AbortSignal; requestOwner?: string },
+  options?: {
+    limit?: number;
+    useCache?: boolean;
+    includeTransactions?: boolean;
+    signal?: AbortSignal;
+    requestOwner?: string;
+  },
 ): Promise<WalletDashboardResponse> {
   return offpayPublicRequest<WalletDashboardResponse>({
     path: '/api/wallet/dashboard',
@@ -1443,6 +1449,7 @@ export async function getWalletDashboard(
       network,
       limit: options?.limit,
       useCache: options?.useCache,
+      includeTransactions: options?.includeTransactions,
     },
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),

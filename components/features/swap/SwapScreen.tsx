@@ -329,6 +329,7 @@ export function SwapScreen(): React.JSX.Element {
   const { isNetworkSwitching } = useOffpayNetworkAccess();
   const { effectiveWalletMode } = useWalletModeState();
   const isOfflineMode = effectiveWalletMode === 'offline';
+  const isDevnetNetwork = network === 'devnet';
   const [tabDataReady, setTabDataReady] = useState(false);
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: true });
   const balanceQuery = useOffpayWalletBalance(null, {
@@ -1384,6 +1385,10 @@ export function SwapScreen(): React.JSX.Element {
       return { label: 'Switching network…', tone: 'default', disabled: true };
     }
 
+    if (isDevnetNetwork) {
+      return { label: 'Unavailable', tone: 'danger', disabled: true };
+    }
+
     if (swapActionErrorLabel != null) {
       if (swapActionRefreshAvailable) {
         return { label: 'Slide to refresh quote', tone: 'default', disabled: false };
@@ -1482,6 +1487,7 @@ export function SwapScreen(): React.JSX.Element {
     currentInputAmount,
     currentFundingBlocker,
     executeSwapMutation.isPending,
+    isDevnetNetwork,
     isOfflineMode,
     network,
     normalSwapCapability.message,
@@ -1514,6 +1520,10 @@ export function SwapScreen(): React.JSX.Element {
     if (!privateSwapMode || privateSwapMutation.isPending) return null;
     if (isNetworkSwitching) {
       return { label: 'Switching network…', tone: 'default', disabled: true };
+    }
+
+    if (isDevnetNetwork) {
+      return { label: 'Unavailable', tone: 'danger', disabled: true };
     }
 
     if (walletAddress == null) {
@@ -1556,6 +1566,7 @@ export function SwapScreen(): React.JSX.Element {
     balanceQuery.error,
     capabilitiesQuery.isCapabilitiesPending,
     currentInputAmount,
+    isDevnetNetwork,
     isOfflineMode,
     network,
     payAmount,
@@ -1589,31 +1600,33 @@ export function SwapScreen(): React.JSX.Element {
         : privatePairSupported
           ? `${privateSwapPairLabel} only · ${PRIVATE_SWAP_PROVIDER_LABEL}`
           : `Choose ${privateSwapPairLabel} tokens for private swap.`;
-  const swapStatusMessage = privateSwapMode
-    ? privateSwapStatusMessage
-    : executeSwapMutation.isPending
-      ? 'Signing and submitting swap...'
-      : lastSwapResult != null
-        ? `Last swap submitted: ${lastSwapResult.signature.slice(0, 8)}...${lastSwapResult.signature.slice(-8)}`
-        : !canLoadTokens
-          ? tokensCapability.message
-          : swapTokensQuery.error != null
-            ? tokensErrorMessage
-            : !canLoadPrices
-              ? priceCapability.message
-              : payPriceQuery.error != null || receivePriceQuery.error != null
-                ? priceErrorMessage
-                : !canQuoteSwap
-                  ? normalSwapCapability.message
-                  : quoteQuery.data != null
-                    ? quoteExpired
-                      ? 'Quote expired. Refresh or edit amount to fetch a new quote.'
-                      : activeExecutableQuote == null
-                        ? 'Updating quote for the current amount.'
-                        : 'Live quote loaded. Review to sign and execute.'
-                    : payAmount.trim().length > 0 && quoteQuery.error != null
-                      ? quoteErrorMessage
-                      : null;
+  const swapStatusMessage = isDevnetNetwork
+    ? null
+    : privateSwapMode
+      ? privateSwapStatusMessage
+      : executeSwapMutation.isPending
+        ? 'Signing and submitting swap...'
+        : lastSwapResult != null
+          ? `Last swap submitted: ${lastSwapResult.signature.slice(0, 8)}...${lastSwapResult.signature.slice(-8)}`
+          : !canLoadTokens
+            ? tokensCapability.message
+            : swapTokensQuery.error != null
+              ? tokensErrorMessage
+              : !canLoadPrices
+                ? priceCapability.message
+                : payPriceQuery.error != null || receivePriceQuery.error != null
+                  ? priceErrorMessage
+                  : !canQuoteSwap
+                    ? normalSwapCapability.message
+                    : quoteQuery.data != null
+                      ? quoteExpired
+                        ? 'Quote expired. Refresh or edit amount to fetch a new quote.'
+                        : activeExecutableQuote == null
+                          ? 'Updating quote for the current amount.'
+                          : 'Live quote loaded. Review to sign and execute.'
+                      : payAmount.trim().length > 0 && quoteQuery.error != null
+                        ? quoteErrorMessage
+                        : null;
   const visibleSwapStatusMessage =
     swapStatusMessage == null
       ? null
@@ -1999,6 +2012,7 @@ export function SwapScreen(): React.JSX.Element {
       (canLoadTokens && swapTokensQuery.data == null && swapTokensQuery.error == null) ||
       (walletAddress != null && balanceQuery.data == null && balanceQuery.error == null));
   const showDataFallback = showDeferredDataFallback && dataStillDeferred && !showLiveSwapDetails;
+  const showAdvancedSwapButton = !isDevnetNetwork;
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -2044,12 +2058,20 @@ export function SwapScreen(): React.JSX.Element {
               >
                 {privateSwapMode ? 'Private Swap' : 'Swap'}
               </Text>
-              <HeaderIconButton
-                onPress={handleOpenAdvancedModes}
-                accessibilityLabel="Open advanced swap"
-              >
-                <PuffySettingsIcon size={layout.iconSizeNav} color={colors.text.primary} focused />
-              </HeaderIconButton>
+              {showAdvancedSwapButton ? (
+                <HeaderIconButton
+                  onPress={handleOpenAdvancedModes}
+                  accessibilityLabel="Open advanced swap"
+                >
+                  <PuffySettingsIcon
+                    size={layout.iconSizeNav}
+                    color={colors.text.primary}
+                    focused
+                  />
+                </HeaderIconButton>
+              ) : (
+                <View style={styles.headerIconPlaceholder} />
+              )}
             </View>
 
             <View style={[styles.contentFrame, styles.swapContentStack, { gap: sectionGap }]}>
@@ -2216,6 +2238,10 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerIconPlaceholder: {
+    width: layout.minTouchTarget + spacing.xs,
+    height: layout.minTouchTarget + spacing.xs,
   },
   headerTitle: {
     flex: 1,

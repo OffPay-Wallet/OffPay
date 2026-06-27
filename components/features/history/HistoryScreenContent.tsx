@@ -13,7 +13,6 @@ import { PuffyRefreshIcon } from '@/components/ui/icons/PuffyRefreshIcon';
 import { Text } from '@/components/ui/Text';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { GradientBackground } from '@/components/ui/GradientBackground';
-import { StaggerRevealItem } from '@/components/ui/StaggerReveal';
 import { HistoryList } from '@/components/features/history/HistoryList';
 import { TransactionDetailsSheet } from '@/components/features/history/TransactionDetailsSheet';
 import { colors } from '@/constants/colors';
@@ -69,6 +68,7 @@ export function HistoryScreenContent(): React.JSX.Element {
   const transactionsQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
     deferUntilAfterInteractions: false,
+    eagerWithoutCapabilities: true,
     enabled: isFocused,
     limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     refetchOnMount: 'always',
@@ -257,14 +257,14 @@ export function HistoryScreenContent(): React.JSX.Element {
         </Animated.View>
       </View>
 
-      <StaggerRevealItem index={0} style={styles.listLayer}>
+      <View style={styles.listLayer}>
         <HistoryList
           transactionsQuery={transactionsQuery}
           localReceipts={localReceipts}
           tokenLogos={tokenLogoMap}
           onTransactionPress={handleTransactionPress}
         />
-      </StaggerRevealItem>
+      </View>
       <TransactionDetailsSheet
         transaction={selectedTransaction}
         tokenLogos={tokenLogoMap}

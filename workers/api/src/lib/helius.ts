@@ -67,11 +67,11 @@ const WALLET_TRANSACTION_SCAN_BUDGET_MS = 2_500;
 // collecting displayable (or mint-matching) rows until the requested count is
 // reached or a budget is hit; the response cursor lets the client continue.
 const INDEXED_TRANSACTION_PAGE_SIZE = 100;
-// First-page scan ceiling for token-specific history. Native SOL has no
-// server-side mint filter (it is not a token transfer), so matching rows can be
-// sparse and we allow a few indexed pages; older rows load on demand via the
-// cursor. SPL mints are filtered server-side and fill far sooner.
+// First-page scan ceiling for token-specific history. Token Details uses the
+// wallet-wide balanceChanged indexed feed and local mint matching so it stays
+// consistent with canonical History; older rows load on demand via the cursor.
 const MAX_INDEXED_TOKEN_TRANSACTION_SCAN = 500;
+const INDEXED_TOKEN_CURSOR_PREFIX = 'offpay-itx-v1:';
 const DEFAULT_STREAM_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_STREAM_WEBSOCKET_FALLBACK_POLL_INTERVAL_MS = 45_000;
 const DEFAULT_STREAM_ACTIVITY_LIMIT = 10;
@@ -3762,6 +3762,52 @@ interface IndexedTransactionPage {
   paginationToken: string | null;
 }
 
+interface IndexedTokenCursor {
+  pageToken: string | null;
+  offset: number;
+}
+
+function parseIndexedTokenCursor(cursor: string | null): IndexedTokenCursor {
+  if (cursor == null || !cursor.startsWith(INDEXED_TOKEN_CURSOR_PREFIX)) {
+    return {
+      pageToken: cursor,
+      offset: 0,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(cursor.slice(INDEXED_TOKEN_CURSOR_PREFIX.length)));
+    const pageToken =
+      typeof parsed?.pageToken === 'string' && parsed.pageToken.trim().length > 0
+        ? parsed.pageToken.trim()
+        : null;
+    const offset =
+      typeof parsed?.offset === 'number' && Number.isInteger(parsed.offset) && parsed.offset > 0
+        ? parsed.offset
+        : 0;
+
+    return {
+      pageToken,
+      offset,
+    };
+  } catch {
+    return {
+      pageToken: cursor,
+      offset: 0,
+    };
+  }
+}
+
+function buildIndexedTokenCursor(pageToken: string | null, offset: number): string | null {
+  if (pageToken == null && offset <= 0) return null;
+  return `${INDEXED_TOKEN_CURSOR_PREFIX}${encodeURIComponent(
+    JSON.stringify({
+      pageToken,
+      offset: Math.max(0, offset),
+    }),
+  )}`;
+}
+
 /**
  * Fetch and parse a single page of Helius `getTransactionsForAddress`
  * (transactionDetails: 'full'). This is the indexed replacement for
@@ -3906,6 +3952,85 @@ async function collectIndexedWalletTransactions(params: {
       break;
     }
     pageToken = nextCursor;
+  }
+
+  return buildWalletTransactionsResponse({
+    address,
+    network,
+    transactions: collected,
+    cursor: nextCursor,
+  });
+}
+
+async function collectIndexedWalletTokenTransactions(params: {
+  bindings: Bindings;
+  network: Network;
+  address: string;
+  cursor: string | null;
+  limit: number;
+  maxScan: number;
+  matches: (transaction: WalletTransactionRecord) => boolean;
+}): Promise<WalletTransactionsResponse> {
+  const { bindings, network, address, limit, maxScan, matches } = params;
+  const scanStartedAt = Date.now();
+  const collected: WalletTransactionRecord[] = [];
+  const parsedCursor = parseIndexedTokenCursor(params.cursor);
+  let pageToken = parsedCursor.pageToken;
+  let pageOffset = parsedCursor.offset;
+  let nextCursor: string | null = null;
+  let scannedTransactions = 0;
+  let pages = 0;
+
+  while (collected.length < limit && scannedTransactions < maxScan) {
+    if (pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
+      nextCursor = buildIndexedTokenCursor(pageToken, pageOffset);
+      break;
+    }
+
+    const pageLimit = Math.min(INDEXED_TRANSACTION_PAGE_SIZE, maxScan - scannedTransactions);
+    const page = await fetchIndexedTransactionsPage(
+      bindings,
+      network,
+      address,
+      pageToken,
+      pageLimit,
+      null,
+    );
+    pages += 1;
+    scannedTransactions += page.rawCount;
+
+    const records = page.records;
+    const startIndex = Math.min(pageOffset, records.length);
+    let reachedLimit = false;
+
+    for (let index = startIndex; index < records.length; index += 1) {
+      const transaction = records[index]!;
+      if (matches(transaction)) {
+        collected.push(transaction);
+      }
+
+      if (collected.length >= limit) {
+        const nextOffset = index + 1;
+        nextCursor =
+          nextOffset < records.length
+            ? buildIndexedTokenCursor(pageToken, nextOffset)
+            : page.paginationToken;
+        reachedLimit = true;
+        break;
+      }
+    }
+
+    if (reachedLimit) {
+      break;
+    }
+
+    pageToken = page.paginationToken;
+    pageOffset = 0;
+    nextCursor = pageToken;
+    if (page.rawCount === 0 || pageToken === null) {
+      nextCursor = null;
+      break;
+    }
   }
 
   return buildWalletTransactionsResponse({
@@ -5030,29 +5155,21 @@ async function fetchWalletTokenTransactionsViaIndexedApi(
   recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
   const normalizedMint = normalizeTokenTransactionMint(mint);
-  // SPL mints are filtered server-side via filters.tokenTransfer.mint, which
-  // fills the requested limit in (usually) a single page. Native SOL is not a
-  // token transfer, so it has no server-side filter and is matched locally
-  // while paging.
-  const tokenTransferMint = normalizedMint === SOL_MINT ? null : normalizedMint;
-  // When the server already filtered by mint, only require displayability — re-
-  // checking the collapsed primary token would drop swaps where the queried
-  // mint is the non-primary leg. SOL (no server filter) is matched locally.
-  const matches =
-    tokenTransferMint != null
-      ? isDisplayableWalletTransactionRecord
-      : (transaction: WalletTransactionRecord): boolean =>
-          walletTransactionMatchesMint(transaction, normalizedMint) &&
-          isDisplayableWalletTransactionRecord(transaction);
+  // Token Details must match the canonical History screen. Helius'
+  // tokenTransfer.mint filter is narrower than wallet balance changes and can
+  // miss swap/balance-change rows that broad history later resolves. Pull the
+  // same wallet-wide balanceChanged feed as History and filter locally.
+  const matches = (transaction: WalletTransactionRecord): boolean =>
+    walletTransactionMatchesMint(transaction, normalizedMint) &&
+    isDisplayableWalletTransactionRecord(transaction);
   const startedAt = Date.now();
-  const response = await collectIndexedWalletTransactions({
+  const response = await collectIndexedWalletTokenTransactions({
     bindings,
     network,
     address,
     cursor,
     limit,
     maxScan: MAX_INDEXED_TOKEN_TRANSACTION_SCAN,
-    tokenTransferMint,
     matches,
   });
   recordTiming?.('ittx_ms', Date.now() - startedAt);
@@ -5464,11 +5581,11 @@ async function getWalletTokenTransactions(
   bindings: Bindings,
   request: WalletTokenTransactionsRequest,
 ): Promise<WalletTransactionsResponse> {
-  const normalizedLimit = Math.min(50, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
+  const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const normalizedMint = normalizeTokenTransactionMint(request.mint.trim());
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-token-transactions-v4-indexed', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-token-transactions-v5-indexed', [
     request.address,
     normalizedMint,
     normalizedCursor ?? 'first-page',
@@ -5547,7 +5664,7 @@ async function getWalletTokenTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-token-transactions-v4-indexed',
+          namespace: 'wallet-token-transactions-v5-indexed',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,

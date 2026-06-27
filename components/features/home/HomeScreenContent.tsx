@@ -9,7 +9,7 @@
  *
  * Uses OffPay backend wallet and activity surfaces.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -25,9 +25,9 @@ import { OfflineSlotsPromptModal } from '@/components/features/home/OfflineSlots
 import { RecentActivityCard } from '@/components/features/home/RecentActivityCard';
 import { TokenHoldingsCard } from '@/components/features/home/TokenHoldingsCard';
 import { TransactionDetailsSheet } from '@/components/features/history/TransactionDetailsSheet';
+import { UmbraVaultContent } from '@/components/features/umbra-vault/umbra-vault-screen';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
-import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { colors } from '@/constants/colors';
 import { OFFLINE_PAYMENT_SLOT_DEFAULT } from '@/constants/offline-payment-slots';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -76,38 +76,6 @@ import type { OffpayRecentActivityView } from '@/lib/api/offpay-wallet-data';
 import type { ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import type { WalletMode } from '@/store/preferencesStore';
 
-// Lazy-load the Umbra vault surface so the heavy `@umbra-privacy/sdk`
-// graph stays out of the cold-start bundle. Do not auto-prefetch this
-// chunk on Home mount: in development it pulls in ~2k modules and can
-// stall reload / navigation. We only warm it when the user presses the
-// Shielded segment.
-type UmbraVaultContentModule = {
-  default: typeof import('@/components/features/umbra-vault/umbra-vault-screen').UmbraVaultContent;
-};
-
-let umbraVaultContentImportPromise: Promise<UmbraVaultContentModule> | null = null;
-function loadUmbraVaultContent(reason: 'press-in' | 'render'): Promise<UmbraVaultContentModule> {
-  if (umbraVaultContentImportPromise != null) return umbraVaultContentImportPromise;
-  const startedAt = mark();
-  umbraVaultContentImportPromise = import('@/components/features/umbra-vault/umbra-vault-screen')
-    .then((module) => {
-      return {
-        default: module.UmbraVaultContent,
-      };
-    })
-    .finally(() => {
-      measure('home.umbraVault.import', startedAt, { reason });
-    });
-
-  return umbraVaultContentImportPromise;
-}
-
-function prefetchUmbraVaultContent(reason: 'press-in' | 'render'): void {
-  void loadUmbraVaultContent(reason);
-}
-
-const UmbraVaultContent = lazy(() => loadUmbraVaultContent('render'));
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -118,9 +86,6 @@ const EMPTY_DISABLED_ACTION_IDS: readonly string[] = [];
 const OFFLINE_DISABLED_ACTION_IDS: readonly string[] = ['swap'];
 const HOME_REFRESH_SPINNER_MIN_MS = 360;
 const EMPTY_TOKEN_VALUATIONS: Readonly<Record<string, TokenValuationView>> = {};
-
-const SHIELDED_SKELETON_TOKEN_ROWS = ['usdc', 'usdt', 'wsol', 'umbra'] as const;
-const SHIELDED_SKELETON_CHIPS = ['shield', 'withdraw', 'token-a', 'token-b'] as const;
 
 interface HomeBalanceModeState {
   scopeKey: string;
@@ -166,62 +131,6 @@ function buildOfflineSlotsLabel(params: {
   return params.snapshotLoaded ? 'Setup needed' : 'Checking slots';
 }
 
-function ShieldedVaultSkeleton(): React.JSX.Element {
-  return (
-    <View
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={styles.shieldedSkeleton}
-    >
-      <View style={styles.shieldedSkeletonCard}>
-        <View style={styles.shieldedSkeletonHeader}>
-          <SkeletonBlock width="46%" height={24} radius={radii.sm} />
-          <SkeletonBlock width={86} height={34} radius={radii.full} />
-        </View>
-        <View style={styles.shieldedSkeletonValueBlock}>
-          <SkeletonBlock width="42%" height={50} radius={radii.sm} />
-          <SkeletonBlock width={82} height={16} radius={radii.xs} />
-        </View>
-        <View style={styles.shieldedSkeletonTokenGrid}>
-          {SHIELDED_SKELETON_TOKEN_ROWS.map((row) => (
-            <View key={row} style={styles.shieldedSkeletonTokenRow}>
-              <SkeletonBlock width={34} height={34} radius={radii.full} />
-              <View style={styles.shieldedSkeletonTokenText}>
-                <SkeletonBlock width="58%" height={18} radius={radii.xs} />
-                <SkeletonBlock width="72%" height={14} radius={radii.xs} />
-              </View>
-            </View>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.shieldedSkeletonCard}>
-        <View style={styles.shieldedSkeletonMoveHeader}>
-          <SkeletonBlock width="34%" height={24} radius={radii.sm} />
-          <SkeletonBlock width="40%" height={16} radius={radii.xs} />
-        </View>
-        <SkeletonBlock width="100%" height={50} radius={radii.full} />
-        <View style={styles.shieldedSkeletonChipRow}>
-          {SHIELDED_SKELETON_CHIPS.map((chip) => (
-            <View key={chip} style={styles.shieldedSkeletonChip}>
-              <SkeletonBlock width="100%" height={38} radius={radii.full} />
-            </View>
-          ))}
-        </View>
-        <View style={styles.shieldedSkeletonFormRow}>
-          <View style={styles.shieldedSkeletonInput}>
-            <SkeletonBlock width="100%" height={48} radius={radii.full} />
-          </View>
-          <View style={styles.shieldedSkeletonSubmit}>
-            <SkeletonBlock width="100%" height={48} radius={radii.full} />
-          </View>
-        </View>
-      </View>
-    </View>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -257,7 +166,6 @@ export function HomeScreenContent(): React.JSX.Element {
   );
   const slotPromptAutoShownRef = useRef<string | null>(null);
   const slotPrepareShouldEnterOfflineRef = useRef(false);
-  const umbraVaultPrefetchRef = useRef<ScheduledUiWork | null>(null);
   const previousSlotStatusRef = useRef<{
     key: string | null;
     readySlots: number;
@@ -312,6 +220,7 @@ export function HomeScreenContent(): React.JSX.Element {
   });
   const transactionsQuery = useOffpayWalletTransactions({
     enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
+    eagerWithoutCapabilities: true,
     limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     waitForDashboard: false,
     refetchOnMount: 'always',
@@ -429,8 +338,6 @@ export function HomeScreenContent(): React.JSX.Element {
     () => () => {
       walletModeCommitRef.current?.cancel();
       walletModeCommitRef.current = null;
-      umbraVaultPrefetchRef.current?.cancel();
-      umbraVaultPrefetchRef.current = null;
     },
     [],
   );
@@ -554,7 +461,12 @@ export function HomeScreenContent(): React.JSX.Element {
     !transactionsQuery.isError &&
     (criticalSnapshotPending ||
       activityWarmingUp ||
+      !homeSnapshot.foregroundFetchEnabled ||
+      transactionsQuery.isCapabilitiesPending ||
       transactionsQuery.isInitialDataPending ||
+      transactionsQuery.isLoading ||
+      transactionsQuery.isFetching ||
+      transactionsQuery.isRefetching ||
       (homeSnapshot.foregroundFetchEnabled &&
         transactionsQuery.isCapabilityEnabled &&
         !transactionsQuery.isFetched &&
@@ -613,21 +525,6 @@ export function HomeScreenContent(): React.JSX.Element {
     router.prefetch('/(tabs)/history' as never);
   }, [balanceQuery.data, router]);
 
-  const handlePrefetchUmbraVaultContent = useCallback((): void => {
-    if (umbraVaultContentImportPromise != null) return;
-    umbraVaultPrefetchRef.current?.cancel();
-    umbraVaultPrefetchRef.current = scheduleUiWorkAfterFirstPaint(
-      () => {
-        prefetchUmbraVaultContent('press-in');
-        umbraVaultPrefetchRef.current = null;
-      },
-      {
-        timeoutMs: 700,
-        fallbackDelayMs: 80,
-      },
-    );
-  }, []);
-
   const handleChangeHomeBalanceMode = useCallback(
     (mode: HomeBalanceMode): void => {
       setHomeBalanceModeState((current) => {
@@ -643,15 +540,6 @@ export function HomeScreenContent(): React.JSX.Element {
     },
     [homeBalanceModeScopeKey],
   );
-
-  // Warm the Umbra vault chunk the moment the user switches to the
-  // Shielded segment. Kept in an effect (not inline in render) so the
-  // dynamic `import()` side effect never runs during the render pass.
-  useEffect(() => {
-    if (homeBalanceMode === 'shielded') {
-      prefetchUmbraVaultContent('render');
-    }
-  }, [homeBalanceMode]);
 
   const handleToggleOffline = useCallback((newOfflineState: boolean) => {
     const context = offlineToggleContextRef.current;
@@ -1174,7 +1062,6 @@ export function HomeScreenContent(): React.JSX.Element {
             selectedMode={homeBalanceMode}
             onChangeMode={handleChangeHomeBalanceMode}
             loading={isNetworkSwitching}
-            onShieldedPressIn={handlePrefetchUmbraVaultContent}
           />
         </View>
 
@@ -1189,9 +1076,7 @@ export function HomeScreenContent(): React.JSX.Element {
             accessibilityElementsHidden={!shieldedPaneActive}
             importantForAccessibility={shieldedPaneActive ? 'auto' : 'no-hide-descendants'}
           >
-            <Suspense fallback={<ShieldedVaultSkeleton />}>
-              <UmbraVaultContent showHeader={false} tokenLogoMap={tokenLogoMap} />
-            </Suspense>
+            <UmbraVaultContent showHeader={false} tokenLogoMap={tokenLogoMap} />
           </View>
         ) : null}
 
@@ -1328,91 +1213,5 @@ const styles = StyleSheet.create({
   },
   shieldedSection: {
     paddingBottom: spacing.md,
-  },
-  shieldedSkeleton: {
-    width: '100%',
-    gap: spacing.lg,
-  },
-  shieldedSkeletonCard: {
-    width: '100%',
-    borderRadius: radii['2xl'],
-    borderCurve: 'continuous',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.surface.cardElevated,
-    padding: spacing.lg,
-    gap: spacing.md,
-    overflow: 'hidden',
-    boxShadow: [
-      'inset 0 1px 1px rgba(255, 255, 255, 0.12)',
-      'inset 0 0 16px rgba(255, 255, 255, 0.03)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.3)',
-      '0 8px 20px rgba(0, 0, 0, 0.3)',
-    ].join(', '),
-  },
-  shieldedSkeletonHeader: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  shieldedSkeletonValueBlock: {
-    gap: spacing.xs,
-  },
-  shieldedSkeletonTokenGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  shieldedSkeletonTokenRow: {
-    minHeight: 52,
-    borderRadius: radii.lg,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.clearFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    padding: spacing.sm,
-    flexBasis: '48%',
-    flexGrow: 1,
-    minWidth: 128,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  shieldedSkeletonTokenText: {
-    flex: 1,
-    minWidth: 0,
-    gap: spacing.xs,
-  },
-  shieldedSkeletonMoveHeader: {
-    gap: spacing.xs,
-  },
-  shieldedSkeletonChipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  shieldedSkeletonChip: {
-    flex: 1,
-    minWidth: 64,
-  },
-  shieldedSkeletonFormRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  shieldedSkeletonInput: {
-    flex: 1,
-    minWidth: 0,
-  },
-  shieldedSkeletonSubmit: {
-    width: 124,
   },
 });

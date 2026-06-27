@@ -1322,7 +1322,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.cursor).not.toBeNull();
   });
 
-  it('filters SPL token history server-side via getTransactionsForAddress tokenTransfer.mint', async () => {
+  it('matches SPL token history locally from wallet-wide indexed history', async () => {
     const tokenItem = (signature: string, blockTime: number, rawAmount: string) => ({
       slot: 1000,
       transactionIndex: 0,
@@ -1381,13 +1381,100 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       useCache: false,
     });
 
-    // Helius filtered server-side to the two SPL transactions; the SOL noise is
-    // excluded before it ever reaches the client.
+    // Token Details uses the same wallet-wide balanceChanged feed as canonical
+    // History, then filters locally so swap/balance-change rows are not lost to
+    // a narrower provider-side tokenTransfer filter.
     expect(response.transactions).toHaveLength(2);
     expect(response.transactions.every((t) => t.tokenMint === OTHER_TOKEN_MINT)).toBe(true);
-    expect((configs[0]?.filters as Record<string, unknown>)?.tokenTransfer).toMatchObject({
-      mint: OTHER_TOKEN_MINT,
+    expect((configs[0]?.filters as Record<string, unknown>)?.tokenTransfer).toBeUndefined();
+  });
+
+  it('paginates SPL token history through one indexed provider page without dropping rows', async () => {
+    const tokenItem = (signature: string, blockTime: number, rawAmount: string) => ({
+      slot: 1000,
+      transactionIndex: 0,
+      blockTime,
+      transaction: {
+        signatures: [signature],
+        message: { accountKeys: [{ pubkey: WALLET }], instructions: [] },
+      },
+      meta: {
+        err: null,
+        fee: 5000,
+        preBalances: [1_000_000_000],
+        postBalances: [999_995_000],
+        preTokenBalances: [
+          {
+            owner: WALLET,
+            accountIndex: 0,
+            mint: OTHER_TOKEN_MINT,
+            uiTokenAmount: { amount: '0', decimals: 6 },
+          },
+        ],
+        postTokenBalances: [
+          {
+            owner: WALLET,
+            accountIndex: 0,
+            mint: OTHER_TOKEN_MINT,
+            uiTokenAmount: { amount: rawAmount, decimals: 6 },
+          },
+        ],
+      },
     });
+    const items = Array.from({ length: 30 }, (_, index) =>
+      tokenItem(
+        `${SIGNATURE}p${String(index).padStart(3, '0')}`,
+        1781800000 - index,
+        String((index + 1) * 1_000_000),
+      ),
+    );
+    const configs: Record<string, unknown>[] = [];
+    const fetchMock = createGetTransactionsForAddressMock(items, {
+      onConfig: (config) => configs.push(config),
+      assets: [
+        {
+          id: OTHER_TOKEN_MINT,
+          content: { metadata: { name: 'Bonk', symbol: 'BONK' } },
+          token_info: { symbol: 'BONK', decimals: 6 },
+        },
+      ],
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const firstPage = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      mint: OTHER_TOKEN_MINT,
+      limit: 8,
+      useCache: false,
+    });
+    const secondPage = await getWalletTokenTransactions(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      mint: OTHER_TOKEN_MINT,
+      cursor: firstPage.cursor ?? undefined,
+      limit: 8,
+      useCache: false,
+    });
+
+    expect(firstPage.transactions).toHaveLength(8);
+    expect(secondPage.transactions).toHaveLength(8);
+    expect(firstPage.cursor).toMatch(/^offpay-itx-v1:/);
+    expect(secondPage.cursor).toMatch(/^offpay-itx-v1:/);
+    const itemSignature = (item: Record<string, unknown>): string => {
+      const transaction = item.transaction as { signatures: string[] };
+      return transaction.signatures[0]!;
+    };
+    expect(firstPage.transactions.map((transaction) => transaction.signature)).toEqual(
+      items.slice(0, 8).map(itemSignature),
+    );
+    expect(secondPage.transactions.map((transaction) => transaction.signature)).toEqual(
+      items.slice(8, 16).map(itemSignature),
+    );
+    expect(
+      configs.every((config) => (config.filters as Record<string, unknown>)?.tokenTransfer == null),
+    ).toBe(true);
   });
 
   it('keeps SOL swaps in broad wallet history (previously dropped by the null-direction gate)', async () => {

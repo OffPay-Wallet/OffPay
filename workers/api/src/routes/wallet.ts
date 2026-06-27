@@ -45,7 +45,7 @@ const walletTokenTransactionsQuerySchema = z.object({
   network: networkSchema,
   mint: z.string().min(1),
   cursor: z.string().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(50).optional().default(12),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(12),
   useCache: booleanQuerySchema,
 });
 
@@ -54,6 +54,7 @@ const walletDashboardQuerySchema = z.object({
   network: networkSchema,
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   useCache: booleanQuerySchema,
+  includeTransactions: booleanQuerySchema.default('true'),
 });
 
 function assertWalletAddress(value: string, message: string): void {
@@ -84,6 +85,15 @@ walletRoutes.get('/dashboard', async (context) => {
 
   const resolveDashboard = async () => {
     const recordTiming = makeTimingRecorder(context);
+    const emptyTransactions = {
+      address: query.address,
+      network: query.network,
+      transactions: [],
+      displayTransactions: [],
+      historyGroups: [],
+      cursor: null,
+      fetchedAt: Date.now(),
+    };
     const [capabilities, streamCapabilities, balance, transactions] = await Promise.all([
       getCapabilities(context.env, query.network),
       getStreamCapabilities(context.env, query.network),
@@ -93,14 +103,16 @@ walletRoutes.get('/dashboard', async (context) => {
         useCache: query.useCache ?? true,
         recordTiming,
       }),
-      getWalletTransactions(context.env, {
-        address: query.address,
-        network: query.network,
-        cursor: null,
-        limit: query.limit,
-        useCache: query.useCache ?? true,
-        recordTiming,
-      }),
+      query.includeTransactions
+        ? getWalletTransactions(context.env, {
+            address: query.address,
+            network: query.network,
+            cursor: null,
+            limit: query.limit,
+            useCache: query.useCache ?? true,
+            recordTiming,
+          })
+        : Promise.resolve(emptyTransactions),
     ]);
 
     return {
@@ -110,6 +122,7 @@ walletRoutes.get('/dashboard', async (context) => {
       streamCapabilities,
       balance,
       transactions,
+      transactionsIncluded: query.includeTransactions,
       fetchedAt: Date.now(),
     };
   };
@@ -120,7 +133,7 @@ walletRoutes.get('/dashboard', async (context) => {
       : await getOrSetEdgeJsonCache({
           context,
           namespace: 'wallet_dashboard_v4_display_history',
-          keyParts: [query.network, query.address, query.limit],
+          keyParts: [query.network, query.address, query.limit, query.includeTransactions],
           freshTtlMs: WALLET_DASHBOARD_EDGE_FRESH_TTL_MS,
           staleTtlMs: WALLET_DASHBOARD_EDGE_STALE_TTL_MS,
           resolver: resolveDashboard,
@@ -220,7 +233,7 @@ walletRoutes.get('/token-transactions', async (context) => {
   const payload = canUseEdgeCache
     ? await getOrSetEdgeJsonCache({
         context,
-        namespace: 'wallet_token_transactions_first_page_v3_display_rpc',
+        namespace: 'wallet_token_transactions_first_page_v4_indexed_local_filter',
         keyParts: [query.network, query.address, query.mint, query.limit],
         freshTtlMs: WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS,
         staleTtlMs: WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS,

@@ -1,4 +1,5 @@
 import {
+  shouldEnableHomeForegroundFetch,
   shouldOpenHomeSnapshotFallbackGate,
   shouldWaitForDashboardData,
 } from '@/lib/api/offpay-home-loading-gates';
@@ -116,5 +117,29 @@ describe('OffPay home loading gates', () => {
         dashboardFetching: true,
       }),
     ).toBe(true);
+  });
+
+  it('enables foreground fetches once the live dashboard response has landed', () => {
+    expect(
+      shouldEnableHomeForegroundFetch({
+        canCoordinate: true,
+        canUseNetwork: true,
+        isNetworkAccessSuspended: false,
+        fallbackGateOpen: false,
+        hasDashboardData: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps foreground fetches closed before dashboard data or fallback gate', () => {
+    expect(
+      shouldEnableHomeForegroundFetch({
+        canCoordinate: true,
+        canUseNetwork: true,
+        isNetworkAccessSuspended: false,
+        fallbackGateOpen: false,
+        hasDashboardData: false,
+      }),
+    ).toBe(false);
   });
 });

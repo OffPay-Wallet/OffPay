@@ -12,7 +12,7 @@ import type { PersistedClient } from '@tanstack/react-query-persist-client';
  * cause TanStack to discard any persisted cache from older builds.
  * Bump it whenever a query's response shape changes.
  */
-const APP_QUERY_CACHE_VERSION = 'v4';
+const APP_QUERY_CACHE_VERSION = 'v5';
 
 /** 24 hours of cached query data is plenty for a wallet UI. */
 const QUERY_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
@@ -23,6 +23,9 @@ const QUERY_CACHE_KEY = 'offpay-tanstack-query-cache';
 const QUERY_CACHE_WRITE_THROTTLE_MS = 1000;
 
 const VOLATILE_WALLET_QUERY_SCOPES = new Set([
+  'walletDashboard',
+  'walletTransactions',
+  'walletTokenTransactions',
   'walletBalance',
   'umbraEncryptedBalances',
   'umbraVaultRegistrationStatus',

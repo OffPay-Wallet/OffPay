@@ -90,6 +90,9 @@ describe('hydrateOffpayWalletDashboard', () => {
       expect(queryClient.getQueryData(offpayWalletDashboardQueryKey(WALLET, 'devnet', 20))).toBe(
         dashboard,
       );
+      expect(
+        queryClient.getQueryData(offpayWalletDashboardQueryKey(WALLET, 'devnet', 20, false)),
+      ).toBeUndefined();
       expect(queryClient.getQueryData(offpayCapabilitiesCacheKey('devnet'))).toBe(
         dashboard.capabilities,
       );
@@ -196,6 +199,40 @@ describe('hydrateOffpayWalletDashboard', () => {
           offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20, 'network'),
         )?.pages[0],
       ).toEqual(dashboard.transactions);
+    } finally {
+      queryClient.clear();
+    }
+  });
+
+  it('skips transaction query hydration when dashboard omitted transactions', () => {
+    const queryClient = new QueryClient();
+    try {
+      const dashboard: WalletDashboardResponse = {
+        ...createDashboard(),
+        transactionsIncluded: false,
+      };
+
+      hydrateOffpayWalletDashboard({ queryClient, dashboard, limit: 20 });
+
+      expect(
+        queryClient.getQueryData(offpayWalletDashboardQueryKey(WALLET, 'devnet', 20, false)),
+      ).toBe(dashboard);
+      expect(queryClient.getQueryData(offpayWalletDashboardQueryKey(WALLET, 'devnet', 20))).toBe(
+        undefined,
+      );
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20),
+        ),
+      ).toBeUndefined();
+      expect(
+        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
+          offpayWalletTransactionsQueryKey(WALLET, 'devnet', 20, 'network'),
+        ),
+      ).toBeUndefined();
+      expect(queryClient.getQueryData(offpayWalletBalanceQueryKey(WALLET, 'devnet'))).toBe(
+        dashboard.balance,
+      );
     } finally {
       queryClient.clear();
     }

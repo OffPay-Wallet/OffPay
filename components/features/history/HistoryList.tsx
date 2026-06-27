@@ -250,21 +250,29 @@ export function HistoryList({
   const getItemType = useCallback((item: HistoryRow) => item.kind, []);
   const keyExtractor = useCallback((item: HistoryRow) => item.key, []);
 
-  const handleEndReached = useCallback(() => {
+  const loadMoreDisabled =
+    !transactionsQuery.isCapabilityEnabled ||
+    !transactionsQuery.hasNextPage ||
+    transactionsQuery.isFetching ||
+    transactionsQuery.isFetchingNextPage;
+  const showLoadMoreFooter = transactionsQuery.isCapabilityEnabled && transactionsQuery.hasNextPage;
+
+  const handleLoadMorePress = useCallback(() => {
     if (
-      transactionsQuery.isCapabilityEnabled &&
-      transactionsQuery.hasNextPage &&
-      !transactionsQuery.isFetchingNextPage
+      !transactionsQuery.isCapabilityEnabled ||
+      !transactionsQuery.hasNextPage ||
+      transactionsQuery.isFetching ||
+      transactionsQuery.isFetchingNextPage
     ) {
-      void transactionsQuery.fetchNextPage({ requestOwnerSuffix: 'scrollPage' });
+      return;
     }
-    // Depending on the stable inner accessors instead of the wrapper
-    // object keeps this callback memoised across renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    void transactionsQuery.fetchNextPage({ requestOwnerSuffix: 'buttonPage' });
   }, [
     transactionsQuery.fetchNextPage,
     transactionsQuery.hasNextPage,
     transactionsQuery.isCapabilityEnabled,
+    transactionsQuery.isFetching,
     transactionsQuery.isFetchingNextPage,
   ]);
 
@@ -310,26 +318,29 @@ export function HistoryList({
   );
 
   const ListFooter = useMemo(() => {
-    if (transactionsQuery.isFetchingNextPage) {
-      return (
-        <View style={[styles.contentFrame, styles.paginationSpinner, { width: contentFrameWidth }]}>
-          <LazyLoadingSpinner size={22} color={colors.text.secondary} />
-        </View>
-      );
-    }
-    if (!transactionsQuery.hasNextPage) return null;
+    if (!showLoadMoreFooter) return null;
+
     return (
       <View style={[styles.contentFrame, { width: contentFrameWidth }]}>
         <Pressable
-          style={({ pressed }) => [styles.loadMoreButton, pressed && styles.loadMoreButtonPressed]}
-          onPress={() => {
-            if (!transactionsQuery.isCapabilityEnabled) return;
-            void transactionsQuery.fetchNextPage({ requestOwnerSuffix: 'buttonPage' });
-          }}
+          style={({ pressed }) => [
+            styles.loadMoreButton,
+            loadMoreDisabled && styles.loadMoreButtonDisabled,
+            pressed && !loadMoreDisabled && styles.loadMoreButtonPressed,
+          ]}
+          onPress={handleLoadMorePress}
+          disabled={loadMoreDisabled}
           accessibilityRole="button"
           accessibilityLabel="Load more transactions"
+          accessibilityState={{
+            busy: transactionsQuery.isFetchingNextPage,
+            disabled: loadMoreDisabled,
+          }}
         >
           <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.loadMoreGlass]}>
+            {transactionsQuery.isFetchingNextPage ? (
+              <LazyLoadingSpinner size={18} color={colors.semantic.info} />
+            ) : null}
             <Text
               variant="captionBold"
               color={colors.semantic.info}
@@ -337,7 +348,7 @@ export function HistoryList({
               numberOfLines={1}
               maxFontSizeMultiplier={1}
             >
-              Load more
+              {transactionsQuery.isFetchingNextPage ? 'Loading' : 'Load more'}
             </Text>
           </View>
         </Pressable>
@@ -349,9 +360,9 @@ export function HistoryList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     contentFrameWidth,
-    transactionsQuery.fetchNextPage,
-    transactionsQuery.hasNextPage,
-    transactionsQuery.isCapabilityEnabled,
+    handleLoadMorePress,
+    loadMoreDisabled,
+    showLoadMoreFooter,
     transactionsQuery.isFetchingNextPage,
   ]);
 
@@ -363,8 +374,6 @@ export function HistoryList({
       getItemType={getItemType}
       ListEmptyComponent={ListEmpty}
       ListFooterComponent={ListFooter}
-      onEndReached={handleEndReached}
-      onEndReachedThreshold={0.4}
       contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
       contentContainerStyle={[
@@ -499,12 +508,17 @@ const styles = StyleSheet.create({
   loadMoreButtonPressed: {
     opacity: 0.74,
   },
+  loadMoreButtonDisabled: {
+    opacity: 0.82,
+  },
   loadMoreGlass: {
     minHeight: layout.minTouchTarget,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xl,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   loadMoreText: {
     fontFamily: fontFamily.uiSemiBold,

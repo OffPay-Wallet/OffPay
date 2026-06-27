@@ -998,6 +998,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsQuery.isFetching;
   const tokenActivityPaginationPending =
     tokenActivity.length > 0 && tokenTransactionsQuery.isFetchingNextPage;
+  const tokenActivityCanLoadMore =
+    tokenActivity.length > 0 &&
+    tokenTransactionsQuery.isCapabilityEnabled &&
+    tokenTransactionsQuery.hasNextPage;
   const tokenActivityLoading =
     tokenActivity.length === 0 &&
     (walletHistoryQuery.isInitialDataPending ||
@@ -1125,6 +1129,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
     [maybeRequestNextTokenActivityPage],
   );
 
+  const handleLoadMoreTokenActivity = useCallback((): void => {
+    requestNextTokenActivityPage('buttonPage');
+  }, [requestNextTokenActivityPage]);
+
   const handleTokenDetailsLayout = useCallback(
     (event: LayoutChangeEvent): void => {
       tokenActivityScrollMetricsRef.current.layoutHeight = event.nativeEvent.layout.height;
@@ -1166,6 +1174,8 @@ export function TokenDetailsScreen(): React.JSX.Element {
         removeClippedSubviews={Platform.OS === 'android'}
         onLayout={handleTokenDetailsLayout}
         onScroll={handleTokenDetailsScroll}
+        onScrollEndDrag={handleTokenDetailsScroll}
+        onMomentumScrollEnd={handleTokenDetailsScroll}
         onContentSizeChange={handleTokenDetailsContentSizeChange}
         scrollEventThrottle={16}
         contentContainerStyle={[
@@ -1278,6 +1288,26 @@ export function TokenDetailsScreen(): React.JSX.Element {
                     <View style={styles.activityPaginationSpinner}>
                       <LazyLoadingSpinner size={22} color={colors.text.secondary} />
                     </View>
+                  ) : tokenActivityCanLoadMore ? (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.activityLoadMoreButton,
+                        pressed ? styles.controlPressed : null,
+                      ]}
+                      onPress={handleLoadMoreTokenActivity}
+                      accessibilityRole="button"
+                      accessibilityLabel="Load more token activity"
+                    >
+                      <Text
+                        variant="captionBold"
+                        color={colors.semantic.info}
+                        style={styles.activityLoadMoreText}
+                        numberOfLines={1}
+                        maxFontSizeMultiplier={1}
+                      >
+                        Load more
+                      </Text>
+                    </Pressable>
                   ) : null}
                 </View>
               ) : (
@@ -1552,6 +1582,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: spacing.xs,
     paddingBottom: spacing.md,
+  },
+  activityLoadMoreButton: {
+    alignSelf: 'center',
+    minHeight: layout.minTouchTarget,
+    minWidth: 128,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    backgroundColor: colors.surface.cardElevated,
+    boxShadow: TOKEN_DETAIL_CONTROL_SHADOW,
+  },
+  activityLoadMoreText: {
+    fontFamily: fontFamily.uiSemiBold,
   },
   actionsRow: {
     flexDirection: 'row',

@@ -101,6 +101,7 @@ export async function runOffpayLaunchSequence(
     walletAddress,
     network,
     useCache: false,
+    includeTransactions: false,
     requestOwner: 'launch.dashboard',
   })
     .then((dashboard) => {

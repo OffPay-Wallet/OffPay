@@ -19,27 +19,27 @@ import type { StyleProp, ViewStyle } from 'react-native';
 /** Opacity "breathing" cycle applied to the base block. */
 const SKELETON_PULSE_MS = 1100;
 /** Duration of a single light-sweep pass across a block. */
-const SKELETON_SWEEP_MS = 1300;
-/** Width of the moving highlight band, in px. */
-const SKELETON_SWEEP_BAND = 150;
+const SKELETON_SWEEP_MS = 1050;
+/** Wide shimmer track mirrors the skeleton loaders used by apps like X and Reddit. */
+const SKELETON_SWEEP_TRACK_WIDTH = '240%' as const;
+const SKELETON_SWEEP_START_OFFSET = -1.5;
+const SKELETON_SWEEP_END_OFFSET = 0.15;
 
 /**
- * Soft, centered white core that fades to transparent at both edges so the
- * sweep reads as a smooth light pass instead of a hard bar.
+ * Strong centered core with soft shoulders. The outer stops are transparent
+ * so the base skeleton remains visible between passes.
  */
 const SWEEP_COLORS = [
   'rgba(255, 255, 255, 0)',
-  'rgba(255, 255, 255, 0.08)',
-  'rgba(255, 255, 255, 0.5)',
-  'rgba(255, 255, 255, 0.08)',
+  'rgba(247, 247, 242, 0.18)',
+  'rgba(247, 247, 242, 0.92)',
+  'rgba(247, 247, 242, 0.18)',
   'rgba(255, 255, 255, 0)',
 ] as const;
-const SWEEP_LOCATIONS = [0, 0.35, 0.5, 0.65, 1] as const;
-/** Top-left -> bottom-right gradient gives the highlight its diagonal tilt. */
-const SWEEP_START = { x: 0, y: 0 };
-const SWEEP_END = { x: 1, y: 1 };
-
-const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
+const SWEEP_LOCATIONS = [0, 0.42, 0.5, 0.58, 1] as const;
+/** Slight diagonal gives the moving highlight a visible sweep instead of a flat flash. */
+const SWEEP_START = { x: 0, y: 0.36 };
+const SWEEP_END = { x: 1, y: 0.64 };
 
 interface SkeletonBlockProps {
   width: number | `${number}%`;
@@ -79,7 +79,7 @@ export function SkeletonBlock({
         : withRepeat(
             withTiming(1, {
               duration: SKELETON_SWEEP_MS,
-              easing: Easing.inOut(Easing.quad),
+              easing: Easing.linear,
             }),
             -1,
             false,
@@ -88,7 +88,7 @@ export function SkeletonBlock({
   );
 
   const blockStyle = useAnimatedStyle(() => ({
-    opacity: 0.7 + pulse.value * 0.08,
+    opacity: 0.94 + pulse.value * 0.06,
   }));
 
   const sweepStyle = useAnimatedStyle(() => ({
@@ -97,7 +97,10 @@ export function SkeletonBlock({
         translateX: interpolate(
           sweep.value,
           [0, 1],
-          [-SKELETON_SWEEP_BAND, blockWidth.value + SKELETON_SWEEP_BAND],
+          [
+            blockWidth.value * SKELETON_SWEEP_START_OFFSET,
+            blockWidth.value * SKELETON_SWEEP_END_OFFSET,
+          ],
         ),
       },
     ],
@@ -114,13 +117,15 @@ export function SkeletonBlock({
       style={[styles.block, { width, height, borderRadius: radius }, blockStyle, style]}
     >
       {!reduceMotion ? (
-        <AnimatedLinearGradient
-          colors={SWEEP_COLORS}
-          locations={SWEEP_LOCATIONS}
-          start={SWEEP_START}
-          end={SWEEP_END}
-          style={[styles.sweep, sweepStyle]}
-        />
+        <Animated.View style={[styles.sweep, sweepStyle]}>
+          <LinearGradient
+            colors={SWEEP_COLORS}
+            locations={SWEEP_LOCATIONS}
+            start={SWEEP_START}
+            end={SWEEP_END}
+            style={styles.sweepGradient}
+          />
+        </Animated.View>
       ) : null}
     </Animated.View>
   );
@@ -128,13 +133,18 @@ export function SkeletonBlock({
 
 const styles = StyleSheet.create({
   block: {
+    position: 'relative',
     overflow: 'hidden',
     backgroundColor: colors.glass.strongFill,
   },
   sweep: {
     position: 'absolute',
+    left: 0,
     top: 0,
     bottom: 0,
-    width: SKELETON_SWEEP_BAND,
+    width: SKELETON_SWEEP_TRACK_WIDTH,
+  },
+  sweepGradient: {
+    flex: 1,
   },
 });

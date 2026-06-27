@@ -31,6 +31,7 @@ export function hydrateOffpayWalletDashboard(params: {
 }): void {
   const { dashboard, queryClient } = params;
   const limit = params.limit ?? WALLET_TRANSACTIONS_PAGE_SIZE;
+  const includeTransactions = dashboard.transactionsIncluded ?? true;
   const updatedAt = Math.max(
     dashboard.fetchedAt,
     dashboard.balance.fetchedAt,
@@ -38,7 +39,7 @@ export function hydrateOffpayWalletDashboard(params: {
   );
 
   queryClient.setQueryData<WalletDashboardResponse>(
-    offpayWalletDashboardQueryKey(dashboard.address, dashboard.network, limit),
+    offpayWalletDashboardQueryKey(dashboard.address, dashboard.network, limit, includeTransactions),
     dashboard,
     { updatedAt },
   );
@@ -57,6 +58,9 @@ export function hydrateOffpayWalletDashboard(params: {
     dashboard.balance,
     { updatedAt: dashboard.balance.fetchedAt },
   );
+  if (dashboard.transactionsIncluded === false) {
+    return;
+  }
   const transactionsKey = offpayWalletTransactionsQueryKey(
     dashboard.address,
     dashboard.network,
@@ -98,12 +102,19 @@ export async function prefetchOffpayWalletDashboard(params: {
   network: OffpayNetwork;
   limit?: number;
   useCache?: boolean;
+  includeTransactions?: boolean;
   requestOwner?: string;
 }): Promise<WalletDashboardResponse | null> {
   if (params.walletAddress.length === 0) return null;
 
   const limit = params.limit ?? WALLET_TRANSACTIONS_PAGE_SIZE;
-  const queryKey = offpayWalletDashboardQueryKey(params.walletAddress, params.network, limit);
+  const includeTransactions = params.includeTransactions ?? true;
+  const queryKey = offpayWalletDashboardQueryKey(
+    params.walletAddress,
+    params.network,
+    limit,
+    includeTransactions,
+  );
   const cached = params.queryClient.getQueryData<WalletDashboardResponse>(queryKey);
 
   if (cached?.network === params.network && cached.address === params.walletAddress) {
@@ -122,6 +133,7 @@ export async function prefetchOffpayWalletDashboard(params: {
           signal,
           limit,
           useCache: params.useCache,
+          includeTransactions,
           requestOwner: params.requestOwner ?? 'wallet.dashboard.prefetch',
         }),
       staleTime: params.useCache === false ? 0 : WALLET_DASHBOARD_WARM_STALE_TIME_MS,

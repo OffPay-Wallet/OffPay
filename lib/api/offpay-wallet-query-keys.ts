@@ -11,7 +11,12 @@ export const offpayWalletDashboardQueryKey = (
   walletAddress: string | null,
   network: OffpayNetwork | null,
   limit: number = WALLET_TRANSACTIONS_PAGE_SIZE,
-) => [...offpayWalletDashboardBaseQueryKey(walletAddress, network), { limit }] as const;
+  includeTransactions: boolean = true,
+) =>
+  [
+    ...offpayWalletDashboardBaseQueryKey(walletAddress, network),
+    { limit, includeTransactions },
+  ] as const;
 
 export const offpayWalletBalanceQueryKey = (
   walletAddress: string | null,

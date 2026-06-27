@@ -205,6 +205,7 @@ export interface WalletDashboardResponse {
   streamCapabilities: StreamCapabilitiesResponse;
   balance: WalletBalanceResponse;
   transactions: WalletTransactionsResponse;
+  transactionsIncluded?: boolean;
   fetchedAt: number;
 }
 

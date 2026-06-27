@@ -37,3 +37,24 @@ export function shouldWaitForDashboardData({
 }): boolean {
   return waitForDashboard && dashboardFetching;
 }
+
+export function shouldEnableHomeForegroundFetch({
+  canCoordinate,
+  canUseNetwork,
+  isNetworkAccessSuspended,
+  fallbackGateOpen,
+  hasDashboardData,
+}: {
+  canCoordinate: boolean;
+  canUseNetwork: boolean;
+  isNetworkAccessSuspended: boolean;
+  fallbackGateOpen: boolean;
+  hasDashboardData: boolean;
+}): boolean {
+  return (
+    canCoordinate &&
+    canUseNetwork &&
+    !isNetworkAccessSuspended &&
+    (fallbackGateOpen || hasDashboardData)
+  );
+}

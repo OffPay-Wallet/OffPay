@@ -14,7 +14,6 @@ import {
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { InfiniteData } from '@tanstack/react-query';
@@ -169,7 +168,6 @@ export function useOffpayWalletTokenTransactions(options: {
   timeoutMs?: number;
   allowPartialWarmData?: boolean;
   waitForWalletHistory?: boolean;
-  hydrateDisplayCacheOnMount?: boolean;
 }) {
   const activeWalletAddress = useWalletStore((state) => state.publicKey);
   const walletAddress = options.walletAddress ?? activeWalletAddress;
@@ -183,7 +181,6 @@ export function useOffpayWalletTokenTransactions(options: {
   const timeoutMs = options.timeoutMs ?? TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS;
   const allowPartialWarmData = options.allowPartialWarmData ?? false;
   const waitForWalletHistory = options.waitForWalletHistory ?? true;
-  const hydrateDisplayCacheOnMount = options.hydrateDisplayCacheOnMount ?? false;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();
@@ -193,10 +190,6 @@ export function useOffpayWalletTokenTransactions(options: {
     [network, walletAddress],
   );
   const walletHistoryFetching = useIsFetching({ queryKey: walletHistoryBaseQueryKey }) > 0;
-  const [displayCacheHydrationSettled, setDisplayCacheHydrationSettled] = useState(
-    !hydrateDisplayCacheOnMount,
-  );
-  const [displayCacheHydrationVersion, setDisplayCacheHydrationVersion] = useState(0);
   const [walletHistoryWaitExpired, setWalletHistoryWaitExpired] = useState(false);
   const nextPageRequestOwnerSuffixRef = useRef<string | null>(null);
   const capabilitiesQuery = useOffpayCapabilities({
@@ -267,42 +260,6 @@ export function useOffpayWalletTokenTransactions(options: {
   }, [deferUntilAfterInteractions, enabledByCaller, limit, mint, network, walletAddress]);
 
   useEffect(() => {
-    if (!hydrateDisplayCacheOnMount) {
-      setDisplayCacheHydrationSettled(true);
-      return undefined;
-    }
-
-    setDisplayCacheHydrationSettled(false);
-
-    if (!enabledByCaller || walletAddress == null || network == null || mint == null) {
-      setDisplayCacheHydrationSettled(true);
-      return undefined;
-    }
-
-    let cancelled = false;
-    void hydrateWalletDisplayCacheIntoQueryClient({
-      queryClient,
-      walletAddress,
-      network,
-      options: {
-        includeBalance: false,
-        includeTransactions: true,
-        includePendingBackupStats: false,
-      },
-    })
-      .catch(() => false)
-      .finally(() => {
-        if (cancelled) return;
-        setDisplayCacheHydrationSettled(true);
-        setDisplayCacheHydrationVersion((version) => version + 1);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [enabledByCaller, hydrateDisplayCacheOnMount, mint, network, queryClient, walletAddress]);
-
-  useEffect(() => {
     setWalletHistoryWaitExpired(false);
 
     if (
@@ -353,7 +310,6 @@ export function useOffpayWalletTokenTransactions(options: {
 
     return bestPage == null ? undefined : { pages: [bestPage], pageParams: [undefined] };
   }, [
-    displayCacheHydrationVersion,
     allowPartialWarmData,
     limit,
     minWarmTransactionRows,
@@ -371,7 +327,6 @@ export function useOffpayWalletTokenTransactions(options: {
     canRequestTransactions &&
     enabledByCaller &&
     interactionsSettled &&
-    displayCacheHydrationSettled &&
     !shouldWaitForWalletHistory;
 
   useEffect(() => {
@@ -471,7 +426,6 @@ export function useOffpayWalletTokenTransactions(options: {
     (capabilitiesQuery.isCapabilitiesPending ||
       (transactionsFeatureAvailable &&
         (!interactionsSettled ||
-          !displayCacheHydrationSettled ||
           shouldWaitForWalletHistory ||
           query.isLoading ||
           query.isFetching)));

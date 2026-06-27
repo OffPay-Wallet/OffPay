@@ -17,11 +17,7 @@ import {
 } from '@/lib/api/offpay-wallet-query-keys';
 import { shouldWaitForDashboardData } from '@/lib/api/offpay-home-loading-gates';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import {
-  hydrateWalletDisplayCacheIntoQueryClient,
-  mergeWalletTransactionsWithDisplayCache,
-  writeWalletDisplayCacheSlice,
-} from '@/lib/wallet/wallet-display-cache';
+import { writeWalletDisplayCacheSlice } from '@/lib/wallet/wallet-display-cache';
 import { useWalletStore } from '@/store/walletStore';
 
 import type { InfiniteData } from '@tanstack/react-query';
@@ -105,11 +101,11 @@ export function useOffpayWalletTransactions(options?: {
   refetchOnMount?: boolean | 'always';
   refetchOnWindowFocus?: boolean | 'always';
   useCache?: boolean;
+  eagerWithoutCapabilities?: boolean;
   enabled?: boolean;
   requestOwner?: string;
   waitForDashboard?: boolean;
   timeoutMs?: number;
-  hydrateDisplayCacheOnMount?: boolean;
   allowPartialWarmData?: boolean;
   retry?: false | number;
 }) {
@@ -120,15 +116,14 @@ export function useOffpayWalletTransactions(options?: {
   const deferUntilAfterInteractions = options?.deferUntilAfterInteractions ?? false;
   const autoFetchAllPages = options?.autoFetchAllPages ?? false;
   const useCache = options?.useCache;
+  const eagerWithoutCapabilities = options?.eagerWithoutCapabilities ?? false;
   const enabledByCaller = options?.enabled ?? true;
   const requestOwner = options?.requestOwner ?? 'wallet.transactions';
   const waitForDashboard = options?.waitForDashboard ?? true;
   const timeoutMs = options?.timeoutMs ?? TRANSACTION_REQUEST_TIMEOUT_MS;
-  const hydrateDisplayCacheOnMount = options?.hydrateDisplayCacheOnMount ?? false;
   const allowPartialWarmData = options?.allowPartialWarmData ?? false;
   const [interactionsSettled, setInteractionsSettled] = useState(!deferUntilAfterInteractions);
   const [freshRefetching, setFreshRefetching] = useState(false);
-  const [displayCacheHydrationVersion, setDisplayCacheHydrationVersion] = useState(0);
   const freshRefetchingRef = useRef(false);
   const nextPageRequestOwnerSuffixRef = useRef<string | null>(null);
   const { network } = useOffpayNetwork();
@@ -181,8 +176,13 @@ export function useOffpayWalletTransactions(options?: {
     capabilities,
     'wallet.transactions',
   );
+  const canFetchBeforeCapabilities =
+    eagerWithoutCapabilities && capabilities == null && !capabilitiesQuery.hasCapabilityError;
   const canRequestTransactions =
-    walletAddress != null && network != null && canUseNetwork && transactionsFeatureAvailable;
+    walletAddress != null &&
+    network != null &&
+    canUseNetwork &&
+    (transactionsFeatureAvailable || canFetchBeforeCapabilities);
   const canFetchTransactions = canRequestTransactions && enabledByCaller && !dashboardPending;
   const enabled = canFetchTransactions && interactionsSettled;
 
@@ -213,51 +213,6 @@ export function useOffpayWalletTransactions(options?: {
     };
   }, [deferUntilAfterInteractions, enabledByCaller, limit, network, walletAddress]);
 
-  // Cold-start paint accelerator. Transaction history enrichment can take
-  // several seconds on a release build over cellular, so without warm data the
-  // screen shows a skeleton the whole time. Pulling the persisted display cache
-  // into the query client lets cached rows paint immediately while the first
-  // network page loads in the background. Mirrors
-  // `useOffpayWalletTokenTransactions`. Best-effort: a miss or read failure
-  // just falls back to the network-only path.
-  useEffect(() => {
-    if (
-      !hydrateDisplayCacheOnMount ||
-      !enabledByCaller ||
-      walletAddress == null ||
-      network == null
-    ) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    let transactionHydrationNotified = false;
-    void hydrateWalletDisplayCacheIntoQueryClient({
-      queryClient,
-      walletAddress,
-      network,
-      options: {
-        includeBalance: false,
-        includeTransactions: true,
-        includePendingBackupStats: false,
-        onTransactionsHydrated: () => {
-          if (cancelled) return;
-          transactionHydrationNotified = true;
-          setDisplayCacheHydrationVersion((version) => version + 1);
-        },
-      },
-    })
-      .catch(() => false)
-      .finally(() => {
-        if (cancelled || transactionHydrationNotified) return;
-        setDisplayCacheHydrationVersion((version) => version + 1);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [enabledByCaller, hydrateDisplayCacheOnMount, network, queryClient, walletAddress]);
-
   const getWarmInitialTransactionsData = useCallback(():
     | WalletTransactionsInfiniteData
     | undefined => {
@@ -283,7 +238,6 @@ export function useOffpayWalletTransactions(options?: {
 
     return warmData;
   }, [
-    displayCacheHydrationVersion,
     allowPartialWarmData,
     limit,
     minWarmTransactionRows,
@@ -313,19 +267,7 @@ export function useOffpayWalletTransactions(options?: {
         requestOwner: pageRequestOwner,
       });
 
-      if (pageParam != null) return page;
-
-      const fallback =
-        queryClient.getQueryData<InfiniteData<WalletTransactionsResponse, string | undefined>>(
-          transactionsQueryKey,
-        )?.pages[0] ?? null;
-
-      return mergeWalletTransactionsWithDisplayCache({
-        walletAddress,
-        network,
-        transactions: page,
-        fallback,
-      });
+      return page;
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage: WalletTransactionsResponse) => lastPage.cursor ?? undefined,
@@ -463,9 +405,6 @@ export function useOffpayWalletTransactions(options?: {
           queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
         });
 
-        const fallback =
-          queryClient.getQueryData<WalletTransactionsInfiniteData>(transactionsQueryKey)
-            ?.pages[0] ?? null;
         const refreshUseCache = options?.useCache ?? useCache ?? true;
         const page = await getWalletTransactions(walletAddress, network, {
           limit,
@@ -474,12 +413,7 @@ export function useOffpayWalletTransactions(options?: {
           timeoutMs,
           requestOwner: `${requestOwner}.${refreshUseCache ? 'refresh' : 'fresh'}`,
         });
-        const mergedPage = await mergeWalletTransactionsWithDisplayCache({
-          walletAddress,
-          network,
-          transactions: page,
-          fallback,
-        });
+        const mergedPage = page;
         const updatedAt = Date.now();
         const transactionsQueryKeyId = JSON.stringify(transactionsQueryKey);
         const queryKeys = [
@@ -559,7 +493,7 @@ export function useOffpayWalletTransactions(options?: {
     isInitialDataPending,
     isCapabilitiesPending:
       canUseNetwork && (capabilitiesQuery.isCapabilitiesPending || dashboardPending),
-    isCapabilityEnabled: canRequestTransactions,
+    isCapabilityEnabled: transactionsFeatureAvailable || canRequestTransactions,
   };
 }
 

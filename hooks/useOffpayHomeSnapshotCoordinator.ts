@@ -13,16 +13,14 @@ import {
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
 import {
+  shouldEnableHomeForegroundFetch,
   shouldOpenHomeSnapshotFallbackGate,
   type HomeDisplayCacheStatus,
   type HomeFallbackDeadlineStatus,
 } from '@/lib/api/offpay-home-loading-gates';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import {
-  hydrateWalletDisplayCacheIntoQueryClient,
-  persistWalletDisplayCacheFromQueryClient,
-} from '@/lib/wallet/wallet-display-cache';
+import { persistWalletDisplayCacheFromQueryClient } from '@/lib/wallet/wallet-display-cache';
 
 import type { OffpayNetwork, WalletDashboardResponse } from '@/types/offpay-api';
 
@@ -55,7 +53,6 @@ export function useOffpayHomeSnapshotCoordinator({
   const startupMeasureRef = useRef<number | null>(null);
   const startupWallClockRef = useRef<number | null>(null);
   const fallbackFetchMarkKeyRef = useRef<string | null>(null);
-  const cachedPaintLoggedRef = useRef(false);
   const freshPaintLoggedRef = useRef(false);
   const identity = useMemo(
     () => `${network ?? 'no-network'}:${walletAddress ?? 'no-wallet'}:${enabled ? 'on' : 'off'}`,
@@ -65,7 +62,12 @@ export function useOffpayHomeSnapshotCoordinator({
   const canFetchDashboard = canCoordinate && canUseNetwork && !isNetworkAccessSuspended;
 
   const dashboardQuery = useQuery<WalletDashboardResponse>({
-    queryKey: offpayWalletDashboardQueryKey(walletAddress, network, WALLET_TRANSACTIONS_PAGE_SIZE),
+    queryKey: offpayWalletDashboardQueryKey(
+      walletAddress,
+      network,
+      WALLET_TRANSACTIONS_PAGE_SIZE,
+      false,
+    ),
     queryFn: ({ signal }) => {
       if (walletAddress == null || network == null) {
         throw new Error('Home wallet snapshot requires an active wallet and supported network.');
@@ -75,6 +77,7 @@ export function useOffpayHomeSnapshotCoordinator({
         signal,
         limit: WALLET_TRANSACTIONS_PAGE_SIZE,
         useCache: false,
+        includeTransactions: false,
         requestOwner: 'home.snapshot.dashboard',
       });
     },
@@ -98,7 +101,6 @@ export function useOffpayHomeSnapshotCoordinator({
     setFallbackGateOpen(false);
     setIdleGateOpen(false);
     fallbackFetchMarkKeyRef.current = null;
-    cachedPaintLoggedRef.current = false;
     freshPaintLoggedRef.current = false;
 
     if (!enabled || walletAddress == null || network == null) {
@@ -114,38 +116,12 @@ export function useOffpayHomeSnapshotCoordinator({
     startupMeasureRef.current = startedAt;
     startupWallClockRef.current = Date.now();
 
-    void hydrateWalletDisplayCacheIntoQueryClient({
-      queryClient,
-      walletAddress: currentWalletAddress,
+    setDisplayCacheStatus('miss');
+    setTransactionsCacheStatus('miss');
+    measure('home.snapshot.displayCacheHydrate', startedAt, {
       network: currentNetwork,
-      options: {
-        includeBalance: true,
-        includeTransactions: false,
-        includePendingBackupStats: true,
-        measurePrefix: 'home.snapshot.hydrate',
-        onTransactionsHydrated: (status) => {
-          if (cancelled) return;
-          setTransactionsCacheStatus(status);
-        },
-      },
-    })
-      .then((hydrated) => {
-        if (cancelled) return;
-        setDisplayCacheStatus(hydrated ? 'hit' : 'miss');
-        measure('home.snapshot.displayCacheHydrate', startedAt, {
-          network: currentNetwork,
-          result: hydrated ? 'hit' : 'miss',
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setDisplayCacheStatus('miss');
-        setTransactionsCacheStatus('miss');
-        measure('home.snapshot.displayCacheHydrate', startedAt, {
-          network: currentNetwork,
-          result: 'error',
-        });
-      });
+      result: 'disabled',
+    });
 
     if (canFetchDashboard) {
       fallbackTimerRef.current = setTimeout(() => {
@@ -286,8 +262,13 @@ export function useOffpayHomeSnapshotCoordinator({
     setFallbackGateOpen(true);
   }, []);
 
-  const foregroundFetchEnabled =
-    canCoordinate && canUseNetwork && !isNetworkAccessSuspended && fallbackGateOpen;
+  const foregroundFetchEnabled = shouldEnableHomeForegroundFetch({
+    canCoordinate,
+    canUseNetwork,
+    isNetworkAccessSuspended,
+    fallbackGateOpen,
+    hasDashboardData: dashboardQuery.data != null,
+  });
   const marketFetchEnabled =
     canCoordinate &&
     canUseNetwork &&
@@ -311,20 +292,10 @@ export function useOffpayHomeSnapshotCoordinator({
     });
   }, [foregroundFetchEnabled, identity, network]);
 
-  // First-meaningful-paint (Phase 0). These fire on the React commit that
-  // first makes usable data available, so the screen can show real content
-  // instead of a skeleton — a close proxy for paint, and the metric that
-  // matches the "screen keeps loading" complaint. `cached` = persisted/stale
-  // rows hydrated; `fresh` = the live dashboard landed. On a cold cache only
-  // `fresh` fires. Both measured from coordination start.
-  useEffect(() => {
-    if (cachedPaintLoggedRef.current) return;
-    if (startupMeasureRef.current == null) return;
-    if (displayCacheStatus !== 'hit') return;
-    cachedPaintLoggedRef.current = true;
-    measure('home.firstPaint.cached', startupMeasureRef.current, { network });
-  }, [displayCacheStatus, network]);
-
+  // First-meaningful-paint (Phase 0) is now only logged for the live dashboard.
+  // Persisted snapshots are intentionally not painted on Home because they can
+  // visibly flip stale activity/balances to the fresh response several seconds
+  // later on slow provider scans.
   useEffect(() => {
     if (freshPaintLoggedRef.current) return;
     const startedAt = startupMeasureRef.current;
