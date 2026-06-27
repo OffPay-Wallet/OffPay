@@ -4,7 +4,9 @@ import { sha256 } from '@noble/hashes/sha2.js';
 
 import {
   broadcastRawTransaction,
+  getRpcAccounts,
   getRpcFeeForMessage,
+  getRpcMinimumBalanceForRentExemption,
   initializePrivatePaymentMint,
   preparePrivateSend,
   OffpayApiError,
@@ -23,9 +25,11 @@ import {
   normalizeAtomicAmount,
   parseSerializedTransaction,
   readShortVec,
+  u64FromLittleEndian,
 } from '@/lib/magicblock/tx-parsing';
 import { enqueuePendingPaymentBackup } from '@/lib/payments/pending-backup-queue';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
+import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@/lib/crypto/solana-token-accounts';
 import { signSerializedTransactionForWallet } from '@/lib/crypto/solana-transaction-signing';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import {
@@ -40,9 +44,18 @@ import type {
   PrivateInitMintResponse,
   PrivateSendResponse,
   PrivateSendRequest,
+  RpcAccountRecord,
 } from '@/types/offpay-api';
 
 const NATIVE_SOL_SYSTEM_MINT = '11111111111111111111111111111111';
+const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
+const SPL_TOKEN_ACCOUNT_SPACE = 165;
+const SYSTEM_INSTRUCTION_CREATE_ACCOUNT = 0;
+const SYSTEM_INSTRUCTION_TRANSFER = 2;
+const SYSTEM_INSTRUCTION_CREATE_ACCOUNT_WITH_SEED = 3;
+const SYSTEM_INSTRUCTION_TRANSFER_WITH_SEED = 11;
+const ASSOCIATED_TOKEN_CREATE_INSTRUCTION = 0;
+const ASSOCIATED_TOKEN_CREATE_IDEMPOTENT_INSTRUCTION = 1;
 
 export interface PrivatePaymentVerification {
   requiredSigners: string[];
@@ -84,6 +97,8 @@ export interface PreparedPrivatePaymentPlan {
   transaction: PreparedTransaction | null;
   verification: PrivatePaymentVerification;
   feeLamports: number | null;
+  solFeePayer: string | null;
+  includesMintInitialization: boolean;
   preparedAt: number;
 }
 
@@ -285,6 +300,185 @@ function extractMessageBase64FromSerializedTransaction(transactionBase64: string
   return Buffer.from(transaction.subarray(messageOffset)).toString('base64');
 }
 
+function u32FromLittleEndian(data: Uint8Array, offset: number): number | null {
+  if (offset < 0 || offset + 4 > data.length) return null;
+
+  return (
+    (data[offset] ?? 0) |
+    ((data[offset + 1] ?? 0) << 8) |
+    ((data[offset + 2] ?? 0) << 16) |
+    ((data[offset + 3] ?? 0) << 24)
+  );
+}
+
+function safeLamportsToNumber(value: bigint): number | null {
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(value);
+}
+
+function accountExists(record: RpcAccountRecord | null | undefined): boolean {
+  return record != null && record.owner != null && record.lamports != null;
+}
+
+function readCreateAccountWithSeedLamports(data: Uint8Array): bigint | null {
+  const seedLength = u64FromLittleEndian(data, 36);
+  if (seedLength == null || seedLength > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+
+  const lamportsOffset = 44 + Number(seedLength);
+  return u64FromLittleEndian(data, lamportsOffset);
+}
+
+function getWalletFundedSystemLamports(params: {
+  instruction: ReturnType<typeof parseSerializedTransaction>['instructions'][number];
+  accountKeys: string[];
+  walletAddress: string;
+}): bigint {
+  const programId = params.accountKeys[params.instruction.programIdIndex];
+  if (programId !== SYSTEM_PROGRAM_ID) return 0n;
+
+  const fundingAccountIndex = params.instruction.accountIndexes[0];
+  if (fundingAccountIndex == null) return 0n;
+
+  const fundingAccount = params.accountKeys[fundingAccountIndex] ?? null;
+  if (fundingAccount !== params.walletAddress) return 0n;
+
+  const instructionType = u32FromLittleEndian(params.instruction.data, 0);
+  if (instructionType == null) return 0n;
+
+  if (
+    instructionType === SYSTEM_INSTRUCTION_CREATE_ACCOUNT ||
+    instructionType === SYSTEM_INSTRUCTION_TRANSFER ||
+    instructionType === SYSTEM_INSTRUCTION_TRANSFER_WITH_SEED
+  ) {
+    return u64FromLittleEndian(params.instruction.data, 4) ?? 0n;
+  }
+
+  if (instructionType === SYSTEM_INSTRUCTION_CREATE_ACCOUNT_WITH_SEED) {
+    return readCreateAccountWithSeedLamports(params.instruction.data) ?? 0n;
+  }
+
+  return 0n;
+}
+
+function collectWalletPaidAssociatedTokenCreates(params: {
+  parsed: ReturnType<typeof parseSerializedTransaction>;
+  accountKeys: string[];
+  walletAddress: string;
+}): string[] {
+  const accounts = new Set<string>();
+
+  for (const instruction of params.parsed.instructions) {
+    const programId = params.accountKeys[instruction.programIdIndex];
+    if (programId !== ASSOCIATED_TOKEN_PROGRAM_ID) continue;
+
+    const instructionType =
+      instruction.data.length === 0
+        ? ASSOCIATED_TOKEN_CREATE_INSTRUCTION
+        : (instruction.data[0] ?? -1);
+    if (
+      instructionType !== ASSOCIATED_TOKEN_CREATE_INSTRUCTION &&
+      instructionType !== ASSOCIATED_TOKEN_CREATE_IDEMPOTENT_INSTRUCTION
+    ) {
+      continue;
+    }
+
+    const payerIndex = instruction.accountIndexes[0];
+    const associatedAccountIndex = instruction.accountIndexes[1];
+    if (payerIndex == null || associatedAccountIndex == null) continue;
+
+    const payer = params.accountKeys[payerIndex] ?? null;
+    const associatedAccount = params.accountKeys[associatedAccountIndex] ?? null;
+    if (payer === params.walletAddress && associatedAccount != null) {
+      accounts.add(associatedAccount);
+    }
+  }
+
+  return Array.from(accounts);
+}
+
+async function estimateAssociatedTokenCreateRentLamports(params: {
+  parsed: ReturnType<typeof parseSerializedTransaction>;
+  accountKeys: string[];
+  walletAddress: string;
+  network: OffpayNetwork;
+}): Promise<bigint | null> {
+  const candidateAccounts = collectWalletPaidAssociatedTokenCreates(params);
+  if (candidateAccounts.length === 0) return 0n;
+
+  const accounts = await getRpcAccounts({
+    addresses: candidateAccounts,
+    network: params.network,
+  });
+  const missingAccountCount = candidateAccounts.reduce((count, _account, index) => {
+    return accountExists(accounts.accounts[index]) ? count : count + 1;
+  }, 0);
+  if (missingAccountCount === 0) return 0n;
+
+  const rent = await getRpcMinimumBalanceForRentExemption({
+    space: SPL_TOKEN_ACCOUNT_SPACE,
+    network: params.network,
+  });
+  if (rent.lamports == null) return null;
+
+  return BigInt(rent.lamports) * BigInt(missingAccountCount);
+}
+
+async function estimateMagicBlockPrivatePaymentFee(params: {
+  unsignedTransaction: string;
+  parsed: ReturnType<typeof parseSerializedTransaction>;
+  accountKeys: string[];
+  walletAddress: string;
+  network: OffpayNetwork;
+}): Promise<{
+  feeLamports: number | null;
+  solFeePayer: string | null;
+}> {
+  const fee = await getRpcFeeForMessage({
+    network: params.network,
+    messageBase64: extractMessageBase64FromSerializedTransaction(params.unsignedTransaction),
+  });
+
+  const feePayer = params.parsed.accountKeys[0] ?? null;
+  const walletPaysNetworkFee = feePayer === params.walletAddress;
+  if (walletPaysNetworkFee && fee.lamports == null) {
+    return {
+      feeLamports: null,
+      solFeePayer: feePayer,
+    };
+  }
+
+  const systemLamports = params.parsed.instructions.reduce((sum, instruction) => {
+    return (
+      sum +
+      getWalletFundedSystemLamports({
+        instruction,
+        accountKeys: params.accountKeys,
+        walletAddress: params.walletAddress,
+      })
+    );
+  }, 0n);
+  const associatedTokenRentLamports = await estimateAssociatedTokenCreateRentLamports({
+    parsed: params.parsed,
+    accountKeys: params.accountKeys,
+    walletAddress: params.walletAddress,
+    network: params.network,
+  });
+  if (associatedTokenRentLamports == null) {
+    return {
+      feeLamports: null,
+      solFeePayer: feePayer,
+    };
+  }
+
+  const networkFeeLamports = walletPaysNetworkFee ? BigInt(fee.lamports ?? 0) : 0n;
+  const totalLamports = networkFeeLamports + systemLamports + associatedTokenRentLamports;
+
+  return {
+    feeLamports: safeLamportsToNumber(totalLamports),
+    solFeePayer: feePayer,
+  };
+}
+
 function preparedPlanMatchesParams(
   params: SubmitPrivatePaymentParams,
   plan: PreparedPrivatePaymentPlan | null | undefined,
@@ -365,8 +559,25 @@ async function preparePrivatePaymentPlanInternal(
 ): Promise<PreparedPrivatePaymentPlan> {
   assertPrivatePaymentInputs(params);
   const startedAt = mark();
-  let stage: 'prepare' | 'verify' | 'fee' = 'prepare';
+  let stage: 'init-status' | 'prepare' | 'verify' | 'fee' = 'prepare';
   try {
+    let includesMintInitialization = false;
+    if (options.estimateFee) {
+      stage = 'init-status';
+      const initStatusStartedAt = mark();
+      const initStatus = await initializePrivatePaymentMint({
+        walletAddress: params.walletAddress,
+        mintAddress: params.mint,
+        network: params.network,
+      });
+      includesMintInitialization = initStatus.status === 'requires_signature';
+      measure('magicblock.private.initMint.statusForPlan', initStatusStartedAt, {
+        network: params.network,
+        status: initStatus.status,
+      });
+    }
+
+    stage = 'prepare';
     const prepareStartedAt = mark();
     const prepared = await preparePrivateSend({
       walletAddress: params.walletAddress,
@@ -378,6 +589,8 @@ async function preparePrivatePaymentPlanInternal(
     measure('magicblock.private.prepare', prepareStartedAt, { network: params.network });
 
     const preparedTransaction = resolvePrivateSendTransaction(prepared);
+    const parsed = parseSerializedTransaction(preparedTransaction.unsignedTransaction);
+    const accountKeys = await resolveMessageAccountKeys(parsed, params.network);
     stage = 'verify';
     const verification = await verifyPrivatePaymentUnsignedTransaction({
       unsignedTransaction: preparedTransaction.unsignedTransaction,
@@ -391,17 +604,24 @@ async function preparePrivatePaymentPlanInternal(
     });
 
     let feeLamports: number | null = null;
+    let solFeePayer: string | null = null;
     if (options.estimateFee) {
       stage = 'fee';
       const feeStartedAt = mark();
-      const fee = await getRpcFeeForMessage({
+      const feeEstimate = await estimateMagicBlockPrivatePaymentFee({
+        unsignedTransaction: preparedTransaction.unsignedTransaction,
+        parsed,
+        accountKeys,
+        walletAddress: params.walletAddress,
         network: params.network,
-        messageBase64: extractMessageBase64FromSerializedTransaction(
-          preparedTransaction.unsignedTransaction,
-        ),
       });
-      feeLamports = fee.lamports;
-      measure('magicblock.private.feeForMessage', feeStartedAt, { network: params.network });
+      feeLamports = feeEstimate.feeLamports;
+      solFeePayer = feeEstimate.solFeePayer;
+      measure('magicblock.private.feeEstimate', feeStartedAt, {
+        network: params.network,
+        feeLamports: feeLamports ?? null,
+        includesMintInitialization,
+      });
     }
 
     return {
@@ -414,6 +634,8 @@ async function preparePrivatePaymentPlanInternal(
       transaction: preparedTransaction.transaction,
       verification,
       feeLamports,
+      solFeePayer,
+      includesMintInitialization,
       preparedAt: Date.now(),
     };
   } finally {
@@ -527,7 +749,13 @@ export async function submitPrivatePayment(
   try {
     assertPrivatePaymentInputs(params);
 
-    const initSignature = await initializeMintIfNeeded(params);
+    const preparedPlan = preparedPlanMatchesParams(params, params.preparedPlan)
+      ? params.preparedPlan
+      : null;
+    const initSignature =
+      preparedPlan?.includesMintInitialization === true
+        ? null
+        : await initializeMintIfNeeded(params);
     let signed = await prepareVerifySignPrivateSend(params);
 
     try {

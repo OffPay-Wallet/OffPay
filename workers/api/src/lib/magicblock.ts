@@ -369,7 +369,10 @@ async function getMagicBlockMintInitializationStatus(
   if (!response.ok || !isRecord(payload)) {
     throw new AppError({
       status: response.status === 400 || response.status === 422 ? 400 : 503,
-      code: response.status === 400 || response.status === 422 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
+      code:
+        response.status === 400 || response.status === 422
+          ? 'INVALID_REQUEST'
+          : 'UPSTREAM_UNAVAILABLE',
       message:
         extractProviderMessage(payload) ?? 'MagicBlock mint status is currently unavailable.',
       retryable: response.status !== 400 && response.status !== 422,
@@ -430,7 +433,8 @@ async function createMagicBlockInitializeMintTransaction(
           ? 'INVALID_REQUEST'
           : 'UPSTREAM_UNAVAILABLE',
       message:
-        extractProviderMessage(payload) ?? 'MagicBlock mint initialization is currently unavailable.',
+        extractProviderMessage(payload) ??
+        'MagicBlock mint initialization is currently unavailable.',
       retryable: response.status !== 400 && response.status !== 422,
     });
   }
@@ -480,7 +484,8 @@ async function createMagicBlockTransferTransaction(
           ? 'INVALID_REQUEST'
           : 'UPSTREAM_UNAVAILABLE',
       message:
-        extractProviderMessage(payload) ?? 'MagicBlock transfer preparation is currently unavailable.',
+        extractProviderMessage(payload) ??
+        'MagicBlock transfer preparation is currently unavailable.',
       retryable: response.status !== 400 && response.status !== 422,
     });
   }
@@ -520,7 +525,8 @@ async function createMagicBlockQueueInitializationTransaction(
           ? 'INVALID_REQUEST'
           : 'UPSTREAM_UNAVAILABLE',
       message:
-        extractProviderMessage(payload) ?? 'MagicBlock mint initialization is currently unavailable.',
+        extractProviderMessage(payload) ??
+        'MagicBlock mint initialization is currently unavailable.',
       retryable: response.status !== 400 && response.status !== 422,
     });
   }
@@ -556,6 +562,9 @@ async function createMagicBlockPrivatePaymentTransaction(
         fromBalance: 'base',
         toBalance: 'base',
         validator: request.validator,
+        initIfMissing: true,
+        initAtasIfMissing: true,
+        initVaultIfMissing: false,
         ...(memo ? { memo } : {}),
       }),
     },
@@ -570,7 +579,8 @@ async function createMagicBlockPrivatePaymentTransaction(
           ? 'INVALID_REQUEST'
           : 'UPSTREAM_UNAVAILABLE',
       message:
-        extractProviderMessage(payload) ?? 'MagicBlock transfer preparation is currently unavailable.',
+        extractProviderMessage(payload) ??
+        'MagicBlock transfer preparation is currently unavailable.',
       retryable: response.status !== 400 && response.status !== 422,
     });
   }

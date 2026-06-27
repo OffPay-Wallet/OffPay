@@ -254,6 +254,18 @@ function resolveLookupIndexes(params: {
   });
 }
 
+function getTokenAccountMint(record: RpcAccountRecord | null | undefined): string | null {
+  const dataBase64 = record?.data ?? record?.dataBase64 ?? null;
+  if (dataBase64 == null || record?.owner == null || !TOKEN_PROGRAM_IDS.has(record.owner)) {
+    return null;
+  }
+
+  const data = Uint8Array.from(Buffer.from(dataBase64, 'base64'));
+  if (data.length < 32) return null;
+
+  return bs58.encode(data.subarray(0, 32));
+}
+
 export async function resolveMessageAccountKeys(
   parsed: ParsedTransactionMessage,
   network: OffpayNetwork,
@@ -288,18 +300,6 @@ export async function resolveMessageAccountKeys(
   });
 
   return [...parsed.accountKeys, ...writableLoadedAddresses, ...readonlyLoadedAddresses];
-}
-
-function getTokenAccountMint(record: RpcAccountRecord | null | undefined): string | null {
-  const dataBase64 = record?.data ?? record?.dataBase64 ?? null;
-  if (dataBase64 == null || record?.owner == null || !TOKEN_PROGRAM_IDS.has(record.owner)) {
-    return null;
-  }
-
-  const data = Uint8Array.from(Buffer.from(dataBase64, 'base64'));
-  if (data.length < 32) return null;
-
-  return bs58.encode(data.subarray(0, 32));
 }
 
 export async function verifyRequestedTokenMint(params: {

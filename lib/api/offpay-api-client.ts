@@ -77,6 +77,8 @@ import type {
   RpcEpochInfoResponse,
   RpcOfflineSlotBroadcastRequest,
   RpcLatestBlockhashResponse,
+  RpcMinimumBalanceForRentExemptionRequest,
+  RpcMinimumBalanceForRentExemptionResponse,
   RpcSignatureStatusesRequest,
   RpcSignatureStatusesResponse,
   RpcSignaturesForAddressRequest,
@@ -1784,6 +1786,17 @@ export function getRpcFeeForMessage(params: {
     },
     network: params.network,
     signal: params.signal,
+  });
+}
+
+export function getRpcMinimumBalanceForRentExemption(
+  request: RpcMinimumBalanceForRentExemptionRequest,
+): Promise<RpcMinimumBalanceForRentExemptionResponse> {
+  return offpayApiRequest<RpcMinimumBalanceForRentExemptionResponse>({
+    path: '/api/rpc/minimum-balance-for-rent-exemption',
+    method: 'POST',
+    body: request,
+    network: request.network,
   });
 }
 

@@ -668,8 +668,14 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       return 'Fee unavailable';
     }
     if (effectivePaymentRoute === 'magicblock') {
-      if (feeEstimateMatchesAmount && magicBlockFeeEstimate.plan?.feeLamports != null) {
-        return `${formatLamportsAsSol(magicBlockFeeEstimate.plan.feeLamports, 9)} SOL`;
+      if (feeEstimateMatchesAmount && magicBlockFeeEstimate.plan != null) {
+        const walletPaysSolFee =
+          walletAddress != null &&
+          (magicBlockFeeEstimate.plan.solFeePayer == null ||
+            magicBlockFeeEstimate.plan.solFeePayer === walletAddress);
+        if (walletPaysSolFee && magicBlockFeeEstimate.plan.feeLamports != null) {
+          return `${formatLamportsAsSol(magicBlockFeeEstimate.plan.feeLamports, 9)} SOL`;
+        }
       }
       if (!feeEstimateMatchesAmount || magicBlockFeeEstimate.isFetching) return 'Estimating';
       if (magicBlockFeeEstimate.isError) return 'Fee unavailable';
@@ -697,6 +703,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     umbraFeeEstimate.estimate,
     umbraFeeEstimate.isError,
     umbraFeeEstimate.isFetching,
+    walletAddress,
   ]);
   const viewportProfile = getViewportProfile({
     width,

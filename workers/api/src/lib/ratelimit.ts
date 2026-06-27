@@ -85,6 +85,10 @@ const RATE_LIMIT_POLICIES = new Map<string, RateLimitPolicy>([
   ['DELETE /api/pending/backup', { limit: 10, windowSec: 60, scope: 'wallet' }],
   ['GET /api/rpc/latest-blockhash', { limit: 30, windowSec: 60, scope: 'wallet' }],
   ['POST /api/rpc/fee-for-message', { limit: 30, windowSec: 60, scope: 'wallet' }],
+  [
+    'POST /api/rpc/minimum-balance-for-rent-exemption',
+    { limit: 30, windowSec: 60, scope: 'wallet' },
+  ],
   ['POST /api/rpc/accounts', { limit: 30, windowSec: 60, scope: 'wallet' }],
   ['POST /api/rpc/token-largest-accounts', { limit: 30, windowSec: 60, scope: 'wallet' }],
   ['GET /api/rpc/epoch-info', { limit: 20, windowSec: 60, scope: 'wallet' }],

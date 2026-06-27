@@ -36,8 +36,10 @@ const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const MAINNET_USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
-const WALLET_BALANCE_CACHE_TTL_MS = 30_000;
-const WALLET_TRANSACTIONS_CACHE_TTL_MS = 60_000;
+const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
+const WALLET_BALANCE_CACHE_STALE_TTL_MS = 30_000;
+const WALLET_TRANSACTIONS_CACHE_TTL_MS = 15_000;
+const WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS = 5 * 60_000;
 const STREAM_CAPABILITY_CACHE_TTL_MS = 60_000;
 const TOKEN_METADATA_CACHE_TTL_MS = 60 * 60_000;
 const DEFAULT_TRANSACTION_LIMIT = 25;
@@ -319,6 +321,7 @@ interface WalletBalanceRequest {
   network: Network;
   useCache?: boolean;
   recordTiming?: TimingRecorder;
+  waitUntil?: (task: Promise<unknown>) => void;
 }
 
 interface WalletTransactionsRequest {
@@ -328,6 +331,7 @@ interface WalletTransactionsRequest {
   limit?: number;
   useCache?: boolean;
   recordTiming?: TimingRecorder;
+  waitUntil?: (task: Promise<unknown>) => void;
 }
 
 interface WalletTokenTransactionsRequest extends WalletTransactionsRequest {
@@ -4969,10 +4973,12 @@ async function getWalletBalance(
           namespace: 'wallet-balance-v1',
           key: cacheKey,
           ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
+          staleTtlMs: WALLET_BALANCE_CACHE_STALE_TTL_MS,
           isValid: isWalletBalanceResponse,
           resolver,
           recordTiming: request.recordTiming,
           metricLabel: 'bal',
+          waitUntil: request.waitUntil,
         }),
       )
     : resolver();
@@ -5008,10 +5014,12 @@ async function getWalletTransactions(
           namespace: 'wallet-transactions-v9-raw-rpc',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
+          staleTtlMs: WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS,
           isValid: isWalletTransactionsResponse,
           resolver,
           recordTiming: request.recordTiming,
           metricLabel: 'tx',
+          waitUntil: request.waitUntil,
         }),
       )
     : resolver();
@@ -5050,10 +5058,12 @@ async function getWalletTokenTransactions(
           namespace: 'wallet-token-transactions-v6-raw-rpc',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
+          staleTtlMs: WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS,
           isValid: isWalletTransactionsResponse,
           resolver,
           recordTiming: request.recordTiming,
           metricLabel: 'ttx',
+          waitUntil: request.waitUntil,
         }),
       )
     : resolver();
@@ -5177,7 +5187,9 @@ export {
   DEFAULT_STREAM_WEBSOCKET_FALLBACK_POLL_INTERVAL_MS,
   STREAM_CAPABILITY_CACHE_TTL_MS,
   STREAM_DEFAULTS,
+  WALLET_BALANCE_CACHE_STALE_TTL_MS,
   WALLET_BALANCE_CACHE_TTL_MS,
+  WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS,
   WALLET_TRANSACTIONS_CACHE_TTL_MS,
   broadcastRawTransaction,
   getFeeForMessage,

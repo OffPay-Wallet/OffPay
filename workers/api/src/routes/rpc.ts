@@ -7,6 +7,7 @@ import {
   broadcastRawTransaction,
   getFeeForMessage,
   getLatestBlockhash,
+  getMinimumBalanceForRentExemption,
   getRpcAccounts,
   getRpcEpochInfo,
   getRpcSignatureStatuses,
@@ -49,6 +50,11 @@ const networkQuerySchema = z.object({
 
 const feeForMessageBodySchema = z.object({
   messageBase64: base64StringSchema,
+  network: networkSchema,
+});
+
+const minimumBalanceForRentExemptionBodySchema = z.object({
+  space: z.number().int().min(0).max(10_000_000),
   network: networkSchema,
 });
 
@@ -219,6 +225,26 @@ rpcRoutes.post('/fee-for-message', async (context) => {
 
   const lamports = await getFeeForMessage(context.env, {
     messageBase64: body.messageBase64,
+    network: body.network,
+  });
+  const response = context.json({ lamports: Number(lamports) });
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+});
+
+rpcRoutes.post('/minimum-balance-for-rent-exemption', async (context) => {
+  const authenticatedContext = getAuthenticatedContext(context);
+  const body = await readJsonBody(
+    context.req.raw,
+    minimumBalanceForRentExemptionBodySchema,
+    'Request body is required.',
+    'Malformed minimum-balance-for-rent-exemption request body.',
+  );
+
+  assertRequestedNetwork(body.network, authenticatedContext.network);
+
+  const lamports = await getMinimumBalanceForRentExemption(context.env, {
+    space: body.space,
     network: body.network,
   });
   const response = context.json({ lamports: Number(lamports) });

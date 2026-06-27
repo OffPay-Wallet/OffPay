@@ -629,6 +629,15 @@ export interface RpcAccountsResponse {
   accounts: Array<RpcAccountRecord | null>;
 }
 
+export interface RpcMinimumBalanceForRentExemptionRequest {
+  space: number;
+  network: OffpayNetwork;
+}
+
+export interface RpcMinimumBalanceForRentExemptionResponse {
+  lamports: number | null;
+}
+
 export interface RpcTokenLargestAccountsRequest {
   mint: string;
   network: OffpayNetwork;

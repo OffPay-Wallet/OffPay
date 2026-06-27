@@ -3,18 +3,38 @@ import { Buffer } from 'buffer';
 import bs58 from 'bs58';
 
 import { getRpcAccounts } from '@/lib/api/offpay-api-client';
-import { verifyPrivatePaymentUnsignedTransaction } from '@/lib/magicblock/private-payment';
+import {
+  preparePrivatePaymentPlan,
+  verifyPrivatePaymentUnsignedTransaction,
+} from '@/lib/magicblock/private-payment';
 import { deriveAssociatedTokenAddress } from '@/lib/crypto/solana-token-accounts';
 
 jest.mock('@/lib/api/offpay-api-client', () => ({
   getRpcAccounts: jest.fn(),
+  getRpcFeeForMessage: jest.fn(),
+  getRpcMinimumBalanceForRentExemption: jest.fn(),
+  initializePrivatePaymentMint: jest.fn(),
+  preparePrivateSend: jest.fn(),
 }));
 
 const mockGetRpcAccounts = getRpcAccounts as jest.MockedFunction<typeof getRpcAccounts>;
+const {
+  getRpcFeeForMessage,
+  getRpcMinimumBalanceForRentExemption,
+  initializePrivatePaymentMint,
+  preparePrivateSend,
+} = jest.requireMock('@/lib/api/offpay-api-client') as {
+  getRpcFeeForMessage: jest.Mock;
+  getRpcMinimumBalanceForRentExemption: jest.Mock;
+  initializePrivatePaymentMint: jest.Mock;
+  preparePrivateSend: jest.Mock;
+};
 
 const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const ADDRESS_LOOKUP_TABLE_PROGRAM_ID = 'AddressLookupTab1e1111111111111111111111111';
+const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
+const ASSOCIATED_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 
 function pubkey(byte: number): string {
   return bs58.encode(Uint8Array.from({ length: 32 }, () => byte));
@@ -30,6 +50,10 @@ function u64LittleEndian(value: bigint): number[] {
     bytes.push(Number((value >> BigInt(index * 8)) & 0xffn));
   }
   return bytes;
+}
+
+function u32LittleEndian(value: number): number[] {
+  return [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff];
 }
 
 function buildTokenTransferTransaction(params: {
@@ -63,6 +87,129 @@ function buildTokenTransferTransaction(params: {
     ...Array.from({ length: 32 }, () => 9),
     ...shortVec(1),
     ...instruction,
+  ];
+  const transaction = [...shortVec(1), ...Array.from({ length: 64 }, () => 0), ...message];
+
+  return Buffer.from(transaction).toString('base64');
+}
+
+function buildTransferCheckedTransaction(params: {
+  walletAddress: string;
+  sourceTokenAccount: string;
+  mint: string;
+  transfers: readonly { destination: string; amount: bigint }[];
+  decimals?: number;
+}): string {
+  const accountKeys = [
+    params.walletAddress,
+    params.sourceTokenAccount,
+    params.mint,
+    ...params.transfers.map((transfer) => transfer.destination),
+    TOKEN_PROGRAM_ID,
+  ];
+  const tokenProgramIndex = accountKeys.length - 1;
+  const instructions = params.transfers.flatMap((transfer, transferIndex) => {
+    const destinationIndex = 3 + transferIndex;
+    const transferData = [12, ...u64LittleEndian(transfer.amount), params.decimals ?? 6];
+    return [
+      tokenProgramIndex,
+      ...shortVec(4),
+      1,
+      2,
+      destinationIndex,
+      0,
+      ...shortVec(transferData.length),
+      ...transferData,
+    ];
+  });
+  const message = [
+    1,
+    0,
+    1,
+    ...shortVec(accountKeys.length),
+    ...accountKeys.flatMap((key) => Array.from(bs58.decode(key))),
+    ...Array.from({ length: 32 }, () => 9),
+    ...shortVec(params.transfers.length),
+    ...instructions,
+  ];
+  const transaction = [...shortVec(1), ...Array.from({ length: 64 }, () => 0), ...message];
+
+  return Buffer.from(transaction).toString('base64');
+}
+
+function buildTransferCheckedWithSolAccountCostsTransaction(params: {
+  walletAddress: string;
+  sourceTokenAccount: string;
+  mint: string;
+  recipient: string;
+  createdAccount: string;
+  associatedTokenAccount: string;
+  amount: bigint;
+  systemCreateLamports: bigint;
+  decimals?: number;
+}): string {
+  const accountKeys = [
+    params.walletAddress,
+    params.sourceTokenAccount,
+    params.mint,
+    params.recipient,
+    params.createdAccount,
+    params.associatedTokenAccount,
+    SYSTEM_PROGRAM_ID,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  ];
+  const systemProgramIndex = 6;
+  const tokenProgramIndex = 7;
+  const associatedTokenProgramIndex = 8;
+  const createAccountData = [
+    ...u32LittleEndian(0),
+    ...u64LittleEndian(params.systemCreateLamports),
+    ...u64LittleEndian(165n),
+    ...Array.from(bs58.decode(TOKEN_PROGRAM_ID)),
+  ];
+  const createAccountInstruction = [
+    systemProgramIndex,
+    ...shortVec(2),
+    0,
+    4,
+    ...shortVec(createAccountData.length),
+    ...createAccountData,
+  ];
+  const createAssociatedTokenInstruction = [
+    associatedTokenProgramIndex,
+    ...shortVec(6),
+    0,
+    5,
+    3,
+    2,
+    6,
+    7,
+    ...shortVec(1),
+    1,
+  ];
+  const transferData = [12, ...u64LittleEndian(params.amount), params.decimals ?? 6];
+  const transferInstruction = [
+    tokenProgramIndex,
+    ...shortVec(4),
+    1,
+    2,
+    3,
+    0,
+    ...shortVec(transferData.length),
+    ...transferData,
+  ];
+  const message = [
+    1,
+    0,
+    3,
+    ...shortVec(accountKeys.length),
+    ...accountKeys.flatMap((key) => Array.from(bs58.decode(key))),
+    ...Array.from({ length: 32 }, () => 9),
+    ...shortVec(3),
+    ...createAccountInstruction,
+    ...createAssociatedTokenInstruction,
+    ...transferInstruction,
   ];
   const transaction = [...shortVec(1), ...Array.from({ length: 64 }, () => 0), ...message];
 
@@ -562,5 +709,72 @@ describe('private payment transaction verification', () => {
         network: 'mainnet',
       }),
     ).rejects.toThrow('requested token mint');
+  });
+
+  it('estimates MagicBlock SOL fees and account-creation rent from the prepared transaction', async () => {
+    const walletAddress = pubkey(81);
+    const recipient = pubkey(82);
+    const sourceTokenAccount = pubkey(83);
+    const createdAccount = pubkey(84);
+    const associatedTokenAccount = pubkey(85);
+    const amount = 1_000_000n;
+    const systemCreateLamports = 2_039_280n;
+    const associatedTokenRentLamports = 2_039_280;
+    const unsignedTransaction = buildTransferCheckedWithSolAccountCostsTransaction({
+      walletAddress,
+      sourceTokenAccount,
+      mint: MAINNET_USDC_MINT,
+      recipient,
+      createdAccount,
+      associatedTokenAccount,
+      amount,
+      systemCreateLamports,
+    });
+
+    initializePrivatePaymentMint.mockResolvedValueOnce({
+      queueId: pubkey(196),
+      validator: pubkey(198),
+      status: 'initialized',
+    });
+    preparePrivateSend.mockResolvedValueOnce({
+      unsignedTransaction,
+      transaction: privateRouteTransaction(unsignedTransaction),
+    });
+    getRpcFeeForMessage.mockResolvedValueOnce({ lamports: 8_000 });
+    mockGetRpcAccounts.mockResolvedValueOnce({
+      network: 'mainnet',
+      accounts: [null],
+    });
+    getRpcMinimumBalanceForRentExemption.mockResolvedValueOnce({
+      lamports: associatedTokenRentLamports,
+    });
+
+    const plan = await preparePrivatePaymentPlan({
+      walletAddress,
+      recipient,
+      mint: MAINNET_USDC_MINT,
+      amount: amount.toString(),
+      network: 'mainnet',
+    });
+
+    expect(plan.feeLamports).toBe(
+      8_000 + Number(systemCreateLamports) + associatedTokenRentLamports,
+    );
+    expect(plan.solFeePayer).toBe(walletAddress);
+    expect(plan.includesMintInitialization).toBe(false);
+    expect(plan).not.toHaveProperty('relayFeeAtomicAmount');
+    expect(plan).not.toHaveProperty('relayFeeMint');
+    expect(getRpcFeeForMessage).toHaveBeenCalledWith({
+      network: 'mainnet',
+      messageBase64: expect.any(String),
+    });
+    expect(mockGetRpcAccounts).toHaveBeenCalledWith({
+      addresses: [associatedTokenAccount],
+      network: 'mainnet',
+    });
+    expect(getRpcMinimumBalanceForRentExemption).toHaveBeenCalledWith({
+      space: 165,
+      network: 'mainnet',
+    });
   });
 });

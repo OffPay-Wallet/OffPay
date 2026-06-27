@@ -10,7 +10,7 @@ import {
   getWalletTokenTransactions,
   getWalletTransactions,
 } from '../lib/helius.js';
-import { recordRequestTiming } from '../lib/timing.js';
+import { recordRequestTiming, waitUntil } from '../lib/timing.js';
 import type { AppEnv } from '../lib/types.js';
 import { isValidSolanaAddress, networkSchema, readSearchParams } from '../lib/validation.js';
 
@@ -76,6 +76,10 @@ function makeTimingRecorder(context: Context<AppEnv>) {
   return (name: string, durationMs: number): void => recordRequestTiming(context, name, durationMs);
 }
 
+function makeWaitUntil(context: Context<AppEnv>) {
+  return (task: Promise<unknown>): void => waitUntil(context, task);
+}
+
 const walletRoutes = new Hono<AppEnv>();
 
 walletRoutes.get('/dashboard', async (context) => {
@@ -85,6 +89,7 @@ walletRoutes.get('/dashboard', async (context) => {
 
   const resolveDashboard = async () => {
     const recordTiming = makeTimingRecorder(context);
+    const deferRefresh = makeWaitUntil(context);
     const emptyTransactions = {
       address: query.address,
       network: query.network,
@@ -102,6 +107,7 @@ walletRoutes.get('/dashboard', async (context) => {
         network: query.network,
         useCache: query.useCache ?? true,
         recordTiming,
+        waitUntil: deferRefresh,
       }),
       query.includeTransactions
         ? getWalletTransactions(context.env, {
@@ -111,6 +117,7 @@ walletRoutes.get('/dashboard', async (context) => {
             limit: query.limit,
             useCache: query.useCache ?? true,
             recordTiming,
+            waitUntil: deferRefresh,
           })
         : Promise.resolve(emptyTransactions),
     ]);
@@ -142,7 +149,7 @@ walletRoutes.get('/dashboard', async (context) => {
   const response = context.json(payload);
   response.headers.set(
     'Cache-Control',
-    query.useCache === false ? 'no-store' : 'public, max-age=10',
+    query.useCache === false ? 'no-store' : 'public, max-age=10, stale-while-revalidate=30',
   );
   return response;
 });
@@ -158,6 +165,7 @@ walletRoutes.get('/balance', async (context) => {
       network: query.network,
       useCache: query.useCache ?? true,
       recordTiming: makeTimingRecorder(context),
+      waitUntil: makeWaitUntil(context),
     });
 
   const payload =
@@ -175,7 +183,7 @@ walletRoutes.get('/balance', async (context) => {
   const response = context.json(payload);
   response.headers.set(
     'Cache-Control',
-    query.useCache === false ? 'no-store' : 'public, max-age=10',
+    query.useCache === false ? 'no-store' : 'public, max-age=10, stale-while-revalidate=30',
   );
   return response;
 });
@@ -193,6 +201,7 @@ walletRoutes.get('/transactions', async (context) => {
       limit: query.limit,
       useCache: query.useCache ?? true,
       recordTiming: makeTimingRecorder(context),
+      waitUntil: makeWaitUntil(context),
     });
 
   const canUseEdgeCache = query.useCache !== false && query.cursor == null;
@@ -208,7 +217,10 @@ walletRoutes.get('/transactions', async (context) => {
     : await resolveTransactions();
 
   const response = context.json(payload);
-  response.headers.set('Cache-Control', canUseEdgeCache ? 'public, max-age=15' : 'no-store');
+  response.headers.set(
+    'Cache-Control',
+    canUseEdgeCache ? 'public, max-age=15, stale-while-revalidate=300' : 'no-store',
+  );
   return response;
 });
 
@@ -227,6 +239,7 @@ walletRoutes.get('/token-transactions', async (context) => {
       limit: query.limit,
       useCache: query.useCache ?? true,
       recordTiming: makeTimingRecorder(context),
+      waitUntil: makeWaitUntil(context),
     });
 
   const canUseEdgeCache = query.useCache !== false && query.cursor == null;
@@ -242,7 +255,10 @@ walletRoutes.get('/token-transactions', async (context) => {
     : await resolveTransactions();
 
   const response = context.json(payload);
-  response.headers.set('Cache-Control', canUseEdgeCache ? 'public, max-age=15' : 'no-store');
+  response.headers.set(
+    'Cache-Control',
+    canUseEdgeCache ? 'public, max-age=15, stale-while-revalidate=300' : 'no-store',
+  );
   return response;
 });
 
