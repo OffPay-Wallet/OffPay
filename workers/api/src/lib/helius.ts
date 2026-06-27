@@ -119,6 +119,7 @@ interface WalletTransactionGroup {
 
 interface WalletTransactionRecord {
   signature: string;
+  displayId?: string | null;
   timestamp: number;
   type: string;
   description: string | null;
@@ -3314,7 +3315,7 @@ function buildWalletTransactionView(
   const account = findDisplayCounterparty(type, transaction.counterparties);
 
   return {
-    id: transaction.signature,
+    id: getWalletTransactionRecordIdentity(transaction),
     type,
     title: getDisplayTitle(type, transaction.status),
     subtitle: swapSubtitle ?? buildDisplaySubtitle(type, transaction),
@@ -3343,8 +3344,28 @@ function sortWalletTransactionsMostRecent(
   return [...transactions].sort((left, right) => {
     const timestampDiff = right.timestamp - left.timestamp;
     if (timestampDiff !== 0) return timestampDiff;
-    return left.signature.localeCompare(right.signature);
+    return getWalletTransactionRecordIdentity(left).localeCompare(
+      getWalletTransactionRecordIdentity(right),
+    );
   });
+}
+
+function getWalletTransactionRecordIdentity(transaction: WalletTransactionRecord): string {
+  return transaction.displayId?.trim() || transaction.signature;
+}
+
+function takeWalletTransactionsPreservingSignatureGroup(
+  transactions: readonly WalletTransactionRecord[],
+  limit: number,
+): WalletTransactionRecord[] {
+  if (transactions.length <= limit) return [...transactions];
+
+  const cutoffSignature = transactions[Math.max(0, limit - 1)]?.signature;
+  if (cutoffSignature == null) return transactions.slice(0, limit);
+
+  return transactions.filter(
+    (transaction, index) => index < limit || transaction.signature === cutoffSignature,
+  );
 }
 
 function buildHistoryGroupsFromDisplayRows(
@@ -3563,17 +3584,21 @@ async function supplementWalletHistoryWithNativeSolRpc(params: {
     return params.response;
   }
 
-  const transactionsBySignature = new Map<string, WalletTransactionRecord>();
+  const transactionsByIdentity = new Map<string, WalletTransactionRecord>();
   for (const transaction of [...params.response.transactions, ...supplement.transactions]) {
-    if (!transactionsBySignature.has(transaction.signature)) {
-      transactionsBySignature.set(transaction.signature, transaction);
+    const identity = getWalletTransactionRecordIdentity(transaction);
+    if (!transactionsByIdentity.has(identity)) {
+      transactionsByIdentity.set(identity, transaction);
     }
   }
 
   const mergedTransactions = sortWalletTransactionsMostRecent(
-    Array.from(transactionsBySignature.values()),
+    Array.from(transactionsByIdentity.values()),
   );
-  const visibleTransactions = mergedTransactions.slice(0, params.limit);
+  const visibleTransactions = takeWalletTransactionsPreservingSignatureGroup(
+    mergedTransactions,
+    params.limit,
+  );
   const hasMore =
     mergedTransactions.length > params.limit ||
     params.response.cursor !== null ||
@@ -3987,11 +4012,13 @@ function extractOwnerTokenBalanceDeltas(
 function extractTokenBalanceCounterparties(
   meta: Record<string, unknown> | null,
   walletAddress: string,
+  mint?: string,
 ): WalletTransactionCounterparty[] {
   const counterparties: WalletTransactionCounterparty[] = [];
 
   for (const delta of extractOwnerTokenBalanceDeltas(meta)) {
     if (delta.owner === walletAddress) continue;
+    if (mint != null && delta.mint !== mint) continue;
 
     appendCounterparty(
       counterparties,
@@ -4081,6 +4108,36 @@ function inferTypeFromTokenBalanceDeltas(deltas: readonly TokenBalanceDelta[]): 
   if (hasCredit) return 'RECEIVE';
   if (hasDebit) return 'TOKEN_TRANSFER';
   return null;
+}
+
+function getTokenBalanceDeltaDirection(delta: TokenBalanceDelta): 'send' | 'receive' {
+  return delta.rawDelta > 0n ? 'receive' : 'send';
+}
+
+function getTokenBalanceDeltaType(delta: TokenBalanceDelta): string {
+  return getTokenBalanceDeltaDirection(delta) === 'receive' ? 'RECEIVE' : 'TOKEN_TRANSFER';
+}
+
+function shouldExpandTokenBalanceDeltas(
+  type: string,
+  deltas: readonly TokenBalanceDelta[],
+): boolean {
+  if (deltas.length <= 1) return false;
+  if (type === 'SWAP') return false;
+
+  const hasDebit = deltas.some((delta) => delta.rawDelta < 0n);
+  const hasCredit = deltas.some((delta) => delta.rawDelta > 0n);
+  return hasDebit !== hasCredit;
+}
+
+function buildTokenBalanceDeltaDisplayId(
+  signature: string,
+  delta: TokenBalanceDelta,
+  index: number,
+): string {
+  const direction = getTokenBalanceDeltaDirection(delta);
+  const mint = isNativeSolMint(delta.mint) ? 'SOL' : delta.mint;
+  return `${signature}:${direction}:${mint}:${index}`;
 }
 
 function buildRpcTransactionTokenFields(
@@ -4174,17 +4231,19 @@ async function buildRpcTransactionRecordFromResult(
   fallbackStatus: 'success' | 'failed',
   result: unknown,
   prefetchedTokenMetadata?: Map<string, TokenMetadata>,
-): Promise<WalletTransactionRecord> {
+): Promise<WalletTransactionRecord[]> {
   if (!isRecord(result)) {
-    return {
-      signature,
-      timestamp: fallbackTimestamp,
-      type: 'UNKNOWN',
-      description: null,
-      fee: 0,
-      status: fallbackStatus,
-      counterparties: [],
-    };
+    return [
+      {
+        signature,
+        timestamp: fallbackTimestamp,
+        type: 'UNKNOWN',
+        description: null,
+        fee: 0,
+        status: fallbackStatus,
+        counterparties: [],
+      },
+    ];
   }
 
   const transaction = isRecord(result.transaction) ? result.transaction : null;
@@ -4231,6 +4290,78 @@ async function buildRpcTransactionRecordFromResult(
       : type === 'TOKEN_TRANSFER'
         ? 'Token transfer'
         : null);
+  const timestamp =
+    blockTime !== null && blockTime > 0 ? Math.trunc(blockTime) : Math.trunc(fallbackTimestamp);
+  const normalizedFee = fee !== null && fee > 0 ? Math.trunc(fee) : 0;
+  const status = hasError ? 'failed' : 'success';
+  const parsedCounterparties = extractParsedCounterparties(parsedInstructions, walletAddress);
+
+  const buildRecord = ({
+    displayId,
+    recordType,
+    description,
+    tokenFields,
+    counterparties,
+  }: {
+    displayId?: string | null;
+    recordType: string;
+    description: string | null;
+    tokenFields: TransactionTokenFields;
+    counterparties: WalletTransactionCounterparty[];
+  }): WalletTransactionRecord => {
+    const sender =
+      findCounterpartyAddress(counterparties, /sender|source|from|payer|authority/) ??
+      (tokenFields.direction === 'send' ? walletAddress : null);
+    const recipient =
+      findCounterpartyAddress(counterparties, /recipient|receiver|destination|to/) ??
+      (tokenFields.direction === 'receive' ? walletAddress : null);
+
+    const record: WalletTransactionRecord = {
+      signature,
+      timestamp,
+      type: recordType,
+      description,
+      ...tokenFields,
+      fee: normalizedFee,
+      status,
+      sender,
+      recipient,
+      counterparties,
+    };
+    if (displayId != null) {
+      record.displayId = displayId;
+    }
+    return record;
+  };
+
+  if (!touchesUmbra && shouldExpandTokenBalanceDeltas(type, tokenBalanceDeltas)) {
+    return tokenBalanceDeltas.map((delta, index) => {
+      const recordType = getTokenBalanceDeltaType(delta);
+      const tokenFields = resolveTransactionTokenFields(
+        network,
+        delta.mint,
+        delta.decimals,
+        delta.rawDelta,
+        getTokenBalanceDeltaDirection(delta),
+        tokenMetadata,
+      );
+      const deltaCounterparties = mergeCounterparties(
+        isNativeSolMint(delta.mint)
+          ? []
+          : extractTokenBalanceCounterparties(meta, walletAddress, delta.mint),
+        parsedCounterparties,
+      );
+
+      return buildRecord({
+        displayId: buildTokenBalanceDeltaDisplayId(signature, delta, index),
+        recordType,
+        description: buildRpcTokenBalanceDescription(recordType, [delta], tokenMetadata),
+        tokenFields,
+        counterparties: deltaCounterparties,
+      });
+    });
+  }
+
   const tokenFields = buildRpcTransactionTokenFields(
     network,
     type,
@@ -4241,38 +4372,27 @@ async function buildRpcTransactionRecordFromResult(
     ? mergeCounterparties(
         mergeCounterparties(
           extractTokenBalanceCounterparties(meta, walletAddress),
-          extractParsedCounterparties(parsedInstructions, walletAddress),
+          parsedCounterparties,
         ),
         extractUmbraPoolCounterparties(result, network, walletAddress),
       )
     : mergeCounterparties(
         extractTokenBalanceCounterparties(meta, walletAddress),
-        extractParsedCounterparties(parsedInstructions, walletAddress),
+        parsedCounterparties,
       );
   const umbraInstructionNames = touchesUmbra ? extractUmbraInstructionNames(result) : [];
   const umbraClassification = touchesUmbra
     ? classifyUmbraTransaction(tokenFields.direction, type, baseDescription, umbraInstructionNames)
     : null;
-  const sender =
-    findCounterpartyAddress(counterparties, /sender|source|from|payer|authority/) ??
-    (tokenFields.direction === 'send' ? walletAddress : null);
-  const recipient =
-    findCounterpartyAddress(counterparties, /recipient|receiver|destination|to/) ??
-    (tokenFields.direction === 'receive' ? walletAddress : null);
 
-  return {
-    signature,
-    timestamp:
-      blockTime !== null && blockTime > 0 ? Math.trunc(blockTime) : Math.trunc(fallbackTimestamp),
-    type: umbraClassification?.type ?? type,
-    description: umbraClassification?.description ?? baseDescription,
-    ...tokenFields,
-    fee: fee !== null && fee > 0 ? Math.trunc(fee) : 0,
-    status: hasError ? 'failed' : 'success',
-    sender,
-    recipient,
-    counterparties,
-  };
+  return [
+    buildRecord({
+      recordType: umbraClassification?.type ?? type,
+      description: umbraClassification?.description ?? baseDescription,
+      tokenFields,
+      counterparties,
+    }),
+  ];
 }
 
 async function fetchRpcTransactionRecord(
@@ -4285,7 +4405,7 @@ async function fetchRpcTransactionRecord(
   fallbackTimestamp: number,
   fallbackStatus: 'success' | 'failed',
   rpcProviderRecorder?: RpcProviderRecorder,
-): Promise<WalletTransactionRecord> {
+): Promise<WalletTransactionRecord[]> {
   const result = await historyRpcRequest(
     rpcCandidates,
     network,
@@ -4375,7 +4495,7 @@ async function fetchRpcTransactionRecordsBatch(
       collectBatchTokenMints(results),
     );
 
-    return Promise.all(
+    const recordGroups = await Promise.all(
       entries.map((entry, index) =>
         buildRpcTransactionRecordFromResult(
           bindings,
@@ -4390,8 +4510,9 @@ async function fetchRpcTransactionRecordsBatch(
         ),
       ),
     );
+    return recordGroups.flat();
   } catch {
-    return Promise.all(
+    const recordGroups = await Promise.all(
       entries.map((entry) =>
         fetchRpcTransactionRecord(
           bindings,
@@ -4406,6 +4527,7 @@ async function fetchRpcTransactionRecordsBatch(
         ),
       ),
     );
+    return recordGroups.flat();
   }
 }
 
@@ -4620,19 +4742,24 @@ async function fetchWalletTransactionsViaRpc(
     scanTimings.txBatchMs += Date.now() - transactionBatchStartedAt;
     scanTimings.pages += 1;
     let reachedLimit = false;
+    let limitSignature: string | null = null;
 
     for (const transaction of parsedTransactions) {
-      if (isDisplayableWalletTransactionRecord(transaction)) {
-        filteredTransactions.push(transaction);
-      }
-      if (filteredTransactions.length >= limit) {
-        nextCursor = transaction.signature;
+      if (limitSignature !== null && transaction.signature !== limitSignature) {
         reachedLimit = true;
         break;
       }
+
+      if (isDisplayableWalletTransactionRecord(transaction)) {
+        filteredTransactions.push(transaction);
+        if (filteredTransactions.length >= limit && limitSignature === null) {
+          limitSignature = transaction.signature;
+          nextCursor = transaction.signature;
+        }
+      }
     }
 
-    if (reachedLimit) {
+    if (reachedLimit || limitSignature !== null) {
       break;
     }
 
@@ -4658,7 +4785,7 @@ async function fetchWalletTransactionsViaRpc(
   return buildWalletTransactionsResponse({
     address,
     network,
-    transactions: filteredTransactions.slice(0, limit),
+    transactions: filteredTransactions,
     cursor: nextCursor,
   });
 }
@@ -4908,21 +5035,26 @@ async function fetchWalletTokenTransactionsViaRpc(
     scanTimings.txBatchMs += Date.now() - transactionBatchStartedAt;
     scanTimings.pages += 1;
     let reachedLimit = false;
+    let limitSignature: string | null = null;
     for (const transaction of parsedTransactions) {
+      if (limitSignature !== null && transaction.signature !== limitSignature) {
+        reachedLimit = true;
+        break;
+      }
+
       if (
         walletTransactionMatchesMint(transaction, normalizedMint) &&
         isDisplayableWalletTransactionRecord(transaction)
       ) {
         filteredTransactions.push(transaction);
-      }
-      if (filteredTransactions.length >= limit) {
-        nextCursor = transaction.signature;
-        reachedLimit = true;
-        break;
+        if (filteredTransactions.length >= limit && limitSignature === null) {
+          limitSignature = transaction.signature;
+          nextCursor = transaction.signature;
+        }
       }
     }
 
-    if (reachedLimit) {
+    if (reachedLimit || limitSignature !== null) {
       break;
     }
 
@@ -4946,7 +5078,7 @@ async function fetchWalletTokenTransactionsViaRpc(
   return buildWalletTransactionsResponse({
     address,
     network,
-    transactions: filteredTransactions.slice(0, limit),
+    transactions: filteredTransactions,
     cursor: nextCursor,
   });
 }
@@ -4999,11 +5131,11 @@ async function getWalletTransactions(
   const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v9-raw-rpc', [
-    request.address,
-    normalizedCursor ?? 'first-page',
-    normalizedLimit,
-  ]);
+  const cacheKey = createNetworkCacheKey(
+    request.network,
+    'wallet-transactions-v10-multi-asset-rpc',
+    [request.address, normalizedCursor ?? 'first-page', normalizedLimit],
+  );
 
   const resolver = async () =>
     fetchWalletTransactionsViaRpc(
@@ -5019,7 +5151,7 @@ async function getWalletTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v9-raw-rpc',
+          namespace: 'wallet-transactions-v10-multi-asset-rpc',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           staleTtlMs: WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS,
@@ -5041,12 +5173,11 @@ async function getWalletTokenTransactions(
   const normalizedCursor = request.cursor?.trim() || null;
   const normalizedMint = normalizeTokenTransactionMint(request.mint.trim());
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-token-transactions-v6-raw-rpc', [
-    request.address,
-    normalizedMint,
-    normalizedCursor ?? 'first-page',
-    normalizedLimit,
-  ]);
+  const cacheKey = createNetworkCacheKey(
+    request.network,
+    'wallet-token-transactions-v7-multi-asset-rpc',
+    [request.address, normalizedMint, normalizedCursor ?? 'first-page', normalizedLimit],
+  );
 
   const resolver = async () =>
     fetchWalletTokenTransactionsViaRpc(
@@ -5063,7 +5194,7 @@ async function getWalletTokenTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-token-transactions-v6-raw-rpc',
+          namespace: 'wallet-token-transactions-v7-multi-asset-rpc',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           staleTtlMs: WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS,

@@ -1277,6 +1277,164 @@ describe('wallet transaction history (standard Solana RPC)', () => {
     });
   });
 
+  it('expands same-signature airdrops into one history row per credited token', async () => {
+    const airdropSignature = `${SIGNATURE}airdrop`;
+    const sender = 'Hq3cgpbHV1Hsq3cZKaWDyHhXzHq7veKf5D5eGX2Ujqq3';
+    const usdcMint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+    const usdcTokenAccount = UMBRA_POOL;
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTokenAccountsByOwner') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { value: [] },
+          };
+        }
+
+        if (request.method === 'getSignaturesForAddress') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result:
+              params[0] === WALLET
+                ? [
+                    {
+                      signature: airdropSignature,
+                      blockTime: 1781794500,
+                      err: null,
+                    },
+                  ]
+                : [],
+          };
+        }
+
+        if (request.method === 'getTransaction') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              blockTime: 1781794500,
+              meta: {
+                err: null,
+                fee: 5000,
+                preBalances: [2_000_000_000, 0, 0, 0],
+                postBalances: [1_749_995_000, 250_000_000, 0, 0],
+                preTokenBalances: [
+                  {
+                    owner: WALLET,
+                    accountIndex: 2,
+                    mint: OTHER_TOKEN_MINT,
+                    uiTokenAmount: { amount: '0', decimals: 5 },
+                  },
+                  {
+                    owner: WALLET,
+                    accountIndex: 3,
+                    mint: usdcMint,
+                    uiTokenAmount: { amount: '0', decimals: 6 },
+                  },
+                ],
+                postTokenBalances: [
+                  {
+                    owner: WALLET,
+                    accountIndex: 2,
+                    mint: OTHER_TOKEN_MINT,
+                    uiTokenAmount: { amount: '12345000', decimals: 5 },
+                  },
+                  {
+                    owner: WALLET,
+                    accountIndex: 3,
+                    mint: usdcMint,
+                    uiTokenAmount: { amount: '1000000', decimals: 6 },
+                  },
+                ],
+              },
+              transaction: {
+                message: {
+                  accountKeys: [
+                    { pubkey: sender },
+                    { pubkey: WALLET },
+                    { pubkey: TOKEN_ACCOUNT },
+                    { pubkey: usdcTokenAccount },
+                  ],
+                  instructions: [
+                    {
+                      programId: '11111111111111111111111111111111',
+                      parsed: {
+                        type: 'transfer',
+                        info: {
+                          source: sender,
+                          destination: WALLET,
+                          lamports: 250_000_000,
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [
+              {
+                id: OTHER_TOKEN_MINT,
+                content: { metadata: { name: 'Bonk', symbol: 'BONK' } },
+                token_info: { symbol: 'BONK', decimals: 5 },
+              },
+              {
+                id: usdcMint,
+                content: { metadata: { name: 'USD Coin', symbol: 'USDC' } },
+                token_info: { symbol: 'USDC', decimals: 6 },
+              },
+            ],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(bindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(3);
+    expect(response.displayTransactions).toHaveLength(3);
+    expect(new Set(response.displayTransactions.map((transaction) => transaction.id)).size).toBe(3);
+    expect(
+      response.displayTransactions.every(
+        (transaction) => transaction.detailSignature === airdropSignature,
+      ),
+    ).toBe(true);
+    expect(
+      response.displayTransactions.map((transaction) => transaction.amountLabel).sort(),
+    ).toEqual(['+0.25 SOL', '+1 USDC', '+123.45 BONK']);
+    expect(response.transactions.map((transaction) => transaction.tokenSymbol).sort()).toEqual([
+      'BONK',
+      'SOL',
+      'USDC',
+    ]);
+  });
+
   it('uses standard public RPC methods for mainnet wallet history', async () => {
     const configs: Record<string, unknown>[] = [];
     const seenMethods: string[] = [];

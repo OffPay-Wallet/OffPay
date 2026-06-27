@@ -332,7 +332,7 @@ export const BalanceCard = memo(function BalanceCard({
   const maskedAddress = privacyHidden ? '****' : displayAddress;
   const cardHPadding = compact ? spacing.sm : spacing.md;
   const cardVPadding = compact ? spacing.sm : spacing.md;
-  const portfolioCardMinHeight = stackFooter ? 176 : ultraCompact ? 146 : compact ? 160 : 184;
+  const portfolioCardMinHeight = stackFooter ? 188 : ultraCompact ? 154 : compact ? 170 : 196;
   const topControlSize = ultraCompact ? 28 : compact ? 30 : 32;
   const footerControlHeight = ultraCompact ? 28 : 30;
   const statusPillHeight = ultraCompact ? 22 : 24;
@@ -350,7 +350,7 @@ export const BalanceCard = memo(function BalanceCard({
   const currencySheetBottomPadding = Math.max(insets.bottom, spacing.md) + spacing.md;
   const currencyCode = selectedCurrency ?? 'USD';
   const refreshDisabled = onRefresh == null || refreshing;
-  const addressPress = useCancelSafePressed(publicKey == null);
+  const copyPress = useCancelSafePressed(publicKey == null);
   const refreshPress = useCancelSafePressed(refreshDisabled);
   const privacyPress = useCancelSafePressed(onTogglePrivacy == null);
   const currencyPress = useCancelSafePressed(false);
@@ -440,22 +440,11 @@ export const BalanceCard = memo(function BalanceCard({
                     {balanceTicker}
                   </Text>
                   <View style={styles.topActions}>
-                    <Pressable
+                    <View
                       style={[
                         styles.addressPill,
                         { height: topControlSize, maxWidth: addressPillMaxWidth },
-                        addressPress.pressed && styles.controlPressed,
                       ]}
-                      onPress={handleCopy}
-                      onPressIn={addressPress.onPressIn}
-                      onPressOut={addressPress.onPressOut}
-                      onResponderTerminate={addressPress.onResponderTerminate}
-                      onResponderTerminationRequest={() => true}
-                      disabled={publicKey == null}
-                      hitSlop={6}
-                      accessibilityRole="button"
-                      accessibilityLabel="Copy wallet address"
-                      accessibilityState={{ disabled: publicKey == null }}
                     >
                       <View style={styles.addressPillGlass}>
                         <Text
@@ -470,13 +459,30 @@ export const BalanceCard = memo(function BalanceCard({
                         >
                           {maskedAddress}
                         </Text>
-                        <Ionicons
-                          name={copied ? 'checkmark' : 'copy-outline'}
-                          size={compact ? 15 : 16}
-                          color={colors.text.primary}
-                        />
+                        <Pressable
+                          style={[
+                            styles.addressCopyButton,
+                            copyPress.pressed && styles.addressCopyButtonPressed,
+                          ]}
+                          onPress={handleCopy}
+                          onPressIn={copyPress.onPressIn}
+                          onPressOut={copyPress.onPressOut}
+                          onResponderTerminate={copyPress.onResponderTerminate}
+                          onResponderTerminationRequest={() => true}
+                          disabled={publicKey == null}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Copy wallet address"
+                          accessibilityState={{ disabled: publicKey == null }}
+                        >
+                          <Ionicons
+                            name={copied ? 'checkmark' : 'copy-outline'}
+                            size={compact ? 14 : 15}
+                            color={colors.text.primary}
+                          />
+                        </Pressable>
                       </View>
-                    </Pressable>
+                    </View>
                     <Pressable
                       style={[
                         styles.refreshButton,
@@ -1070,9 +1076,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    gap: 3,
+    paddingLeft: spacing.sm,
+    paddingRight: 5,
     minWidth: 0,
+  },
+  addressCopyButton: {
+    width: 22,
+    height: 22,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  addressCopyButtonPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    opacity: 0.74,
   },
   addressText: {
     fontFamily: fontFamily.mono,

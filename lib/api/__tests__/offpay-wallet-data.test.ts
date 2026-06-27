@@ -25,6 +25,10 @@ import type {
   WalletTransactionsResponse,
 } from '@/types/offpay-api';
 
+type WalletDisplayTransactionView = NonNullable<
+  WalletTransactionsResponse['displayTransactions']
+>[number];
+
 const signature =
   '5r9jzD8fHa9eG4vAMcYQYV5spwG9R4VuYH9zJm7DYd6m8uDj7b4hyY3TwY2Nv4R8ydh7v7FGM5h7EJYvVx3sN4fQ';
 const nativeSolMint = 'So11111111111111111111111111111111111111112';
@@ -50,6 +54,32 @@ function buildActivityEvent(overrides: Partial<WalletActivityEvent> = {}): Walle
     timestamp: 1_713_996_000,
     type: 'TRANSFER',
     description: 'Received 2 BONK from test wallet',
+    ...overrides,
+  };
+}
+
+function buildDisplayView(
+  overrides: Partial<WalletDisplayTransactionView> = {},
+): WalletDisplayTransactionView {
+  return {
+    id: signature,
+    type: 'receive',
+    title: 'Received',
+    subtitle: 'From test wallet',
+    sourceLabel: null,
+    amountLabel: '+1 USDC',
+    secondaryAmountLabel: null,
+    amountTone: 'positive',
+    tokenMint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    tokenSymbol: 'USDC',
+    tokenName: 'USD Coin',
+    tokenLogo: null,
+    status: 'confirmed',
+    detailTimestampMs: 1_713_996_000_000,
+    detailNetwork: 'devnet',
+    detailSignature: signature,
+    detailAccountLabel: 'From',
+    detailAccountAddress: null,
     ...overrides,
   };
 }
@@ -386,6 +416,62 @@ describe('offpay-wallet-data', () => {
       tokenSymbol: 'SOL',
       tokenName: 'Solana',
     });
+  });
+
+  it('dedupes multi-asset backend rows by detail signature while preserving each token row', () => {
+    const solRowId = `${signature}:receive:${nativeSolMint}:0`;
+    const usdcRowId = `${signature}:receive:4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU:1`;
+    const transaction = buildTransaction({
+      signature,
+      description: 'Received 1 USDC',
+      amount: '1',
+      rawAmount: '1000000',
+      tokenMint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      tokenSymbol: 'USDC',
+      tokenDecimals: 6,
+      direction: 'receive',
+    });
+    const transactionViews = [
+      buildDisplayView({
+        id: solRowId,
+        amountLabel: '+0.25 SOL',
+        tokenMint: nativeSolMint,
+        tokenSymbol: 'SOL',
+        tokenName: 'Solana',
+      }),
+      buildDisplayView({
+        id: usdcRowId,
+      }),
+    ];
+    const localReceipts = [
+      {
+        id: `online-receive-devnet-${signature}`,
+        direction: 'receive' as const,
+        status: 'settled' as const,
+        title: 'Airdrop received',
+        subtitle: 'Devnet faucet',
+        routeLabel: 'Devnet faucet',
+        createdAt: 1_713_996_000_000,
+        signature,
+      },
+    ];
+
+    const recentRows = buildWalletRecentActivityItems({
+      transactions: [transaction],
+      transactionViews,
+      localReceipts,
+    });
+    const historyRows = buildWalletHistoryGroups({
+      transactions: [transaction],
+      transactionViews,
+      localReceipts,
+    }).flatMap((group) => group.data);
+
+    expect(recentRows.map((row) => row.id).sort()).toEqual([solRowId, usdcRowId].sort());
+    expect(historyRows.map((row) => row.id).sort()).toEqual([solRowId, usdcRowId].sort());
+    expect(recentRows).toHaveLength(2);
+    expect(historyRows).toHaveLength(2);
+    expect(recentRows.every((row) => row.sourceLabel === 'Devnet faucet')).toBe(true);
   });
 
   it('filters SOL token details from mapped history rows with accurate detail fields', () => {

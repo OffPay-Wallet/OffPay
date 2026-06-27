@@ -139,7 +139,7 @@ walletRoutes.get('/dashboard', async (context) => {
       ? await resolveDashboard()
       : await getOrSetEdgeJsonCache({
           context,
-          namespace: 'wallet_dashboard_v4_display_history',
+          namespace: 'wallet_dashboard_v5_multi_asset_history',
           keyParts: [query.network, query.address, query.limit, query.includeTransactions],
           freshTtlMs: WALLET_DASHBOARD_EDGE_FRESH_TTL_MS,
           staleTtlMs: WALLET_DASHBOARD_EDGE_STALE_TTL_MS,
@@ -208,7 +208,7 @@ walletRoutes.get('/transactions', async (context) => {
   const payload = canUseEdgeCache
     ? await getOrSetEdgeJsonCache({
         context,
-        namespace: 'wallet_transactions_first_page_v7_sol_supplement',
+        namespace: 'wallet_transactions_first_page_v8_multi_asset_history',
         keyParts: [query.network, query.address, query.limit],
         freshTtlMs: WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS,
         staleTtlMs: WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS,
@@ -246,7 +246,7 @@ walletRoutes.get('/token-transactions', async (context) => {
   const payload = canUseEdgeCache
     ? await getOrSetEdgeJsonCache({
         context,
-        namespace: 'wallet_token_transactions_first_page_v4_indexed_local_filter',
+        namespace: 'wallet_token_transactions_first_page_v5_multi_asset_history',
         keyParts: [query.network, query.address, query.mint, query.limit],
         freshTtlMs: WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS,
         staleTtlMs: WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS,
