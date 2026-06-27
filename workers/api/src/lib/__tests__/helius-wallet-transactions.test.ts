@@ -55,9 +55,9 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-// getTransactionsForAddress (transactionDetails: 'full') item for a native SOL
-// transfer from WALLET to RECIPIENT.
-function indexedSolTransferItem(
+// Parsed getTransaction-style item for a native SOL transfer from WALLET to
+// RECIPIENT.
+function rawRpcSolTransferItem(
   signature: string,
   blockTime: number,
   lamports: number,
@@ -93,7 +93,7 @@ function indexedSolTransferItem(
 }
 
 // Item where WALLET only paid the fee (no transfer touching it). Not displayable.
-function indexedFeeOnlyItem(signature: string, blockTime: number): Record<string, unknown> {
+function rawRpcFeeOnlyItem(signature: string, blockTime: number): Record<string, unknown> {
   return {
     slot: 1000,
     transactionIndex: 0,
@@ -119,7 +119,7 @@ function indexedFeeOnlyItem(signature: string, blockTime: number): Record<string
 // Item for a SOL -> SPL swap: a wrapped-SOL debit and an SPL credit, both owned
 // by WALLET. The parser classifies this as a SWAP whose description reads
 // "Swapped <sol> SOL to <amount> <symbol>".
-function indexedSolToTokenSwapItem(params: {
+function rawRpcSolToTokenSwapItem(params: {
   signature: string;
   blockTime: number;
   solLamports: number;
@@ -172,7 +172,7 @@ function indexedSolToTokenSwapItem(params: {
   };
 }
 
-function indexedItemTouchesMint(item: Record<string, unknown>, mint: string): boolean {
+function rawRpcItemTouchesMint(item: Record<string, unknown>, mint: string): boolean {
   const meta = (item.meta ?? {}) as Record<string, unknown>;
   for (const key of ['preTokenBalances', 'postTokenBalances'] as const) {
     const list = meta[key];
@@ -477,7 +477,7 @@ function enhancedNonceAccountFundingItem(
   };
 }
 
-function createIndexedPlanGateThenRawRpcMock(options: {
+function createRawRpcHistoryMock(options: {
   enhancedItems: readonly Record<string, unknown>[];
   onRpcMethod?: (method: string) => void;
   assets?: unknown[];
@@ -586,41 +586,96 @@ function createIndexedPlanGateThenRawRpcMock(options: {
   });
 }
 
-// Mock that serves indexed getTransactionsForAddress (JSON-RPC POST) from a
-// fixed, newest-first list of full-transaction items. It paginates via an
-// index-based paginationToken and honors the server-side
-// filters.tokenTransfer.mint filter. getAssetBatch metadata resolves to empty
-// unless provided.
+function getTransactionSignature(item: Record<string, unknown>): string {
+  const transaction = item.transaction as { signatures?: string[] } | undefined;
+  return transaction?.signatures?.[0] ?? '';
+}
+
+// Mock that serves standard Solana public-RPC history methods from a fixed,
+// newest-first list of full transaction items. getAssetBatch metadata resolves
+// to empty unless provided.
 function createGetTransactionsForAddressMock(
   items: readonly Record<string, unknown>[],
-  options: { onConfig?: (config: Record<string, unknown>) => void; assets?: unknown[] } = {},
+  options: {
+    onConfig?: (config: Record<string, unknown>) => void;
+    onMethod?: (method: string) => void;
+    onUrl?: (url: string) => void;
+    assets?: unknown[];
+  } = {},
 ) {
-  return jest.fn(async (_input: string, init: RequestInit) => {
+  return jest.fn(async (input: string, init: RequestInit) => {
+    options.onUrl?.(input);
     const requestBody = JSON.parse(init.body as string);
     const respond = (request: Record<string, unknown>) => {
+      options.onMethod?.(String(request.method));
       if (request.method === 'getTransactionsForAddress') {
-        const params = Array.isArray(request.params) ? request.params : [];
-        const config = (params[1] ?? {}) as Record<string, unknown>;
-        options.onConfig?.(config);
-        const filters = (config.filters ?? {}) as Record<string, unknown>;
-        const tokenTransfer = (filters.tokenTransfer ?? null) as { mint?: string } | null;
-        const mintFilter = tokenTransfer?.mint ?? null;
-        const limit = typeof config.limit === 'number' ? config.limit : 100;
-        const token = typeof config.paginationToken === 'string' ? config.paginationToken : null;
-        const matching =
-          mintFilter == null
-            ? items
-            : items.filter((item) => indexedItemTouchesMint(item, mintFilter));
-        const startIndex = token == null ? 0 : Number(token.split(':')[0]);
-        const page = matching.slice(startIndex, startIndex + limit);
-        const nextIndex = startIndex + page.length;
-        const paginationToken = nextIndex < matching.length ? `${nextIndex}:0` : null;
-        return { jsonrpc: '2.0', id: request.id, result: { data: page, paginationToken } };
+        throw new Error('getTransactionsForAddress must not be used for wallet history');
       }
       if (request.method === 'getAssetBatch') {
         return { jsonrpc: '2.0', id: request.id, result: options.assets ?? [] };
       }
-      throw new Error(`Unexpected RPC method on indexed path: ${String(request.method)}`);
+      if (request.method === 'getTokenAccountsByOwner') {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            value: [
+              {
+                pubkey: TOKEN_ACCOUNT,
+                account: {
+                  data: {
+                    parsed: {
+                      info: {
+                        mint: OTHER_TOKEN_MINT,
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        };
+      }
+      if (request.method === 'getSignaturesForAddress') {
+        const params = Array.isArray(request.params) ? request.params : [];
+        const address = String(params[0] ?? '');
+        const config = (params[1] ?? {}) as Record<string, unknown>;
+        options.onConfig?.(config);
+        const limit = typeof config.limit === 'number' ? config.limit : 100;
+        const before = typeof config.before === 'string' ? config.before : null;
+        const matching =
+          address === TOKEN_ACCOUNT
+            ? items.filter((item) => rawRpcItemTouchesMint(item, OTHER_TOKEN_MINT))
+            : address === WALLET
+              ? items
+              : [];
+        const startIndex =
+          before == null
+            ? 0
+            : matching.findIndex((item) => getTransactionSignature(item) === before) + 1;
+        const normalizedStartIndex = startIndex > 0 ? startIndex : 0;
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: matching
+            .slice(normalizedStartIndex, normalizedStartIndex + limit)
+            .map((item) => ({
+              signature: getTransactionSignature(item),
+              blockTime: item.blockTime,
+              err: null,
+            })),
+        };
+      }
+      if (request.method === 'getTransaction') {
+        const params = Array.isArray(request.params) ? request.params : [];
+        const signature = String(params[0] ?? '');
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: items.find((item) => getTransactionSignature(item) === signature) ?? null,
+        };
+      }
+      throw new Error(`Unexpected RPC method on raw history path: ${String(request.method)}`);
     };
     return jsonResponse(
       Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
@@ -628,7 +683,7 @@ function createGetTransactionsForAddressMock(
   });
 }
 
-describe('wallet transaction history (indexed getTransactionsForAddress with RPC fallback)', () => {
+describe('wallet transaction history (standard Solana RPC)', () => {
   afterEach(() => {
     resetHeliusFetchImplementation();
   });
@@ -759,7 +814,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
           return {
             jsonrpc: '2.0',
             id: request.id,
-            error: { code: -32002, message: 'indexed history unavailable' },
+            error: { code: -32002, message: 'provider-specific history unavailable' },
           };
         }
         if (input.includes('alchemy')) {
@@ -788,9 +843,10 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       recordTiming: (name) => timings.push(name),
     });
 
-    // The failed primary did not throw; the secondary served the result.
+    // Public Solana RPC is the primary history provider now; Alchemy is only a
+    // backup when public RPC is slow or unavailable.
     expect(response.transactions).toEqual([]);
-    expect(calledUrls.some((url) => url.includes('alchemy'))).toBe(true);
+    expect(calledUrls.some((url) => url.includes('alchemy'))).toBe(false);
     expect(calledUrls.some((url) => url === 'https://api.devnet.solana.com')).toBe(true);
     expect(timings).toContain('tx_rpc_provider_solanaPublic');
     expect(timings).not.toContain('tx_rpc_provider_alchemy');
@@ -1221,11 +1277,15 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
   });
 
-  it('uses the indexed getTransactionsForAddress method for mainnet wallet history', async () => {
+  it('uses standard public RPC methods for mainnet wallet history', async () => {
     const configs: Record<string, unknown>[] = [];
+    const seenMethods: string[] = [];
     const fetchMock = createGetTransactionsForAddressMock(
-      [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
-      { onConfig: (config) => configs.push(config) },
+      [rawRpcSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+      {
+        onConfig: (config) => configs.push(config),
+        onMethod: (method) => seenMethods.push(method),
+      },
     );
 
     setHeliusFetchImplementation(fetchMock);
@@ -1250,31 +1310,30 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       sender: WALLET,
       recipient: RECIPIENT,
     });
-    // Single indexed call with full details, newest-first, ATA-aware, and (for
-    // broad history) without a token-transfer mint filter — no signature scan.
-    expect(configs).toHaveLength(1);
-    expect(configs[0]).toMatchObject({
-      transactionDetails: 'full',
-      sortOrder: 'desc',
-      encoding: 'jsonParsed',
-    });
-    expect((configs[0]?.filters as Record<string, unknown>)?.tokenAccounts).toBe('balanceChanged');
-    expect((configs[0]?.filters as Record<string, unknown>)?.tokenTransfer).toBeUndefined();
+    expect(seenMethods).not.toContain('getTransactionsForAddress');
+    expect(seenMethods).toContain('getTokenAccountsByOwner');
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    expect(seenMethods).toContain('getTransaction');
+    expect(configs.every((config) => config.commitment === 'confirmed')).toBe(true);
   });
 
-  it('uses the indexed getTransactionsForAddress method for devnet when Alchemy is configured', async () => {
-    const devnetIndexedBindings = withAlchemyRpc('devnet', {
+  it('uses standard public RPC methods for devnet when Alchemy is configured', async () => {
+    const devnetRawRpcBindings = withAlchemyRpc('devnet', {
       HELIUS_DEVNET_API_KEY: 'test-devnet-key',
     });
     const configs: Record<string, unknown>[] = [];
+    const seenMethods: string[] = [];
     const fetchMock = createGetTransactionsForAddressMock(
-      [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
-      { onConfig: (config) => configs.push(config) },
+      [rawRpcSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+      {
+        onConfig: (config) => configs.push(config),
+        onMethod: (method) => seenMethods.push(method),
+      },
     );
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTransactions(devnetIndexedBindings, {
+    const response = await getWalletTransactions(devnetRawRpcBindings, {
       address: WALLET,
       network: 'devnet',
       limit: 5,
@@ -1288,48 +1347,28 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       tokenSymbol: 'SOL',
       direction: 'send',
     });
-    // Devnet uses the same indexed method (no raw signature scan).
-    expect(configs).toHaveLength(1);
-    expect(configs[0]).toMatchObject({ transactionDetails: 'full', sortOrder: 'desc' });
+    expect(seenMethods).not.toContain('getTransactionsForAddress');
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    expect(seenMethods).toContain('getTransaction');
+    expect(configs.every((config) => config.commitment === 'confirmed')).toBe(true);
   });
 
-  it('prefers Alchemy for indexed getTransactionsForAddress when both providers exist', async () => {
+  it('prefers Solana public RPC for history when Alchemy is also configured', async () => {
     const multiProviderBindings = {
       ...bindings,
       HELIUS_DEVNET_API_KEY: 'test-devnet-key',
       ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test',
       ALCHEMY_DEVNET_FALLBACK_RPC_URL: 'https://alchemy-fallback.offpay.test',
     } as Bindings;
-    const indexedCallUrls: string[] = [];
-    const seenIndexedRequestIds: string[] = [];
-    const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
-      const requestBody = JSON.parse(init.body as string);
-      const respond = (request: Record<string, unknown>) => {
-        if (request.method === 'getTransactionsForAddress') {
-          indexedCallUrls.push(input);
-          if (!input.includes('alchemy.offpay.test')) {
-            throw new Error('getTransactionsForAddress must use Alchemy when configured');
-          }
-          seenIndexedRequestIds.push(String(request.id));
-          return {
-            jsonrpc: '2.0',
-            id: request.id,
-            result: {
-              data: [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
-              paginationToken: null,
-            },
-          };
-        }
-        if (request.method === 'getAssetBatch') {
-          return { jsonrpc: '2.0', id: request.id, result: [] };
-        }
-        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
-      };
-
-      return jsonResponse(
-        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
-      );
-    });
+    const calledUrls: string[] = [];
+    const seenMethods: string[] = [];
+    const fetchMock = createGetTransactionsForAddressMock(
+      [rawRpcSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+      {
+        onUrl: (url) => calledUrls.push(url),
+        onMethod: (method) => seenMethods.push(method),
+      },
+    );
 
     setHeliusFetchImplementation(fetchMock);
 
@@ -1341,46 +1380,31 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
 
     expect(response.transactions).toHaveLength(1);
-    expect(indexedCallUrls).toEqual(['https://alchemy.offpay.test']);
-    expect(seenIndexedRequestIds).toEqual(['getTransactionsForAddress:devnet:alchemy']);
+    expect(calledUrls.every((url) => url === 'https://api.devnet.solana.com')).toBe(true);
+    expect(seenMethods).not.toContain('getTransactionsForAddress');
+    expect(seenMethods).toContain('getSignaturesForAddress');
   });
 
-  it('uses Alchemy indexed history without requiring a Helius API key', async () => {
-    const alchemyOnlyBindings = {
+  it('uses Solana public history without requiring Helius or Alchemy configuration', async () => {
+    const publicOnlyBindings = {
       ...bindings,
       HELIUS_DEVNET_API_KEY: undefined,
-      ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test',
+      HELIUS_DEVNET_RPC_URL: undefined,
+      ALCHEMY_DEVNET_RPC_URL: undefined,
     } as Bindings;
+    const calledUrls: string[] = [];
     const seenMethods: string[] = [];
-    const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
-      const requestBody = JSON.parse(init.body as string);
-      const respond = (request: Record<string, unknown>) => {
-        seenMethods.push(String(request.method));
-        if (request.method === 'getTransactionsForAddress') {
-          expect(input).toBe('https://alchemy.offpay.test');
-          return {
-            jsonrpc: '2.0',
-            id: request.id,
-            result: {
-              data: [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
-              paginationToken: null,
-            },
-          };
-        }
-        if (request.method === 'getAssetBatch') {
-          return { jsonrpc: '2.0', id: request.id, result: [] };
-        }
-        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
-      };
-
-      return jsonResponse(
-        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
-      );
-    });
+    const fetchMock = createGetTransactionsForAddressMock(
+      [rawRpcSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+      {
+        onUrl: (url) => calledUrls.push(url),
+        onMethod: (method) => seenMethods.push(method),
+      },
+    );
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTransactions(alchemyOnlyBindings, {
+    const response = await getWalletTransactions(publicOnlyBindings, {
       address: WALLET,
       network: 'devnet',
       limit: 5,
@@ -1388,12 +1412,13 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
 
     expect(response.transactions).toHaveLength(1);
-    expect(seenMethods).toContain('getTransactionsForAddress');
-    expect(seenMethods).not.toContain('getSignaturesForAddress');
-    expect(seenMethods).not.toContain('getTransaction');
+    expect(calledUrls.every((url) => url === 'https://api.devnet.solana.com')).toBe(true);
+    expect(seenMethods).not.toContain('getTransactionsForAddress');
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    expect(seenMethods).toContain('getTransaction');
   });
 
-  it('pages getTransactionsForAddress for SOL token history until the limit is filled', async () => {
+  it('pages raw SOL token history until the limit is filled', async () => {
     // 300 full items newest-first: 3 SOL transfers in page 1 (of 100) and 5 in
     // page 2; the rest are fee-only noise. Filling a limit of 8 SOL rows
     // therefore REQUIRES paging. SOL is not a token transfer, so there is no
@@ -1405,8 +1430,8 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       const isSol = (index < 100 && index % 34 === 0) || (index >= 100 && index % 20 === 0);
       items.push(
         isSol
-          ? indexedSolTransferItem(signature, baseTime - index, 100_000_000 + index)
-          : indexedFeeOnlyItem(signature, baseTime - index),
+          ? rawRpcSolTransferItem(signature, baseTime - index, 100_000_000 + index)
+          : rawRpcFeeOnlyItem(signature, baseTime - index),
       );
     }
     const configs: Record<string, unknown>[] = [];
@@ -1428,8 +1453,9 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.transactions.every((transaction) => transaction.tokenMint === SOL_MINT)).toBe(
       true,
     );
-    // No server-side token-transfer filter for SOL, and at least two indexed
-    // pages were fetched to fill the limit. Fee-only items are excluded.
+    // No provider-specific history method is called; standard signature pages
+    // are scanned until enough displayable SOL rows are found. Fee-only items
+    // are excluded.
     expect(
       configs.every((config) => (config.filters as Record<string, unknown>)?.tokenTransfer == null),
     ).toBe(true);
@@ -1438,7 +1464,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.cursor).not.toBeNull();
   });
 
-  it('matches SPL token history locally from wallet-wide indexed history', async () => {
+  it('matches SPL token history from raw token-account signatures', async () => {
     const tokenItem = (signature: string, blockTime: number, rawAmount: string) => ({
       slot: 1000,
       transactionIndex: 0,
@@ -1472,7 +1498,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
     const items = [
       tokenItem(`${SIGNATURE}t0`, 1781800000, '1000000'),
-      indexedSolTransferItem(`${SIGNATURE}s0`, 1781799999, 250_000_000),
+      rawRpcSolTransferItem(`${SIGNATURE}s0`, 1781799999, 250_000_000),
       tokenItem(`${SIGNATURE}t1`, 1781799998, '2000000'),
     ];
     const configs: Record<string, unknown>[] = [];
@@ -1497,15 +1523,14 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       useCache: false,
     });
 
-    // Token Details uses the same wallet-wide balanceChanged feed as canonical
-    // History, then filters locally so swap/balance-change rows are not lost to
-    // a narrower provider-side tokenTransfer filter.
+    // Token Details scans the wallet's token accounts directly and filters
+    // locally, avoiding the failing provider-specific history method.
     expect(response.transactions).toHaveLength(2);
     expect(response.transactions.every((t) => t.tokenMint === OTHER_TOKEN_MINT)).toBe(true);
     expect((configs[0]?.filters as Record<string, unknown>)?.tokenTransfer).toBeUndefined();
   });
 
-  it('paginates SPL token history through one indexed provider page without dropping rows', async () => {
+  it('paginates SPL token history through raw signature cursors without dropping rows', async () => {
     const tokenItem = (signature: string, blockTime: number, rawAmount: string) => ({
       slot: 1000,
       transactionIndex: 0,
@@ -1576,8 +1601,8 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     expect(firstPage.transactions).toHaveLength(8);
     expect(secondPage.transactions).toHaveLength(8);
-    expect(firstPage.cursor).toMatch(/^offpay-itx-v1:/);
-    expect(secondPage.cursor).toMatch(/^offpay-itx-v1:/);
+    expect(firstPage.cursor).toBe(items[7] ? getTransactionSignature(items[7]!) : null);
+    expect(secondPage.cursor).toBe(items[15] ? getTransactionSignature(items[15]!) : null);
     const itemSignature = (item: Record<string, unknown>): string => {
       const transaction = item.transaction as { signatures: string[] };
       return transaction.signatures[0]!;
@@ -1596,7 +1621,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
   it('keeps SOL swaps in broad wallet history (previously dropped by the null-direction gate)', async () => {
     const fetchMock = createGetTransactionsForAddressMock(
       [
-        indexedSolToTokenSwapItem({
+        rawRpcSolToTokenSwapItem({
           signature: `${SIGNATURE}swap`,
           blockTime: 1781800000,
           solLamports: 500_000_000,
@@ -1634,7 +1659,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
   it('includes SOL swaps in SOL token activity even when the primary token is the swap output', async () => {
     const fetchMock = createGetTransactionsForAddressMock(
       [
-        indexedSolToTokenSwapItem({
+        rawRpcSolToTokenSwapItem({
           signature: `${SIGNATURE}swap`,
           blockTime: 1781800000,
           solLamports: 500_000_000,
@@ -1670,10 +1695,10 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.transactions[0]?.type.toLowerCase()).toContain('swap');
   });
 
-  it('falls back to raw Solana RPC when Alchemy indexed history is unavailable', async () => {
+  it('uses raw Solana RPC without attempting provider-specific history', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const seenMethods: string[] = [];
-    const fetchMock = createIndexedPlanGateThenRawRpcMock({
+    const fetchMock = createRawRpcHistoryMock({
       enhancedItems: [enhancedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
       onRpcMethod: (method) => seenMethods.push(method),
     });
@@ -1693,17 +1718,17 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       tokenMint: SOL_MINT,
       direction: 'send',
     });
-    expect(seenMethods).toContain('getTransactionsForAddress');
+    expect(seenMethods).not.toContain('getTransactionsForAddress');
     expect(seenMethods).toContain('getSignaturesForAddress');
     expect(seenMethods).toContain('getTransaction');
     warnSpy.mockRestore();
   });
 
-  it('uses devnet raw Solana RPC for SOL token history after Alchemy indexed fallback', async () => {
+  it('uses devnet raw Solana RPC for SOL token history without provider-specific fallback', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = withAlchemyRpc('devnet');
+    const devnetRawRpcBindings = withAlchemyRpc('devnet');
     const seenMethods: string[] = [];
-    const fetchMock = createIndexedPlanGateThenRawRpcMock({
+    const fetchMock = createRawRpcHistoryMock({
       enhancedItems: [
         enhancedSolTransferItem(`${SIGNATURE}rest0`, 1781794440, 250_000_000),
         {
@@ -1721,7 +1746,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+    const response = await getWalletTokenTransactions(devnetRawRpcBindings, {
       address: WALLET,
       network: 'devnet',
       mint: SOL_MINT,
@@ -1733,18 +1758,18 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.transactions.every((transaction) => transaction.tokenMint === SOL_MINT)).toBe(
       true,
     );
-    expect(seenMethods).toContain('getTransactionsForAddress');
+    expect(seenMethods).not.toContain('getTransactionsForAddress');
     expect(seenMethods).toContain('getSignaturesForAddress');
     expect(seenMethods).toContain('getTransaction');
     warnSpy.mockRestore();
   });
 
-  it('shows raw RPC SOL transfer rows after Alchemy indexed fallback', async () => {
+  it('shows raw RPC SOL transfer rows without provider-specific fallback', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = withAlchemyRpc('devnet');
+    const devnetRawRpcBindings = withAlchemyRpc('devnet');
     const sendSignature = `${SIGNATURE}unknown-send`;
     const receiveSignature = `${SIGNATURE}unknown-receive`;
-    const fetchMock = createIndexedPlanGateThenRawRpcMock({
+    const fetchMock = createRawRpcHistoryMock({
       enhancedItems: [
         enhancedUnknownSystemTransferItem(sendSignature, 1781794440, 20_000_000, 'send'),
         enhancedNonceWithdrawalItem(receiveSignature, 1781794439, 1_447_680),
@@ -1753,7 +1778,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+    const response = await getWalletTokenTransactions(devnetRawRpcBindings, {
       address: WALLET,
       network: 'devnet',
       mint: SOL_MINT,
@@ -1781,7 +1806,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
   it('filters nonce funding from native SOL rows through raw instructions', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = withAlchemyRpc('devnet');
+    const devnetRawRpcBindings = withAlchemyRpc('devnet');
     const transferSignature = `${SIGNATURE}opaque-transfer`;
     const nonceSignature = `${SIGNATURE}opaque-nonce`;
     const seenMethods: string[] = [];
@@ -1804,7 +1829,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
         }),
       ],
     ]);
-    const fetchMock = createIndexedPlanGateThenRawRpcMock({
+    const fetchMock = createRawRpcHistoryMock({
       enhancedItems: [
         enhancedOpaqueNativeTransferItem({
           signature: nonceSignature,
@@ -1825,7 +1850,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+    const response = await getWalletTokenTransactions(devnetRawRpcBindings, {
       address: WALLET,
       network: 'devnet',
       mint: SOL_MINT,
@@ -1847,7 +1872,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
   it('deep-scans raw SOL token history for nonce withdrawals', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = withAlchemyRpc('devnet');
+    const devnetRawRpcBindings = withAlchemyRpc('devnet');
     const transferSignature = `${SIGNATURE}enhanced-transfer`;
     const withdrawalSignature = `${SIGNATURE}nonce-withdraw`;
     const seenMethods: string[] = [];
@@ -1920,7 +1945,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+    const response = await getWalletTokenTransactions(devnetRawRpcBindings, {
       address: WALLET,
       network: 'devnet',
       mint: SOL_MINT,
@@ -1947,7 +1972,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
   it('falls back to raw native SOL rows for first-page wallet history', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = withAlchemyRpc('devnet');
+    const devnetRawRpcBindings = withAlchemyRpc('devnet');
     const enhancedSignature = `${SIGNATURE}history-enhanced-transfer`;
     const withdrawalSignature = `${SIGNATURE}history-nonce-withdraw`;
     const seenMethods: string[] = [];
@@ -2020,7 +2045,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTransactions(devnetIndexedBindings, {
+    const response = await getWalletTransactions(devnetRawRpcBindings, {
       address: WALLET,
       network: 'devnet',
       limit: 20,
@@ -2046,13 +2071,13 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('does not treat nonce-account rent funding as SOL token activity after indexed fallback', async () => {
+  it('does not treat nonce-account rent funding as SOL token activity in raw history', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = withAlchemyRpc('devnet');
+    const devnetRawRpcBindings = withAlchemyRpc('devnet');
     const nonceSignature = `${SIGNATURE}nonce-rent`;
     const transferSignature = `${SIGNATURE}real-sol`;
     const seenMethods: string[] = [];
-    const fetchMock = createIndexedPlanGateThenRawRpcMock({
+    const fetchMock = createRawRpcHistoryMock({
       enhancedItems: [
         enhancedNonceAccountFundingItem(nonceSignature, 1781794440, 1_447_680),
         enhancedSolTransferItem(transferSignature, 1781794439, 250_000_000),
@@ -2072,7 +2097,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(devnetIndexedBindings, {
+    const response = await getWalletTokenTransactions(devnetRawRpcBindings, {
       address: WALLET,
       network: 'devnet',
       mint: SOL_MINT,
@@ -2092,7 +2117,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('falls back to the raw RPC scan when Alchemy indexed transactions fail', async () => {
+  it('uses the raw RPC scan without calling provider-specific history', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const seenMethods: string[] = [];
     const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
@@ -2183,7 +2208,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       tokenMint: SOL_MINT,
       direction: 'send',
     });
-    expect(seenMethods).toContain('getTransactionsForAddress');
+    expect(seenMethods).not.toContain('getTransactionsForAddress');
     expect(seenMethods).toContain('getSignaturesForAddress');
     expect(seenMethods).toContain('getTransaction');
     warnSpy.mockRestore();

@@ -157,20 +157,13 @@ function getAlchemyRpcHttpUrlCandidates(
   ]);
 }
 
-export function getIndexedTransactionsRpcHttpUrlCandidates(
-  bindings: Bindings,
-  network: Network,
-): RpcProviderEndpoint[] {
-  return getAlchemyRpcHttpUrlCandidates(bindings, network);
-}
-
 export function getHistoryRpcHttpUrlCandidates(
   bindings: Bindings,
   network: Network,
 ): RpcProviderEndpoint[] {
   return uniqueEndpoints([
-    ...getAlchemyRpcHttpUrlCandidates(bindings, network),
     { provider: 'solanaPublic', transport: 'http', url: PUBLIC_SOLANA_RPC_URLS[network] },
+    ...getAlchemyRpcHttpUrlCandidates(bindings, network),
   ]);
 }
 

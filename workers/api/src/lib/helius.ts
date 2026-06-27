@@ -1,10 +1,8 @@
 import { AppError } from './errors.js';
 import { createNetworkCacheKey, memoryCache } from './cache.js';
-import { writeOperationalLog } from './logging.js';
 import { getOrSetSharedJsonCache } from './shared-cache.js';
 import {
   getHistoryRpcHttpUrlCandidates,
-  getIndexedTransactionsRpcHttpUrlCandidates,
   getRpcHttpUrlCandidates,
   type RpcProviderEndpoint,
 } from './solana-rpc-providers.js';
@@ -60,17 +58,6 @@ const MAX_SPL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 200;
 // keeping endpoints < 3s even when most scanned signatures are non-displayable.
 // Tune against the Phase 0 tx_signatures / tx_batch / tx_pages numbers.
 const WALLET_TRANSACTION_SCAN_BUDGET_MS = 2_500;
-// Indexed getTransactionsForAddress returns full, newest-first transactions in
-// a single JSON-RPC call (no per-signature getTransaction fan-out). We use the
-// Alchemy-supported endpoint for this path and page backwards with
-// `paginationToken`, collecting displayable (or mint-matching) rows until the
-// requested count is reached or a budget is hit.
-const INDEXED_TRANSACTION_PAGE_SIZE = 100;
-// First-page scan ceiling for token-specific history. Token Details uses the
-// wallet-wide balanceChanged indexed feed and local mint matching so it stays
-// consistent with canonical History; older rows load on demand via the cursor.
-const MAX_INDEXED_TOKEN_TRANSACTION_SCAN = 500;
-const INDEXED_TOKEN_CURSOR_PREFIX = 'offpay-itx-v1:';
 const DEFAULT_STREAM_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_STREAM_WEBSOCKET_FALLBACK_POLL_INTERVAL_MS = 45_000;
 const DEFAULT_STREAM_ACTIVITY_LIMIT = 10;
@@ -973,47 +960,6 @@ function toUpstreamUnavailable(
   });
 }
 
-function describeIndexedFallbackCause(error: unknown): Record<string, unknown> {
-  if (error instanceof AppError) {
-    const cause = (error as Error & { cause?: unknown }).cause;
-    if (isRecord(cause)) {
-      return {
-        status: error.status,
-        code: error.code,
-        provider: readTrimmedString(cause.provider),
-        httpStatus: readFiniteNumber(cause.httpStatus),
-        statusText: readTrimmedString(cause.statusText),
-        causeCode: readFiniteNumber(cause.code),
-        causeMessage: readTrimmedString(cause.message),
-        causeName: readTrimmedString(cause.causeName),
-        upstreamText: readTrimmedString(cause.upstreamText),
-      };
-    }
-    if (cause instanceof Error) {
-      return {
-        status: error.status,
-        code: error.code,
-        causeName: cause.name,
-        causeMessage: cause.message,
-      };
-    }
-
-    return {
-      status: error.status,
-      code: error.code,
-    };
-  }
-
-  if (error instanceof Error) {
-    return {
-      causeName: error.name,
-      causeMessage: error.message,
-    };
-  }
-
-  return { causeType: typeof error };
-}
-
 function isRetryableRpcError(errorValue: Record<string, unknown>): boolean {
   const code = readFiniteNumber(errorValue.code);
   if (code === 429) return true;
@@ -1105,8 +1051,6 @@ async function fetchJson(
 // responds first, aborting the losers. A provider error advances to the next
 // candidate immediately. This removes the additive cost of serial fallthrough
 // on a slow-but-not-failed provider without doubling load on the fast path.
-// NOTE: this only wraps standard JSON-RPC calls; indexed history requests use
-// their own provider selection so they don't inherit this order.
 const RPC_HEDGE_DELAY_MS = 600;
 
 async function requestWithHedge<T>(
@@ -1263,77 +1207,6 @@ function addRpcProviderCause(
   }
 
   return toUpstreamUnavailable(null, errorMessage, providerCause);
-}
-
-async function indexedTransactionsRpcRequest(
-  candidates: readonly RpcProviderEndpoint[],
-  network: Network,
-  method: string,
-  params: RpcRequestParams,
-): Promise<unknown> {
-  if (candidates.length === 0) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
-  }
-
-  let lastError: unknown = null;
-  for (const candidate of candidates) {
-    try {
-      const payload = await fetchJson(
-        candidate.url,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: `${method}:${network}:${candidate.provider}`,
-            method,
-            params,
-          }),
-        },
-        'Wallet provider is temporarily unavailable.',
-      );
-
-      if (!isRecord(payload)) {
-        throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.', {
-          provider: candidate.provider,
-          message: 'RPC provider returned a malformed payload.',
-        });
-      }
-
-      if ('error' in payload && payload.error !== null && payload.error !== undefined) {
-        const upstreamError = payload.error;
-        const cause: Record<string, unknown> = { provider: candidate.provider };
-        if (isRecord(upstreamError)) {
-          cause.code = readFiniteNumber(upstreamError.code);
-          cause.message = readTrimmedString(upstreamError.message);
-        }
-        throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.', cause);
-      }
-
-      return payload.result;
-    } catch (error) {
-      lastError =
-        error instanceof AppError
-          ? addRpcProviderCause(
-              candidate.provider,
-              'Wallet provider is temporarily unavailable.',
-              error,
-            )
-          : error;
-    }
-  }
-
-  if (lastError instanceof AppError) {
-    throw lastError;
-  }
-
-  throw toUpstreamUnavailable(
-    null,
-    'Wallet provider is temporarily unavailable.',
-    lastError ?? undefined,
-  );
 }
 
 async function rpcBatchRequestFromCandidates(
@@ -3706,344 +3579,6 @@ async function supplementWalletHistoryWithNativeSolRpc(params: {
   });
 }
 
-interface IndexedTransactionPage {
-  records: WalletTransactionRecord[];
-  rawCount: number;
-  // Opaque "slot:position" cursor for the next (older) page; null at the end of
-  // history.
-  paginationToken: string | null;
-}
-
-interface IndexedTokenCursor {
-  pageToken: string | null;
-  offset: number;
-}
-
-function parseIndexedTokenCursor(cursor: string | null): IndexedTokenCursor {
-  if (cursor == null || !cursor.startsWith(INDEXED_TOKEN_CURSOR_PREFIX)) {
-    return {
-      pageToken: cursor,
-      offset: 0,
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(decodeURIComponent(cursor.slice(INDEXED_TOKEN_CURSOR_PREFIX.length)));
-    const pageToken =
-      typeof parsed?.pageToken === 'string' && parsed.pageToken.trim().length > 0
-        ? parsed.pageToken.trim()
-        : null;
-    const offset =
-      typeof parsed?.offset === 'number' && Number.isInteger(parsed.offset) && parsed.offset > 0
-        ? parsed.offset
-        : 0;
-
-    return {
-      pageToken,
-      offset,
-    };
-  } catch {
-    return {
-      pageToken: cursor,
-      offset: 0,
-    };
-  }
-}
-
-function buildIndexedTokenCursor(pageToken: string | null, offset: number): string | null {
-  if (pageToken == null && offset <= 0) return null;
-  return `${INDEXED_TOKEN_CURSOR_PREFIX}${encodeURIComponent(
-    JSON.stringify({
-      pageToken,
-      offset: Math.max(0, offset),
-    }),
-  )}`;
-}
-
-/**
- * Fetch and parse a single page of indexed `getTransactionsForAddress`
- * (transactionDetails: 'full'). This is the indexed replacement for
- * getSignaturesForAddress + batched getTransaction: one JSON-RPC call returns
- * complete transaction + meta objects already sorted newest-first, including a
- * wallet's associated-token-account activity via `tokenAccounts:
- * 'balanceChanged'`, so there is no per-signature fan-out. When
- * `tokenTransferMint` is set, the indexed provider filters server-side to
- * transactions where the address participated in a transfer of that SPL mint.
- * Native SOL is not a token transfer and cannot be filtered this way, so SOL is
- * matched locally. Results are parsed with the shared raw-transaction parser.
- */
-async function fetchIndexedTransactionsPage(
-  bindings: Bindings,
-  indexedRpcCandidates: readonly RpcProviderEndpoint[],
-  network: Network,
-  address: string,
-  paginationToken: string | null,
-  limit: number,
-  tokenTransferMint: string | null,
-): Promise<IndexedTransactionPage> {
-  const filters: Record<string, unknown> = { tokenAccounts: 'balanceChanged' };
-  if (tokenTransferMint != null) {
-    filters.tokenTransfer = { mint: tokenTransferMint };
-  }
-
-  const config: Record<string, unknown> = {
-    transactionDetails: 'full',
-    sortOrder: 'desc',
-    limit: Math.min(INDEXED_TRANSACTION_PAGE_SIZE, Math.max(1, limit)),
-    commitment: 'confirmed',
-    encoding: 'jsonParsed',
-    maxSupportedTransactionVersion: 0,
-    filters,
-  };
-  if (paginationToken) {
-    config.paginationToken = paginationToken;
-  }
-
-  const result = await indexedTransactionsRpcRequest(
-    indexedRpcCandidates,
-    network,
-    'getTransactionsForAddress',
-    [address, config],
-  );
-  const data = isRecord(result) && Array.isArray(result.data) ? result.data : [];
-  const nextToken = isRecord(result) ? readTrimmedString(result.paginationToken) : null;
-
-  // Resolve token metadata once per page and reuse it per record so the parser
-  // does not issue a getAssetBatch per transaction.
-  const metadataByMint = await fetchTokenMetadataMap(
-    bindings,
-    network,
-    collectBatchTokenMints(data),
-  );
-  const records: WalletTransactionRecord[] = [];
-  for (const item of data) {
-    if (!isRecord(item)) {
-      continue;
-    }
-    const transaction = isRecord(item.transaction) ? item.transaction : null;
-    const signatures =
-      transaction && Array.isArray(transaction.signatures) ? transaction.signatures : [];
-    const signature = readTrimmedString(signatures[0]);
-    if (!signature) {
-      continue;
-    }
-    const meta = isRecord(item.meta) ? item.meta : null;
-    const status: 'success' | 'failed' =
-      meta != null && meta.err !== null && meta.err !== undefined ? 'failed' : 'success';
-    const fallbackTimestamp = readFiniteNumber(item.blockTime) ?? 0;
-    records.push(
-      await buildRpcTransactionRecordFromResult(
-        bindings,
-        network,
-        address,
-        [],
-        signature,
-        fallbackTimestamp,
-        status,
-        item,
-        metadataByMint,
-      ),
-    );
-  }
-
-  return {
-    records,
-    rawCount: data.length,
-    paginationToken: nextToken,
-  };
-}
-
-/**
- * Page-walking loop over `getTransactionsForAddress` shared by broad wallet
- * history and token-specific history. It pages backwards via `paginationToken`,
- * keeping records that pass `matches`, until at least `limit` rows are
- * collected, the scan budget (page count or wall-clock) is exhausted, or the
- * provider runs out of history. The `paginationToken` cursor is page granular
- * ("slot:position"), so pages are consumed whole and rows are never sliced off
- * mid-page (that would silently drop history). The returned cursor lets the
- * client continue on demand.
- */
-async function collectIndexedWalletTransactions(params: {
-  bindings: Bindings;
-  indexedRpcCandidates: readonly RpcProviderEndpoint[];
-  network: Network;
-  address: string;
-  cursor: string | null;
-  limit: number;
-  maxScan: number;
-  tokenTransferMint: string | null;
-  matches: (transaction: WalletTransactionRecord) => boolean;
-}): Promise<WalletTransactionsResponse> {
-  const {
-    bindings,
-    indexedRpcCandidates,
-    network,
-    address,
-    cursor,
-    limit,
-    maxScan,
-    tokenTransferMint,
-    matches,
-  } = params;
-  const scanStartedAt = Date.now();
-  const collected: WalletTransactionRecord[] = [];
-  let scannedTransactions = 0;
-  let pageToken = cursor;
-  let nextCursor: string | null = null;
-  let pages = 0;
-
-  while (collected.length < limit && scannedTransactions < maxScan) {
-    if (pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
-      // Budget exhausted; nextCursor (from the previous page) signals more.
-      break;
-    }
-    const pageLimit = Math.min(INDEXED_TRANSACTION_PAGE_SIZE, maxScan - scannedTransactions);
-    const page = await fetchIndexedTransactionsPage(
-      bindings,
-      indexedRpcCandidates,
-      network,
-      address,
-      pageToken,
-      pageLimit,
-      tokenTransferMint,
-    );
-    pages += 1;
-    scannedTransactions += page.rawCount;
-    for (const transaction of page.records) {
-      if (matches(transaction)) {
-        collected.push(transaction);
-      }
-    }
-    nextCursor = page.paginationToken;
-    if (page.rawCount === 0 || nextCursor === null) {
-      break;
-    }
-    pageToken = nextCursor;
-  }
-
-  return buildWalletTransactionsResponse({
-    address,
-    network,
-    transactions: collected,
-    cursor: nextCursor,
-  });
-}
-
-async function collectIndexedWalletTokenTransactions(params: {
-  bindings: Bindings;
-  indexedRpcCandidates: readonly RpcProviderEndpoint[];
-  network: Network;
-  address: string;
-  cursor: string | null;
-  limit: number;
-  maxScan: number;
-  matches: (transaction: WalletTransactionRecord) => boolean;
-}): Promise<WalletTransactionsResponse> {
-  const { bindings, indexedRpcCandidates, network, address, limit, maxScan, matches } = params;
-  const scanStartedAt = Date.now();
-  const collected: WalletTransactionRecord[] = [];
-  const parsedCursor = parseIndexedTokenCursor(params.cursor);
-  let pageToken = parsedCursor.pageToken;
-  let pageOffset = parsedCursor.offset;
-  let nextCursor: string | null = null;
-  let scannedTransactions = 0;
-  let pages = 0;
-
-  while (collected.length < limit && scannedTransactions < maxScan) {
-    if (pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
-      nextCursor = buildIndexedTokenCursor(pageToken, pageOffset);
-      break;
-    }
-
-    const pageLimit = Math.min(INDEXED_TRANSACTION_PAGE_SIZE, maxScan - scannedTransactions);
-    const page = await fetchIndexedTransactionsPage(
-      bindings,
-      indexedRpcCandidates,
-      network,
-      address,
-      pageToken,
-      pageLimit,
-      null,
-    );
-    pages += 1;
-    scannedTransactions += page.rawCount;
-
-    const records = page.records;
-    const startIndex = Math.min(pageOffset, records.length);
-    let reachedLimit = false;
-
-    for (let index = startIndex; index < records.length; index += 1) {
-      const transaction = records[index]!;
-      if (matches(transaction)) {
-        collected.push(transaction);
-      }
-
-      if (collected.length >= limit) {
-        const nextOffset = index + 1;
-        nextCursor =
-          nextOffset < records.length
-            ? buildIndexedTokenCursor(pageToken, nextOffset)
-            : page.paginationToken;
-        reachedLimit = true;
-        break;
-      }
-    }
-
-    if (reachedLimit) {
-      break;
-    }
-
-    pageToken = page.paginationToken;
-    pageOffset = 0;
-    nextCursor = pageToken;
-    if (page.rawCount === 0 || pageToken === null) {
-      nextCursor = null;
-      break;
-    }
-  }
-
-  return buildWalletTransactionsResponse({
-    address,
-    network,
-    transactions: collected,
-    cursor: nextCursor,
-  });
-}
-
-async function fetchWalletTransactionsViaIndexedApi(
-  bindings: Bindings,
-  indexedRpcCandidates: readonly RpcProviderEndpoint[],
-  network: Network,
-  address: string,
-  cursor: string | null,
-  limit: number,
-  recordTiming?: TimingRecorder,
-): Promise<WalletTransactionsResponse> {
-  const primaryIndexedProvider = indexedRpcCandidates[0];
-  if (primaryIndexedProvider == null) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
-  }
-
-  const startedAt = Date.now();
-  recordTiming?.(`itx_provider_${primaryIndexedProvider.provider}`, 1);
-  const response = await collectIndexedWalletTransactions({
-    bindings,
-    indexedRpcCandidates,
-    network,
-    address,
-    cursor,
-    limit,
-    maxScan: Math.max(
-      INDEXED_TRANSACTION_PAGE_SIZE,
-      Math.min(MAX_WALLET_TRANSACTION_SIGNATURE_SCAN, limit * 5),
-    ),
-    tokenTransferMint: null,
-    matches: isDisplayableWalletTransactionRecord,
-  });
-  recordTiming?.('itx_ms', Date.now() - startedAt);
-  return response;
-}
-
 function inferParsedTransactionType(instructions: readonly unknown[]): string {
   for (const instruction of instructions) {
     if (!isRecord(instruction)) {
@@ -4962,11 +4497,9 @@ async function fetchRpcWalletSignaturePage(
 }
 
 /**
- * Fallback wallet history via raw RPC (getSignaturesForAddress + batched
- * getTransaction). Used only when the Alchemy indexed history endpoint is not
- * configured for the network or is temporarily unavailable. This path is
- * heavier (per-signature fan-out, bounded scan budget) and uses Solana public
- * RPC as a history-only backup.
+ * Wallet history via standard Solana RPC (getSignaturesForAddress + batched
+ * getTransaction). This path uses Solana public RPC first for history-only
+ * reads, then configured raw RPC providers as backups.
  */
 async function fetchWalletTransactionsViaRpc(
   bindings: Bindings,
@@ -5161,45 +4694,6 @@ function walletTransactionMatchesMint(
   return transaction.tokenMint === normalizedMint;
 }
 
-async function fetchWalletTokenTransactionsViaIndexedApi(
-  bindings: Bindings,
-  indexedRpcCandidates: readonly RpcProviderEndpoint[],
-  network: Network,
-  address: string,
-  mint: string,
-  cursor: string | null,
-  limit: number,
-  recordTiming?: TimingRecorder,
-): Promise<WalletTransactionsResponse> {
-  const primaryIndexedProvider = indexedRpcCandidates[0];
-  if (primaryIndexedProvider == null) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
-  }
-
-  const normalizedMint = normalizeTokenTransactionMint(mint);
-  // Token Details must match the canonical History screen. The indexed
-  // tokenTransfer.mint filter is narrower than wallet balance changes and can
-  // miss swap/balance-change rows that broad history later resolves. Pull the
-  // same wallet-wide balanceChanged feed as History and filter locally.
-  const matches = (transaction: WalletTransactionRecord): boolean =>
-    walletTransactionMatchesMint(transaction, normalizedMint) &&
-    isDisplayableWalletTransactionRecord(transaction);
-  const startedAt = Date.now();
-  recordTiming?.(`ittx_provider_${primaryIndexedProvider.provider}`, 1);
-  const response = await collectIndexedWalletTokenTransactions({
-    bindings,
-    indexedRpcCandidates,
-    network,
-    address,
-    cursor,
-    limit,
-    maxScan: MAX_INDEXED_TOKEN_TRANSACTION_SCAN,
-    matches,
-  });
-  recordTiming?.('ittx_ms', Date.now() - startedAt);
-  return response;
-}
-
 async function fetchRpcWalletTokenSignaturePage(
   rpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
@@ -5287,10 +4781,9 @@ async function fetchRpcWalletTokenSignaturePage(
 }
 
 /**
- * Fallback token-specific history via raw RPC. Used only when the indexed
- * Alchemy history endpoint is unavailable for the network. For native SOL it
- * scans the wallet address and reconstructs transfers from native-balance
- * deltas (fees excluded); for SPL it scans the relevant token accounts.
+ * Token-specific history via standard Solana RPC. For native SOL it scans the
+ * wallet address and reconstructs transfers from native-balance deltas (fees
+ * excluded); for SPL it scans the relevant token accounts.
  */
 async function fetchWalletTokenTransactionsViaRpc(
   bindings: Bindings,
@@ -5402,6 +4895,7 @@ async function fetchWalletTokenTransactionsViaRpc(
     }
     scanTimings.txBatchMs += Date.now() - transactionBatchStartedAt;
     scanTimings.pages += 1;
+    let reachedLimit = false;
     for (const transaction of parsedTransactions) {
       if (
         walletTransactionMatchesMint(transaction, normalizedMint) &&
@@ -5409,7 +4903,15 @@ async function fetchWalletTokenTransactionsViaRpc(
       ) {
         filteredTransactions.push(transaction);
       }
-      if (filteredTransactions.length >= limit) break;
+      if (filteredTransactions.length >= limit) {
+        nextCursor = transaction.signature;
+        reachedLimit = true;
+        break;
+      }
+    }
+
+    if (reachedLimit) {
+      break;
     }
 
     const lastEntry = transactionRequests.at(-1);
@@ -5483,47 +4985,14 @@ async function getWalletTransactions(
   const normalizedLimit = Math.min(100, Math.max(1, request.limit ?? DEFAULT_TRANSACTION_LIMIT));
   const normalizedCursor = request.cursor?.trim() || null;
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v8-sol-supplement', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-transactions-v9-raw-rpc', [
     request.address,
     normalizedCursor ?? 'first-page',
     normalizedLimit,
   ]);
 
-  const resolver = async () => {
-    const indexedRpcCandidates = getIndexedTransactionsRpcHttpUrlCandidates(
-      bindings,
-      request.network,
-    );
-
-    // Alchemy documents getTransactionsForAddress as a native Solana endpoint,
-    // so keep this one-call indexed history path on Alchemy only. When it is
-    // unavailable, skip paid Helius history APIs and fall back to the standard
-    // Solana RPC scan with public RPC as a history-only backup.
-    if (indexedRpcCandidates.length > 0) {
-      try {
-        return await fetchWalletTransactionsViaIndexedApi(
-          bindings,
-          indexedRpcCandidates,
-          request.network,
-          request.address,
-          normalizedCursor,
-          normalizedLimit,
-          request.recordTiming,
-        );
-      } catch (error) {
-        if (!(error instanceof AppError) || error.status !== 503) {
-          throw error;
-        }
-        request.recordTiming?.('itx_fallback_503', 1);
-        writeOperationalLog('warn', {
-          event: 'wallet_transactions_indexed_fallback',
-          network: request.network,
-          details: describeIndexedFallbackCause(error),
-        });
-      }
-    }
-
-    return fetchWalletTransactionsViaRpc(
+  const resolver = async () =>
+    fetchWalletTransactionsViaRpc(
       bindings,
       request.address,
       request.network,
@@ -5531,13 +5000,12 @@ async function getWalletTransactions(
       normalizedLimit,
       request.recordTiming,
     );
-  };
 
   return useCache
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v8-sol-supplement',
+          namespace: 'wallet-transactions-v9-raw-rpc',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
@@ -5557,51 +5025,15 @@ async function getWalletTokenTransactions(
   const normalizedCursor = request.cursor?.trim() || null;
   const normalizedMint = normalizeTokenTransactionMint(request.mint.trim());
   const useCache = request.useCache ?? true;
-  const cacheKey = createNetworkCacheKey(request.network, 'wallet-token-transactions-v5-indexed', [
+  const cacheKey = createNetworkCacheKey(request.network, 'wallet-token-transactions-v6-raw-rpc', [
     request.address,
     normalizedMint,
     normalizedCursor ?? 'first-page',
     normalizedLimit,
   ]);
 
-  const resolver = async () => {
-    const indexedRpcCandidates = getIndexedTransactionsRpcHttpUrlCandidates(
-      bindings,
-      request.network,
-    );
-
-    // Use the same Alchemy-only indexed provider preference as broad wallet
-    // history. SPL mints are filtered locally against the wallet-wide feed so
-    // Token Details stays consistent with canonical History.
-    if (indexedRpcCandidates.length > 0) {
-      try {
-        return await fetchWalletTokenTransactionsViaIndexedApi(
-          bindings,
-          indexedRpcCandidates,
-          request.network,
-          request.address,
-          normalizedMint,
-          normalizedCursor,
-          normalizedLimit,
-          request.recordTiming,
-        );
-      } catch (error) {
-        if (!(error instanceof AppError) || error.status !== 503) {
-          throw error;
-        }
-        request.recordTiming?.('ittx_fallback_503', 1);
-        writeOperationalLog('warn', {
-          event: 'wallet_token_transactions_indexed_fallback',
-          network: request.network,
-          details: {
-            mint: normalizedMint === SOL_MINT ? 'native-sol' : 'spl',
-            ...describeIndexedFallbackCause(error),
-          },
-        });
-      }
-    }
-
-    return fetchWalletTokenTransactionsViaRpc(
+  const resolver = async () =>
+    fetchWalletTokenTransactionsViaRpc(
       bindings,
       request.address,
       request.network,
@@ -5610,13 +5042,12 @@ async function getWalletTokenTransactions(
       normalizedLimit,
       request.recordTiming,
     );
-  };
 
   return useCache
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-token-transactions-v5-indexed',
+          namespace: 'wallet-token-transactions-v6-raw-rpc',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           isValid: isWalletTransactionsResponse,
