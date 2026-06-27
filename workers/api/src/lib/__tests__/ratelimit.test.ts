@@ -20,4 +20,12 @@ describe('rate limit policies', () => {
     });
     expect(offlineSlotBroadcastPolicy.limit).toBeGreaterThanOrEqual(50);
   });
+
+  it('keeps devnet faucet delivery gating out of the generic route limiter', () => {
+    expect(getRateLimitPolicy('POST', '/api/rpc/devnet-airdrop')).toMatchObject({
+      limit: 60,
+      windowSec: 60,
+      scope: 'wallet',
+    });
+  });
 });

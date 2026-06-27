@@ -30,7 +30,11 @@ import {
   offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
-import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
+import {
+  getDevnetAirdropErrorMessage,
+  getDevnetAirdropRetryAfterMs,
+  requestDevnetSolAirdrop,
+} from '@/lib/faucet/devnet-airdrop';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import {
@@ -47,6 +51,22 @@ import { useWalletStore } from '@/store/walletStore';
 
 const TOGGLE_TIMING = { duration: 150, easing: Easing.out(Easing.cubic) };
 const WALLET_PROFILE_ICON = require('../../../assets/AppIcons/playstore.png') as number;
+
+function formatFaucetCooldown(milliseconds: number): string {
+  const totalMinutes = Math.max(1, Math.ceil(milliseconds / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours <= 0) {
+    return `${totalMinutes} min`;
+  }
+
+  if (minutes === 0) {
+    return `${hours} hr`;
+  }
+
+  return `${hours} hr ${minutes} min`;
+}
 
 const HeaderWalletProfileIcon = memo(function HeaderWalletProfileIcon({
   onProfileImageError,
@@ -149,6 +169,8 @@ function HomeHeaderComponent({
   const markAllNotificationsRead = useNotificationStore((s) => s.markAllRead);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [faucetBusy, setFaucetBusy] = useState(false);
+  const [faucetNow, setFaucetNow] = useState(() => Date.now());
+  const [faucetNextEligibleAt, setFaucetNextEligibleAt] = useState<number | null>(null);
 
   // Animation values
   const toggleProgress = useDerivedValue(
@@ -203,8 +225,30 @@ function HomeHeaderComponent({
   );
   const walletDisplayName = username != null ? `@${username}` : accountName;
   const walletPress = useCancelSafePressed(onPressWalletDetails == null);
-  const faucetPress = useCancelSafePressed(faucetBusy || publicKey == null);
+  const faucetCooldownMs =
+    faucetNextEligibleAt == null ? 0 : Math.max(0, faucetNextEligibleAt - faucetNow);
+  const faucetCoolingDown = faucetCooldownMs > 0;
+  const faucetCooldownLabel = faucetCoolingDown ? formatFaucetCooldown(faucetCooldownMs) : null;
+  const faucetDisabled = faucetBusy || publicKey == null || faucetCoolingDown;
+  const faucetPress = useCancelSafePressed(faucetDisabled);
   const notificationPress = useCancelSafePressed(false);
+
+  useEffect(() => {
+    setFaucetNextEligibleAt(null);
+    setFaucetNow(Date.now());
+  }, [network, publicKey]);
+
+  useEffect(() => {
+    if (!faucetCoolingDown) return undefined;
+
+    const intervalId = setInterval(() => {
+      setFaucetNow(Date.now());
+    }, 1_000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [faucetCoolingDown]);
 
   const handleToggle = useCallback((): void => {
     const next = !isOffline;
@@ -217,7 +261,7 @@ function HomeHeaderComponent({
   }, [isOffline, onToggleOffline]);
 
   const handleRequestDevnetAirdrop = useCallback(async (): Promise<void> => {
-    if (faucetBusy) return;
+    if (faucetBusy || faucetCoolingDown) return;
 
     if (network !== 'devnet') {
       showToast({
@@ -249,6 +293,8 @@ function HomeHeaderComponent({
 
     try {
       const result = await requestDevnetSolAirdrop(publicKey);
+      setFaucetNextEligibleAt(result.nextEligibleAt);
+      setFaucetNow(Date.now());
 
       showToast({
         title: 'Devnet SOL added',
@@ -270,6 +316,13 @@ function HomeHeaderComponent({
         queryKey: offpayWalletTokenTransactionsBaseQueryKey(publicKey, 'devnet'),
       });
     } catch (error) {
+      const retryAfterMs = getDevnetAirdropRetryAfterMs(error);
+      if (retryAfterMs > 0) {
+        const now = Date.now();
+        setFaucetNextEligibleAt(now + retryAfterMs);
+        setFaucetNow(now);
+      }
+
       showToast({
         title: 'Faucet unavailable',
         message: getDevnetAirdropErrorMessage(error),
@@ -279,7 +332,7 @@ function HomeHeaderComponent({
     } finally {
       setFaucetBusy(false);
     }
-  }, [faucetBusy, network, publicKey, queryClient, showToast]);
+  }, [faucetBusy, faucetCoolingDown, network, publicKey, queryClient, showToast]);
 
   const handleProfileImageError = useCallback((): void => {
     if (profileImageUri == null) return;
@@ -507,19 +560,23 @@ function HomeHeaderComponent({
                   width: Math.max(layout.minTouchTarget, faucetWidth),
                   height: Math.max(layout.minTouchTarget, actionButtonSize),
                 },
-                faucetPress.pressed && !faucetBusy ? styles.actionControlPressed : null,
-                faucetBusy || publicKey == null ? styles.faucetDisabled : null,
+                faucetPress.pressed && !faucetDisabled ? styles.actionControlPressed : null,
+                faucetDisabled ? styles.faucetDisabled : null,
               ]}
               onPress={handleRequestDevnetAirdrop}
               onPressIn={faucetPress.onPressIn}
               onPressOut={faucetPress.onPressOut}
               onResponderTerminate={faucetPress.onResponderTerminate}
               onResponderTerminationRequest={() => true}
-              disabled={faucetBusy || publicKey == null}
+              disabled={faucetDisabled}
               hitSlop={6}
               accessibilityRole="button"
-              accessibilityLabel="Airdrop 1 Devnet SOL"
-              accessibilityState={{ busy: faucetBusy, disabled: faucetBusy || publicKey == null }}
+              accessibilityLabel={
+                faucetCooldownLabel == null
+                  ? 'Airdrop Devnet SOL and test tokens'
+                  : `Devnet faucet available in ${faucetCooldownLabel}`
+              }
+              accessibilityState={{ busy: faucetBusy, disabled: faucetDisabled }}
             >
               <View
                 style={[

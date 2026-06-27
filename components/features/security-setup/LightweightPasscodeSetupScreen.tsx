@@ -51,6 +51,14 @@ function nextRoute(intent: SecuritySetupIntent, source: WalletFlowInviteSource):
   });
 }
 
+function walletRouteForIntent(
+  intent: SecuritySetupIntent,
+): '/create-wallet' | '/restore-wallet' | '/privy-wallet' {
+  if (intent === 'restore-wallet') return '/restore-wallet';
+  if (intent === 'privy-wallet') return '/privy-wallet';
+  return '/create-wallet';
+}
+
 export function PasscodeSetupScreen({
   intent,
   source,
@@ -95,6 +103,14 @@ export function PasscodeSetupScreen({
   const setupTouchedRef = useRef(false);
   const completingEntryRef = useRef(false);
   const initialSettingsAppliedRef = useRef(cachedSettings != null);
+
+  useEffect(() => {
+    if (source !== 'accounts') return;
+    router.replace({
+      pathname: walletRouteForIntent(intent),
+      params: { source: 'accounts' },
+    });
+  }, [intent, source]);
 
   const keyFrameStyle = useMemo(
     () => ({
@@ -219,7 +235,11 @@ export function PasscodeSetupScreen({
         // the time all six digits are entered. Resolve the authoritative
         // mode now so we never mistake an existing passcode for a fresh
         // setup (or vice versa). Skipped once a confirm step is in flight.
-        if (!initialSettingsAppliedRef.current && firstPasscodeRef.current.length === 0) {
+        if (
+          !initialSettingsAppliedRef.current &&
+          !setupTouchedRef.current &&
+          firstPasscodeRef.current.length === 0
+        ) {
           try {
             const settings = await getSecuritySettings();
             setModeValue(settings.hasPasscode ? 'unlockExisting' : 'create');
@@ -229,6 +249,9 @@ export function PasscodeSetupScreen({
             initialSettingsAppliedRef.current = true;
             setSettingsReady(true);
           }
+        } else if (!initialSettingsAppliedRef.current) {
+          initialSettingsAppliedRef.current = true;
+          setSettingsReady(true);
         }
 
         const activeMode = modeRef.current;
@@ -287,6 +310,7 @@ export function PasscodeSetupScreen({
 
   const handleDigit = useCallback(
     (digit: string): void => {
+      if (source === 'accounts') return;
       if (saving || processingEntry || completingEntryRef.current) return;
       const currentEntry = entryRef.current;
       if (currentEntry.length >= 6) return;
@@ -298,20 +322,22 @@ export function PasscodeSetupScreen({
         void handleCompletedEntry(nextEntry);
       }
     },
-    [handleCompletedEntry, processingEntry, saving, setEntryValue],
+    [handleCompletedEntry, processingEntry, saving, setEntryValue, source],
   );
 
   const handleDelete = useCallback((): void => {
+    if (source === 'accounts') return;
     if (saving || processingEntry || completingEntryRef.current) return;
     setupTouchedRef.current = true;
     setEntryValue(entryRef.current.slice(0, -1));
-  }, [processingEntry, saving, setEntryValue]);
+  }, [processingEntry, saving, setEntryValue, source]);
 
   const handleClear = useCallback((): void => {
+    if (source === 'accounts') return;
     if (saving || processingEntry || completingEntryRef.current) return;
     setupTouchedRef.current = true;
     setEntryValue('');
-  }, [processingEntry, saving, setEntryValue]);
+  }, [processingEntry, saving, setEntryValue, source]);
 
   const content = useMemo(() => {
     if (mode === 'unlockExisting') {
@@ -356,6 +382,10 @@ export function PasscodeSetupScreen({
     }),
     [handleDigit],
   );
+
+  if (source === 'accounts') {
+    return <View style={styles.redirectScreen} />;
+  }
 
   return (
     <CreateWalletScreenLayout
@@ -482,6 +512,10 @@ export function PasscodeSetupScreen({
 }
 
 const styles = StyleSheet.create({
+  redirectScreen: {
+    flex: 1,
+    backgroundColor: colors.brand.glassTint,
+  },
   centerBlock: {
     width: '100%',
     alignSelf: 'center',

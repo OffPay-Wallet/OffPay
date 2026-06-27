@@ -53,6 +53,12 @@ function readLinkedPrivySolanaWalletAddress(user: unknown): string | null {
   return null;
 }
 
+function runAfterRouteSettles(task: () => void): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(task);
+  });
+}
+
 export default function PrivyWalletRoute(): React.JSX.Element {
   const params = useLocalSearchParams<{ source?: string | string[] }>();
   const { width } = useWindowDimensions();
@@ -85,12 +91,15 @@ export default function PrivyWalletRoute(): React.JSX.Element {
         await importFromPrivyEmbeddedWallet(address);
 
         if (flowSource === 'accounts') {
-          clearWalletFlowInviteVerification();
+          setHasOnboarded(true);
+          router.replace('/');
+          runAfterRouteSettles(clearWalletFlowInviteVerification);
+          return;
         }
 
         if (username != null) {
           setHasOnboarded(true);
-          router.replace(flowSource === 'accounts' ? '/accounts' : '/');
+          router.replace('/');
           return;
         }
 
@@ -146,8 +155,8 @@ export default function PrivyWalletRoute(): React.JSX.Element {
 
   function handleBack(): void {
     if (flowSource === 'accounts') {
-      clearWalletFlowInviteVerification();
       router.replace('/accounts');
+      runAfterRouteSettles(clearWalletFlowInviteVerification);
       return;
     }
 

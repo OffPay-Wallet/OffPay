@@ -1125,7 +1125,6 @@ export function HomeScreenContent(): React.JSX.Element {
           <View style={[styles.balanceSection, { marginBottom: sectionGap }]}>
             <BalanceCard
               publicKey={publicKey}
-              networkLabel={networkLabel}
               offlineSlotsLabel={offlineSlotsLabel}
               portfolioValueLabel={portfolioValueLabel}
               portfolioValueLoading={

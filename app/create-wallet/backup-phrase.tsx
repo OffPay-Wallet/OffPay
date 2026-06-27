@@ -38,6 +38,12 @@ function parseFlowSource(raw: string | undefined): 'accounts' | 'onboarding' {
   return 'onboarding';
 }
 
+function runAfterRouteSettles(task: () => void): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(task);
+  });
+}
+
 export default function BackupPhraseScreen(): React.JSX.Element {
   const { width } = useWindowDimensions();
   const params = useLocalSearchParams<{ count?: string | string[]; source?: string | string[] }>();
@@ -157,8 +163,8 @@ export default function BackupPhraseScreen(): React.JSX.Element {
     if (words.length === 0) return;
     if (flowSource === 'accounts') {
       setHasOnboarded(true);
-      clearWalletFlowInviteVerification();
-      router.dismissTo('/accounts');
+      router.replace('/');
+      runAfterRouteSettles(clearWalletFlowInviteVerification);
     } else if (username != null) {
       setHasOnboarded(true);
       router.replace('/');

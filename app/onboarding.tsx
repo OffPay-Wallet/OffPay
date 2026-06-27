@@ -161,7 +161,13 @@ export default function WelcomeScreen(): React.JSX.Element {
   const handleCreateWallet = useCallback((): void => {
     if (flowSource === 'accounts') {
       setWalletFlowInviteSource('accounts');
+      router.push({
+        pathname: '/create-wallet',
+        params: { source: 'accounts' },
+      });
+      return;
     }
+
     router.push({
       pathname: '/security-setup/passcode',
       params: { intent: 'create-wallet', source: flowSource },
@@ -171,7 +177,13 @@ export default function WelcomeScreen(): React.JSX.Element {
   const handleImportWallet = useCallback((): void => {
     if (flowSource === 'accounts') {
       setWalletFlowInviteSource('accounts');
+      router.push({
+        pathname: '/restore-wallet',
+        params: { source: 'accounts' },
+      });
+      return;
     }
+
     router.push({
       pathname: '/security-setup/passcode',
       params: { intent: 'restore-wallet', source: flowSource },
@@ -240,7 +252,13 @@ export default function WelcomeScreen(): React.JSX.Element {
     authFeedbackExitTimerRef.current = setTimeout(() => {
       if (flowSource === 'accounts') {
         setWalletFlowInviteSource('accounts');
+        router.replace({
+          pathname: '/privy-wallet',
+          params: { source: 'accounts' },
+        });
+        return;
       }
+
       router.replace({
         pathname: '/security-setup/passcode',
         params: { intent: 'privy-wallet', source: flowSource },
@@ -329,7 +347,7 @@ export default function WelcomeScreen(): React.JSX.Element {
               align="center"
               style={styles.heroTitle}
             >
-              Pay your way.{'\n'}Private. Offline-ready.
+              Pay your way.{'\n'}Private. Offline-ready.{'\n'}AI Powered
             </Text>
           </View>
         </View>

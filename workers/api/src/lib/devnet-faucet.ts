@@ -1,5 +1,11 @@
 import { Buffer } from 'buffer';
-import { Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction,
+} from '@solana/web3.js';
 import bs58 from 'bs58';
 import { AppError } from './errors.js';
 import {
@@ -61,6 +67,11 @@ export interface DevnetTreasuryAirdropResponse {
   lamports: string;
   sol: number;
   tokens: DevnetTreasuryTokenAirdrop[];
+  nextEligibleAt: number;
+}
+
+interface FaucetWindowClaim {
+  key: string;
   nextEligibleAt: number;
 }
 
@@ -134,7 +145,10 @@ function assertConfiguredMint(value: string, label: string): string {
 }
 
 function getFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
-  const usdcMint = assertConfiguredMint(bindings.OFFPAY_DEVNET_USDC_MINT ?? DEVNET_USDC_MINT, 'Devnet USDC');
+  const usdcMint = assertConfiguredMint(
+    bindings.OFFPAY_DEVNET_USDC_MINT ?? DEVNET_USDC_MINT,
+    'Devnet USDC',
+  );
 
   return [
     {
@@ -259,10 +273,15 @@ function createTransferCheckedInstruction(params: {
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join(
+    '',
+  );
 }
 
-async function claimFaucetWindow(bindings: Bindings, walletAddress: string): Promise<number> {
+async function claimFaucetWindow(
+  bindings: Bindings,
+  walletAddress: string,
+): Promise<FaucetWindowClaim> {
   const hashedWallet = await sha256Hex(walletAddress);
   const key = `devnet-faucet:v1:wallet:${hashedWallet}`;
   const now = Date.now();
@@ -289,7 +308,18 @@ async function claimFaucetWindow(bindings: Bindings, walletAddress: string): Pro
     });
   }
 
-  return now + FAUCET_CLAIM_WINDOW_SEC * 1000;
+  return {
+    key,
+    nextEligibleAt: now + FAUCET_CLAIM_WINDOW_SEC * 1000,
+  };
+}
+
+async function releaseFaucetWindow(bindings: Bindings, claim: FaucetWindowClaim): Promise<void> {
+  await runKvPipeline(
+    bindings,
+    [['DEL', claim.key]],
+    'Devnet faucet rate limit storage is unavailable.',
+  );
 }
 
 export async function requestDevnetTreasuryAirdrop(
@@ -310,7 +340,10 @@ export async function requestDevnetTreasuryAirdrop(
   }));
   const accounts = await getRpcAccounts(bindings, {
     network: 'devnet',
-    addresses: tokenPlans.flatMap((plan) => [plan.treasuryTokenAccount, plan.recipientTokenAccount]),
+    addresses: tokenPlans.flatMap((plan) => [
+      plan.treasuryTokenAccount,
+      plan.recipientTokenAccount,
+    ]),
   });
   const tokenAirdrops: DevnetTreasuryTokenAirdrop[] = [];
   let missingRecipientTokenAccountCount = 0;
@@ -321,6 +354,7 @@ export async function requestDevnetTreasuryAirdrop(
     const recipientAccount = accounts.accounts[index * 2 + 1] ?? null;
     const treasuryRawAmount = readTokenAccountRawAmount(treasuryAccount);
     const recipientRawAmount = readTokenAccountRawAmount(recipientAccount);
+    const recipientTokenAccountExists = recipientAccount?.exists === true;
     const recipientBalance = recipientRawAmount ?? 0n;
     const transferRawAmount =
       recipientBalance >= plan.token.capRawAmount ? 0n : plan.token.capRawAmount - recipientBalance;
@@ -333,7 +367,7 @@ export async function requestDevnetTreasuryAirdrop(
       });
     }
 
-    if (recipientAccount != null && recipientRawAmount === null) {
+    if (recipientTokenAccountExists && recipientRawAmount === null) {
       throw new AppError({
         status: 400,
         code: 'INVALID_REQUEST',
@@ -341,7 +375,7 @@ export async function requestDevnetTreasuryAirdrop(
       });
     }
 
-    if (recipientAccount == null && transferRawAmount > 0n) {
+    if (!recipientTokenAccountExists && transferRawAmount > 0n) {
       missingRecipientTokenAccountCount += 1;
     }
 
@@ -386,7 +420,7 @@ export async function requestDevnetTreasuryAirdrop(
   }
 
   const { blockhash, lastValidBlockHeight } = await getLatestBlockhash(bindings, 'devnet');
-  const nextEligibleAt = await claimFaucetWindow(bindings, request.walletAddress);
+  const faucetClaim = await claimFaucetWindow(bindings, request.walletAddress);
   const transaction = new Transaction({
     feePayer: faucetKeypair.publicKey,
     recentBlockhash: blockhash,
@@ -423,10 +457,26 @@ export async function requestDevnetTreasuryAirdrop(
   transaction.lastValidBlockHeight = lastValidBlockHeight;
   transaction.sign(faucetKeypair);
 
-  const { signature } = await broadcastRawTransaction(bindings, {
-    rawTransaction: Buffer.from(transaction.serialize()).toString('base64'),
-    network: 'devnet',
-  });
+  let signature: string;
+  try {
+    ({ signature } = await broadcastRawTransaction(bindings, {
+      rawTransaction: Buffer.from(transaction.serialize()).toString('base64'),
+      network: 'devnet',
+      skipPreflight: false,
+      maxRetries: 2,
+      preflightCommitment: 'confirmed',
+    }));
+  } catch (error) {
+    try {
+      await releaseFaucetWindow(bindings, faucetClaim);
+    } catch (releaseError) {
+      console.warn(
+        'Failed to release Devnet faucet cooldown after broadcast failure.',
+        releaseError,
+      );
+    }
+    throw error;
+  }
 
   return {
     network: 'devnet',
@@ -436,6 +486,6 @@ export async function requestDevnetTreasuryAirdrop(
     lamports: DEVNET_AIRDROP_LAMPORTS.toString(),
     sol: DEVNET_AIRDROP_SOL,
     tokens: tokenAirdrops,
-    nextEligibleAt,
+    nextEligibleAt: faucetClaim.nextEligibleAt,
   };
 }

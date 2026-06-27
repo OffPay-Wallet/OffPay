@@ -341,6 +341,9 @@ interface WalletTokenTransactionsRequest extends WalletTransactionsRequest {
 interface RawTransactionBroadcastRequest {
   rawTransaction: string;
   network: Network;
+  skipPreflight?: boolean;
+  maxRetries?: number;
+  preflightCommitment?: 'processed' | 'confirmed' | 'finalized';
 }
 
 interface RawTransactionBroadcastResponse {
@@ -1713,6 +1716,17 @@ async function broadcastRawTransaction(
     let response: Response;
     let payload: unknown = null;
     try {
+      const sendOptions: Record<string, unknown> = {
+        encoding: 'base64',
+        skipPreflight: request.skipPreflight ?? true,
+      };
+      if (request.maxRetries !== undefined) {
+        sendOptions.maxRetries = request.maxRetries;
+      }
+      if (request.preflightCommitment !== undefined) {
+        sendOptions.preflightCommitment = request.preflightCommitment;
+      }
+
       response = await heliusFetchImplementation(candidate.url, {
         method: 'POST',
         headers: {
@@ -1722,13 +1736,7 @@ async function broadcastRawTransaction(
           jsonrpc: '2.0',
           id: `sendTransaction:${request.network}:${candidate.provider}`,
           method: 'sendTransaction',
-          params: [
-            request.rawTransaction,
-            {
-              encoding: 'base64',
-              skipPreflight: true,
-            },
-          ],
+          params: [request.rawTransaction, sendOptions],
         }),
       });
     } catch (error) {

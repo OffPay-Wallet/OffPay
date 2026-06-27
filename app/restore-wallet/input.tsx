@@ -57,6 +57,12 @@ function createEmptyWords(count: number): string[] {
   return Array.from({ length: count }, () => '');
 }
 
+function runAfterRouteSettles(task: () => void): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(task);
+  });
+}
+
 export default function RestoreWalletInputScreen(): React.JSX.Element {
   const params = useLocalSearchParams<{
     method?: string | string[];
@@ -129,8 +135,8 @@ export default function RestoreWalletInputScreen(): React.JSX.Element {
   const completeImportFlow = useCallback((): void => {
     if (flowSource === 'accounts') {
       setHasOnboarded(true);
-      clearWalletFlowInviteVerification();
-      router.dismissTo('/accounts');
+      router.replace('/');
+      runAfterRouteSettles(clearWalletFlowInviteVerification);
       return;
     }
 

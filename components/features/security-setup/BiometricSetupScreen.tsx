@@ -58,6 +58,12 @@ export function BiometricSetupScreen({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (source === 'accounts') {
+      finishSetup(intent, source);
+    }
+  }, [intent, source]);
+
+  useEffect(() => {
     let cancelled = false;
     void getBiometricAvailability().then((availability) => {
       if (cancelled) return;
@@ -118,6 +124,10 @@ export function BiometricSetupScreen({
     }
     finishSetup(intent, source);
   }, [intent, source]);
+
+  if (source === 'accounts') {
+    return <View style={styles.redirectScreen} />;
+  }
 
   return (
     <CreateWalletScreenLayout
@@ -213,6 +223,10 @@ export function BiometricSetupScreen({
 }
 
 const styles = StyleSheet.create({
+  redirectScreen: {
+    flex: 1,
+    backgroundColor: colors.brand.glassTint,
+  },
   centerBlock: {
     width: '100%',
     alignSelf: 'center',

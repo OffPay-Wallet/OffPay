@@ -11,9 +11,33 @@ export interface DevnetAirdropResult {
   nextEligibleAt: number;
 }
 
+function readErrorStringField(error: unknown, field: 'code' | 'message'): string | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === 'string' ? value : null;
+}
+
+function readErrorNumberField(error: unknown, field: 'retryAfterMs' | 'status'): number | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return readErrorStringField(error, 'message') ?? String(error);
+}
+
 function isRateLimitError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /429|rate|limit|too many/i.test(message);
+  const status = readErrorNumberField(error, 'status');
+  const code = readErrorStringField(error, 'code');
+  const message = getErrorMessage(error);
+
+  return (
+    status === 429 ||
+    code === 'RATE_LIMITED' ||
+    /(?:^|\b)(429|too many requests)(?:\b|$)/i.test(message)
+  );
 }
 
 export async function requestDevnetSolAirdrop(walletAddress: string): Promise<DevnetAirdropResult> {
@@ -35,7 +59,7 @@ export async function requestDevnetSolAirdrop(walletAddress: string): Promise<De
 }
 
 export function getDevnetAirdropErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = getErrorMessage(error);
 
   if (isRateLimitError(error)) {
     return 'The Devnet faucet can be used once every 4 hours per wallet.';
@@ -58,6 +82,11 @@ export function getDevnetAirdropErrorMessage(error: unknown): string {
   }
 
   return 'Unable to request Devnet SOL right now.';
+}
+
+export function getDevnetAirdropRetryAfterMs(error: unknown): number {
+  if (!isRateLimitError(error)) return 0;
+  return Math.max(0, readErrorNumberField(error, 'retryAfterMs') ?? 0);
 }
 
 export const __devnetAirdropInternal = {

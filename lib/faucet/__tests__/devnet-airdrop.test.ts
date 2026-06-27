@@ -5,7 +5,7 @@ jest.mock('@/lib/api/offpay-api-client', () => ({
   requestDevnetSolAirdrop: mockRequestDevnetSolAirdropFromApi,
 }));
 
-const { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } =
+const { getDevnetAirdropErrorMessage, getDevnetAirdropRetryAfterMs, requestDevnetSolAirdrop } =
   require('@/lib/faucet/devnet-airdrop') as typeof import('@/lib/faucet/devnet-airdrop');
 
 describe('devnet airdrop faucet', () => {
@@ -51,8 +51,34 @@ describe('devnet airdrop faucet', () => {
   });
 
   it('explains backend faucet treasury failures', () => {
-    expect(getDevnetAirdropErrorMessage(new Error('Devnet faucet treasury needs more dUSDC.'))).toBe(
-      'Devnet faucet treasury needs more dUSDC.',
+    expect(
+      getDevnetAirdropErrorMessage(new Error('Devnet faucet treasury needs more dUSDC.')),
+    ).toBe('Devnet faucet treasury needs more dUSDC.');
+  });
+
+  it('only shows the cooldown message for real rate-limit errors', () => {
+    const rateLimitedError = {
+      status: 429,
+      code: 'RATE_LIMITED',
+      message: 'Too many requests.',
+      retryAfterMs: 60_000,
+    };
+
+    expect(getDevnetAirdropErrorMessage(rateLimitedError)).toBe(
+      'The Devnet faucet can be used once every 4 hours per wallet.',
     );
+    expect(getDevnetAirdropRetryAfterMs(rateLimitedError)).toBe(60_000);
+
+    const invalidRequestError = {
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Airdrop wallet must match the authenticated wallet.',
+      retryAfterMs: 0,
+    };
+
+    expect(getDevnetAirdropErrorMessage(invalidRequestError)).toBe(
+      'Unable to request Devnet SOL right now.',
+    );
+    expect(getDevnetAirdropRetryAfterMs(invalidRequestError)).toBe(0);
   });
 });

@@ -53,7 +53,7 @@ interface QuickAction {
 // ---------------------------------------------------------------------------
 
 const COPY_FEEDBACK_MS = 1800;
-const ADDRESS_TRUNCATE_CHARS = 6;
+const ADDRESS_TRUNCATE_CHARS = 5;
 
 const QUICK_ACTIONS: QuickAction[] = [
   { id: 'send', label: 'Send' },
@@ -230,7 +230,6 @@ function useCancelSafePressed(disabled = false): {
 interface BalanceCardProps {
   /** Wallet public key — displayed truncated with copy button */
   publicKey: string | null;
-  networkLabel?: string | null;
   offlineSlotsLabel?: string | null;
   portfolioValueLabel?: string;
   portfolioValueLoading?: boolean;
@@ -257,7 +256,6 @@ interface BalanceCardProps {
 
 export const BalanceCard = memo(function BalanceCard({
   publicKey,
-  networkLabel,
   offlineSlotsLabel,
   portfolioValueLabel,
   portfolioValueLoading = false,
@@ -332,15 +330,16 @@ export const BalanceCard = memo(function BalanceCard({
 
   const displayAddress = publicKey != null ? truncateAddress(publicKey) : '—';
   const maskedAddress = privacyHidden ? '****' : displayAddress;
-  const cardHPadding = compact ? spacing.md : spacing.lg;
-  const cardVPadding = compact ? spacing.md : 18;
-  const portfolioCardMinHeight = stackFooter ? 190 : ultraCompact ? 158 : compact ? 172 : 200;
-  const topControlSize = ultraCompact ? 30 : compact ? 32 : 36;
-  const footerControlHeight = ultraCompact ? 30 : 32;
-  const statusPillHeight = ultraCompact ? 24 : 26;
-  const refreshIconSize = ultraCompact ? 15 : 16;
-  const addressPillMaxWidth = ultraCompact ? 136 : compact ? 164 : 198;
-  const currencyPillWidth = ultraCompact ? 68 : compact ? 76 : 84;
+  const cardHPadding = compact ? spacing.sm : spacing.md;
+  const cardVPadding = compact ? spacing.sm : spacing.md;
+  const portfolioCardMinHeight = stackFooter ? 176 : ultraCompact ? 146 : compact ? 160 : 184;
+  const topControlSize = ultraCompact ? 28 : compact ? 30 : 32;
+  const footerControlHeight = ultraCompact ? 28 : 30;
+  const statusPillHeight = ultraCompact ? 22 : 24;
+  const refreshIconSize = ultraCompact ? 14 : 15;
+  const portfolioAmountFontSize = ultraCompact ? 28 : compact ? 31 : 36;
+  const addressPillMaxWidth = ultraCompact ? 122 : compact ? 148 : 176;
+  const currencyPillWidth = ultraCompact ? 62 : compact ? 68 : 76;
   const currencySheetTopInset = Math.max(insets.top, spacing.md) + spacing.sm;
   const currencySheetMaxHeight = Math.max(0, windowHeight - currencySheetTopInset);
   const currencySheetPreferredHeight = Math.max(
@@ -349,15 +348,12 @@ export const BalanceCard = memo(function BalanceCard({
   );
   const currencySheetHeight = Math.min(currencySheetMaxHeight, currencySheetPreferredHeight);
   const currencySheetBottomPadding = Math.max(insets.bottom, spacing.md) + spacing.md;
-  const networkPillWidth = hasOfflineStatus ? (ultraCompact ? 50 : compact ? 58 : 76) : undefined;
   const currencyCode = selectedCurrency ?? 'USD';
   const refreshDisabled = onRefresh == null || refreshing;
   const addressPress = useCancelSafePressed(publicKey == null);
   const refreshPress = useCancelSafePressed(refreshDisabled);
   const privacyPress = useCancelSafePressed(onTogglePrivacy == null);
   const currencyPress = useCancelSafePressed(false);
-  const displayedNetworkLabel =
-    ultraCompact && networkLabel != null ? networkLabel.replace(/net$/i, '').trim() : networkLabel;
   const displayedOfflineSlotsLabel =
     ultraCompact && offlineSlotsLabel != null
       ? offlineSlotsLabel.replace(/\s+slots$/i, '').trim()
@@ -522,7 +518,7 @@ export const BalanceCard = memo(function BalanceCard({
                             style={styles.refreshIcon}
                           >
                             <PuffyRefreshIcon
-                              size={compact ? 17 : 18}
+                              size={compact ? 15 : 16}
                               color={colors.text.primary}
                             />
                           </Animated.View>
@@ -554,6 +550,7 @@ export const BalanceCard = memo(function BalanceCard({
                       value={displayedPortfolioValue}
                       size="hero"
                       compact={compact}
+                      amountFontSize={portfolioAmountFontSize}
                       style={styles.balanceAmount}
                       numberOfLines={1}
                       adjustsFontSizeToFit
@@ -569,28 +566,26 @@ export const BalanceCard = memo(function BalanceCard({
                 styles.bottomRow,
                 compact && styles.bottomRowCompact,
                 stackFooter && styles.bottomRowStacked,
+                offlineSlotsLabel == null && styles.bottomRowNoStatus,
               ]}
             >
               {loading ? (
                 <>
-                  <View
-                    style={[
-                      styles.statusPillRow,
-                      compact && styles.statusPillRowCompact,
-                      stackFooter && styles.statusPillRowStacked,
-                    ]}
-                  >
-                    <SkeletonBlock
-                      width={compact ? 82 : 94}
-                      height={statusPillHeight}
-                      radius={radii.full}
-                    />
-                    <SkeletonBlock
-                      width={compact ? 68 : 82}
-                      height={statusPillHeight}
-                      radius={radii.full}
-                    />
-                  </View>
+                  {hasOfflineStatus ? (
+                    <View
+                      style={[
+                        styles.statusPillRow,
+                        compact && styles.statusPillRowCompact,
+                        stackFooter && styles.statusPillRowStacked,
+                      ]}
+                    >
+                      <SkeletonBlock
+                        width={compact ? 76 : 88}
+                        height={statusPillHeight}
+                        radius={radii.full}
+                      />
+                    </View>
+                  ) : null}
                   <View
                     style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}
                   >
@@ -610,7 +605,7 @@ export const BalanceCard = memo(function BalanceCard({
                 </>
               ) : (
                 <>
-                  {networkLabel != null || offlineSlotsLabel != null ? (
+                  {offlineSlotsLabel != null ? (
                     <View
                       style={[
                         styles.statusPillRow,
@@ -618,72 +613,37 @@ export const BalanceCard = memo(function BalanceCard({
                         stackFooter && styles.statusPillRowStacked,
                       ]}
                     >
-                      {networkLabel != null ? (
+                      <View
+                        style={[
+                          styles.statusPill,
+                          stackFooter && styles.statusPillStacked,
+                          {
+                            width: slotsPillWidth,
+                            height: statusPillHeight,
+                          },
+                        ]}
+                      >
                         <View
                           style={[
-                            styles.networkPill,
-                            stackFooter && styles.networkPillStacked,
-                            {
-                              width: networkPillWidth,
-                              height: statusPillHeight,
-                            },
+                            styles.statusPillGlass,
+                            ultraCompact && styles.statusPillGlassCompact,
                           ]}
                         >
-                          <View
-                            style={[
-                              styles.statusPillGlass,
-                              ultraCompact && styles.statusPillGlassCompact,
-                            ]}
+                          <Text
+                            variant="small"
+                            color={colors.text.secondary}
+                            style={styles.statusPillText}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.76}
+                            maxFontSizeMultiplier={1}
                           >
-                            <Text
-                              variant="small"
-                              color={colors.text.secondary}
-                              style={styles.networkText}
-                              numberOfLines={1}
-                              adjustsFontSizeToFit
-                              minimumFontScale={0.76}
-                              maxFontSizeMultiplier={1}
-                            >
-                              {displayedNetworkLabel}
-                            </Text>
-                          </View>
+                            {displayedOfflineSlotsLabel}
+                          </Text>
                         </View>
-                      ) : null}
-                      {offlineSlotsLabel != null ? (
-                        <View
-                          style={[
-                            styles.networkPill,
-                            stackFooter && styles.networkPillStacked,
-                            {
-                              width: slotsPillWidth,
-                              height: statusPillHeight,
-                            },
-                          ]}
-                        >
-                          <View
-                            style={[
-                              styles.statusPillGlass,
-                              ultraCompact && styles.statusPillGlassCompact,
-                            ]}
-                          >
-                            <Text
-                              variant="small"
-                              color={colors.text.secondary}
-                              style={styles.networkText}
-                              numberOfLines={1}
-                              adjustsFontSizeToFit
-                              minimumFontScale={0.76}
-                              maxFontSizeMultiplier={1}
-                            >
-                              {displayedOfflineSlotsLabel}
-                            </Text>
-                          </View>
-                        </View>
-                      ) : null}
+                      </View>
                     </View>
-                  ) : (
-                    <View style={styles.networkPillPlaceholder} />
-                  )}
+                  ) : null}
                   <View
                     style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}
                   >
@@ -700,7 +660,7 @@ export const BalanceCard = memo(function BalanceCard({
                         onResponderTerminate={privacyPress.onResponderTerminate}
                         onResponderTerminationRequest={() => true}
                         disabled={onTogglePrivacy == null}
-                        hitSlop={6}
+                        hitSlop={8}
                         accessibilityRole="button"
                         accessibilityLabel={
                           privacyHidden ? 'Show wallet values' : 'Hide wallet values'
@@ -713,7 +673,7 @@ export const BalanceCard = memo(function BalanceCard({
                         <View style={styles.iconControlGlass}>
                           <Ionicons
                             name={privacyHidden ? 'eye-off-outline' : 'eye-outline'}
-                            size={18}
+                            size={16}
                             color={colors.text.primary}
                           />
                         </View>
@@ -729,7 +689,7 @@ export const BalanceCard = memo(function BalanceCard({
                         onPressOut={currencyPress.onPressOut}
                         onResponderTerminate={currencyPress.onResponderTerminate}
                         onResponderTerminationRequest={() => true}
-                        hitSlop={6}
+                        hitSlop={8}
                         accessibilityRole="button"
                         accessibilityLabel="Select display currency"
                       >
@@ -745,7 +705,7 @@ export const BalanceCard = memo(function BalanceCard({
                           >
                             {currencyCode}
                           </Text>
-                          <Ionicons name="chevron-down" size={13} color={colors.text.secondary} />
+                          <Ionicons name="chevron-down" size={12} color={colors.text.secondary} />
                         </View>
                       </Pressable>
                     </View>
@@ -1002,6 +962,9 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: spacing.sm,
   },
+  bottomRowNoStatus: {
+    justifyContent: 'flex-end',
+  },
   statusPillRow: {
     flex: 1,
     flexShrink: 1,
@@ -1018,7 +981,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     justifyContent: 'space-between',
   },
-  networkPill: {
+  statusPill: {
     borderRadius: radii.full,
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -1036,7 +999,7 @@ const styles = StyleSheet.create({
       '0 3px 8px rgba(0, 0, 0, 0.18)',
     ].join(', '),
   },
-  networkPillStacked: {
+  statusPillStacked: {
     flex: 1,
   },
   statusPillGlass: {
@@ -1048,14 +1011,10 @@ const styles = StyleSheet.create({
   statusPillGlassCompact: {
     paddingHorizontal: spacing.sm,
   },
-  networkPillPlaceholder: {
-    width: 1,
-    height: 34,
-  },
-  networkText: {
+  statusPillText: {
     fontFamily: fontFamily.uiMedium,
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 10,
+    lineHeight: 13,
     textTransform: 'uppercase',
     letterSpacing: 0,
   },
@@ -1078,12 +1037,12 @@ const styles = StyleSheet.create({
   ticker: {
     flexShrink: 1,
     fontFamily: fontFamily.displaySemiBold,
-    fontSize: 20,
-    lineHeight: 26,
-  },
-  tickerCompact: {
     fontSize: 18,
     lineHeight: 24,
+  },
+  tickerCompact: {
+    fontSize: 17,
+    lineHeight: 22,
   },
   controlPressed: {
     opacity: 0.72,
@@ -1119,8 +1078,8 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.mono,
     minWidth: 0,
     flexShrink: 1,
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 10,
+    lineHeight: 13,
   },
   balanceAmount: {
     width: '100%',
@@ -1156,8 +1115,8 @@ const styles = StyleSheet.create({
   },
   currencyText: {
     fontFamily: fontFamily.uiMedium,
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 10,
+    lineHeight: 13,
     flexShrink: 1,
   },
   refreshButton: {
