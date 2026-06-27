@@ -96,7 +96,7 @@ export default function PrivyWalletRoute(): React.JSX.Element {
 
         router.replace({
           pathname: '/username-setup',
-          params: { source: 'onboarding' },
+          params: { source: flowSource },
         });
       } catch (cause: unknown) {
         completedRef.current = false;

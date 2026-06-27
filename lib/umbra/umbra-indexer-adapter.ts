@@ -289,7 +289,13 @@ export function createOffpayUmbraUtxoDataFetcher(
     let hasMore: boolean | null = null;
     let nextCursor: string | null = null;
     try {
-      const result = await fetchOffpayUmbraUtxoData(network, startIndex, endIndex, cappedLimit);
+      const result = await fetchOffpayUmbraUtxoData(
+        network,
+        startIndex,
+        endIndex,
+        cappedLimit,
+        options.signal,
+      );
       itemCount = result.items.size;
       hasMore = result.hasMore;
       nextCursor = result.nextCursor == null ? null : String(result.nextCursor);
@@ -317,6 +323,7 @@ async function fetchOffpayUmbraUtxoData(
   startIndex: bigint,
   endIndex?: bigint,
   limit?: bigint,
+  signal?: AbortSignal | null,
 ): Promise<UtxoFetchResult> {
   if (startIndex < 0n) {
     throw new IndexerError(
@@ -340,6 +347,7 @@ async function fetchOffpayUmbraUtxoData(
       start: startIndex.toString(),
       ...(endIndex !== undefined ? { end: endIndex.toString() } : {}),
       ...(limit !== undefined ? { limit: limit.toString() } : {}),
+      signal: signal ?? undefined,
     });
   } catch (error) {
     if (error instanceof IndexerError) throw error;
@@ -411,10 +419,7 @@ function normalizeOffpayUtxoDataItem(utxo: Record<string, JsonValue>): UtxoDataI
       readCandidate(utxo, ['absolute_index', 'absoluteIndex']),
       'absolute_index',
     ),
-    treeIndex: readBigint(
-      readCandidate(utxo, ['tree_index', 'treeIndex']),
-      'tree_index',
-    ) as never,
+    treeIndex: readBigint(readCandidate(utxo, ['tree_index', 'treeIndex']), 'tree_index') as never,
     insertionIndex: readBigint(
       readCandidate(utxo, ['insertion_index', 'insertionIndex']),
       'insertion_index',
@@ -443,20 +448,11 @@ function normalizeOffpayUtxoDataItem(utxo: Record<string, JsonValue>): UtxoDataI
       mintAddressHigh: mintAddress.high as never,
       timestamp: {
         year: readBigint(readCandidate(utxo, ['h1_year', 'h1Year']), 'h1_year') as never,
-        month: readBigint(
-          readCandidate(utxo, ['h1_month', 'h1Month']),
-          'h1_month',
-        ) as never,
+        month: readBigint(readCandidate(utxo, ['h1_month', 'h1Month']), 'h1_month') as never,
         day: readBigint(readCandidate(utxo, ['h1_day', 'h1Day']), 'h1_day') as never,
         hour: readBigint(readCandidate(utxo, ['h1_hour', 'h1Hour']), 'h1_hour') as never,
-        minute: readBigint(
-          readCandidate(utxo, ['h1_minute', 'h1Minute']),
-          'h1_minute',
-        ) as never,
-        second: readBigint(
-          readCandidate(utxo, ['h1_second', 'h1Second']),
-          'h1_second',
-        ) as never,
+        minute: readBigint(readCandidate(utxo, ['h1_minute', 'h1Minute']), 'h1_minute') as never,
+        second: readBigint(readCandidate(utxo, ['h1_second', 'h1Second']), 'h1_second') as never,
       },
       poolVolumeSpl: readBigint(
         readCandidate(utxo, ['h1_pool_volume_spl', 'h1PoolVolumeSpl']),
@@ -490,10 +486,7 @@ function normalizeOffpayUtxoDataItem(utxo: Record<string, JsonValue>): UtxoDataI
       32,
       'depositor_x25519_public_key',
     ) as never,
-    timestamp: readBigint(
-      readCandidate(utxo, ['timestamp']),
-      'timestamp',
-    ) as never,
+    timestamp: readBigint(readCandidate(utxo, ['timestamp']), 'timestamp') as never,
     slot: readBigint(readCandidate(utxo, ['slot']), 'slot') as never,
     eventType,
   };
@@ -501,9 +494,12 @@ function normalizeOffpayUtxoDataItem(utxo: Record<string, JsonValue>): UtxoDataI
 
 export function createOffpayUmbraTreeSummaryFetcher(
   network: OffpayNetwork,
+  options: { signal?: AbortSignal | null } = {},
 ): TreeSummaryFetcherFunction {
   return async () => {
-    const response = await getUmbraTreeSummaries(network);
+    assertUmbraIndexerNotAborted(options.signal);
+    const response = await getUmbraTreeSummaries(network, options.signal);
+    assertUmbraIndexerNotAborted(options.signal);
     return response.trees.map((tree) => ({
       treeIndex: BigInt(tree.treeIndex) as never,
       numLeaves: BigInt(tree.numLeaves) as never,
@@ -546,12 +542,14 @@ function readProofPathBytes(value: JsonValue | undefined): Uint8Array[] {
     throw new Error('Umbra proof entry is missing a Merkle path.');
   }
 
-  return value.map((entry, index) =>
-    jsonValueToFixedBytes(entry, 32, `proof[${index}]`),
-  );
+  return value.map((entry, index) => jsonValueToFixedBytes(entry, 32, `proof[${index}]`));
 }
 
-function jsonValueToFixedBytes(value: JsonValue | undefined, length: number, label: string): Uint8Array {
+function jsonValueToFixedBytes(
+  value: JsonValue | undefined,
+  length: number,
+  label: string,
+): Uint8Array {
   if (typeof value === 'string') {
     return base64ToFixedBytes(value, length, label);
   }

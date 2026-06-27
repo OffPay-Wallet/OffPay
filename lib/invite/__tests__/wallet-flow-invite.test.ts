@@ -20,10 +20,12 @@ describe('wallet flow invite gate helpers', () => {
   it('normalizes wallet-flow invite route params', () => {
     expect(normalizeWalletFlowInviteNext('restore-wallet')).toBe('restore-wallet');
     expect(normalizeWalletFlowInviteNext('privy-wallet')).toBe('privy-wallet');
+    expect(normalizeWalletFlowInviteNext('onboarding')).toBe('onboarding');
     expect(normalizeWalletFlowInviteNext('unknown')).toBe('create-wallet');
     expect(normalizeWalletFlowInviteSource('onboarding')).toBe('onboarding');
     expect(normalizeWalletFlowInviteSource('accounts')).toBe('accounts');
     expect(normalizeWalletFlowInviteSource(undefined)).toBe('accounts');
     expect(getWalletFlowInvitePathname('restore-wallet')).toBe('/restore-wallet');
+    expect(getWalletFlowInvitePathname('onboarding')).toBe('/onboarding');
   });
 });

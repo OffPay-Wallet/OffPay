@@ -1,15 +1,23 @@
 const mockSubmitUmbraClaim = jest.fn();
 const mockGetUmbraClaimStatus = jest.fn();
 const mockGetUmbraRelayerInfo = jest.fn();
+const mockGetUmbraUtxos = jest.fn();
+const mockGetUmbraTreeSummaries = jest.fn();
 
 jest.mock('@/lib/api/offpay-api-client', () => ({
   __esModule: true,
   submitUmbraClaim: mockSubmitUmbraClaim,
   getUmbraClaimStatus: mockGetUmbraClaimStatus,
   getUmbraRelayerInfo: mockGetUmbraRelayerInfo,
+  getUmbraUtxos: mockGetUmbraUtxos,
+  getUmbraTreeSummaries: mockGetUmbraTreeSummaries,
 }));
 
-const { createOffpayUmbraClaimRelayer } =
+const {
+  createOffpayUmbraClaimRelayer,
+  createOffpayUmbraTreeSummaryFetcher,
+  createOffpayUmbraUtxoDataFetcher,
+} =
   require('@/lib/umbra/umbra-indexer-adapter') as typeof import('@/lib/umbra/umbra-indexer-adapter');
 
 describe('createOffpayUmbraClaimRelayer', () => {
@@ -17,6 +25,8 @@ describe('createOffpayUmbraClaimRelayer', () => {
     mockSubmitUmbraClaim.mockReset();
     mockGetUmbraClaimStatus.mockReset();
     mockGetUmbraRelayerInfo.mockReset();
+    mockGetUmbraUtxos.mockReset();
+    mockGetUmbraTreeSummaries.mockReset();
   });
 
   it('exposes both the current SDK (submitBurn/pollBurnStatus) and legacy (submitClaim/pollClaimStatus) relayer methods', () => {
@@ -73,5 +83,63 @@ describe('createOffpayUmbraClaimRelayer', () => {
       txSignature: 'sig-abc',
       failureReason: null,
     });
+  });
+
+  it('passes abort signals through Umbra UTXO and tree-summary fetchers', async () => {
+    const controller = new AbortController();
+    mockGetUmbraUtxos.mockResolvedValue({
+      network: 'devnet',
+      utxos: [],
+      cursor: null,
+      hasMore: false,
+      totalCount: '0',
+      startIndex: '10',
+      endIndex: '20',
+      highestIndexedInsertionIndex: null,
+      fetchedAt: '2026-06-27T00:00:00.000Z',
+    });
+    mockGetUmbraTreeSummaries.mockResolvedValue({
+      network: 'devnet',
+      trees: [{ treeIndex: '0', numLeaves: '21' }],
+      fetchedAt: '2026-06-27T00:00:00.000Z',
+    });
+
+    const fetchUtxos = createOffpayUmbraUtxoDataFetcher('devnet', {
+      signal: controller.signal,
+    });
+    await fetchUtxos(10n, 20n, 32n);
+    await createOffpayUmbraTreeSummaryFetcher('devnet', {
+      signal: controller.signal,
+    })();
+
+    expect(mockGetUmbraUtxos).toHaveBeenCalledWith(
+      expect.objectContaining({
+        network: 'devnet',
+        start: '10',
+        end: '20',
+        limit: '32',
+        signal: controller.signal,
+      }),
+    );
+    expect(mockGetUmbraTreeSummaries).toHaveBeenCalledWith('devnet', controller.signal);
+  });
+
+  it('does not start Umbra indexer fetches after the scan is aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      createOffpayUmbraUtxoDataFetcher('devnet', {
+        signal: controller.signal,
+      })(0n),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(
+      createOffpayUmbraTreeSummaryFetcher('devnet', {
+        signal: controller.signal,
+      })(),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(mockGetUmbraUtxos).not.toHaveBeenCalled();
+    expect(mockGetUmbraTreeSummaries).not.toHaveBeenCalled();
   });
 });

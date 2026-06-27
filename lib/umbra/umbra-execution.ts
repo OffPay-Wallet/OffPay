@@ -195,6 +195,7 @@ const UMBRA_AWAIT_COMPUTATION_FINALIZATION = {
 } as const;
 const UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT = 384n;
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT;
+const UMBRA_CLAIM_SCAN_CHUNK_LEAF_LIMIT = 48n;
 // Multi-UTXO encrypted-balance claims can exceed the Umbra program heap on
 // devnet. Claim All still drains the pending set, but it does so via n1 claims.
 const UMBRA_ENCRYPTED_BALANCE_CLAIM_BATCH_SIZE = 1;
@@ -238,6 +239,38 @@ type UmbraClaimScanWindow = {
   summaries: readonly UmbraTreeSummary[];
   fakeProgressStore: UmbraUtxoDataStore | undefined;
 };
+
+type UmbraSdkClaimableScanResult = {
+  etaToStealthPoolReceiverBurnable?: readonly unknown[];
+  ataToStealthPoolReceiverBurnable?: readonly unknown[];
+  networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress?: readonly unknown[];
+  etaToStealthPoolSelfBurnable?: readonly unknown[];
+  ataToStealthPoolSelfBurnable?: readonly unknown[];
+  networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress?: readonly unknown[];
+  etaIntoReceiverBurnable?: readonly unknown[];
+  ataIntoReceiverBurnable?: readonly unknown[];
+  etaIntoSelfBurnable?: readonly unknown[];
+  ataIntoSelfBurnable?: readonly unknown[];
+  received?: readonly unknown[];
+  publicReceived?: readonly unknown[];
+  selfBurnable?: readonly unknown[];
+  publicSelfBurnable?: readonly unknown[];
+  scannedTrees?: readonly {
+    treeIndex: bigint;
+    scannedRange: { end: bigint } | null;
+  }[];
+  nextScanStartIndex?: unknown;
+};
+
+function assertUmbraOperationNotAborted(
+  signal: AbortSignal | null | undefined,
+  message = 'Umbra operation cancelled.',
+): void {
+  if (signal?.aborted !== true) return;
+  const error = new Error(message);
+  error.name = 'AbortError';
+  throw error;
+}
 
 interface UmbraPrivateP2PUtxoScanResult {
   receiverClaimableUtxos: readonly unknown[];
@@ -307,6 +340,26 @@ function filterUmbraUtxosToScanWindow(
   });
 }
 
+function appendUniqueUmbraUtxos(current: readonly unknown[], next: readonly unknown[]): unknown[] {
+  const seenInsertionIndices = new Set<number>();
+  for (const utxo of current) {
+    const index = getUtxoInsertionIndexAsNumber(utxo);
+    if (index != null) seenInsertionIndices.add(index);
+  }
+
+  const merged = [...current];
+  for (const utxo of next) {
+    const index = getUtxoInsertionIndexAsNumber(utxo);
+    if (index != null) {
+      if (seenInsertionIndices.has(index)) continue;
+      seenInsertionIndices.add(index);
+    }
+    merged.push(utxo);
+  }
+
+  return merged;
+}
+
 function narrowUmbraClaimScanResultToWindow(
   cached: UmbraPrivateP2PUtxoScanResult,
   window: UmbraClaimScanWindow,
@@ -360,6 +413,49 @@ function writeUmbraClaimScanCache(
   pruneUmbraClaimScanCache(now);
 }
 
+function sliceUmbraClaimScanWindow(
+  window: UmbraClaimScanWindow,
+  start: bigint,
+  end: bigint,
+): UmbraClaimScanWindow {
+  const selectedSummary =
+    window.summaries.find((summary) => BigInt(summary.treeIndex) === window.treeIndex) ??
+    window.summaries[0];
+  const boundedSummary =
+    selectedSummary == null
+      ? undefined
+      : ({
+          ...selectedSummary,
+          numLeaves: end + 1n,
+        } as UmbraTreeSummary);
+
+  return {
+    ...window,
+    start,
+    end,
+    leafCount: end >= start ? end - start + 1n : 0n,
+    summaries: boundedSummary == null ? [] : [boundedSummary],
+    fakeProgressStore: createPreScannedUmbraUtxoDataStore(start),
+  };
+}
+
+function splitUmbraClaimScanWindow(
+  window: UmbraClaimScanWindow,
+  chunkLeafLimit: bigint,
+): UmbraClaimScanWindow[] {
+  if (window.leafCount <= 0n) return [window];
+  if (window.leafCount <= chunkLeafLimit) return [window];
+
+  const chunks: UmbraClaimScanWindow[] = [];
+  for (let start = window.start; start <= window.end; start += chunkLeafLimit) {
+    const uncappedEnd = start + chunkLeafLimit - 1n;
+    chunks.push(
+      sliceUmbraClaimScanWindow(window, start, uncappedEnd > window.end ? window.end : uncappedEnd),
+    );
+  }
+  return chunks;
+}
+
 function createPreScannedUmbraUtxoDataStore(start: bigint): UmbraUtxoDataStore | undefined {
   if (start <= 0n) return undefined;
 
@@ -391,8 +487,10 @@ async function resolveUmbraClaimScanWindow(
   network: OffpayNetwork,
   params: UmbraClaimScanParams,
 ): Promise<UmbraClaimScanWindow> {
-  const fetchTreeSummary = createOffpayUmbraTreeSummaryFetcher(network);
+  assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
+  const fetchTreeSummary = createOffpayUmbraTreeSummaryFetcher(network, { signal: params.signal });
   const allSummaries = await fetchTreeSummary();
+  assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
   const requestedTreeIndex = BigInt(params.treeIndex ?? 0);
   const selectedSummary =
     allSummaries.find((summary) => BigInt(summary.treeIndex) === requestedTreeIndex) ??
@@ -2801,6 +2899,7 @@ async function scanUmbraPrivateP2PUtxos(
   network: OffpayNetwork,
   params: UmbraClaimScanParams,
 ): Promise<UmbraPrivateP2PUtxoScanResult> {
+  assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
   const pageLimit =
     params.pageLimit == null
       ? UMBRA_CLAIM_SCAN_PAGE_LIMIT
@@ -2808,6 +2907,7 @@ async function scanUmbraPrivateP2PUtxos(
         ? params.pageLimit
         : BigInt(Math.max(1, Math.trunc(params.pageLimit)));
   const window = await resolveUmbraClaimScanWindow(network, params);
+  assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
   const walletParams = params as Partial<UmbraWalletExecutionParams>;
   const cacheScope = getUmbraClaimScanCacheScope({
     runtime,
@@ -2830,15 +2930,9 @@ async function scanUmbraPrivateP2PUtxos(
       endInsertionIndex: window.end.toString(),
       leafCount: Number(window.leafCount),
     });
+    assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
     return cachedScanResult;
   }
-  const fetchUtxoData = createOffpayUmbraUtxoDataFetcher(network, {
-    maxLimit: pageLimit,
-    signal: params.signal,
-    // Yielding between indexer pages keeps deep scans responsive; fast
-    // recent/range scans skip the ~16ms frame tax per page.
-    yieldAfterPage: window.mode === 'deep',
-  });
   // Deep scans intentionally try every registered master-seed scheme so older
   // notes created under a legacy scheme are still discovered. Recent/range
   // (the auto/fast paths) narrow to the wallet's active scheme to cut the
@@ -2850,90 +2944,113 @@ async function scanUmbraPrivateP2PUtxos(
   const schemeCount = Array.isArray(scanClient.masterSeedSchemes)
     ? scanClient.masterSeedSchemes.length
     : 0;
-  const clientWithIndexer = {
-    ...scanClient,
-    fetchUtxoData,
-    fetchTreeSummary: async () => window.summaries,
-    ...(window.fakeProgressStore == null ? {} : { utxoDataStore: window.fakeProgressStore }),
-  } as IUmbraClient;
-  const scanner = getClaimableUtxoScannerFunction({ client: clientWithIndexer }, {
-    fetchUtxoData,
-    aesDecryptor: createYieldingUmbraAesDecryptor(window.mode === 'deep' ? 8 : 4, params.signal),
-  } as never);
-  const startedAt = mark();
-  const scanResult = (await scanner()) as {
-    etaToStealthPoolReceiverBurnable?: readonly unknown[];
-    ataToStealthPoolReceiverBurnable?: readonly unknown[];
-    networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress?: readonly unknown[];
-    etaToStealthPoolSelfBurnable?: readonly unknown[];
-    ataToStealthPoolSelfBurnable?: readonly unknown[];
-    networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress?: readonly unknown[];
-    etaIntoReceiverBurnable?: readonly unknown[];
-    ataIntoReceiverBurnable?: readonly unknown[];
-    etaIntoSelfBurnable?: readonly unknown[];
-    ataIntoSelfBurnable?: readonly unknown[];
-    received?: readonly unknown[];
-    publicReceived?: readonly unknown[];
-    selfBurnable?: readonly unknown[];
-    publicSelfBurnable?: readonly unknown[];
-    scannedTrees?: readonly {
-      treeIndex: bigint;
-      scannedRange: { end: bigint } | null;
-    }[];
-    nextScanStartIndex?: unknown;
-  };
-  const selectedTreeIndex = BigInt(params.treeIndex ?? 0);
-  const scannedTrees = Array.isArray(scanResult.scannedTrees) ? scanResult.scannedTrees : [];
-  const selectedProgress =
-    scannedTrees.find((tree) => tree.treeIndex === selectedTreeIndex) ?? scannedTrees[0] ?? null;
-  const nextScanStartIndex =
-    scanResult.nextScanStartIndex ??
-    selectedProgress?.scannedRange?.end ??
-    BigInt(params.startInsertionIndex ?? 0);
-  measure('umbra.claims.sdkScan', startedAt, {
-    network,
-    scanMode: window.mode,
-    schemeCount,
-    pageLimit: Number(pageLimit),
-    treeIndex: Number(window.treeIndex),
-    startInsertionIndex: window.start.toString(),
-    endInsertionIndex: window.end.toString(),
-    leafCount: Number(window.leafCount),
-    totalLeaves: window.totalLeaves.toString(),
-    receiverCount:
-      (scanResult.etaToStealthPoolReceiverBurnable?.length ?? 0) +
-      (scanResult.ataToStealthPoolReceiverBurnable?.length ?? 0) +
-      (scanResult.networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress?.length ?? 0) +
-      (scanResult.etaIntoReceiverBurnable?.length ?? scanResult.received?.length ?? 0) +
-      (scanResult.ataIntoReceiverBurnable?.length ?? scanResult.publicReceived?.length ?? 0),
-    selfCount:
-      (scanResult.etaToStealthPoolSelfBurnable?.length ?? 0) +
-      (scanResult.ataToStealthPoolSelfBurnable?.length ?? 0) +
-      (scanResult.networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress?.length ?? 0) +
-      (scanResult.etaIntoSelfBurnable?.length ?? scanResult.selfBurnable?.length ?? 0) +
-      (scanResult.ataIntoSelfBurnable?.length ?? scanResult.publicSelfBurnable?.length ?? 0),
-  });
 
-  const result: UmbraPrivateP2PUtxoScanResult = {
-    receiverClaimableUtxos: [
+  const scanWindow = async (
+    scanWindowSlice: UmbraClaimScanWindow,
+  ): Promise<UmbraPrivateP2PUtxoScanResult> => {
+    const slicePageLimit =
+      scanWindowSlice.leafCount > 0n && scanWindowSlice.leafCount < pageLimit
+        ? scanWindowSlice.leafCount
+        : pageLimit;
+    const fetchUtxoData = createOffpayUmbraUtxoDataFetcher(network, {
+      maxLimit: slicePageLimit,
+      signal: params.signal,
+      yieldAfterPage: true,
+    });
+    const clientWithIndexer = {
+      ...scanClient,
+      fetchUtxoData,
+      fetchTreeSummary: async () => scanWindowSlice.summaries,
+      ...(scanWindowSlice.fakeProgressStore == null
+        ? {}
+        : { utxoDataStore: scanWindowSlice.fakeProgressStore }),
+    } as IUmbraClient;
+    const scanner = getClaimableUtxoScannerFunction({ client: clientWithIndexer }, {
+      fetchUtxoData,
+      aesDecryptor: createYieldingUmbraAesDecryptor(0, params.signal),
+    } as never);
+    const startedAt = mark();
+    assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
+    const scanResult = (await scanner()) as UmbraSdkClaimableScanResult;
+    assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
+    const selectedTreeIndex = BigInt(params.treeIndex ?? 0);
+    const scannedTrees = Array.isArray(scanResult.scannedTrees) ? scanResult.scannedTrees : [];
+    const selectedProgress =
+      scannedTrees.find((tree) => tree.treeIndex === selectedTreeIndex) ?? scannedTrees[0] ?? null;
+    const nextScanStartIndex =
+      scanResult.nextScanStartIndex ??
+      selectedProgress?.scannedRange?.end ??
+      BigInt(params.startInsertionIndex ?? 0);
+    const receiverClaimableUtxos = [
       ...(scanResult.etaToStealthPoolReceiverBurnable ?? []),
       ...(scanResult.ataToStealthPoolReceiverBurnable ?? []),
       ...(scanResult.networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress ?? []),
       ...(scanResult.etaIntoReceiverBurnable ?? scanResult.received ?? []),
       ...(scanResult.ataIntoReceiverBurnable ?? scanResult.publicReceived ?? []),
-    ],
-    selfClaimableUtxos: [
+    ];
+    const selfClaimableUtxos = [
       ...(scanResult.etaToStealthPoolSelfBurnable ?? []),
       ...(scanResult.ataToStealthPoolSelfBurnable ?? []),
       ...(scanResult.networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress ?? []),
       ...(scanResult.etaIntoSelfBurnable ?? scanResult.selfBurnable ?? []),
       ...(scanResult.ataIntoSelfBurnable ?? scanResult.publicSelfBurnable ?? []),
-    ],
-    nextScanStartIndex: String(nextScanStartIndex),
-    scanMode: window.mode,
-    scanStartInsertionIndex: Number(window.start),
-    scanEndInsertionIndex: Number(window.end),
+    ];
+    measure('umbra.claims.sdkScan', startedAt, {
+      network,
+      scanMode: scanWindowSlice.mode,
+      schemeCount,
+      pageLimit: Number(slicePageLimit),
+      treeIndex: Number(scanWindowSlice.treeIndex),
+      startInsertionIndex: scanWindowSlice.start.toString(),
+      endInsertionIndex: scanWindowSlice.end.toString(),
+      leafCount: Number(scanWindowSlice.leafCount),
+      totalLeaves: scanWindowSlice.totalLeaves.toString(),
+      receiverCount: receiverClaimableUtxos.length,
+      selfCount: selfClaimableUtxos.length,
+    });
+
+    return {
+      receiverClaimableUtxos,
+      selfClaimableUtxos,
+      nextScanStartIndex: String(nextScanStartIndex),
+      scanMode: scanWindowSlice.mode,
+      scanStartInsertionIndex: Number(scanWindowSlice.start),
+      scanEndInsertionIndex: Number(scanWindowSlice.end),
+    };
   };
+
+  const chunkLeafLimit =
+    pageLimit < UMBRA_CLAIM_SCAN_CHUNK_LEAF_LIMIT ? pageLimit : UMBRA_CLAIM_SCAN_CHUNK_LEAF_LIMIT;
+  const chunks = splitUmbraClaimScanWindow(window, chunkLeafLimit);
+  const result =
+    chunks.length === 1
+      ? await scanWindow(chunks[0] ?? window)
+      : {
+          receiverClaimableUtxos: [],
+          selfClaimableUtxos: [],
+          nextScanStartIndex: String(window.end),
+          scanMode: window.mode,
+          scanStartInsertionIndex: Number(window.start),
+          scanEndInsertionIndex: Number(window.end),
+        };
+
+  if (chunks.length > 1) {
+    for (const chunk of chunks) {
+      assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
+      await yieldToUi();
+      assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
+      const chunkResult = await scanWindow(chunk);
+      result.receiverClaimableUtxos = appendUniqueUmbraUtxos(
+        result.receiverClaimableUtxos,
+        chunkResult.receiverClaimableUtxos,
+      );
+      result.selfClaimableUtxos = appendUniqueUmbraUtxos(
+        result.selfClaimableUtxos,
+        chunkResult.selfClaimableUtxos,
+      );
+    }
+  }
+
   writeUmbraClaimScanCache(cacheScope, window, result);
   return result;
 }
@@ -3056,15 +3173,18 @@ async function getOnChainClaimedUmbraInsertionIndexSet(
   runtime: UmbraRuntime,
   treeIndex: number | undefined,
   utxos: readonly unknown[],
+  signal?: AbortSignal | null,
 ): Promise<ReadonlySet<number>> {
   const startedAt = mark();
   let candidateCount = 0;
   let nullifierSetAccountCount = 0;
   let claimedCount = 0;
   try {
+    assertUmbraOperationNotAborted(signal, 'Umbra scan cancelled.');
     const candidates = (
       await Promise.all(
         utxos.map(async (utxo) => {
+          assertUmbraOperationNotAborted(signal, 'Umbra scan cancelled.');
           const insertionIndex = getUtxoInsertionIndexAsNumber(utxo);
           const modifiedGenerationIndexBytes = getUtxoModifiedGenerationIndexBytes(utxo);
           const nullifier = await getUtxoNullifierValue(utxo);
@@ -3090,6 +3210,7 @@ async function getOnChainClaimedUmbraInsertionIndexSet(
         unlockerType: string | null;
       } => candidate != null,
     );
+    assertUmbraOperationNotAborted(signal, 'Umbra scan cancelled.');
     candidateCount = candidates.length;
     if (candidates.length === 0) return new Set();
 
@@ -3110,6 +3231,7 @@ async function getOnChainClaimedUmbraInsertionIndexSet(
       : null;
     const candidateNullifierHashes = await Promise.all(
       candidates.map(async (candidate) => {
+        assertUmbraOperationNotAborted(signal, 'Umbra scan cancelled.');
         const poseidonPrivateKey =
           candidate.unlockerType === 'self-burnable' ||
           candidate.unlockerType === 'public-self-burnable'
@@ -3131,6 +3253,7 @@ async function getOnChainClaimedUmbraInsertionIndexSet(
         };
       }),
     );
+    assertUmbraOperationNotAborted(signal, 'Umbra scan cancelled.');
 
     const nullifierSetPdas = await findNullifierSetPdas(
       BigInt(treeIndex ?? 0) as never,
@@ -3144,6 +3267,7 @@ async function getOnChainClaimedUmbraInsertionIndexSet(
       nullifierSetPdas.treap4,
     ];
     const accountMap = await runtime.rpc.accountInfoProvider(nullifierSetAddresses as never);
+    assertUmbraOperationNotAborted(signal, 'Umbra scan cancelled.');
     const nullifierSetData = nullifierSetAddresses
       .map((address) =>
         getMaybeEncodedAccountData(getMapValueByStringKey(accountMap, String(address))),
@@ -3155,6 +3279,7 @@ async function getOnChainClaimedUmbraInsertionIndexSet(
 
     const claimedInsertionIndices = new Set<number>();
     for (const candidate of candidateNullifierHashes) {
+      assertUmbraOperationNotAborted(signal, 'Umbra scan cancelled.');
       if (candidate == null) continue;
       if (
         nullifierSetData.some((data) =>
@@ -3230,7 +3355,9 @@ export async function scanUmbraPrivateP2PClaims(
   assertUmbraNetworkSupported(params.network);
   const walletAddress = assertWalletAddress(params.walletAddress);
   const startedAt = mark();
+  assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
   await verifyOffpayUmbraRpcReadiness(params.network);
+  assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
 
   const excluded =
     params.excludedInsertionIndices == null
@@ -3241,15 +3368,19 @@ export async function scanUmbraPrivateP2PClaims(
 
   try {
     return await withUmbraRuntime(params, async (runtime) => {
+      assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
       const [registrationStatus, scanResult] = await Promise.all([
         queryUmbraVaultRegistrationStatus(runtime, walletAddress),
         scanUmbraPrivateP2PUtxos(runtime, params.network, params),
       ]);
+      assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
       const onChainClaimedIndices = await getOnChainClaimedUmbraInsertionIndexSet(
         runtime,
         params.treeIndex,
         [...scanResult.receiverClaimableUtxos, ...scanResult.selfClaimableUtxos],
+        params.signal,
       );
+      assertUmbraOperationNotAborted(params.signal, 'Umbra scan cancelled.');
       const effectiveExcluded =
         excluded == null || excluded.size === 0
           ? onChainClaimedIndices
@@ -3373,7 +3504,9 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
 ): Promise<UmbraExecutionResult> {
   assertUmbraNetworkSupported(params.network);
   const walletAddress = assertWalletAddress(params.walletAddress);
+  assertUmbraOperationNotAborted(params.signal, 'Umbra claim cancelled.');
   await verifyOffpayUmbraRpcReadiness(params.network);
+  assertUmbraOperationNotAborted(params.signal, 'Umbra claim cancelled.');
 
   const excluded =
     params.excludedInsertionIndices == null
@@ -3383,10 +3516,12 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
         : new Set(params.excludedInsertionIndices as readonly number[]);
 
   return withUmbraRuntime(params, async (runtime) => {
+    assertUmbraOperationNotAborted(params.signal, 'Umbra claim cancelled.');
     const [registrationStatus, scanResult] = await Promise.all([
       queryUmbraVaultRegistrationStatus(runtime, walletAddress),
       scanUmbraPrivateP2PUtxos(runtime, params.network, params),
     ]);
+    assertUmbraOperationNotAborted(params.signal, 'Umbra claim cancelled.');
     const receiverClaimableUtxos = filterClaimableUtxos(
       scanResult.receiverClaimableUtxos,
       excluded,

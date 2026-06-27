@@ -67,19 +67,24 @@ export function HistoryScreenContent(): React.JSX.Element {
   }, [network, offlineReceipts, privatePaymentReceipts, swapReceipts, walletAddress]);
   const transactionsQuery = useOffpayWalletTransactions({
     autoFetchAllPages: false,
-    deferUntilAfterInteractions: false,
+    deferUntilAfterInteractions: true,
     eagerWithoutCapabilities: true,
     enabled: isFocused,
     limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: 'always',
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     retry: false,
     requestOwner: 'history.transactions',
     serverCacheOnly: true,
     useCache: true,
     waitForDashboard: false,
   });
-  const tokenLogoMap = useOffpayTokenLogoMap();
+  const tokenLogoMap = useOffpayTokenLogoMap({
+    enabled: isFocused,
+    balanceData: null,
+    capabilities: null,
+    fetchSwapTokenCatalog: false,
+  });
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];

@@ -153,7 +153,6 @@ const HistorySkeletonPanel = React.memo(function HistorySkeletonPanel({
 }): React.JSX.Element {
   return (
     <View style={[styles.contentFrame, styles.skeletonPanel, { width: contentFrameWidth }]}>
-      <SkeletonBlock width={116} height={18} radius={radii.xs} style={styles.skeletonDate} />
       {Array.from({ length: rowCount }, (_, index) => (
         <HistorySkeletonRow key={`history-skeleton-${index}`} compact={compact} />
       ))}
@@ -171,6 +170,10 @@ export function HistoryList({
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const sections = useMemo(() => {
+    if (localReceipts.length === 0 && transactionsQuery.historyGroups.length > 0) {
+      return transactionsQuery.historyGroups as OffpayHistoryTransactionGroup[];
+    }
+
     return buildWalletHistoryGroups({
       transactions: transactionsQuery.transactions,
       transactionViews: transactionsQuery.transactionViews,
@@ -181,6 +184,7 @@ export function HistoryList({
   }, [
     includeUnmatchedLocalReceipts,
     localReceipts,
+    transactionsQuery.historyGroups,
     transactionsQuery.network,
     transactionsQuery.transactionViews,
     transactionsQuery.transactions,
@@ -256,25 +260,14 @@ export function HistoryList({
     transactionsQuery.isFetching ||
     transactionsQuery.isFetchingNextPage;
   const showLoadMoreFooter = transactionsQuery.isCapabilityEnabled && transactionsQuery.hasNextPage;
+  const fetchNextTransactionsPage = transactionsQuery.fetchNextPage;
+  const isFetchingNextPage = transactionsQuery.isFetchingNextPage;
 
   const handleLoadMorePress = useCallback(() => {
-    if (
-      !transactionsQuery.isCapabilityEnabled ||
-      !transactionsQuery.hasNextPage ||
-      transactionsQuery.isFetching ||
-      transactionsQuery.isFetchingNextPage
-    ) {
-      return;
-    }
+    if (loadMoreDisabled) return;
 
-    void transactionsQuery.fetchNextPage({ requestOwnerSuffix: 'buttonPage' });
-  }, [
-    transactionsQuery.fetchNextPage,
-    transactionsQuery.hasNextPage,
-    transactionsQuery.isCapabilityEnabled,
-    transactionsQuery.isFetching,
-    transactionsQuery.isFetchingNextPage,
-  ]);
+    void fetchNextTransactionsPage({ requestOwnerSuffix: 'buttonPage' });
+  }, [fetchNextTransactionsPage, loadMoreDisabled]);
 
   const ListEmpty = useMemo(
     () =>
@@ -333,12 +326,12 @@ export function HistoryList({
           accessibilityRole="button"
           accessibilityLabel="Load more transactions"
           accessibilityState={{
-            busy: transactionsQuery.isFetchingNextPage,
+            busy: isFetchingNextPage,
             disabled: loadMoreDisabled,
           }}
         >
           <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.loadMoreGlass]}>
-            {transactionsQuery.isFetchingNextPage ? (
+            {isFetchingNextPage ? (
               <LazyLoadingSpinner size={18} color={colors.semantic.info} />
             ) : null}
             <Text
@@ -348,22 +341,18 @@ export function HistoryList({
               numberOfLines={1}
               maxFontSizeMultiplier={1}
             >
-              {transactionsQuery.isFetchingNextPage ? 'Loading' : 'Load more'}
+              {isFetchingNextPage ? 'Loading' : 'Load more'}
             </Text>
           </View>
         </Pressable>
       </View>
     );
-    // The wrapper `transactionsQuery` is a fresh object every render;
-    // we deliberately track the stable inner accessors so this memo
-    // does not invalidate every parent re-render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     contentFrameWidth,
     handleLoadMorePress,
+    isFetchingNextPage,
     loadMoreDisabled,
     showLoadMoreFooter,
-    transactionsQuery.isFetchingNextPage,
   ]);
 
   return (
@@ -395,10 +384,6 @@ const styles = StyleSheet.create({
   skeletonPanel: {
     paddingTop: spacing.xs,
     gap: spacing.sm,
-  },
-  skeletonDate: {
-    marginLeft: spacing.xs,
-    marginBottom: spacing.xs,
   },
   paginationSpinner: {
     alignItems: 'center',

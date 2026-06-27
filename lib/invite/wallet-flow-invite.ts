@@ -1,7 +1,11 @@
 export const WALLET_FLOW_INVITE_PURPOSE = 'add-wallet';
 export const WALLET_FLOW_INVITE_TTL_MS = 10 * 60 * 1000;
 
-export type WalletFlowInviteNext = 'create-wallet' | 'restore-wallet' | 'privy-wallet';
+export type WalletFlowInviteNext =
+  | 'create-wallet'
+  | 'restore-wallet'
+  | 'privy-wallet'
+  | 'onboarding';
 export type WalletFlowInviteSource = 'accounts' | 'onboarding';
 
 export function firstRouteParam(value: string | string[] | undefined): string | undefined {
@@ -12,7 +16,11 @@ export function normalizeWalletFlowInviteNext(
   value: string | string[] | undefined,
 ): WalletFlowInviteNext {
   const normalized = firstRouteParam(value);
-  if (normalized === 'restore-wallet' || normalized === 'privy-wallet') {
+  if (
+    normalized === 'restore-wallet' ||
+    normalized === 'privy-wallet' ||
+    normalized === 'onboarding'
+  ) {
     return normalized;
   }
   return 'create-wallet';
@@ -26,12 +34,14 @@ export function normalizeWalletFlowInviteSource(
 
 export function getWalletFlowInvitePathname(
   next: WalletFlowInviteNext,
-): '/create-wallet' | '/restore-wallet' | '/privy-wallet' {
+): '/create-wallet' | '/restore-wallet' | '/privy-wallet' | '/onboarding' {
   switch (next) {
     case 'restore-wallet':
       return '/restore-wallet';
     case 'privy-wallet':
       return '/privy-wallet';
+    case 'onboarding':
+      return '/onboarding';
     default:
       return '/create-wallet';
   }

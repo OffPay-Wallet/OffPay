@@ -308,29 +308,18 @@ export const TokenHoldingsCard = memo(function TokenHoldingsCard({
     <View style={styles.section}>
       {/* Section header with optional "View All" */}
       <View style={[styles.headerRow, compact && styles.headerRowCompact]}>
-        {loading ? (
-          <SkeletonBlock
-            width={compact ? 86 : 104}
-            height={18}
-            radius={radii.full}
-            style={styles.sectionTitle}
-          />
-        ) : (
-          <Text
-            variant="bodyBold"
-            color={colors.text.primary}
-            style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.86}
-            maxFontSizeMultiplier={1}
-          >
-            {title}
-          </Text>
-        )}
-        {loading ? (
-          <SkeletonBlock width={54} height={18} radius={radii.full} />
-        ) : hasHoldings && onViewAll != null ? (
+        <Text
+          variant="bodyBold"
+          color={colors.text.primary}
+          style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.86}
+          maxFontSizeMultiplier={1}
+        >
+          {title}
+        </Text>
+        {(hasHoldings || loading) && onViewAll != null ? (
           <Pressable
             style={styles.viewAllButton}
             onPress={onViewAll}

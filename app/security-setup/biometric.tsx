@@ -3,6 +3,8 @@ import { useLocalSearchParams } from 'expo-router';
 
 import { BiometricSetupScreen } from '@/components/features/security-setup/BiometricSetupScreen';
 
+import type { WalletFlowInviteSource } from '@/lib/invite/wallet-flow-invite';
+
 type SecuritySetupIntent = 'create-wallet' | 'restore-wallet' | 'privy-wallet';
 
 function parseIntent(raw: string | string[] | undefined): SecuritySetupIntent {
@@ -11,9 +13,15 @@ function parseIntent(raw: string | string[] | undefined): SecuritySetupIntent {
   return value === 'restore-wallet' ? 'restore-wallet' : 'create-wallet';
 }
 
-export default function BiometricSetupRoute(): React.JSX.Element {
-  const params = useLocalSearchParams<{ intent?: string | string[] }>();
-  const intent = useMemo(() => parseIntent(params.intent), [params.intent]);
+function parseSource(raw: string | string[] | undefined): WalletFlowInviteSource {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value === 'accounts' ? 'accounts' : 'onboarding';
+}
 
-  return <BiometricSetupScreen intent={intent} />;
+export default function BiometricSetupRoute(): React.JSX.Element {
+  const params = useLocalSearchParams<{ intent?: string | string[]; source?: string | string[] }>();
+  const intent = useMemo(() => parseIntent(params.intent), [params.intent]);
+  const source = useMemo(() => parseSource(params.source), [params.source]);
+
+  return <BiometricSetupScreen intent={intent} source={source} />;
 }

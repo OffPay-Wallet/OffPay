@@ -81,7 +81,9 @@ const PEPPER = 'invite-pepper-for-tests-minimum-32-chars';
 const INVITE_CODE = 'A1B2C3';
 const EMAIL = 'tester@example.com';
 const DEVICE_ID = 'device-1';
+const DEVICE_ID_2 = 'device-2';
 const WALLET_ADDRESS = 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw';
+const WALLET_ADDRESS_2 = '5cfv4nUTqyxTkB8JWS6nqzYJXqqf9u65c4BNGqZQW73r';
 
 function isOperatorObject(value: unknown): value is Record<string, any> {
   return (
@@ -199,5 +201,58 @@ describe('invite access', () => {
         invite_code_hash: inviteCodeHash(INVITE_CODE),
       }),
     );
+  });
+
+  it('restores invite access on a new device when the email already used a code', async () => {
+    await verifyInviteCodeForAccess(inviteEnv(), INVITE_CODE, DEVICE_ID, EMAIL);
+    await ensureInviteAccessForBootstrap(inviteEnv(), {
+      walletAddress: WALLET_ADDRESS,
+      deviceId: DEVICE_ID,
+      email: EMAIL,
+    });
+
+    await expect(checkInviteEmailForAccess(inviteEnv(), EMAIL, DEVICE_ID_2)).resolves.toMatchObject(
+      {
+        verified: true,
+        segment: 'B1',
+      },
+    );
+
+    await expect(
+      ensureInviteAccessForBootstrap(inviteEnv(), {
+        walletAddress: WALLET_ADDRESS_2,
+        deviceId: DEVICE_ID_2,
+        email: EMAIL,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCollections.get('invite_access')?.documents).toContainEqual(
+      expect.objectContaining({
+        status: 'active',
+        wallet_address: WALLET_ADDRESS_2,
+        email: EMAIL,
+        invite_code_hash: inviteCodeHash(INVITE_CODE),
+      }),
+    );
+  });
+
+  it('does not restore a pending email reservation on a different device', async () => {
+    await verifyInviteCodeForAccess(inviteEnv(), INVITE_CODE, DEVICE_ID, EMAIL);
+
+    await expect(checkInviteEmailForAccess(inviteEnv(), EMAIL, DEVICE_ID_2)).resolves.toMatchObject(
+      {
+        verified: false,
+      },
+    );
+
+    await expect(
+      ensureInviteAccessForBootstrap(inviteEnv(), {
+        walletAddress: WALLET_ADDRESS_2,
+        deviceId: DEVICE_ID_2,
+        email: EMAIL,
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVITE_REQUIRED',
+    });
   });
 });

@@ -1652,7 +1652,7 @@ describe('umbra-execution', () => {
           }
         | undefined;
       await expect(client?.fetchTreeSummary?.()).resolves.toEqual([
-        { treeIndex: 0n, numLeaves: 1000n },
+        { treeIndex: 0n, numLeaves: 664n },
       ]);
       await expect(
         client?.utxoDataStore?.getScanProgress('devnet', mockWalletAddress, 0n),
@@ -1684,7 +1684,8 @@ describe('umbra-execution', () => {
       network: 'devnet',
       start: '616',
       end: '999',
-      limit: '384',
+      limit: '48',
+      signal: undefined,
     });
   });
 
@@ -1738,7 +1739,8 @@ describe('umbra-execution', () => {
       network: 'devnet',
       start: '777',
       end: '777',
-      limit: '384',
+      limit: '1',
+      signal: undefined,
     });
   });
 

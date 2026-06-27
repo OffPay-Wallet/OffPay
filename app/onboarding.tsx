@@ -28,7 +28,9 @@ import { AnimatedOffPayLogo } from '@/components/ui/AnimatedOffPayLogo';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
+import { firstRouteParam, type WalletFlowInviteSource } from '@/lib/invite/wallet-flow-invite';
 import { usePrivyOnboardingActions } from '@/lib/privy';
+import { useAppStore } from '@/store/app';
 
 const TERMS_URL = 'https://offpay.app/terms';
 const PRIVACY_URL = 'https://offpay.app/privacy';
@@ -61,6 +63,17 @@ type AuthFeedbackState = {
   message: string;
 };
 
+function getOnboardingFlowSource(params: {
+  authResult?: string;
+  routeSource?: string;
+  storedSource: WalletFlowInviteSource | null;
+}): WalletFlowInviteSource {
+  if (params.routeSource === 'accounts') return 'accounts';
+  if (params.routeSource === 'onboarding') return 'onboarding';
+  if (params.authResult != null && params.storedSource === 'accounts') return 'accounts';
+  return 'onboarding';
+}
+
 function buildAuthFeedback(params: {
   outcome: 'success' | 'cancelled' | 'failed' | 'unavailable';
 }): AuthFeedbackState {
@@ -80,16 +93,32 @@ function buildAuthFeedback(params: {
 }
 
 export default function WelcomeScreen(): React.JSX.Element {
-  const params = useLocalSearchParams<{ authResult?: string }>();
+  const params = useLocalSearchParams<{
+    authResult?: string | string[];
+    source?: string | string[];
+  }>();
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
   const privy = usePrivyOnboardingActions();
+  const storedWalletFlowInviteSource = useAppStore((s) => s.walletFlowInviteSource);
+  const setWalletFlowInviteSource = useAppStore((s) => s.setWalletFlowInviteSource);
   const [authFeedback, setAuthFeedback] = useState<AuthFeedbackState | null>(null);
   const authFeedbackDoneRef = useRef(false);
   const authFeedbackExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedAuthResultRef = useRef<string | null>(null);
 
   const usableHeight = height - insets.top - insets.bottom;
+  const authResult = firstRouteParam(params.authResult);
+  const routeSource = firstRouteParam(params.source);
+  const flowSource = useMemo(
+    () =>
+      getOnboardingFlowSource({
+        authResult,
+        routeSource,
+        storedSource: storedWalletFlowInviteSource,
+      }),
+    [authResult, routeSource, storedWalletFlowInviteSource],
+  );
 
   // Density tiers. Real APK installs can report a smaller logical
   // viewport than the emulator when Android display size/font size is
@@ -111,6 +140,12 @@ export default function WelcomeScreen(): React.JSX.Element {
   const isCompact = density !== 'relaxed';
   const isVeryCompact = density === 'veryCompact';
 
+  useEffect(() => {
+    if (flowSource === 'accounts') {
+      setWalletFlowInviteSource('accounts');
+    }
+  }, [flowSource, setWalletFlowInviteSource]);
+
   const horizontalPadding =
     width < VERY_NARROW_WIDTH ? spacing.lg : isCompact ? spacing.xl : spacing['2xl'];
 
@@ -124,12 +159,24 @@ export default function WelcomeScreen(): React.JSX.Element {
       : spacing['4xl'] + spacing.xl;
 
   const handleCreateWallet = useCallback((): void => {
-    router.push({ pathname: '/security-setup/passcode', params: { intent: 'create-wallet' } });
-  }, []);
+    if (flowSource === 'accounts') {
+      setWalletFlowInviteSource('accounts');
+    }
+    router.push({
+      pathname: '/security-setup/passcode',
+      params: { intent: 'create-wallet', source: flowSource },
+    });
+  }, [flowSource, setWalletFlowInviteSource]);
 
   const handleImportWallet = useCallback((): void => {
-    router.push({ pathname: '/security-setup/passcode', params: { intent: 'restore-wallet' } });
-  }, []);
+    if (flowSource === 'accounts') {
+      setWalletFlowInviteSource('accounts');
+    }
+    router.push({
+      pathname: '/security-setup/passcode',
+      params: { intent: 'restore-wallet', source: flowSource },
+    });
+  }, [flowSource, setWalletFlowInviteSource]);
 
   const handleSocialPress = useCallback(
     async (provider: 'x' | 'google'): Promise<void> => {
@@ -191,25 +238,27 @@ export default function WelcomeScreen(): React.JSX.Element {
     }
 
     authFeedbackExitTimerRef.current = setTimeout(() => {
+      if (flowSource === 'accounts') {
+        setWalletFlowInviteSource('accounts');
+      }
       router.replace({
         pathname: '/security-setup/passcode',
-        params: { intent: 'privy-wallet' },
+        params: { intent: 'privy-wallet', source: flowSource },
       });
     }, AUTH_RESULT_EXIT_DELAY_MS);
-  }, [authFeedback]);
+  }, [authFeedback, flowSource, setWalletFlowInviteSource]);
 
   useEffect(() => {
-    const authResult = Array.isArray(params.authResult) ? params.authResult[0] : params.authResult;
-
     if (authResult !== 'success' && authResult !== 'failed') return;
-    if (consumedAuthResultRef.current === authResult) return;
+    const authResultKey = `${flowSource}:${authResult}`;
+    if (consumedAuthResultRef.current === authResultKey) return;
 
-    consumedAuthResultRef.current = authResult;
+    consumedAuthResultRef.current = authResultKey;
     authFeedbackDoneRef.current = false;
     setAuthFeedback(
       buildAuthFeedback({ outcome: authResult === 'success' ? 'success' : 'failed' }),
     );
-  }, [params.authResult]);
+  }, [authResult, flowSource]);
 
   useEffect(() => {
     if (authFeedback == null) return;

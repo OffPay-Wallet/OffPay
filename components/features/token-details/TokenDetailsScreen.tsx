@@ -1003,13 +1003,18 @@ export function TokenDetailsScreen(): React.JSX.Element {
       count: tokenActivityRowCount,
     });
   }, [network, tokenActivityRowCount, tokenDetailsMountMark, tokenTransactionsQuery.isStale]);
-  const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsQuery.isFetching;
+  const {
+    fetchNextPage: fetchNextTokenActivityPage,
+    hasNextPage: tokenActivityHasNextPage,
+    isCapabilityEnabled: tokenActivityCapabilityEnabled,
+    isFetching: tokenTransactionsFetching,
+    isFetchingNextPage: tokenTransactionsFetchingNextPage,
+  } = tokenTransactionsQuery;
+  const tokenActivityFetching = walletHistoryQuery.isFetching || tokenTransactionsFetching;
   const tokenActivityPaginationPending =
-    tokenActivity.length > 0 && tokenTransactionsQuery.isFetchingNextPage;
+    tokenActivity.length > 0 && tokenTransactionsFetchingNextPage;
   const tokenActivityCanLoadMore =
-    tokenActivity.length > 0 &&
-    tokenTransactionsQuery.isCapabilityEnabled &&
-    tokenTransactionsQuery.hasNextPage;
+    tokenActivity.length > 0 && tokenActivityCapabilityEnabled && tokenActivityHasNextPage;
   const tokenActivityLoading =
     tokenActivity.length === 0 &&
     (walletHistoryQuery.isInitialDataPending ||
@@ -1081,29 +1086,28 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const requestNextTokenActivityPage = useCallback(
     (requestOwnerSuffix: string): void => {
       if (
-        !tokenTransactionsQuery.isCapabilityEnabled ||
-        !tokenTransactionsQuery.hasNextPage ||
-        tokenTransactionsQuery.isFetching ||
-        tokenTransactionsQuery.isFetchingNextPage ||
+        !tokenActivityCapabilityEnabled ||
+        !tokenActivityHasNextPage ||
+        tokenTransactionsFetching ||
+        tokenTransactionsFetchingNextPage ||
         tokenActivityNextPageInFlightRef.current
       ) {
         return;
       }
 
       tokenActivityNextPageInFlightRef.current = true;
-      void tokenTransactionsQuery
-        .fetchNextPage({ requestOwnerSuffix })
+      void fetchNextTokenActivityPage({ requestOwnerSuffix })
         .catch(() => undefined)
         .finally(() => {
           tokenActivityNextPageInFlightRef.current = false;
         });
     },
     [
-      tokenTransactionsQuery.fetchNextPage,
-      tokenTransactionsQuery.hasNextPage,
-      tokenTransactionsQuery.isCapabilityEnabled,
-      tokenTransactionsQuery.isFetching,
-      tokenTransactionsQuery.isFetchingNextPage,
+      fetchNextTokenActivityPage,
+      tokenActivityCapabilityEnabled,
+      tokenActivityHasNextPage,
+      tokenTransactionsFetching,
+      tokenTransactionsFetchingNextPage,
     ],
   );
 
@@ -1162,9 +1166,9 @@ export function TokenDetailsScreen(): React.JSX.Element {
   }, [
     maybeRequestNextTokenActivityPage,
     tokenActivityRowCount,
-    tokenTransactionsQuery.hasNextPage,
-    tokenTransactionsQuery.isFetching,
-    tokenTransactionsQuery.isFetchingNextPage,
+    tokenActivityHasNextPage,
+    tokenTransactionsFetching,
+    tokenTransactionsFetchingNextPage,
   ]);
 
   const bottomPadding =

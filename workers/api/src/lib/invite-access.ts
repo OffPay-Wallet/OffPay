@@ -59,7 +59,7 @@ interface ActiveWalletInviteAccess {
   segment?: string;
 }
 
-interface EmailDeviceInviteAccess {
+interface EmailInviteAccess {
   inviteCodeHash?: string;
   segment?: string;
   status?: string;
@@ -261,17 +261,38 @@ async function findInviteAccessByCodeAndEmail(
   return document != null;
 }
 
+async function findActiveInviteAccessByEmail(
+  config: InviteGateConfig,
+  email: string,
+): Promise<EmailInviteAccess | null> {
+  const document = await withMongoDatabase(config, (db) =>
+    inviteAccessCollection(db).findOne(
+      {
+        email,
+        status: 'active',
+      },
+      { projection: { invite_code_hash: 1, invite_code_segment: 1, status: 1 } },
+    ),
+  );
+
+  if (document == null) return null;
+  return {
+    inviteCodeHash: document.invite_code_hash,
+    segment: document.invite_code_segment,
+    status: document.status,
+  };
+}
+
 /**
  * Look up an existing invite_access record by email and device.
- * Email alone is not enough for a no-code restore, because knowing another
- * registered email must not grant invite access on a new device.
+ * Pending access remains device-bound until bootstrap redeems the invite code.
  */
 async function findInviteAccessByEmailAndDevice(
   config: InviteGateConfig,
   email: string,
   deviceIdHash: string,
   nowIso: string,
-): Promise<EmailDeviceInviteAccess | null> {
+): Promise<EmailInviteAccess | null> {
   const document = await withMongoDatabase(config, (db) =>
     inviteAccessCollection(db).findOne(
       {
@@ -863,23 +884,26 @@ export async function ensureInviteAccessForBootstrap(
     return;
   }
 
-  const existingEmailAccess =
+  const existingDeviceEmailAccess =
     normalizedEmail != null && normalizedEmail.length > 0
       ? await findInviteAccessByEmailAndDevice(config, normalizedEmail, deviceIdHash, nowIso)
       : null;
-  if (existingEmailAccess?.inviteCodeHash != null) {
-    if (existingEmailAccess.status === 'pending') {
+  if (existingDeviceEmailAccess?.inviteCodeHash != null) {
+    if (existingDeviceEmailAccess.status === 'pending') {
       const redeemed = await redeemInviteCode({
         config,
         walletAddress: params.walletAddress,
         deviceIdHash,
-        codeHash: existingEmailAccess.inviteCodeHash,
+        codeHash: existingDeviceEmailAccess.inviteCodeHash,
         nowIso,
         email: normalizedEmail,
       });
 
       if (!redeemed) {
-        const document = await findInviteCodeDocument(config, existingEmailAccess.inviteCodeHash);
+        const document = await findInviteCodeDocument(
+          config,
+          existingDeviceEmailAccess.inviteCodeHash,
+        );
         throwInviteCodeStateError(document, nowIso);
       }
     }
@@ -888,8 +912,25 @@ export async function ensureInviteAccessForBootstrap(
       config,
       walletAddress: params.walletAddress,
       deviceIdHash,
-      inviteCodeHash: existingEmailAccess.inviteCodeHash,
-      segment: existingEmailAccess.segment ?? 'unknown',
+      inviteCodeHash: existingDeviceEmailAccess.inviteCodeHash,
+      segment: existingDeviceEmailAccess.segment ?? 'unknown',
+      nowIso: new Date().toISOString(),
+      email: normalizedEmail,
+    });
+    return;
+  }
+
+  const existingActiveEmailAccess =
+    normalizedEmail != null && normalizedEmail.length > 0
+      ? await findActiveInviteAccessByEmail(config, normalizedEmail)
+      : null;
+  if (existingActiveEmailAccess?.inviteCodeHash != null) {
+    await upsertInviteAccess({
+      config,
+      walletAddress: params.walletAddress,
+      deviceIdHash,
+      inviteCodeHash: existingActiveEmailAccess.inviteCodeHash,
+      segment: existingActiveEmailAccess.segment ?? 'unknown',
       nowIso: new Date().toISOString(),
       email: normalizedEmail,
     });
@@ -1079,19 +1120,22 @@ export async function checkInviteEmailForAccess(
     return { verified: false };
   }
 
-  const deviceIdHash = await hashInviteDeviceId(config, deviceId);
-  if (deviceIdHash == null) {
-    return { verified: false };
+  const activeEmailAccess = await findActiveInviteAccessByEmail(config, normalizedEmail);
+  if (activeEmailAccess?.inviteCodeHash != null) {
+    return { verified: true, segment: activeEmailAccess.segment };
   }
 
-  const existingAccess = await findInviteAccessByEmailAndDevice(
-    config,
-    normalizedEmail,
-    deviceIdHash,
-    new Date().toISOString(),
-  );
-  if (existingAccess != null) {
-    return { verified: true, segment: existingAccess.segment };
+  const deviceIdHash = await hashInviteDeviceId(config, deviceId);
+  if (deviceIdHash != null) {
+    const existingDeviceAccess = await findInviteAccessByEmailAndDevice(
+      config,
+      normalizedEmail,
+      deviceIdHash,
+      new Date().toISOString(),
+    );
+    if (existingDeviceAccess?.inviteCodeHash != null) {
+      return { verified: true, segment: existingDeviceAccess.segment };
+    }
   }
 
   return { verified: false };

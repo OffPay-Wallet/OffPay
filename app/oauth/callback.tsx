@@ -4,12 +4,14 @@ import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { colors } from '@/constants/colors';
+import { useAppStore } from '@/store/app';
 
 const CALLBACK_TIMEOUT_MS = 5000;
 const CALLBACK_REDIRECT_DELAY_MS = 80;
 
 export default function OAuthCallbackScreen(): React.JSX.Element {
   const { user } = usePrivy();
+  const walletFlowInviteSource = useAppStore((s) => s.walletFlowInviteSource);
   const [timedOut, setTimedOut] = useState(false);
   const callbackDoneRef = useRef(false);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -37,10 +39,13 @@ export default function OAuthCallbackScreen(): React.JSX.Element {
     exitTimerRef.current = setTimeout(() => {
       router.replace({
         pathname: '/onboarding',
-        params: { authResult: user != null ? 'success' : 'failed' },
+        params: {
+          authResult: user != null ? 'success' : 'failed',
+          ...(walletFlowInviteSource === 'accounts' ? { source: 'accounts' } : {}),
+        },
       });
     }, CALLBACK_REDIRECT_DELAY_MS);
-  }, [user]);
+  }, [user, walletFlowInviteSource]);
 
   useEffect(() => {
     if (user == null && !timedOut) return;

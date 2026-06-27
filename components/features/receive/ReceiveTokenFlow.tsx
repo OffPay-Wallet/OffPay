@@ -1,13 +1,5 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Platform,
-  Pressable,
-  ScrollView,
-  Share,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { Pressable, ScrollView, Share, StyleSheet, View, useWindowDimensions } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -83,7 +75,8 @@ const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const NATIVE_SOL_ROUTE_MINT = 'native-sol';
 const RECEIVE_CONTENT_MAX_WIDTH = 430;
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = 384;
-const UMBRA_INLINE_AUTO_SCAN_PAGE_LIMIT = 96;
+const UMBRA_INLINE_AUTO_SCAN_LEAF_LIMIT = 48;
+const UMBRA_INLINE_AUTO_SCAN_PAGE_LIMIT = UMBRA_INLINE_AUTO_SCAN_LEAF_LIMIT;
 const UMBRA_AUTO_SCAN_DELAY_MS = 1400;
 const UMBRA_AUTO_SCAN_TIMEOUT_MS = 5000;
 const UMBRA_MIXER_REGISTRATION_RECHECK_MS = 6 * 60 * 60 * 1000;
@@ -204,7 +197,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const [infoOpen, setInfoOpen] = useState(false);
   const [receiveRoute, setReceiveRoute] = useState<PrivatePaymentRoute>('normal');
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('standard');
-  const [closingReceiveMode, setClosingReceiveMode] = useState<ReceiveMode | null>(null);
   const [claimingUmbra, setClaimingUmbra] = useState(false);
   const [claimResult, setClaimResult] = useState<UmbraExecutionResult | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
@@ -215,8 +207,8 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const [hasCheckedUmbraClaims, setHasCheckedUmbraClaims] = useState(false);
   const scanningUmbraClaimsRef = useRef(false);
   const scanAbortControllerRef = useRef<AbortController | null>(null);
+  const receiveMountedRef = useRef(true);
   const closingReceiveRef = useRef(false);
-  const closeFrameRef = useRef<number | null>(null);
   const pendingClaimToastRef = useRef<string | null>(null);
   const pendingClaimAutoScanKeyRef = useRef<string | null>(null);
   const umbraCacheInvalidator = useUmbraCacheInvalidator();
@@ -491,59 +483,27 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const pendingClaimCount = visiblePendingClaimResult?.pendingClaimCount ?? 0;
 
   const renderedReceiveMode = receiveMode;
-  const closingPrivateReceive = closingReceiveMode === 'private';
   const isUmbraSurfaceVisible =
-    (renderedReceiveMode === 'private' || closingPrivateReceive) &&
-    (closingPrivateReceive || canShowUmbraReceiveRoute || pendingClaimCount > 0);
-
-  // Both mode subtrees stay mounted so switching does not rebuild the
-  // heavy QR tree or restart the Umbra hooks. The lightweight reveal
-  // wrappers provide the only entrance motion after the mode changes.
+    renderedReceiveMode === 'private' && (canShowUmbraReceiveRoute || pendingClaimCount > 0);
 
   const handleClose = useCallback(() => {
-    const modeAtClose =
-      renderedReceiveMode === 'private' || receiveMode === 'private' ? 'private' : 'standard';
     closingReceiveRef.current = true;
     abortUmbraPendingClaimScan('Receive screen closing.');
     pendingClaimAutoScanKeyRef.current = null;
     scanningUmbraClaimsRef.current = false;
+    setScanningUmbraClaims(false);
 
-    if (closeFrameRef.current != null) {
-      cancelAnimationFrame(closeFrameRef.current);
-      closeFrameRef.current = null;
-    }
-
-    const navigateAway = (): void => {
-      if (router.canGoBack()) {
-        router.back();
-        return;
-      }
-
-      router.navigate('/');
-    };
-
-    if (modeAtClose === 'private' && renderedReceiveMode !== 'private') {
-      setClosingReceiveMode('private');
-      closeFrameRef.current = requestAnimationFrame(() => {
-        closeFrameRef.current = null;
-        navigateAway();
-      });
-      return;
-    }
-
-    navigateAway();
-  }, [abortUmbraPendingClaimScan, receiveMode, renderedReceiveMode, router]);
+    router.replace('/');
+  }, [abortUmbraPendingClaimScan, router]);
 
   useEffect(() => {
+    receiveMountedRef.current = true;
     closingReceiveRef.current = false;
 
     return () => {
+      receiveMountedRef.current = false;
       closingReceiveRef.current = true;
       abortUmbraPendingClaimScan('Receive screen unmounted.');
-      if (closeFrameRef.current != null) {
-        cancelAnimationFrame(closeFrameRef.current);
-        closeFrameRef.current = null;
-      }
     };
   }, [abortUmbraPendingClaimScan]);
 
@@ -603,7 +563,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   }, [abortUmbraPendingClaimScan, receiveMode]);
 
   const scanUmbraPendingClaims = useCallback(
-    (options?: { pageLimit?: number; silent?: boolean }) => {
+    (options?: { pageLimit?: number; recentLeafLimit?: number; silent?: boolean }) => {
       const silent = options?.silent === true;
       if (closingReceiveRef.current) return;
       if (walletAddress == null || walletId == null || network == null || !canScanUmbraClaims) {
@@ -652,11 +612,13 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           walletAddress,
         );
         const pageLimit = options?.pageLimit ?? UMBRA_CLAIM_SCAN_PAGE_LIMIT;
+        const recentLeafLimit = options?.recentLeafLimit ?? UMBRA_INLINE_AUTO_SCAN_LEAF_LIMIT;
         const result = await scanUmbraPrivateP2PClaims({
           walletAddress,
           walletId,
           network,
           scanMode: 'recent',
+          recentLeafLimit,
           excludedInsertionIndices: latestClaimedUmbraIndexSet,
           signal,
           pageLimit,
@@ -701,7 +663,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
             scanAbortControllerRef.current = null;
           }
           scanningUmbraClaimsRef.current = false;
-          if (!screenSignal.aborted && !closingReceiveRef.current && !silent) {
+          if (receiveMountedRef.current && !closingReceiveRef.current && !silent) {
             setScanningUmbraClaims(false);
           }
         });
@@ -776,6 +738,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     setClaimError(null);
     setClaimResult(null);
     void (async () => {
+      await yieldToUi();
       const {
         claimUmbraPrivateP2PToEncryptedBalance,
         getUmbraClaimScanRangeForInsertionIndices,
@@ -823,9 +786,11 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 walletAddress,
                 insertionIndices,
               });
-              setPendingClaimResult((current) =>
-                filterPendingClaimResult(current, createClaimedIndexSet(insertionIndices)),
-              );
+              if (receiveMountedRef.current && !closingReceiveRef.current) {
+                setPendingClaimResult((current) =>
+                  filterPendingClaimResult(current, createClaimedIndexSet(insertionIndices)),
+                );
+              }
             },
           });
           break;
@@ -842,20 +807,24 @@ export function ReceiveTokenFlow(): React.JSX.Element {
                 walletAddress,
                 insertionIndices: fallbackIndices,
               });
-              setPendingClaimResult((current) =>
-                filterPendingClaimResult(current, createClaimedIndexSet(fallbackIndices)),
-              );
+              if (receiveMountedRef.current && !closingReceiveRef.current) {
+                setPendingClaimResult((current) =>
+                  filterPendingClaimResult(current, createClaimedIndexSet(fallbackIndices)),
+                );
+              }
             }
             pendingClaimToastRef.current = null;
             void queryClient.invalidateQueries({
               queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
             });
-            showToast({
-              title: 'Already claimed',
-              message: 'Encrypted balance is up to date.',
-              variant: 'success',
-            });
-            scanUmbraPendingClaims({ silent: true });
+            if (receiveMountedRef.current && !closingReceiveRef.current) {
+              showToast({
+                title: 'Already claimed',
+                message: 'Encrypted balance is up to date.',
+                variant: 'success',
+              });
+              scanUmbraPendingClaims({ silent: true });
+            }
             schedulePostClaimEncryptedBalanceRefetch();
             return;
           }
@@ -878,7 +847,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         throw lastTransientError ?? new Error('Unable to claim private payments.');
       }
 
-      setClaimResult(result);
+      if (receiveMountedRef.current && !closingReceiveRef.current) {
+        setClaimResult(result);
+      }
       const claimedIndices = result.claimedUtxoInsertionIndices ?? [];
       if (claimedIndices.length > 0) {
         markUmbraUtxosClaimed({
@@ -886,25 +857,29 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           walletAddress,
           insertionIndices: claimedIndices,
         });
-        setPendingClaimResult((current) =>
-          filterPendingClaimResult(current, createClaimedIndexSet(claimedIndices)),
-        );
+        if (receiveMountedRef.current && !closingReceiveRef.current) {
+          setPendingClaimResult((current) =>
+            filterPendingClaimResult(current, createClaimedIndexSet(claimedIndices)),
+          );
+        }
       }
       const remainingPendingIndices = result.pendingClaimUtxoInsertionIndices ?? [];
-      if ((result.claimedUtxoCount ?? 0) > 0 && remainingPendingIndices.length === 0) {
-        setPendingClaimResult(null);
-        pendingClaimToastRef.current = null;
-      } else if (remainingPendingIndices.length > 0) {
-        const remainingIndexSet = new Set(remainingPendingIndices);
-        const previousDetails = visiblePendingClaimResult?.pendingClaimUtxoDetails ?? [];
-        const remainingDetails = previousDetails.filter((utxo) =>
-          remainingIndexSet.has(utxo.insertionIndex),
-        );
-        setPendingClaimResult({
-          ...result,
-          pendingClaimCount: remainingPendingIndices.length,
-          pendingClaimUtxoDetails: remainingDetails,
-        });
+      if (receiveMountedRef.current && !closingReceiveRef.current) {
+        if ((result.claimedUtxoCount ?? 0) > 0 && remainingPendingIndices.length === 0) {
+          setPendingClaimResult(null);
+          pendingClaimToastRef.current = null;
+        } else if (remainingPendingIndices.length > 0) {
+          const remainingIndexSet = new Set(remainingPendingIndices);
+          const previousDetails = visiblePendingClaimResult?.pendingClaimUtxoDetails ?? [];
+          const remainingDetails = previousDetails.filter((utxo) =>
+            remainingIndexSet.has(utxo.insertionIndex),
+          );
+          setPendingClaimResult({
+            ...result,
+            pendingClaimCount: remainingPendingIndices.length,
+            pendingClaimUtxoDetails: remainingDetails,
+          });
+        }
       }
       void queryClient.invalidateQueries({
         queryKey: ['offpay', 'umbraEncryptedBalances', network, walletAddress],
@@ -916,15 +891,17 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
       });
       const claimedAlready = result.title === 'Already claimed';
-      showToast({
-        title: claimedAlready
-          ? 'Already claimed'
-          : result.claimedUtxoCount === 0
-            ? 'No private payments found'
-            : 'Claim submitted',
-        message: result.claimedUtxoCount === 0 ? undefined : result.subtitle,
-        variant: result.claimedUtxoCount === 0 ? 'info' : 'success',
-      });
+      if (receiveMountedRef.current && !closingReceiveRef.current) {
+        showToast({
+          title: claimedAlready
+            ? 'Already claimed'
+            : result.claimedUtxoCount === 0
+              ? 'No private payments found'
+              : 'Claim submitted',
+          message: result.claimedUtxoCount === 0 ? undefined : result.subtitle,
+          variant: result.claimedUtxoCount === 0 ? 'info' : 'success',
+        });
+      }
       if ((result.claimedUtxoCount ?? 0) > 0) {
         const claimSignature = result.primarySignature ?? result.signatures[0] ?? null;
         void presentUmbraTransactionNotification({
@@ -943,7 +920,9 @@ export function ReceiveTokenFlow(): React.JSX.Element {
       // claimed-index filter disappear from the card immediately. The
       // encrypted balance lags behind by an Arcium decryption cycle,
       // so retry a few times to surface the new amount when it lands.
-      scanUmbraPendingClaims({ silent: true });
+      if (receiveMountedRef.current && !closingReceiveRef.current) {
+        scanUmbraPendingClaims({ silent: true });
+      }
       schedulePostClaimEncryptedBalanceRefetch();
     })()
       .catch(async (error) => {
@@ -951,14 +930,20 @@ export function ReceiveTokenFlow(): React.JSX.Element {
         const friendly = getUmbraFriendlyError(error, 'claim');
         const rawMessage =
           error instanceof Error ? error.message : 'Unable to claim private payments.';
-        setClaimError(rawMessage);
-        showToast({
-          title: friendly.title,
-          message: friendly.message,
-          variant: 'error',
-        });
+        if (receiveMountedRef.current && !closingReceiveRef.current) {
+          setClaimError(rawMessage);
+          showToast({
+            title: friendly.title,
+            message: friendly.message,
+            variant: 'error',
+          });
+        }
       })
-      .finally(() => setClaimingUmbra(false));
+      .finally(() => {
+        if (receiveMountedRef.current && !closingReceiveRef.current) {
+          setClaimingUmbra(false);
+        }
+      });
   }, [
     canUseUmbraClaim,
     claimedUmbraIndexSet,
@@ -1044,7 +1029,6 @@ export function ReceiveTokenFlow(): React.JSX.Element {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={Platform.OS === 'android'}
         contentContainerStyle={[
           styles.scrollContent,
           {
@@ -1094,266 +1078,256 @@ export function ReceiveTokenFlow(): React.JSX.Element {
           ) : null}
 
           <View style={styles.modeContent}>
-            {/* Both subtrees stay mounted across mode swaps. Toggling
-                `display` instead of conditionally rendering keeps the
-                heavy QR component (700+ SVG circles) and the Umbra
-                hooks alive, so swapping back is instant — no chunk
-                eval, no React Query refetch, no SVG rebuild. */}
-            <View
-              key="receive-mode-standard"
-              style={[
-                styles.standardLayout,
-                { gap: denseReceive ? spacing.md : spacing.lg },
-                isUmbraSurfaceVisible && styles.modeHidden,
-              ]}
-              pointerEvents={isUmbraSurfaceVisible ? 'none' : 'auto'}
-              accessibilityElementsHidden={isUmbraSurfaceVisible}
-              importantForAccessibility={isUmbraSurfaceVisible ? 'no-hide-descendants' : 'auto'}
-            >
-              {latestReceivedReceipt != null ? (
-                <StaggerRevealItem index={0} trigger={renderedReceiveMode}>
-                  <View style={styles.receivedPill}>
-                    <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
-                    <Text variant="captionBold" color={colors.text.primary} numberOfLines={1}>
-                      Received {latestReceivedReceipt.amountLabel?.replace(/^\+/, '') ?? 'payment'}
+            {!isUmbraSurfaceVisible ? (
+              <View
+                key="receive-mode-standard"
+                style={[styles.standardLayout, { gap: denseReceive ? spacing.md : spacing.lg }]}
+              >
+                {latestReceivedReceipt != null ? (
+                  <StaggerRevealItem index={0} trigger={renderedReceiveMode}>
+                    <View style={styles.receivedPill}>
+                      <Ionicons name="checkmark" size={14} color={colors.semantic.success} />
+                      <Text variant="captionBold" color={colors.text.primary} numberOfLines={1}>
+                        Received{' '}
+                        {latestReceivedReceipt.amountLabel?.replace(/^\+/, '') ?? 'payment'}
+                      </Text>
+                    </View>
+                  </StaggerRevealItem>
+                ) : null}
+
+                <StaggerRevealItem
+                  index={1}
+                  trigger={renderedReceiveMode}
+                  style={[styles.identityBlock, denseReceive && styles.identityBlockDense]}
+                >
+                  <Text
+                    variant="bodyBold"
+                    color={colors.text.primary}
+                    style={styles.identityName}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                    maxFontSizeMultiplier={1.05}
+                  >
+                    {walletDisplayName}
+                  </Text>
+                  <Text
+                    variant="caption"
+                    color={colors.text.secondary}
+                    style={styles.identityAddress}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                  >
+                    {truncatedWalletAddress ?? 'Unlock a wallet first'}
+                  </Text>
+                </StaggerRevealItem>
+
+                <StaggerRevealItem index={2} trigger={renderedReceiveMode}>
+                  <View style={[styles.qrCard, denseReceive && styles.qrCardDense]}>
+                    {qrResult.value != null ? (
+                      <DottedQRCode
+                        value={qrResult.value}
+                        size={qrSize}
+                        color={colors.brand.deepShadow}
+                        backgroundColor={colors.brand.whiteStream}
+                        logo={RECEIVE_QR_LOGO}
+                        logoPlateColor={colors.brand.deepShadow}
+                        logoSize={Math.max(34, qrSize * 0.14)}
+                      />
+                    ) : (
+                      <View style={[styles.qrEmpty, { width: qrSize, height: qrSize }]}>
+                        <PuffyQRIcon size={layout.avatarLg} color={colors.text.tertiary} />
+                        <Text variant="small" color={colors.text.secondary} align="center">
+                          QR unavailable
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </StaggerRevealItem>
+
+                <StaggerRevealItem index={3} trigger={renderedReceiveMode}>
+                  <View style={styles.networkChip}>
+                    <View style={styles.networkChipDot} />
+                    <Text
+                      variant="captionBold"
+                      color={colors.text.primary}
+                      numberOfLines={1}
+                      maxFontSizeMultiplier={1}
+                    >
+                      {`Solana ${networkLabel}`}
                     </Text>
                   </View>
                 </StaggerRevealItem>
-              ) : null}
 
-              <StaggerRevealItem
-                index={1}
-                trigger={renderedReceiveMode}
-                style={[styles.identityBlock, denseReceive && styles.identityBlockDense]}
-              >
-                <Text
-                  variant="bodyBold"
-                  color={colors.text.primary}
-                  style={styles.identityName}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.78}
-                  maxFontSizeMultiplier={1.05}
-                >
-                  {walletDisplayName}
-                </Text>
-                <Text
-                  variant="caption"
-                  color={colors.text.secondary}
-                  style={styles.identityAddress}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={1}
-                >
-                  {truncatedWalletAddress ?? 'Unlock a wallet first'}
-                </Text>
-              </StaggerRevealItem>
+                {qrResult.error != null ? (
+                  <Text
+                    variant="small"
+                    color={colors.semantic.warning}
+                    style={styles.qrErrorMessage}
+                    numberOfLines={2}
+                    maxFontSizeMultiplier={1}
+                  >
+                    {qrResult.error}
+                  </Text>
+                ) : null}
 
-              <StaggerRevealItem index={2} trigger={renderedReceiveMode}>
-                <View style={[styles.qrCard, denseReceive && styles.qrCardDense]}>
-                  {qrResult.value != null ? (
-                    <DottedQRCode
-                      value={qrResult.value}
-                      size={qrSize}
-                      color={colors.brand.deepShadow}
-                      backgroundColor={colors.brand.whiteStream}
-                      logo={RECEIVE_QR_LOGO}
-                      logoPlateColor={colors.brand.deepShadow}
-                      logoSize={Math.max(34, qrSize * 0.14)}
+                <StaggerRevealItem
+                  index={4}
+                  trigger={renderedReceiveMode}
+                  style={styles.addressActionRow}
+                >
+                  <Pressable
+                    onPress={handleCopyAddress}
+                    disabled={walletAddress == null}
+                    accessibilityRole="button"
+                    accessibilityLabel="Copy receive address"
+                    style={({ pressed }) => [
+                      styles.addressActionChip,
+                      walletAddress == null && styles.addressActionChipDisabled,
+                      pressed && walletAddress != null && styles.pressed,
+                    ]}
+                  >
+                    <Ionicons
+                      name="copy-outline"
+                      size={denseReceive ? 15 : 16}
+                      color={colors.text.primary}
                     />
-                  ) : (
-                    <View style={[styles.qrEmpty, { width: qrSize, height: qrSize }]}>
-                      <PuffyQRIcon size={layout.avatarLg} color={colors.text.tertiary} />
-                      <Text variant="small" color={colors.text.secondary} align="center">
-                        QR unavailable
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </StaggerRevealItem>
-
-              <StaggerRevealItem index={3} trigger={renderedReceiveMode}>
-                <View style={styles.networkChip}>
-                  <View style={styles.networkChipDot} />
-                  <Text
-                    variant="captionBold"
-                    color={colors.text.primary}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1}
+                    <Text
+                      variant="captionBold"
+                      color={colors.text.primary}
+                      numberOfLines={1}
+                      maxFontSizeMultiplier={1}
+                    >
+                      Copy address
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleShareAddress}
+                    disabled={walletAddress == null}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share receive address"
+                    style={({ pressed }) => [
+                      styles.addressActionChip,
+                      walletAddress == null && styles.addressActionChipDisabled,
+                      pressed && walletAddress != null && styles.pressed,
+                    ]}
                   >
-                    {`Solana ${networkLabel}`}
-                  </Text>
-                </View>
-              </StaggerRevealItem>
-
-              {qrResult.error != null ? (
-                <Text
-                  variant="small"
-                  color={colors.semantic.warning}
-                  style={styles.qrErrorMessage}
-                  numberOfLines={2}
-                  maxFontSizeMultiplier={1}
-                >
-                  {qrResult.error}
-                </Text>
-              ) : null}
-
-              <StaggerRevealItem
-                index={4}
-                trigger={renderedReceiveMode}
-                style={styles.addressActionRow}
-              >
-                <Pressable
-                  onPress={handleCopyAddress}
-                  disabled={walletAddress == null}
-                  accessibilityRole="button"
-                  accessibilityLabel="Copy receive address"
-                  style={({ pressed }) => [
-                    styles.addressActionChip,
-                    walletAddress == null && styles.addressActionChipDisabled,
-                    pressed && walletAddress != null && styles.pressed,
-                  ]}
-                >
-                  <Ionicons
-                    name="copy-outline"
-                    size={denseReceive ? 15 : 16}
-                    color={colors.text.primary}
-                  />
-                  <Text
-                    variant="captionBold"
-                    color={colors.text.primary}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1}
-                  >
-                    Copy address
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleShareAddress}
-                  disabled={walletAddress == null}
-                  accessibilityRole="button"
-                  accessibilityLabel="Share receive address"
-                  style={({ pressed }) => [
-                    styles.addressActionChip,
-                    walletAddress == null && styles.addressActionChipDisabled,
-                    pressed && walletAddress != null && styles.pressed,
-                  ]}
-                >
-                  <Ionicons
-                    name="share-outline"
-                    size={denseReceive ? 15 : 16}
-                    color={colors.text.primary}
-                  />
-                  <Text
-                    variant="captionBold"
-                    color={colors.text.primary}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1}
-                  >
-                    Share
-                  </Text>
-                </Pressable>
-              </StaggerRevealItem>
-            </View>
-            <View
-              key="receive-mode-private"
-              style={[!isUmbraSurfaceVisible && styles.modeHidden]}
-              pointerEvents={!isUmbraSurfaceVisible ? 'none' : 'auto'}
-              accessibilityElementsHidden={!isUmbraSurfaceVisible}
-              importantForAccessibility={!isUmbraSurfaceVisible ? 'no-hide-descendants' : 'auto'}
-            >
-              <UmbraReceiveCard
-                unavailableMessage={
-                  canRenderUmbraReceivePanels ? null : (umbraReceiveDisabledReason ?? null)
-                }
-                setupPanel={
-                  canRenderUmbraReceivePanels
-                    ? {
-                        title: 'Umbra Claims',
-                        buttonLabel: canShowUmbraSignerLoadingState
-                          ? 'Loading'
-                          : umbraMixerStatusChecking
-                            ? 'Checking'
-                            : 'Set up',
-                        loadingLabel: canShowUmbraSignerLoadingState
-                          ? 'Wallet loading'
-                          : umbraMixerStatusChecking
-                            ? 'Checking'
-                            : 'Setting up',
-                        onPress: handleSetupUmbraPrivateP2P,
-                        disabled:
-                          !canUseUmbraReceiveRoute ||
-                          canShowUmbraSignerLoadingState ||
-                          mixerRegisterMutation.isPending ||
-                          umbraMixerStatusChecking,
-                        loading:
-                          canShowUmbraSignerLoadingState ||
-                          mixerRegisterMutation.isPending ||
-                          umbraMixerStatusChecking,
-                        accessibilityLabel: 'Set up Umbra private P2P',
-                        completed: canShowUmbraSignerLoadingState
-                          ? false
-                          : umbraAlreadyMixerRegistered,
-                      }
-                    : undefined
-                }
-                pendingClaimPanel={{
-                  pendingCount: pendingClaimCount,
-                  status: canShowUmbraSignerLoadingState
-                    ? PRIVY_SIGNING_NOT_READY_MESSAGE
-                    : pendingClaimCount > 0
-                      ? claimError
-                      : (claimError ??
-                        claimResult?.subtitle ??
-                        (scanningUmbraClaims
-                          ? 'Checking for pending private payments.'
-                          : hasCheckedUmbraClaims
-                            ? 'No pending private payments found.'
-                            : 'Check for pending private payments when needed.')),
-                  statusTone: canShowUmbraSignerLoadingState
-                    ? 'neutral'
-                    : claimError != null
-                      ? 'error'
+                    <Ionicons
+                      name="share-outline"
+                      size={denseReceive ? 15 : 16}
+                      color={colors.text.primary}
+                    />
+                    <Text
+                      variant="captionBold"
+                      color={colors.text.primary}
+                      numberOfLines={1}
+                      maxFontSizeMultiplier={1}
+                    >
+                      Share
+                    </Text>
+                  </Pressable>
+                </StaggerRevealItem>
+              </View>
+            ) : (
+              <View key="receive-mode-private">
+                <UmbraReceiveCard
+                  unavailableMessage={
+                    canRenderUmbraReceivePanels ? null : (umbraReceiveDisabledReason ?? null)
+                  }
+                  setupPanel={
+                    canRenderUmbraReceivePanels
+                      ? {
+                          title: 'Umbra Claims',
+                          buttonLabel: canShowUmbraSignerLoadingState
+                            ? 'Loading'
+                            : umbraMixerStatusChecking
+                              ? 'Checking'
+                              : 'Set up',
+                          loadingLabel: canShowUmbraSignerLoadingState
+                            ? 'Wallet loading'
+                            : umbraMixerStatusChecking
+                              ? 'Checking'
+                              : 'Setting up',
+                          onPress: handleSetupUmbraPrivateP2P,
+                          disabled:
+                            !canUseUmbraReceiveRoute ||
+                            canShowUmbraSignerLoadingState ||
+                            mixerRegisterMutation.isPending ||
+                            umbraMixerStatusChecking,
+                          loading:
+                            canShowUmbraSignerLoadingState ||
+                            mixerRegisterMutation.isPending ||
+                            umbraMixerStatusChecking,
+                          accessibilityLabel: 'Set up Umbra private P2P',
+                          completed: canShowUmbraSignerLoadingState
+                            ? false
+                            : umbraAlreadyMixerRegistered,
+                        }
+                      : undefined
+                  }
+                  pendingClaimPanel={{
+                    pendingCount: pendingClaimCount,
+                    status: canShowUmbraSignerLoadingState
+                      ? PRIVY_SIGNING_NOT_READY_MESSAGE
                       : pendingClaimCount > 0
-                        ? 'success'
-                        : claimResult != null
+                        ? claimError
+                        : (claimError ??
+                          claimResult?.subtitle ??
+                          (scanningUmbraClaims
+                            ? 'Checking for pending private payments.'
+                            : hasCheckedUmbraClaims
+                              ? 'No recent private payments found.'
+                              : 'Check for pending private payments when needed.')),
+                    statusTone: canShowUmbraSignerLoadingState
+                      ? 'neutral'
+                      : claimError != null
+                        ? 'error'
+                        : pendingClaimCount > 0
                           ? 'success'
-                          : 'neutral',
-                  buttonLabel: canShowUmbraSignerLoadingState
-                    ? 'Loading'
-                    : pendingClaimCount > 0
-                      ? 'Claim all'
-                      : hasCheckedUmbraClaims
-                        ? 'Check again'
-                        : 'Check pending',
-                  loadingLabel: canShowUmbraSignerLoadingState
-                    ? 'Wallet loading'
-                    : pendingClaimCount > 0
-                      ? 'Claiming'
-                      : 'Checking',
-                  onPress:
-                    pendingClaimCount > 0
-                      ? handleClaimUmbraPayments
-                      : () => scanUmbraPendingClaims(),
-                  onViewAllPress: handleViewAllPendingClaims,
-                  allowEmptyAction: true,
-                  disabled:
-                    canShowUmbraSignerLoadingState ||
-                    !canUseUmbraClaim ||
-                    claimingUmbra ||
-                    scanningUmbraClaims,
-                  loading: canShowUmbraSignerLoadingState || claimingUmbra || scanningUmbraClaims,
-                  accessibilityLabel:
-                    pendingClaimCount > 0
-                      ? 'Claim all pending Umbra private payments'
-                      : 'Check for pending Umbra private payments',
-                  pendingClaims:
-                    visiblePendingClaimResult?.pendingClaimUtxoDetails ??
-                    EMPTY_UMBRA_PENDING_CLAIMS,
-                  previewLimit: 2,
-                }}
-                revealKey={renderedReceiveMode}
-              />
-            </View>
+                          : claimResult != null
+                            ? 'success'
+                            : 'neutral',
+                    buttonLabel: canShowUmbraSignerLoadingState
+                      ? 'Loading'
+                      : pendingClaimCount > 0
+                        ? 'Claim all'
+                        : hasCheckedUmbraClaims
+                          ? 'Check again'
+                          : 'Check pending',
+                    loadingLabel: canShowUmbraSignerLoadingState
+                      ? 'Wallet loading'
+                      : pendingClaimCount > 0
+                        ? 'Claiming'
+                        : 'Checking',
+                    onPress:
+                      pendingClaimCount > 0
+                        ? handleClaimUmbraPayments
+                        : () =>
+                            scanUmbraPendingClaims({
+                              pageLimit: UMBRA_INLINE_AUTO_SCAN_PAGE_LIMIT,
+                              recentLeafLimit: UMBRA_INLINE_AUTO_SCAN_LEAF_LIMIT,
+                            }),
+                    onViewAllPress: handleViewAllPendingClaims,
+                    allowEmptyAction: true,
+                    disabled:
+                      canShowUmbraSignerLoadingState ||
+                      !canUseUmbraClaim ||
+                      claimingUmbra ||
+                      scanningUmbraClaims,
+                    loading: canShowUmbraSignerLoadingState || claimingUmbra || scanningUmbraClaims,
+                    accessibilityLabel:
+                      pendingClaimCount > 0
+                        ? 'Claim all pending Umbra private payments'
+                        : 'Check for pending Umbra private payments',
+                    pendingClaims:
+                      visiblePendingClaimResult?.pendingClaimUtxoDetails ??
+                      EMPTY_UMBRA_PENDING_CLAIMS,
+                    previewLimit: 2,
+                  }}
+                  revealKey={renderedReceiveMode}
+                />
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -1429,19 +1403,8 @@ const styles = StyleSheet.create({
     opacity: 0.78,
   },
 
-  // Wrapper that crossfades between standard and private subtrees.
-  // Sized to fill the remaining width so neither child reflows during
-  // the swap.
   modeContent: {
     width: '100%',
-  },
-  // Both subtrees stay mounted across mode swaps; the inactive one
-  // collapses out of the layout entirely. `display: none` gives us
-  // the same effect as a conditional render without remounting the
-  // children, so the QR component (~700 SVG circles) never has to
-  // rebuild and Umbra hooks keep their warm React Query cache.
-  modeHidden: {
-    display: 'none',
   },
 
   // Standard mode lays everything out as a single centred column —

@@ -333,11 +333,7 @@ function buildVaultActionFeedback(params: {
   }
 
   if (params.vaultBalanceState !== 'shared' || params.vaultBalanceRaw == null) {
-    return defaultFeedback(
-      'Refresh',
-      'Vault balance not ready',
-      'Wait for shield to settle',
-    );
+    return defaultFeedback('Refresh', 'Vault balance not ready', 'Wait for shield to settle');
   }
 
   if (params.shieldedBalanceAtomic == null) {
@@ -389,7 +385,7 @@ interface UmbraVaultContentBodyProps {
 function UmbraVaultContentWithLogoQuery(
   props: Omit<UmbraVaultContentProps, 'tokenLogoMap'>,
 ): React.JSX.Element {
-  const tokenLogoMap = useOffpayTokenLogoMap();
+  const tokenLogoMap = useOffpayTokenLogoMap({ allowPendingCapabilities: true });
   return <UmbraVaultContentBody {...props} tokenLogoMap={tokenLogoMap} />;
 }
 

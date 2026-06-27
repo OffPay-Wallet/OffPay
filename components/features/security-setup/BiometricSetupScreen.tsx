@@ -12,28 +12,34 @@ import { authenticateWithBiometrics, getBiometricAvailability } from '@/lib/wall
 import { setFingerprintEnabled } from '@/lib/wallet/security-settings';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
+import type { WalletFlowInviteSource } from '@/lib/invite/wallet-flow-invite';
+
 type SecuritySetupIntent = 'create-wallet' | 'restore-wallet' | 'privy-wallet';
 
 interface BiometricSetupScreenProps {
   intent: SecuritySetupIntent;
+  source: WalletFlowInviteSource;
 }
 
-function finishSetup(intent: SecuritySetupIntent): void {
+function finishSetup(intent: SecuritySetupIntent, source: WalletFlowInviteSource): void {
   if (intent === 'privy-wallet') {
     router.replace({
       pathname: '/privy-wallet',
-      params: { source: 'onboarding' },
+      params: { source },
     });
     return;
   }
 
   router.replace({
     pathname: intent === 'restore-wallet' ? '/restore-wallet' : '/create-wallet',
-    params: { source: 'onboarding' },
+    params: { source },
   });
 }
 
-export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): React.JSX.Element {
+export function BiometricSetupScreen({
+  intent,
+  source,
+}: BiometricSetupScreenProps): React.JSX.Element {
   const { height, width, fontScale } = useWindowDimensions();
   const viewportProfile = getViewportProfile({ width, height, fontScale });
   const compact = viewportProfile.compact;
@@ -77,9 +83,9 @@ export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): Rea
 
     router.replace({
       pathname: '/security-setup/passcode',
-      params: { intent },
+      params: { intent, source },
     });
-  }, [intent]);
+  }, [intent, source]);
 
   const handleEnable = useCallback(async (): Promise<void> => {
     if (!available || saving) return;
@@ -95,14 +101,14 @@ export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): Rea
         return;
       }
       await setFingerprintEnabled(true);
-      finishSetup(intent);
+      finishSetup(intent, source);
     } catch (error: unknown) {
       console.error('[BiometricSetup] enable failed:', error);
       setToast('Could not enable fingerprint unlock.');
     } finally {
       setSaving(false);
     }
-  }, [available, intent, saving]);
+  }, [available, intent, saving, source]);
 
   const handleSkip = useCallback(async (): Promise<void> => {
     try {
@@ -110,8 +116,8 @@ export function BiometricSetupScreen({ intent }: BiometricSetupScreenProps): Rea
     } catch (error: unknown) {
       console.error('[BiometricSetup] disable failed:', error);
     }
-    finishSetup(intent);
-  }, [intent]);
+    finishSetup(intent, source);
+  }, [intent, source]);
 
   return (
     <CreateWalletScreenLayout

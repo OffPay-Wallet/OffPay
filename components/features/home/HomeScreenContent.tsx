@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from 'expo-router/react-navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { BalanceCard } from '@/components/features/home/BalanceCard';
@@ -35,7 +36,13 @@ import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { usePendingBackupQueueStats } from '@/hooks/usePendingBackupQueueStats';
-import { useOffpayTokenLogoMap } from '@/hooks/useOffpayTokenLogoMap';
+import {
+  fetchOffpaySwapTokensForLogos,
+  offpaySwapTokensQueryKey,
+  TOKEN_LOGO_CACHE_GC_MS,
+  TOKEN_LOGO_CACHE_STALE_MS,
+  useOffpayTokenLogoMap,
+} from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayPortfolioValuation } from '@/hooks/useOffpayPortfolioValuation';
 import { useOffpayHomeSnapshotCoordinator } from '@/hooks/useOffpayHomeSnapshotCoordinator';
@@ -60,6 +67,7 @@ import {
   offpayWalletBalanceQueryKey,
   offpayWalletDashboardQueryKey,
   offpayWalletTransactionsBaseQueryKey,
+  WALLET_DEEP_HISTORY_PAGE_SIZE,
   pendingBackupQueueStatsQueryKey,
   WALLET_TRANSACTIONS_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -139,6 +147,7 @@ export function HomeScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const router = useRouter();
+  const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const { showToast } = useAppToast();
   const publicKey = useWalletStore((s) => s.publicKey);
@@ -188,6 +197,7 @@ export function HomeScreenContent(): React.JSX.Element {
     homeBalanceModeState.scopeKey === homeBalanceModeScopeKey
       ? homeBalanceModeState.shieldedPaneMounted
       : false;
+  const shieldedLogoCatalogNeeded = homeBalanceMode === 'shielded' || shieldedPaneMounted;
   const homeDataReady = publicKey != null && network != null;
   const isOffline = effectiveWalletMode === 'offline';
   const promptRentEstimateTargetSlotCount = slotPromptVisible
@@ -219,12 +229,13 @@ export function HomeScreenContent(): React.JSX.Element {
     rentEstimateEnabled: slotPromptVisible && homeDataReady,
   });
   const transactionsQuery = useOffpayWalletTransactions({
-    enabled: homeDataReady && homeSnapshot.foregroundFetchEnabled,
+    enabled: homeDataReady && isFocused && homeSnapshot.foregroundFetchEnabled,
     eagerWithoutCapabilities: true,
-    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    deferUntilAfterInteractions: true,
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     waitForDashboard: false,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     requestOwner: 'home.transactions.history',
     serverCacheOnly: true,
     useCache: true,
@@ -234,10 +245,11 @@ export function HomeScreenContent(): React.JSX.Element {
     enabled: homeDataReady,
   });
   const tokenLogoMap = useOffpayTokenLogoMap({
+    allowPendingCapabilities: shieldedLogoCatalogNeeded,
     enabled: homeDataReady,
     balanceData: balanceQuery.data,
     capabilities: capabilitiesQuery.capabilities,
-    fetchSwapTokenCatalog: homeSnapshot.idleFetchEnabled,
+    fetchSwapTokenCatalog: homeSnapshot.idleFetchEnabled || shieldedLogoCatalogNeeded,
   });
   const settlementStatus = useSettlementEngineStore((state) => state.status);
   const settlementError = useSettlementEngineStore((state) => state.error);
@@ -529,8 +541,23 @@ export function HomeScreenContent(): React.JSX.Element {
     router.prefetch('/(tabs)/history' as never);
   }, [balanceQuery.data, router]);
 
+  const warmShieldedTokenLogos = useCallback(
+    (mode: HomeBalanceMode): void => {
+      if (mode !== 'shielded' || !homeDataReady || network == null || !canUseNetwork) return;
+
+      void queryClient.prefetchQuery({
+        queryKey: offpaySwapTokensQueryKey(network),
+        queryFn: ({ signal }) => fetchOffpaySwapTokensForLogos(network, signal),
+        staleTime: TOKEN_LOGO_CACHE_STALE_MS,
+        gcTime: TOKEN_LOGO_CACHE_GC_MS,
+      });
+    },
+    [canUseNetwork, homeDataReady, network, queryClient],
+  );
+
   const handleChangeHomeBalanceMode = useCallback(
     (mode: HomeBalanceMode): void => {
+      warmShieldedTokenLogos(mode);
       setHomeBalanceModeState((current) => {
         const keepMounted =
           current.scopeKey === homeBalanceModeScopeKey && current.shieldedPaneMounted;
@@ -542,7 +569,7 @@ export function HomeScreenContent(): React.JSX.Element {
         };
       });
     },
-    [homeBalanceModeScopeKey],
+    [homeBalanceModeScopeKey, warmShieldedTokenLogos],
   );
 
   const handleToggleOffline = useCallback((newOfflineState: boolean) => {
@@ -1065,6 +1092,7 @@ export function HomeScreenContent(): React.JSX.Element {
             key={`home-balance-mode-${homeBalanceModeScopeKey}`}
             selectedMode={homeBalanceMode}
             onChangeMode={handleChangeHomeBalanceMode}
+            onPrepareMode={warmShieldedTokenLogos}
             loading={isNetworkSwitching}
           />
         </View>

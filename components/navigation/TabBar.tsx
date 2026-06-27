@@ -118,6 +118,12 @@ const TAB_PILL_SLIDE_SPRING: WithSpringConfig = {
 };
 const TAB_PILL_PRESS_SCALE = 0.96;
 
+function runAfterNavigationFrame(task: () => void): void {
+  requestAnimationFrame(() => {
+    setTimeout(task, 0);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tab metadata
 // ---------------------------------------------------------------------------
@@ -378,10 +384,27 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [handleTabLongPress],
   );
 
-  const primeFocusedPillFeedback = useCallback(() => {
-    activePillFeedback.value = TAB_PILL_PRESS_SCALE;
-    activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
-  }, [activePillFeedback]);
+  const primePrimaryTabFeedback = useCallback(
+    (primaryIndex: number) => {
+      activePillTranslateX.value = withSpring(
+        primaryIndex * tabSlotWidth + pillInsetX,
+        TAB_PILL_SLIDE_SPRING,
+      );
+      activePillFeedback.value = TAB_PILL_PRESS_SCALE;
+      activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
+    },
+    [activePillFeedback, activePillTranslateX, pillInsetX, tabSlotWidth],
+  );
+
+  const recordTabSwitchAfterNavigation = useCallback(
+    (fromIndex: number, fromRoute: string): void => {
+      if (!isTabRouteName(fromRoute)) return;
+      runAfterNavigationFrame(() => {
+        recordTabSwitch(fromIndex, fromRoute);
+      });
+    },
+    [recordTabSwitch],
+  );
 
   const sliderVisibility = useDerivedValue(
     () => withSpring(hasPrimaryActiveRoute ? 1 : 0, TAB_PILL_FEEDBACK_SPRING),
@@ -413,13 +436,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     });
 
     if (event.defaultPrevented) {
+      activePillTranslateX.value = withSpring(activePillX, TAB_PILL_SLIDE_SPRING);
       return;
     }
 
     if (!isFocused) {
       const currentRoute = state.routes[committedActiveIndex];
-      if (currentRoute != null && isTabRouteName(currentRoute.name)) {
-        recordTabSwitch(committedActiveIndex, currentRoute.name);
+      if (currentRoute != null) {
+        recordTabSwitchAfterNavigation(committedActiveIndex, currentRoute.name);
       }
       navigation.navigate(route.name, route.params);
     }
@@ -477,16 +501,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
       closeFabMenu();
       const currentRoute = state.routes[committedActiveIndex];
-      if (
-        currentRoute != null &&
-        currentRoute.name !== action.routeName &&
-        isTabRouteName(currentRoute.name)
-      ) {
-        recordTabSwitch(committedActiveIndex, currentRoute.name);
+      if (currentRoute != null && currentRoute.name !== action.routeName) {
+        recordTabSwitchAfterNavigation(committedActiveIndex, currentRoute.name);
       }
       navigation.navigate(action.routeName);
     },
-    [closeFabMenu, committedActiveIndex, navigation, recordTabSwitch, state.routes],
+    [closeFabMenu, committedActiveIndex, navigation, recordTabSwitchAfterNavigation, state.routes],
   );
 
   return (
@@ -570,9 +590,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
                 onPressIn={() => {
-                  if (focused) {
-                    primeFocusedPillFeedback();
-                  }
+                  primePrimaryTabFeedback(primaryIndex);
                 }}
                 onPress={() => handleTabPress(route, originalIndex)}
                 onLongPress={() => handlePrimaryTabLongPress(route)}

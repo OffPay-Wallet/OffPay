@@ -1868,6 +1868,7 @@ export function getUmbraUtxos(request: UmbraUtxosRequest): Promise<UmbraUtxosRes
       limit: request.limit,
     },
     network: request.network,
+    signal: request.signal,
   });
 }
 
@@ -1887,12 +1888,14 @@ export function getUmbraTreeProofs(
 
 export async function getUmbraTreeSummaries(
   network: OffpayNetwork,
+  signal?: AbortSignal | null,
 ): Promise<UmbraTreeSummariesResponse> {
   try {
     const response = await offpayApiRequest<UmbraTreeSummariesResponse>({
       path: '/api/umbra/trees',
       query: { network },
       network,
+      signal: signal ?? undefined,
     });
 
     if (__DEV__) {

@@ -146,29 +146,18 @@ export const RecentActivityCard = memo(function RecentActivityCard({
     <View style={styles.section}>
       {/* Section header with optional "View All" */}
       <View style={[styles.headerRow, compact && styles.headerRowCompact]}>
-        {loading ? (
-          <SkeletonBlock
-            width={compact ? 122 : 142}
-            height={18}
-            radius={radii.full}
-            style={styles.sectionTitle}
-          />
-        ) : (
-          <Text
-            variant="bodyBold"
-            color={colors.text.primary}
-            style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.86}
-            maxFontSizeMultiplier={1}
-          >
-            {title}
-          </Text>
-        )}
-        {loading ? (
-          <SkeletonBlock width={54} height={18} radius={radii.full} />
-        ) : hasTransactions && onViewAll != null ? (
+        <Text
+          variant="bodyBold"
+          color={colors.text.primary}
+          style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.86}
+          maxFontSizeMultiplier={1}
+        >
+          {title}
+        </Text>
+        {(hasTransactions || loading) && onViewAll != null ? (
           <Pressable
             style={styles.viewAllButton}
             onPress={onViewAll}
@@ -188,9 +177,7 @@ export const RecentActivityCard = memo(function RecentActivityCard({
           </Pressable>
         ) : null}
       </View>
-      {loading && statusLabel != null ? (
-        <SkeletonBlock width="64%" height={12} radius={radii.full} style={styles.statusLabel} />
-      ) : statusLabel != null ? (
+      {statusLabel != null ? (
         <Text
           variant="small"
           color={colors.text.tertiary}

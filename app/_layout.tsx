@@ -155,6 +155,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const routeParams = useGlobalSearchParams<{
     purpose?: string | string[];
     next?: string | string[];
+    source?: string | string[];
   }>();
   const rootNavigationState = useRootNavigationState();
   const [hasHiddenSplash, setHasHiddenSplash] = useState(false);
@@ -240,8 +241,11 @@ export default function RootLayout(): React.JSX.Element | null {
     inInviteCode || inOnboarding || inSecuritySetup || inWalletFlow || inUsernameSetup;
   const showGradient = inAuthFlow && !inFlatFlow;
   const invitePurpose = firstRouteParam(routeParams.purpose);
+  const routeSource = firstRouteParam(routeParams.source);
   const isWalletFlowInviteRoute = inInviteCode && invitePurpose === WALLET_FLOW_INVITE_PURPOSE;
   const walletFlowInviteFresh = isWalletFlowInviteFresh(walletFlowInviteVerifiedAt);
+  const isAccountWalletChooser =
+    inOnboarding && routeSource === 'accounts' && walletFlowInviteFresh;
   const walletFlowInviteNext: WalletFlowInviteNext = inRestoreWallet
     ? 'restore-wallet'
     : inPrivyWallet
@@ -266,7 +270,9 @@ export default function RootLayout(): React.JSX.Element | null {
     shouldEnableLock && hasPasscode && locked && walletPublicKey == null;
 
   const routeReadyForDisplay = hasCompletedOnboarding
-    ? segments.length > 0 && (!inInviteCode || isWalletFlowInviteRoute) && !inOnboarding
+    ? segments.length > 0 &&
+      (!inInviteCode || isWalletFlowInviteRoute) &&
+      (!inOnboarding || isAccountWalletChooser)
     : inviteAccessVerified || needsUsernameSetup
       ? inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup
       : inInviteCode;
@@ -355,6 +361,13 @@ export default function RootLayout(): React.JSX.Element | null {
           source: 'accounts',
         },
       });
+    } else if (
+      hasCompletedOnboarding &&
+      inOnboarding &&
+      routeSource === 'accounts' &&
+      !walletFlowInviteFresh
+    ) {
+      router.replace('/accounts');
     } else if (!hasCompletedOnboarding && !inviteAccessVerified && !inInviteCode) {
       router.replace('/invite-code');
     } else if (!hasCompletedOnboarding && inviteAccessVerified && inInviteCode) {
@@ -370,7 +383,7 @@ export default function RootLayout(): React.JSX.Element | null {
       router.replace('/onboarding');
     } else if (
       hasCompletedOnboarding &&
-      ((inInviteCode && !isWalletFlowInviteRoute) || inOnboarding)
+      ((inInviteCode && !isWalletFlowInviteRoute) || (inOnboarding && !isAccountWalletChooser))
     ) {
       router.replace('/');
     } else if (shouldShowAppLockRoute && !inAppLock) {
@@ -385,6 +398,7 @@ export default function RootLayout(): React.JSX.Element | null {
     inAppLock,
     inAuthFlow,
     inInviteCode,
+    isAccountWalletChooser,
     isWalletFlowInviteRoute,
     inOnboarding,
     inSecuritySetup,
@@ -396,6 +410,7 @@ export default function RootLayout(): React.JSX.Element | null {
     preferencesHydrated,
     rootLayoutReady,
     rootNavigationState.key,
+    routeSource,
     router,
     shouldShowAppLockRoute,
     walletFlowInviteFresh,

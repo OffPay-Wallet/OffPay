@@ -706,6 +706,7 @@ export interface UmbraUtxosRequest {
   start?: string;
   end?: string;
   limit?: string;
+  signal?: AbortSignal;
 }
 
 export interface UmbraUtxosResponse {

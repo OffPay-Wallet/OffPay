@@ -15,13 +15,9 @@ import {
   getVaultTokenRowLabel,
   type UmbraVaultBalanceLoadState,
 } from './umbra-vault-format';
+import { resolveUmbraTokenLogo, type UmbraVaultTokenLogoLookup } from './umbra-vault-token-logos';
 
 import type { UmbraVaultBalance, UmbraVaultTokenConfig } from './types';
-
-interface TokenLogoLookup {
-  byMint: ReadonlyMap<string, string>;
-  bySymbol: ReadonlyMap<string, string>;
-}
 
 interface UmbraVaultPortfolioCardProps {
   balances: UmbraVaultBalance[];
@@ -35,24 +31,9 @@ interface UmbraVaultPortfolioCardProps {
   disabled: boolean;
   disabledMessage: string | null;
   networkLabel: string | null;
-  tokenLogos?: TokenLogoLookup;
+  tokenLogos?: UmbraVaultTokenLogoLookup;
   onRepair: () => void;
   onRefresh: () => void;
-}
-
-function resolveUmbraTokenLogo(
-  token: UmbraVaultTokenConfig,
-  lookup: TokenLogoLookup | undefined,
-): string | null {
-  const fromMint = lookup?.byMint.get(token.mint);
-  if (fromMint != null && fromMint.length > 0) return fromMint;
-  const fromSymbol = lookup?.bySymbol.get(token.symbol.toUpperCase());
-  if (fromSymbol != null && fromSymbol.length > 0) return fromSymbol;
-  for (const alias of token.aliases ?? []) {
-    const fromAlias = lookup?.bySymbol.get(alias.toUpperCase());
-    if (fromAlias != null && fromAlias.length > 0) return fromAlias;
-  }
-  return token.logoUri ?? null;
 }
 
 function VaultRefreshButton({

@@ -6,17 +6,18 @@ import {
   View,
   useWindowDimensions,
   Pressable,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
-  runOnJS,
-  useAnimatedReaction,
   useAnimatedKeyboard,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import * as Clipboard from 'expo-clipboard';
@@ -56,6 +57,13 @@ import { useAppStore } from '@/store/app';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOOK_DOWN_AMOUNT = 4.5;
 const LOOK_DOWN_DURATION_MS = 350;
+const KEYBOARD_VISIBLE_THRESHOLD = 40;
+const CARD_KEYBOARD_CLEARANCE = spacing.lg;
+const LOGO_POP_SPRING = {
+  damping: 11,
+  mass: 0.72,
+  stiffness: 190,
+};
 
 function isValidEmail(value: string): boolean {
   return EMAIL_PATTERN.test(value.trim());
@@ -102,7 +110,7 @@ export default function InviteCodeScreen(): React.JSX.Element {
   const setInviteEmail = useAppStore((state) => state.setInviteEmail);
   const walletFlowInviteVerifiedAt = useAppStore((state) => state.walletFlowInviteVerifiedAt);
   const setWalletFlowInviteVerifiedAt = useAppStore((state) => state.setWalletFlowInviteVerifiedAt);
-  const scrollRef = useRef<ScrollView>(null);
+  const setWalletFlowInviteSource = useAppStore((state) => state.setWalletFlowInviteSource);
   const emailInputRef = useRef<TextInput>(null);
   const inviteInputRef = useRef<TextInput>(null);
   const shouldFocusEmailAfterBack = useRef(false);
@@ -114,7 +122,6 @@ export default function InviteCodeScreen(): React.JSX.Element {
   const [checkingEmail, setCheckingEmail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [registeredInviteEmail, setRegisteredInviteEmail] = useState<string | null>(null);
   const { showToast } = useAppToast();
   const invitePurpose = firstRouteParam(params.purpose);
   const isWalletFlowInvite = invitePurpose === WALLET_FLOW_INVITE_PURPOSE;
@@ -123,32 +130,65 @@ export default function InviteCodeScreen(): React.JSX.Element {
 
   const lookDownOffset = useSharedValue(0);
   const focusCount = useSharedValue(0);
+  const cardHeight = useSharedValue(340);
   const compact = width < 390 || height < 740;
   const horizontalPadding = width < 340 ? spacing.md : compact ? spacing.xl : spacing['3xl'];
   const cardPadding = width < 340 ? spacing.lg : compact ? spacing.xl : spacing['2xl'];
   const codeBoxGap = width < 360 ? 3 : spacing.xs;
   const codeRowGap = width < 360 ? spacing.xs : spacing.sm;
   const logoSize = compact ? 100 : 120;
+  const logoBottomGap = compact ? spacing.lg : spacing.xl;
+  const contentTopPadding = insets.top + (compact ? spacing['2xl'] : spacing['4xl']);
   const topShaderHeight = Math.max(260, Math.min(420, height * 0.42));
 
-  // Live keyboard height (iOS + Android). We lift the centered content
-  // by the keyboard height so the input/button always clear the keypad,
-  // and settle back to the resting bottom padding when it dismisses.
+  // Live keyboard height (iOS + Android). The logo collapses while typing,
+  // then the card only lifts by the measured overlap needed to clear the keyboard.
   const keyboard = useAnimatedKeyboard();
   const baseBottomPadding = insets.bottom + spacing['3xl'];
-  const keyboardLiftLimit = compact ? 220 : 170;
-  const keyboardLiftRatio = compact ? 0.72 : 0.5;
-  const contentAnimatedStyle = useAnimatedStyle(() => ({
-    paddingBottom: Math.max(
-      baseBottomPadding,
-      keyboard.height.value + insets.bottom + spacing['3xl'],
-    ),
-    transform: [
-      {
-        translateY: -Math.min(keyboard.height.value * keyboardLiftRatio, keyboardLiftLimit),
-      },
-    ],
-  }));
+  const logoProgress = useDerivedValue(() => {
+    if (keyboard.height.value > KEYBOARD_VISIBLE_THRESHOLD) {
+      return withTiming(0, { duration: 160, easing: Easing.out(Easing.cubic) });
+    }
+
+    return withSpring(1, LOGO_POP_SPRING);
+  });
+  const logoAnimatedStyle = useAnimatedStyle(() => {
+    const visibleProgress = Math.min(Math.max(logoProgress.value, 0), 1);
+
+    return {
+      height: logoSize * visibleProgress,
+      marginBottom: logoBottomGap * visibleProgress,
+      opacity: visibleProgress,
+      transform: [
+        { translateY: -10 * (1 - visibleProgress) },
+        { scale: 0.82 + logoProgress.value * 0.18 },
+      ],
+    };
+  });
+  const contentAnimatedStyle = useAnimatedStyle(() => {
+    const keyboardHeight = keyboard.height.value;
+    const keyboardVisible = keyboardHeight > KEYBOARD_VISIBLE_THRESHOLD;
+    const visibleLogoProgress = Math.min(Math.max(logoProgress.value, 0), 1);
+    const logoSpace = (logoSize + logoBottomGap) * visibleLogoProgress;
+    const measuredCardHeight = Math.max(cardHeight.value, 1);
+    const availableHeight = Math.max(0, height - contentTopPadding - baseBottomPadding);
+    const stackHeight = logoSpace + measuredCardHeight;
+    const stackTop = contentTopPadding + Math.max(0, (availableHeight - stackHeight) / 2);
+    const cardTop = stackTop + logoSpace;
+    const cardBottom = cardTop + measuredCardHeight;
+    const keyboardTop = height - keyboardHeight;
+    const requestedLift = keyboardVisible
+      ? Math.max(0, cardBottom + CARD_KEYBOARD_CLEARANCE - keyboardTop)
+      : 0;
+    const topSafeGap = insets.top + spacing.md;
+    const maxLiftBeforeTopClips = Math.max(0, cardTop - topSafeGap);
+    const lift = Math.min(requestedLift, maxLiftBeforeTopClips);
+
+    return {
+      paddingBottom: baseBottomPadding,
+      transform: [{ translateY: -lift }],
+    };
+  });
 
   const validation = useMemo(() => parseInviteCode(inviteCode), [inviteCode]);
   const codeSlots = useMemo(
@@ -165,42 +205,26 @@ export default function InviteCodeScreen(): React.JSX.Element {
     serverError ??
     (codeTouched && !validation.valid ? getInviteCodeValidationMessage(validation.reason) : null);
 
-  const scrollCardIntoView = useCallback((): void => {
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    });
-  }, []);
-
-  useAnimatedReaction(
-    () => keyboard.height.value,
-    (currentHeight, previousHeight) => {
-      if (currentHeight > 40 && (previousHeight ?? 0) <= 40) {
-        runOnJS(scrollCardIntoView)();
-      }
-    },
-    [scrollCardIntoView],
-  );
-
   const goToWalletFlow = useCallback((): void => {
+    setWalletFlowInviteSource(walletFlowSource);
     router.replace({
       pathname: getWalletFlowInvitePathname(walletFlowNext),
       params: { source: walletFlowSource },
     });
-  }, [walletFlowNext, walletFlowSource]);
+  }, [setWalletFlowInviteSource, walletFlowNext, walletFlowSource]);
+
+  const goToOnboardingWalletChooser = useCallback((): void => {
+    setWalletFlowInviteSource(walletFlowSource);
+    router.replace({
+      pathname: '/onboarding',
+      params: { source: walletFlowSource },
+    });
+  }, [setWalletFlowInviteSource, walletFlowSource]);
 
   const restoreWalletFlowInviteFromEmail = useCallback(
-    async (
-      emailAddress: string,
-      trustedRegisteredEmail: string | null | undefined,
-    ): Promise<boolean> => {
+    async (emailAddress: string): Promise<boolean> => {
       const normalizedEmail = emailAddress.trim().toLowerCase();
-      const normalizedRegisteredEmail = trustedRegisteredEmail?.trim().toLowerCase() ?? null;
-      if (
-        !isWalletFlowInvite ||
-        !isValidEmail(normalizedEmail) ||
-        normalizedRegisteredEmail == null ||
-        normalizedEmail !== normalizedRegisteredEmail
-      ) {
+      if (!isWalletFlowInvite || !isValidEmail(normalizedEmail)) {
         return false;
       }
 
@@ -214,14 +238,14 @@ export default function InviteCodeScreen(): React.JSX.Element {
         setInviteEmail(normalizedEmail);
         setInviteAccessVerified(true);
         setWalletFlowInviteVerifiedAt(Date.now());
-        goToWalletFlow();
+        goToOnboardingWalletChooser();
         return true;
       } catch {
         return false;
       }
     },
     [
-      goToWalletFlow,
+      goToOnboardingWalletChooser,
       isWalletFlowInvite,
       setInviteAccessVerified,
       setInviteEmail,
@@ -270,11 +294,10 @@ export default function InviteCodeScreen(): React.JSX.Element {
         if (storedCode != null) setInviteCode(storedCode);
         const knownInviteEmail = storedEmail ?? appInviteEmail;
         if (knownInviteEmail != null) {
-          setRegisteredInviteEmail(knownInviteEmail);
           setEmail(knownInviteEmail);
           if (isWalletFlowInvite) {
             setCheckingEmail(true);
-            void restoreWalletFlowInviteFromEmail(knownInviteEmail, knownInviteEmail)
+            void restoreWalletFlowInviteFromEmail(knownInviteEmail)
               .then((restored) => {
                 if (!cancelled && !restored) {
                   setStage('code');
@@ -326,8 +349,14 @@ export default function InviteCodeScreen(): React.JSX.Element {
 
   const handleInputFocus = useCallback((): void => {
     animateLookDown(true);
-    scrollCardIntoView();
-  }, [animateLookDown, scrollCardIntoView]);
+  }, [animateLookDown]);
+
+  const handleCardLayout = useCallback(
+    (event: LayoutChangeEvent): void => {
+      cardHeight.value = event.nativeEvent.layout.height;
+    },
+    [cardHeight],
+  );
 
   const handleEmailContinue = useCallback(async (): Promise<void> => {
     if (!isValidEmail(email) || checkingEmail) return;
@@ -338,7 +367,7 @@ export default function InviteCodeScreen(): React.JSX.Element {
 
     if (isWalletFlowInvite) {
       try {
-        const restored = await restoreWalletFlowInviteFromEmail(email, registeredInviteEmail);
+        const restored = await restoreWalletFlowInviteFromEmail(email);
         if (!restored) {
           setStage('code');
         }
@@ -373,7 +402,6 @@ export default function InviteCodeScreen(): React.JSX.Element {
     email,
     checkingEmail,
     isWalletFlowInvite,
-    registeredInviteEmail,
     restoreWalletFlowInviteFromEmail,
     setInviteEmail,
     setInviteAccessVerified,
@@ -425,11 +453,11 @@ export default function InviteCodeScreen(): React.JSX.Element {
       await storeInviteCode(parsed.normalizedCode);
       const normalizedEmail = email.trim().toLowerCase();
       await storeInviteEmail(normalizedEmail);
-      setRegisteredInviteEmail(normalizedEmail);
       setInviteEmail(normalizedEmail);
       setInviteAccessVerified(true);
       if (isWalletFlowInvite) {
         setWalletFlowInviteVerifiedAt(Date.now());
+        setWalletFlowInviteSource(walletFlowSource);
         goToWalletFlow();
         return;
       }
@@ -447,7 +475,9 @@ export default function InviteCodeScreen(): React.JSX.Element {
     setInviteAccessVerified,
     setInviteEmail,
     setWalletFlowInviteVerifiedAt,
+    setWalletFlowInviteSource,
     submitting,
+    walletFlowSource,
   ]);
 
   return (
@@ -466,7 +496,6 @@ export default function InviteCodeScreen(): React.JSX.Element {
         style={[styles.topShaderLight, { height: topShaderHeight }]}
       />
       <ScrollView
-        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -478,23 +507,22 @@ export default function InviteCodeScreen(): React.JSX.Element {
           style={[
             styles.content,
             {
-              paddingTop: insets.top + (compact ? spacing['2xl'] : spacing['4xl']),
+              paddingTop: contentTopPadding,
               paddingHorizontal: horizontalPadding,
             },
             contentAnimatedStyle,
           ]}
         >
-          {/* Animated logo — eyes look down when user is typing */}
-          <View style={styles.logoContainer}>
+          <Animated.View style={[styles.logoContainer, logoAnimatedStyle]}>
             <AnimatedOffPayLogo
               size={logoSize}
               bodyColor={colors.brand.whiteStream}
               eyeColor={colors.brand.deepShadow}
               lookDownOffset={lookDownOffset}
             />
-          </View>
+          </Animated.View>
 
-          <View style={[styles.card, { padding: cardPadding }]}>
+          <View style={[styles.card, { padding: cardPadding }]} onLayout={handleCardLayout}>
             {stage === 'code' || isWalletFlowInvite ? (
               <Pressable
                 onPress={stage === 'code' ? handleBackToEmail : () => router.replace('/accounts')}
@@ -700,11 +728,11 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     justifyContent: 'center',
-    gap: spacing.xl,
   },
   logoContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   card: {
     position: 'relative',

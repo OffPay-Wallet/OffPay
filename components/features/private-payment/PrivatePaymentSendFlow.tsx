@@ -58,7 +58,11 @@ import {
   setOfflinePaymentSlotsQueryData,
   useOfflinePaymentSlots,
 } from '@/hooks/useOfflinePaymentSlots';
-import { decimalInputToAtomicAmount, sanitizeDecimalInput } from '@/lib/policy/token-amounts';
+import {
+  decimalInputToAtomicAmount,
+  formatAtomicAmount,
+  sanitizeDecimalInput,
+} from '@/lib/policy/token-amounts';
 import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
@@ -589,16 +593,15 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     effectiveWalletMode === 'offline'
       ? 'Offline P2P'
       : effectivePaymentRoute === 'magicblock'
-        ? 'MagicBlock private payment'
+        ? 'MagicBlock'
         : effectivePaymentRoute === 'umbra'
-          ? 'Umbra private P2P'
+          ? 'Umbra'
           : 'Normal transfer';
 
   // Live network-fee estimates use getFeeForMessage on the exact
   // transaction message for the selected route. Normal transfers
-  // compile locally; MagicBlock private sends prepare an unsigned
-  // transaction through the worker, verify it locally, then price
-  // that message before the user slides.
+  // compile locally; private routes build their route-specific
+  // transaction plan before the user slides.
   const normalFeeEstimateEnabled =
     effectiveWalletMode !== 'offline' && effectivePaymentRoute === 'normal';
   const normalFeeEstimate = useNormalTransferFeeEstimate({
@@ -612,6 +615,13 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   });
   const feeEstimateMatchesAmount =
     feeEstimateAmountRaw != null && feeEstimateAmountRaw === amountRaw;
+  const feeEstimateDisplayAmount = useMemo(
+    () =>
+      selectedToken == null || feeEstimateAmountRaw == null
+        ? null
+        : formatAtomicAmount(feeEstimateAmountRaw, selectedToken.decimals, selectedToken.decimals),
+    [feeEstimateAmountRaw, selectedToken],
+  );
   const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
     walletAddress,
     recipient: effectiveRecipientAddress,
@@ -636,20 +646,16 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     walletId,
     recipient: effectiveRecipientAddress,
     token: selectedToken?.mint ?? null,
-    amount:
-      selectedToken == null || feeEstimateAmountRaw == null
-        ? null
-        : sanitizeDecimalInput(amount, selectedToken.decimals),
+    amount: feeEstimateDisplayAmount,
     rawAmount: feeEstimateAmountRaw,
     network,
     enabled:
-      step === 'summary' &&
       effectiveWalletMode !== 'offline' &&
       effectivePaymentRoute === 'umbra' &&
       selectedToken != null &&
       effectiveRecipientAddress != null &&
       feeEstimateAmountRaw != null &&
-      feeEstimateMatchesAmount &&
+      feeEstimateDisplayAmount != null &&
       walletAddress != null &&
       walletId != null &&
       network != null &&
@@ -1401,7 +1407,18 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             ? 'Private transfer plan is unavailable.'
             : 'Preparing private transfer.'
       : null;
-  const canSubmit = baseCanSubmit && magicBlockPlanBlockedReason == null;
+  const umbraFeeBlockedReason =
+    step === 'summary' && effectiveWalletMode !== 'offline' && effectivePaymentRoute === 'umbra'
+      ? feeEstimateMatchesAmount && umbraFeeEstimate.estimate != null
+        ? null
+        : umbraFeeEstimate.isFetching
+          ? 'Estimating Umbra fee.'
+          : umbraFeeEstimate.isError
+            ? 'Umbra fee is unavailable.'
+            : 'Estimating Umbra fee.'
+      : null;
+  const canSubmit =
+    baseCanSubmit && magicBlockPlanBlockedReason == null && umbraFeeBlockedReason == null;
   const handleContinueAmount = useCallback(() => {
     if (!baseCanSubmit) return;
     Keyboard.dismiss();

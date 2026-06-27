@@ -18,11 +18,14 @@ import {
   preloadPasscodeMaterial,
 } from '@/lib/wallet/security-settings';
 
+import type { WalletFlowInviteSource } from '@/lib/invite/wallet-flow-invite';
+
 type SecuritySetupIntent = 'create-wallet' | 'restore-wallet' | 'privy-wallet';
 type PasscodeMode = 'create' | 'confirm' | 'unlockExisting';
 
 interface PasscodeSetupScreenProps {
   intent: SecuritySetupIntent;
+  source: WalletFlowInviteSource;
 }
 
 function SimpleDot({ filled, size }: { filled: boolean; size: number }): React.JSX.Element {
@@ -41,14 +44,17 @@ function SimpleDot({ filled, size }: { filled: boolean; size: number }): React.J
   );
 }
 
-function nextRoute(intent: SecuritySetupIntent): void {
+function nextRoute(intent: SecuritySetupIntent, source: WalletFlowInviteSource): void {
   router.push({
     pathname: '/security-setup/biometric',
-    params: { intent },
+    params: { intent, source },
   });
 }
 
-export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React.JSX.Element {
+export function PasscodeSetupScreen({
+  intent,
+  source,
+}: PasscodeSetupScreenProps): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
   const cachedSettings = getCachedSecuritySettings();
@@ -172,7 +178,10 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
     }
 
     if (intent === 'privy-wallet') {
-      router.replace('/onboarding');
+      router.replace({
+        pathname: '/onboarding',
+        params: { source },
+      });
       return;
     }
 
@@ -181,8 +190,11 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
       return;
     }
 
-    router.replace('/onboarding');
-  }, [intent, processingEntry, saving, setEntryValue, setModeValue]);
+    router.replace({
+      pathname: '/onboarding',
+      params: { source },
+    });
+  }, [intent, processingEntry, saving, setEntryValue, setModeValue, source]);
 
   useEffect(() => {
     if (mode !== 'confirm') return;
@@ -226,7 +238,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
           try {
             const ok = await verifyPasscode(nextEntry);
             if (ok) {
-              nextRoute(intent);
+              nextRoute(intent, source);
             } else {
               setToast('Incorrect wallet password.');
               setEntryValue('');
@@ -258,7 +270,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         try {
           await setPasscode(nextEntry);
           await setWalletLocked(false);
-          nextRoute(intent);
+          nextRoute(intent, source);
         } catch {
           setToast('Could not save the wallet password.');
           setEntryValue('');
@@ -270,7 +282,7 @@ export function PasscodeSetupScreen({ intent }: PasscodeSetupScreenProps): React
         setProcessingEntry(false);
       }
     },
-    [intent, setEntryValue, setModeValue],
+    [intent, setEntryValue, setModeValue, source],
   );
 
   const handleDigit = useCallback(

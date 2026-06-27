@@ -22,6 +22,7 @@ export type HomeBalanceMode = 'default' | 'shielded';
 interface HomeBalanceModeDividerProps {
   selectedMode: HomeBalanceMode;
   onChangeMode: (mode: HomeBalanceMode) => void;
+  onPrepareMode?: (mode: HomeBalanceMode) => void;
   loading?: boolean;
 }
 
@@ -46,6 +47,7 @@ const ModeSegment = memo(function ModeSegment({
   segmentHeight,
   labelFontSize,
   labelLineHeight,
+  onPrepareMode,
   onSelect,
 }: {
   mode: (typeof MODES)[number];
@@ -53,6 +55,7 @@ const ModeSegment = memo(function ModeSegment({
   segmentHeight: number;
   labelFontSize: number;
   labelLineHeight: number;
+  onPrepareMode?: (mode: HomeBalanceMode) => void;
   onSelect: (mode: HomeBalanceMode) => void;
 }): React.JSX.Element {
   const [pressed, setPressed] = useState(false);
@@ -63,7 +66,10 @@ const ModeSegment = memo(function ModeSegment({
 
   const handlePressIn = useCallback((): void => {
     setPressed(true);
-  }, []);
+    if (!selected) {
+      onPrepareMode?.(mode.id);
+    }
+  }, [mode.id, onPrepareMode, selected]);
 
   const handlePress = useCallback((): void => {
     resetPressed();
@@ -124,6 +130,7 @@ function modeIndex(mode: HomeBalanceMode): number {
 export function HomeBalanceModeDivider({
   selectedMode,
   onChangeMode,
+  onPrepareMode,
   loading = false,
 }: HomeBalanceModeDividerProps): React.JSX.Element {
   const { width, height, fontScale } = useWindowDimensions();
@@ -232,6 +239,7 @@ export function HomeBalanceModeDivider({
                     segmentHeight={segmentHeight}
                     labelFontSize={labelFontSize}
                     labelLineHeight={labelLineHeight}
+                    onPrepareMode={onPrepareMode}
                     onSelect={handleSelect}
                   />
                 );

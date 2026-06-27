@@ -16,7 +16,12 @@ import {
   observeOfflineTokenMetadataFromSwapTokens,
 } from '@/lib/offline/offline-token-metadata';
 
-import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
+import type {
+  CapabilitiesResponse,
+  OffpayNetwork,
+  SwapTokensResponse,
+  WalletBalanceResponse,
+} from '@/types/offpay-api';
 
 interface TokenLogoMap {
   byMint: ReadonlyMap<string, string>;
@@ -30,6 +35,7 @@ export const TOKEN_LOGO_CACHE_STALE_MS = 30 * 60_000;
 export const TOKEN_LOGO_CACHE_GC_MS = 60 * 60_000;
 
 interface UseOffpayTokenLogoMapOptions {
+  allowPendingCapabilities?: boolean;
   balanceData?: WalletBalanceResponse | null;
   capabilities?: CapabilitiesResponse['capabilities'] | null;
   deferCapabilitiesUntilAfterInteractions?: boolean;
@@ -41,9 +47,19 @@ function normalizeSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
 
+export async function fetchOffpaySwapTokensForLogos(
+  network: OffpayNetwork,
+  signal?: AbortSignal,
+): Promise<SwapTokensResponse> {
+  const response = await getSwapTokens(network, { signal });
+  void observeOfflineTokenMetadataFromSwapTokens(network, response.tokens);
+  return response;
+}
+
 export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): TokenLogoMap {
   const { network } = useOffpayNetwork();
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
+  const allowPendingCapabilities = options?.allowPendingCapabilities ?? false;
   const enabledByCaller = options?.enabled ?? true;
   const fetchSwapTokenCatalog = options?.fetchSwapTokenCatalog ?? true;
   const hasExternalBalanceData = options != null && 'balanceData' in options;
@@ -62,13 +78,16 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     : capabilitiesQuery.capabilities;
   const balanceData = hasExternalBalanceData ? options?.balanceData : balanceQuery.data;
   const capability = getOffpayFeatureCapability(capabilities, 'swap.tokens');
+  const canFetchCatalogWithCapabilities =
+    capabilities == null && allowPendingCapabilities
+      ? true
+      : isOffpayFeatureAvailable(capabilities, 'swap.tokens') && capability.available;
   const enabled =
     network != null &&
     enabledByCaller &&
     fetchSwapTokenCatalog &&
     canUseNetwork &&
-    isOffpayFeatureAvailable(capabilities, 'swap.tokens') &&
-    capability.available;
+    canFetchCatalogWithCapabilities;
 
   const query = useQuery({
     queryKey: offpaySwapTokensQueryKey(network),
@@ -77,9 +96,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
         throw new Error('Token logos require a supported OffPay network.');
       }
 
-      const response = await getSwapTokens(network, { signal });
-      void observeOfflineTokenMetadataFromSwapTokens(network, response.tokens);
-      return response;
+      return fetchOffpaySwapTokensForLogos(network, signal);
     },
     enabled: enabled && !isNetworkAccessSuspended,
     staleTime: TOKEN_LOGO_CACHE_STALE_MS,

@@ -4,6 +4,8 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { mmkvStorage } from '@/lib/cache/mmkv-storage';
 import { formatOffpayUsername } from '@/lib/api/offpay-username';
 
+import type { WalletFlowInviteSource } from '@/lib/invite/wallet-flow-invite';
+
 /**
  * App-level global state.
  * Persisted via expo-secure-store for instant hydration on app launch.
@@ -24,6 +26,9 @@ interface AppState {
   /** Recent invite-code verification timestamp for post-onboarding wallet add/import flows */
   walletFlowInviteVerifiedAt: number | null;
 
+  /** Source of the in-progress post-onboarding wallet add/import flow */
+  walletFlowInviteSource: WalletFlowInviteSource | null;
+
   /** User's preferred color scheme override (null = system default) */
   colorScheme: 'light' | 'dark' | null;
 
@@ -38,6 +43,7 @@ interface AppState {
   setInviteAccessVerified: (value: boolean) => void;
   setInviteEmail: (email: string | null) => void;
   setWalletFlowInviteVerifiedAt: (timestamp: number | null) => void;
+  setWalletFlowInviteSource: (source: WalletFlowInviteSource | null) => void;
   clearWalletFlowInviteVerification: () => void;
   setColorScheme: (scheme: 'light' | 'dark' | null) => void;
   setUsername: (username: string | null) => void;
@@ -51,6 +57,7 @@ export const useAppStore = create<AppState>()(
       inviteAccessVerified: false,
       inviteEmail: null,
       walletFlowInviteVerifiedAt: null,
+      walletFlowInviteSource: null,
       colorScheme: null,
       username: null,
       profileImageUri: null,
@@ -59,7 +66,9 @@ export const useAppStore = create<AppState>()(
       setInviteAccessVerified: (value) => set({ inviteAccessVerified: value }),
       setInviteEmail: (email) => set({ inviteEmail: email ? email.trim().toLowerCase() : null }),
       setWalletFlowInviteVerifiedAt: (timestamp) => set({ walletFlowInviteVerifiedAt: timestamp }),
-      clearWalletFlowInviteVerification: () => set({ walletFlowInviteVerifiedAt: null }),
+      setWalletFlowInviteSource: (source) => set({ walletFlowInviteSource: source }),
+      clearWalletFlowInviteVerification: () =>
+        set({ walletFlowInviteVerifiedAt: null, walletFlowInviteSource: null }),
       setColorScheme: (scheme) => set({ colorScheme: scheme }),
       setUsername: (username) => set({ username: formatOffpayUsername(username) }),
       setProfileImageUri: (uri) => set({ profileImageUri: uri }),

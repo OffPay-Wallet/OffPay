@@ -76,21 +76,18 @@ export function AccountsScreenContent(): React.JSX.Element {
     }
   }, [activeWalletId, optimisticPrimaryWalletId]);
 
-  const navigateWithTransition = useCallback(
-    (pathname: '/create-wallet' | '/restore-wallet'): void => {
-      setIsAddWalletCardOpen(false);
-      clearWalletFlowInviteVerification();
-      router.push({
-        pathname: '/invite-code',
-        params: {
-          purpose: WALLET_FLOW_INVITE_PURPOSE,
-          next: pathname === '/restore-wallet' ? 'restore-wallet' : 'create-wallet',
-          source: 'accounts',
-        },
-      });
-    },
-    [clearWalletFlowInviteVerification, router],
-  );
+  const navigateWithTransition = useCallback((): void => {
+    setIsAddWalletCardOpen(false);
+    clearWalletFlowInviteVerification();
+    router.push({
+      pathname: '/invite-code',
+      params: {
+        purpose: WALLET_FLOW_INVITE_PURPOSE,
+        next: 'onboarding',
+        source: 'accounts',
+      },
+    });
+  }, [clearWalletFlowInviteVerification, router]);
 
   const handleBack = useCallback((): void => {
     router.back();
@@ -332,6 +329,9 @@ export function AccountsScreenContent(): React.JSX.Element {
                   <Ionicons name="close" size={layout.iconSizeInline} color={colors.text.primary} />
                 </Pressable>
               </View>
+              <Text variant="small" color={colors.text.secondary} style={styles.addWalletSubtitle}>
+                Verify access, then choose how to add a wallet.
+              </Text>
 
               <View style={styles.addWalletChoices}>
                 <Pressable
@@ -339,13 +339,13 @@ export function AccountsScreenContent(): React.JSX.Element {
                     styles.addWalletChoice,
                     pressed && styles.addWalletChoicePressed,
                   ]}
-                  onPress={() => navigateWithTransition('/restore-wallet')}
+                  onPress={navigateWithTransition}
                   accessibilityRole="button"
-                  accessibilityLabel="Import existing wallet"
+                  accessibilityLabel="Continue to add wallet"
                 >
                   <View style={styles.choiceIcon}>
                     <Ionicons
-                      name="download-outline"
+                      name="wallet"
                       size={layout.iconSizeInline}
                       color={colors.text.onAccent}
                     />
@@ -357,39 +357,7 @@ export function AccountsScreenContent(): React.JSX.Element {
                     numberOfLines={1}
                     adjustsFontSizeToFit
                   >
-                    Import existing wallet
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={layout.iconSizeInline}
-                    color={colors.text.secondary}
-                  />
-                </Pressable>
-
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.addWalletChoice,
-                    pressed && styles.addWalletChoicePressed,
-                  ]}
-                  onPress={() => navigateWithTransition('/create-wallet')}
-                  accessibilityRole="button"
-                  accessibilityLabel="Create new wallet"
-                >
-                  <View style={styles.choiceIcon}>
-                    <Ionicons
-                      name="add"
-                      size={layout.iconSizeInline + 2}
-                      color={colors.text.onAccent}
-                    />
-                  </View>
-                  <Text
-                    variant="bodyBold"
-                    color={colors.text.primary}
-                    style={styles.choiceLabel}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                  >
-                    Create new wallet
+                    Continue
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -546,7 +514,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  addWalletSubtitle: {
     marginBottom: spacing.md,
+    lineHeight: 18,
   },
   addWalletClose: {
     width: layout.buttonHeightSm,

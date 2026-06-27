@@ -22,7 +22,7 @@ import {
   presentUmbraTransactionNotification,
 } from '@/lib/notifications/local-notifications';
 import { mark, measure } from '@/lib/perf/perf-marks';
-import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
+import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
 import { getClaimedUmbraUtxoIndexSet, useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
@@ -279,6 +279,8 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   const [claimingAll, setClaimingAll] = useState(false);
   const [recentClaimSettled, setRecentClaimSettled] = useState(false);
   const scanInFlightRef = useRef(false);
+  const scanAbortControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const visibleUtxos = useMemo(
     () => utxos.filter((utxo) => !claimedIndexSet.has(utxo.insertionIndex)),
     [claimedIndexSet, utxos],
@@ -293,11 +295,61 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   // the unmounted screen's state.
   const getScreenSignal = useScreenAbortSignal();
 
+  const abortActiveScan = useCallback((reason: string, updateState = true): void => {
+    const controller = scanAbortControllerRef.current;
+    scanAbortControllerRef.current = null;
+    if (controller != null && !controller.signal.aborted) {
+      try {
+        controller.abort(new Error(reason));
+      } catch {
+        try {
+          controller.abort();
+        } catch {
+          /* no-op */
+        }
+      }
+    }
+
+    scanInFlightRef.current = false;
+    if (updateState && mountedRef.current) {
+      setScanning(false);
+      setRefreshing(false);
+      setDeepScanning(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortActiveScan('Pending claims screen unmounted.', false);
+    };
+  }, [abortActiveScan]);
+
   const runScan = useCallback(
     async (kind: 'initial' | 'refresh' | 'deep' | 'background'): Promise<void> => {
       if (!canScan || walletAddress == null || walletId == null || network == null) return;
       if (scanInFlightRef.current) return;
-      const signal = getScreenSignal();
+      const screenSignal = getScreenSignal();
+      const controller = new AbortController();
+      const abortFromScreen = () => {
+        try {
+          controller.abort(new Error('Pending claims screen blurred.'));
+        } catch {
+          try {
+            controller.abort();
+          } catch {
+            /* no-op */
+          }
+        }
+      };
+      if (screenSignal.aborted) {
+        abortFromScreen();
+        return;
+      }
+      screenSignal.addEventListener('abort', abortFromScreen, { once: true });
+      scanAbortControllerRef.current = controller;
+      const signal = controller.signal;
       scanInFlightRef.current = true;
       if (kind === 'initial') setScanning(true);
       else if (kind === 'deep') setDeepScanning(true);
@@ -329,7 +381,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           signal,
           pageLimit: UMBRA_CLAIM_SCAN_PAGE_LIMIT,
         });
-        if (signal.aborted) return;
+        if (signal.aborted || !mountedRef.current) return;
         setUtxos(result.pendingClaimUtxoDetails ?? []);
         if ((result.pendingClaimUtxoDetails?.length ?? 0) > 0) {
           setRecentClaimSettled(false);
@@ -345,15 +397,19 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
           },
         );
       } catch (scanError) {
-        if (signal.aborted) return;
+        if (signal.aborted || !mountedRef.current) return;
         if (kind !== 'background') {
           setError(
             scanError instanceof Error ? scanError.message : 'Unable to load pending claims.',
           );
         }
       } finally {
+        screenSignal.removeEventListener('abort', abortFromScreen);
+        if (scanAbortControllerRef.current === controller) {
+          scanAbortControllerRef.current = null;
+        }
         scanInFlightRef.current = false;
-        if (!signal.aborted) {
+        if (mountedRef.current) {
           if (kind === 'initial') setScanning(false);
           else if (kind === 'deep') setDeepScanning(false);
           else if (kind === 'refresh') setRefreshing(false);
@@ -387,6 +443,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
       setBusyId(utxo.id);
       void (async () => {
         try {
+          await yieldToUi();
           const {
             claimUmbraPrivateP2PToEncryptedBalance,
             getUmbraClaimScanRangeForInsertionIndices,
@@ -415,8 +472,10 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                   walletAddress,
                   insertionIndices,
                 });
-                setUtxos((current) => removeClaimedUtxos(current, insertionIndices));
-                setRecentClaimSettled(true);
+                if (mountedRef.current) {
+                  setUtxos((current) => removeClaimedUtxos(current, insertionIndices));
+                  setRecentClaimSettled(true);
+                }
               },
             });
             const claimed = result.claimedUtxoCount ?? 0;
@@ -433,15 +492,19 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                 walletAddress,
                 insertionIndices: claimedIndices,
               });
-              setUtxos((current) => removeClaimedUtxos(current, claimedIndices));
-              setError(null);
-              setRecentClaimSettled(true);
+              if (mountedRef.current) {
+                setUtxos((current) => removeClaimedUtxos(current, claimedIndices));
+                setError(null);
+                setRecentClaimSettled(true);
+              }
             }
-            showToast({
-              title: claimed > 0 ? 'Claim submitted' : 'Already settled',
-              message: result.subtitle,
-              variant: claimed > 0 ? 'success' : 'info',
-            });
+            if (mountedRef.current) {
+              showToast({
+                title: claimed > 0 ? 'Claim submitted' : 'Already settled',
+                message: result.subtitle,
+                variant: claimed > 0 ? 'success' : 'info',
+              });
+            }
             if (claimed > 0) {
               const claimSignature = result.primarySignature ?? result.signatures[0] ?? null;
               void presentUmbraTransactionNotification({
@@ -457,7 +520,9 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               });
             }
             umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
-            void runScan('background');
+            if (mountedRef.current) {
+              void runScan('background');
+            }
           } catch (claimError) {
             if (isBenignAlreadyClaimedFailure(claimError)) {
               markUmbraUtxosClaimed({
@@ -465,28 +530,36 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                 walletAddress,
                 insertionIndices: [utxo.insertionIndex],
               });
-              setUtxos((current) => removeClaimedUtxos(current, [utxo.insertionIndex]));
-              setError(null);
-              setRecentClaimSettled(true);
-              showToast({
-                title: 'Already claimed',
-                message: 'Encrypted balance is up to date.',
-                variant: 'success',
-              });
+              if (mountedRef.current) {
+                setUtxos((current) => removeClaimedUtxos(current, [utxo.insertionIndex]));
+                setError(null);
+                setRecentClaimSettled(true);
+                showToast({
+                  title: 'Already claimed',
+                  message: 'Encrypted balance is up to date.',
+                  variant: 'success',
+                });
+              }
               umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
-              void runScan('background');
+              if (mountedRef.current) {
+                void runScan('background');
+              }
             } else {
               const { getUmbraFriendlyError } = await import('@/lib/umbra/umbra-error-messages');
               const friendly = getUmbraFriendlyError(claimError, 'claim');
-              showToast({
-                title: friendly.title,
-                message: friendly.message,
-                variant: 'error',
-              });
+              if (mountedRef.current) {
+                showToast({
+                  title: friendly.title,
+                  message: friendly.message,
+                  variant: 'error',
+                });
+              }
             }
           }
         } finally {
-          setBusyId(null);
+          if (mountedRef.current) {
+            setBusyId(null);
+          }
         }
       })();
     },
@@ -520,6 +593,7 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
     setClaimingAll(true);
     void (async () => {
       try {
+        await yieldToUi();
         const {
           claimUmbraPrivateP2PToEncryptedBalance,
           getUmbraClaimScanRangeForInsertionIndices,
@@ -540,8 +614,10 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
                 walletAddress,
                 insertionIndices,
               });
-              setUtxos((current) => removeClaimedUtxos(current, insertionIndices));
-              setRecentClaimSettled(true);
+              if (mountedRef.current) {
+                setUtxos((current) => removeClaimedUtxos(current, insertionIndices));
+                setRecentClaimSettled(true);
+              }
             },
           });
           const claimed = result.claimedUtxoCount ?? 0;
@@ -552,15 +628,19 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               walletAddress,
               insertionIndices: claimedIndices,
             });
-            setUtxos((current) => removeClaimedUtxos(current, claimedIndices));
-            setError(null);
-            setRecentClaimSettled(true);
+            if (mountedRef.current) {
+              setUtxos((current) => removeClaimedUtxos(current, claimedIndices));
+              setError(null);
+              setRecentClaimSettled(true);
+            }
           }
-          showToast({
-            title: claimed > 0 ? 'Claims submitted' : 'Already settled',
-            message: result.subtitle,
-            variant: claimed > 0 ? 'success' : 'info',
-          });
+          if (mountedRef.current) {
+            showToast({
+              title: claimed > 0 ? 'Claims submitted' : 'Already settled',
+              message: result.subtitle,
+              variant: claimed > 0 ? 'success' : 'info',
+            });
+          }
           if (claimed > 0) {
             const claimSignature = result.primarySignature ?? result.signatures[0] ?? null;
             void presentUmbraTransactionNotification({
@@ -576,7 +656,9 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
             });
           }
           umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
-          void runScan('background');
+          if (mountedRef.current) {
+            void runScan('background');
+          }
         } catch (claimError) {
           if (isBenignAlreadyClaimedFailure(claimError)) {
             markUmbraUtxosClaimed({
@@ -584,28 +666,36 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
               walletAddress,
               insertionIndices: pendingInsertionIndices,
             });
-            setUtxos((current) => removeClaimedUtxos(current, pendingInsertionIndices));
-            setError(null);
-            setRecentClaimSettled(true);
-            showToast({
-              title: 'Already claimed',
-              message: 'Encrypted balance is up to date.',
-              variant: 'success',
-            });
+            if (mountedRef.current) {
+              setUtxos((current) => removeClaimedUtxos(current, pendingInsertionIndices));
+              setError(null);
+              setRecentClaimSettled(true);
+              showToast({
+                title: 'Already claimed',
+                message: 'Encrypted balance is up to date.',
+                variant: 'success',
+              });
+            }
             umbraCacheInvalidator.scheduleRefresh({ walletAddress, network });
-            void runScan('background');
+            if (mountedRef.current) {
+              void runScan('background');
+            }
           } else {
             const { getUmbraFriendlyError } = await import('@/lib/umbra/umbra-error-messages');
             const friendly = getUmbraFriendlyError(claimError, 'claim');
-            showToast({
-              title: friendly.title,
-              message: friendly.message,
-              variant: 'error',
-            });
+            if (mountedRef.current) {
+              showToast({
+                title: friendly.title,
+                message: friendly.message,
+                variant: 'error',
+              });
+            }
           }
         }
       } finally {
-        setClaimingAll(false);
+        if (mountedRef.current) {
+          setClaimingAll(false);
+        }
       }
     })();
   }, [
@@ -637,12 +727,9 @@ export function UmbraPendingClaimsScreen(): React.JSX.Element {
   );
 
   const handleBack = useCallback(() => {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-    router.navigate('/');
-  }, [router]);
+    abortActiveScan('Pending claims screen closing.');
+    router.replace('/');
+  }, [abortActiveScan, router]);
 
   const compact = width < 380 || fontScale > 1.08;
   const screenHorizontalPadding = compact ? spacing.lg : spacing['2xl'];
