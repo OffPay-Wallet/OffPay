@@ -30,7 +30,7 @@ import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { colors } from '@/constants/colors';
 import { OFFLINE_PAYMENT_SLOT_DEFAULT } from '@/constants/offline-payment-slots';
-import { layout, radii, spacing } from '@/constants/spacing';
+import { layout, spacing } from '@/constants/spacing';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
@@ -223,10 +223,10 @@ export function HomeScreenContent(): React.JSX.Element {
     eagerWithoutCapabilities: true,
     limit: WALLET_TRANSACTIONS_PAGE_SIZE,
     waitForDashboard: false,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: 'always',
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
     requestOwner: 'home.transactions.history',
-    useCache: false,
+    useCache: true,
   });
   const pendingBackupStatsQuery = usePendingBackupQueueStats({
     walletAddress: publicKey,

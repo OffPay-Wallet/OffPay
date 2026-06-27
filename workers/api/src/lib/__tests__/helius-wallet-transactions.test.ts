@@ -33,6 +33,19 @@ const bindings = {
   MIN_APP_VERSION: '0.0.0',
 } as Bindings;
 
+function withAlchemyRpc(
+  network: 'devnet' | 'mainnet',
+  overrides: Partial<Bindings> = {},
+): Bindings {
+  return {
+    ...bindings,
+    ...(network === 'devnet'
+      ? { ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test' }
+      : { ALCHEMY_MAINNET_RPC_URL: 'https://alchemy.offpay.test' }),
+    ...overrides,
+  } as Bindings;
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -464,27 +477,49 @@ function enhancedNonceAccountFundingItem(
   };
 }
 
-function createIndexedPlanGateThenEnhancedRestMock(options: {
+function createIndexedPlanGateThenRawRpcMock(options: {
   enhancedItems: readonly Record<string, unknown>[];
-  onRestUrl?: (url: URL) => void;
   onRpcMethod?: (method: string) => void;
   assets?: unknown[];
   rpcTransactionsBySignature?: ReadonlyMap<string, unknown>;
 }) {
+  const toRpcResult = (item: Record<string, unknown>): unknown => {
+    const signature = String(item.signature ?? '');
+    const timestamp = typeof item.timestamp === 'number' ? item.timestamp : 0;
+    const nativeTransfers = Array.isArray(item.nativeTransfers) ? item.nativeTransfers : [];
+    const nativeTransfer = nativeTransfers.find(
+      (transfer): transfer is Record<string, unknown> =>
+        transfer != null && typeof transfer === 'object',
+    );
+    if (nativeTransfer) {
+      return rpcSystemTransferResult({
+        signature,
+        blockTime: timestamp,
+        lamports: Number(nativeTransfer.amount ?? 0),
+        direction: nativeTransfer.fromUserAccount === WALLET ? 'send' : 'receive',
+      });
+    }
+
+    return {
+      blockTime: timestamp,
+      meta: {
+        err: null,
+        fee: Number(item.fee ?? 5000),
+        preBalances: [1_000_000_000],
+        postBalances: [999_995_000],
+        preTokenBalances: [],
+        postTokenBalances: [],
+      },
+      transaction: {
+        signatures: [signature],
+        message: { accountKeys: [{ pubkey: WALLET }], instructions: [] },
+      },
+    };
+  };
+
   return jest.fn(async (input: string, init: RequestInit) => {
     if ((init.method ?? 'GET').toUpperCase() === 'GET') {
-      const url = new URL(input);
-      options.onRestUrl?.(url);
-      const limit = Number(url.searchParams.get('limit') ?? '100');
-      const beforeSignature = url.searchParams.get('before-signature');
-      const startIndex =
-        beforeSignature == null
-          ? 0
-          : options.enhancedItems.findIndex((item) => item.signature === beforeSignature) + 1;
-      const normalizedStartIndex = startIndex > 0 ? startIndex : 0;
-      return jsonResponse(
-        options.enhancedItems.slice(normalizedStartIndex, normalizedStartIndex + limit),
-      );
+      throw new Error(`Unexpected REST request: ${input}`);
     }
 
     const requestBody = JSON.parse(init.body as string);
@@ -505,13 +540,41 @@ function createIndexedPlanGateThenEnhancedRestMock(options: {
       if (method === 'getAssetBatch') {
         return { jsonrpc: '2.0', id: request.id, result: options.assets ?? [] };
       }
-      if (method === 'getTransaction') {
+      if (method === 'getTokenAccountsByOwner') {
+        return { jsonrpc: '2.0', id: request.id, result: { value: [] } };
+      }
+      if (method === 'getSignaturesForAddress') {
         const params = Array.isArray(request.params) ? request.params : [];
-        const signature = String(params[0] ?? '');
+        const config = (params[1] ?? {}) as Record<string, unknown>;
+        const limit = typeof config.limit === 'number' ? config.limit : 100;
+        const beforeSignature = typeof config.before === 'string' ? config.before : null;
+        const startIndex =
+          beforeSignature == null
+            ? 0
+            : options.enhancedItems.findIndex((item) => item.signature === beforeSignature) + 1;
+        const normalizedStartIndex = startIndex > 0 ? startIndex : 0;
         return {
           jsonrpc: '2.0',
           id: request.id,
-          result: options.rpcTransactionsBySignature?.get(signature) ?? null,
+          result: options.enhancedItems
+            .slice(normalizedStartIndex, normalizedStartIndex + limit)
+            .map((item) => ({
+              signature: item.signature,
+              blockTime: item.timestamp,
+              err: null,
+            })),
+        };
+      }
+      if (method === 'getTransaction') {
+        const params = Array.isArray(request.params) ? request.params : [];
+        const signature = String(params[0] ?? '');
+        const enhancedItem = options.enhancedItems.find((item) => item.signature === signature);
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result:
+            options.rpcTransactionsBySignature?.get(signature) ??
+            (enhancedItem != null ? toRpcResult(enhancedItem) : null),
         };
       }
       throw new Error(`Unexpected RPC method: ${method}`);
@@ -523,7 +586,7 @@ function createIndexedPlanGateThenEnhancedRestMock(options: {
   });
 }
 
-// Mock that serves Helius getTransactionsForAddress (JSON-RPC POST) from a
+// Mock that serves indexed getTransactionsForAddress (JSON-RPC POST) from a
 // fixed, newest-first list of full-transaction items. It paginates via an
 // index-based paginationToken and honors the server-side
 // filters.tokenTransfer.mint filter. getAssetBatch metadata resolves to empty
@@ -680,24 +743,28 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
   });
 
-  it('hedges to the secondary provider when the primary RPC fails', async () => {
-    const multiProviderBindings = {
-      ...bindings,
-      ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test',
-    } as Bindings;
+  it('falls back to Solana public RPC when Alchemy raw history RPC fails', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const multiProviderBindings = withAlchemyRpc('devnet');
     const calledUrls: string[] = [];
+    const timings: string[] = [];
     const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
       calledUrls.push(input);
-      // Primary (Helius) is down: every call to it fails fast.
-      if (!input.includes('alchemy')) {
-        return new Response('upstream error', { status: 503 });
-      }
-      // Secondary (Alchemy) answers with an empty (but valid) result set.
       const requestBody =
         typeof init.body === 'string'
           ? JSON.parse(init.body)
           : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
       const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getTransactionsForAddress') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            error: { code: -32002, message: 'indexed history unavailable' },
+          };
+        }
+        if (input.includes('alchemy')) {
+          throw new Error('Alchemy raw RPC unavailable');
+        }
         if (request.method === 'getTokenAccountsByOwner') {
           return { jsonrpc: '2.0', id: request.id, result: { value: [] } };
         }
@@ -718,12 +785,16 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       network: 'devnet',
       limit: 5,
       useCache: false,
+      recordTiming: (name) => timings.push(name),
     });
 
     // The failed primary did not throw; the secondary served the result.
     expect(response.transactions).toEqual([]);
-    expect(calledUrls.some((url) => !url.includes('alchemy'))).toBe(true);
     expect(calledUrls.some((url) => url.includes('alchemy'))).toBe(true);
+    expect(calledUrls.some((url) => url === 'https://api.devnet.solana.com')).toBe(true);
+    expect(timings).toContain('tx_rpc_provider_solanaPublic');
+    expect(timings).not.toContain('tx_rpc_provider_alchemy');
+    warnSpy.mockRestore();
   });
 
   it('limits shallow wallet history transaction batches instead of parsing the whole signature page', async () => {
@@ -1159,7 +1230,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTransactions(bindings, {
+    const response = await getWalletTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       limit: 5,
@@ -1191,11 +1262,10 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect((configs[0]?.filters as Record<string, unknown>)?.tokenTransfer).toBeUndefined();
   });
 
-  it('uses the indexed getTransactionsForAddress method for devnet when a Helius API key is configured', async () => {
-    const devnetIndexedBindings = {
-      ...bindings,
+  it('uses the indexed getTransactionsForAddress method for devnet when Alchemy is configured', async () => {
+    const devnetIndexedBindings = withAlchemyRpc('devnet', {
       HELIUS_DEVNET_API_KEY: 'test-devnet-key',
-    } as Bindings;
+    });
     const configs: Record<string, unknown>[] = [];
     const fetchMock = createGetTransactionsForAddressMock(
       [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
@@ -1223,24 +1293,23 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(configs[0]).toMatchObject({ transactionDetails: 'full', sortOrder: 'desc' });
   });
 
-  it('routes the indexed Helius-only method only to Helius when Alchemy fallbacks exist', async () => {
+  it('prefers Alchemy for indexed getTransactionsForAddress when both providers exist', async () => {
     const multiProviderBindings = {
       ...bindings,
       HELIUS_DEVNET_API_KEY: 'test-devnet-key',
       ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test',
       ALCHEMY_DEVNET_FALLBACK_RPC_URL: 'https://alchemy-fallback.offpay.test',
     } as Bindings;
-    const calledUrls: string[] = [];
+    const indexedCallUrls: string[] = [];
     const seenIndexedRequestIds: string[] = [];
     const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
-      calledUrls.push(input);
-      if (input.includes('alchemy')) {
-        throw new Error('getTransactionsForAddress must not be sent to Alchemy');
-      }
-
       const requestBody = JSON.parse(init.body as string);
       const respond = (request: Record<string, unknown>) => {
         if (request.method === 'getTransactionsForAddress') {
+          indexedCallUrls.push(input);
+          if (!input.includes('alchemy.offpay.test')) {
+            throw new Error('getTransactionsForAddress must use Alchemy when configured');
+          }
           seenIndexedRequestIds.push(String(request.id));
           return {
             jsonrpc: '2.0',
@@ -1272,9 +1341,56 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
 
     expect(response.transactions).toHaveLength(1);
-    expect(calledUrls.every((url) => !url.includes('alchemy'))).toBe(true);
-    expect(calledUrls[0]).toContain('api-key=test-devnet-key');
-    expect(seenIndexedRequestIds).toEqual(['getTransactionsForAddress:devnet:helius']);
+    expect(indexedCallUrls).toEqual(['https://alchemy.offpay.test']);
+    expect(seenIndexedRequestIds).toEqual(['getTransactionsForAddress:devnet:alchemy']);
+  });
+
+  it('uses Alchemy indexed history without requiring a Helius API key', async () => {
+    const alchemyOnlyBindings = {
+      ...bindings,
+      HELIUS_DEVNET_API_KEY: undefined,
+      ALCHEMY_DEVNET_RPC_URL: 'https://alchemy.offpay.test',
+    } as Bindings;
+    const seenMethods: string[] = [];
+    const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
+      const requestBody = JSON.parse(init.body as string);
+      const respond = (request: Record<string, unknown>) => {
+        seenMethods.push(String(request.method));
+        if (request.method === 'getTransactionsForAddress') {
+          expect(input).toBe('https://alchemy.offpay.test');
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              data: [indexedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
+              paginationToken: null,
+            },
+          };
+        }
+        if (request.method === 'getAssetBatch') {
+          return { jsonrpc: '2.0', id: request.id, result: [] };
+        }
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(alchemyOnlyBindings, {
+      address: WALLET,
+      network: 'devnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(seenMethods).toContain('getTransactionsForAddress');
+    expect(seenMethods).not.toContain('getSignaturesForAddress');
+    expect(seenMethods).not.toContain('getTransaction');
   });
 
   it('pages getTransactionsForAddress for SOL token history until the limit is filled', async () => {
@@ -1300,7 +1416,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(bindings, {
+    const response = await getWalletTokenTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       mint: SOL_MINT,
@@ -1373,7 +1489,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(bindings, {
+    const response = await getWalletTokenTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       mint: OTHER_TOKEN_MINT,
@@ -1442,14 +1558,14 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const firstPage = await getWalletTokenTransactions(bindings, {
+    const firstPage = await getWalletTokenTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       mint: OTHER_TOKEN_MINT,
       limit: 8,
       useCache: false,
     });
-    const secondPage = await getWalletTokenTransactions(bindings, {
+    const secondPage = await getWalletTokenTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       mint: OTHER_TOKEN_MINT,
@@ -1502,7 +1618,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTransactions(bindings, {
+    const response = await getWalletTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       limit: 5,
@@ -1540,7 +1656,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTokenTransactions(bindings, {
+    const response = await getWalletTokenTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       mint: SOL_MINT,
@@ -1554,19 +1670,17 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.transactions[0]?.type.toLowerCase()).toContain('swap');
   });
 
-  it('falls back to Helius enhanced REST when the paid indexed method is unavailable', async () => {
+  it('falls back to raw Solana RPC when Alchemy indexed history is unavailable', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const seenMethods: string[] = [];
-    const restUrls: URL[] = [];
-    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+    const fetchMock = createIndexedPlanGateThenRawRpcMock({
       enhancedItems: [enhancedSolTransferItem(SIGNATURE, 1781794440, 250_000_000)],
       onRpcMethod: (method) => seenMethods.push(method),
-      onRestUrl: (url) => restUrls.push(url),
     });
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTransactions(bindings, {
+    const response = await getWalletTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       limit: 1,
@@ -1579,28 +1693,17 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       tokenMint: SOL_MINT,
       direction: 'send',
     });
-    // The paid indexed method was attempted, then REST served it. No raw
-    // getSignaturesForAddress + getTransaction scan is needed.
     expect(seenMethods).toContain('getTransactionsForAddress');
-    expect(seenMethods).not.toContain('getSignaturesForAddress');
-    expect(seenMethods).not.toContain('getTransaction');
-    expect(restUrls).toHaveLength(1);
-    expect(restUrls[0]?.origin).toBe('https://mainnet.helius-rpc.com');
-    expect(restUrls[0]?.pathname).toBe(`/v0/addresses/${WALLET}/transactions`);
-    expect(restUrls[0]?.searchParams.get('sort-order')).toBe('desc');
-    expect(restUrls[0]?.searchParams.get('token-accounts')).toBe('balanceChanged');
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    expect(seenMethods).toContain('getTransaction');
     warnSpy.mockRestore();
   });
 
-  it('uses devnet enhanced REST for SOL token history after the paid indexed gate', async () => {
+  it('uses devnet raw Solana RPC for SOL token history after Alchemy indexed fallback', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = {
-      ...bindings,
-      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
-    } as Bindings;
+    const devnetIndexedBindings = withAlchemyRpc('devnet');
     const seenMethods: string[] = [];
-    const restUrls: URL[] = [];
-    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+    const fetchMock = createIndexedPlanGateThenRawRpcMock({
       enhancedItems: [
         enhancedSolTransferItem(`${SIGNATURE}rest0`, 1781794440, 250_000_000),
         {
@@ -1614,7 +1717,6 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
         enhancedSolTransferItem(`${SIGNATURE}rest1`, 1781794438, 100_000_000),
       ],
       onRpcMethod: (method) => seenMethods.push(method),
-      onRestUrl: (url) => restUrls.push(url),
     });
 
     setHeliusFetchImplementation(fetchMock);
@@ -1632,24 +1734,17 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
       true,
     );
     expect(seenMethods).toContain('getTransactionsForAddress');
-    expect(seenMethods).not.toContain('getSignaturesForAddress');
-    expect(restUrls).toHaveLength(1);
-    expect(restUrls[0]?.origin).toBe('https://devnet.helius-rpc.com');
-    expect(restUrls[0]?.searchParams.get('api-key')).toBe('test-devnet-key');
-    expect(restUrls[0]?.searchParams.get('sort-order')).toBe('desc');
-    expect(restUrls[0]?.searchParams.get('token-accounts')).toBe('balanceChanged');
+    expect(seenMethods).toContain('getSignaturesForAddress');
+    expect(seenMethods).toContain('getTransaction');
     warnSpy.mockRestore();
   });
 
-  it('shows enhanced REST UNKNOWN rows when parsed instructions prove a SOL transfer', async () => {
+  it('shows raw RPC SOL transfer rows after Alchemy indexed fallback', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = {
-      ...bindings,
-      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
-    } as Bindings;
+    const devnetIndexedBindings = withAlchemyRpc('devnet');
     const sendSignature = `${SIGNATURE}unknown-send`;
     const receiveSignature = `${SIGNATURE}unknown-receive`;
-    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+    const fetchMock = createIndexedPlanGateThenRawRpcMock({
       enhancedItems: [
         enhancedUnknownSystemTransferItem(sendSignature, 1781794440, 20_000_000, 'send'),
         enhancedNonceWithdrawalItem(receiveSignature, 1781794439, 1_447_680),
@@ -1669,14 +1764,14 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.transactions).toHaveLength(2);
     expect(response.transactions[0]).toMatchObject({
       signature: sendSignature,
-      type: 'TRANSFER',
+      type: 'TOKEN_TRANSFER',
       tokenMint: SOL_MINT,
       direction: 'send',
       rawAmount: '20000000',
     });
     expect(response.transactions[1]).toMatchObject({
       signature: receiveSignature,
-      type: 'TRANSFER',
+      type: 'RECEIVE',
       tokenMint: SOL_MINT,
       direction: 'receive',
       rawAmount: '1447680',
@@ -1684,12 +1779,9 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('resolves opaque enhanced REST native SOL rows through raw instructions', async () => {
+  it('filters nonce funding from native SOL rows through raw instructions', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = {
-      ...bindings,
-      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
-    } as Bindings;
+    const devnetIndexedBindings = withAlchemyRpc('devnet');
     const transferSignature = `${SIGNATURE}opaque-transfer`;
     const nonceSignature = `${SIGNATURE}opaque-nonce`;
     const seenMethods: string[] = [];
@@ -1712,7 +1804,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
         }),
       ],
     ]);
-    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+    const fetchMock = createIndexedPlanGateThenRawRpcMock({
       enhancedItems: [
         enhancedOpaqueNativeTransferItem({
           signature: nonceSignature,
@@ -1744,7 +1836,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     expect(response.transactions).toHaveLength(1);
     expect(response.transactions[0]).toMatchObject({
       signature: transferSignature,
-      type: 'TRANSFER',
+      type: 'TOKEN_TRANSFER',
       tokenMint: SOL_MINT,
       direction: 'send',
       rawAmount: '20000000',
@@ -1753,12 +1845,9 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('supplements underfilled enhanced SOL history with raw nonce withdrawals', async () => {
+  it('deep-scans raw SOL token history for nonce withdrawals', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = {
-      ...bindings,
-      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
-    } as Bindings;
+    const devnetIndexedBindings = withAlchemyRpc('devnet');
     const transferSignature = `${SIGNATURE}enhanced-transfer`;
     const withdrawalSignature = `${SIGNATURE}nonce-withdraw`;
     const seenMethods: string[] = [];
@@ -1778,6 +1867,10 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
             id: request.id,
             error: { code: -32403, message: 'This feature is only available for paid plans.' },
           };
+        }
+
+        if (method === 'getTokenAccountsByOwner') {
+          return { jsonrpc: '2.0', id: request.id, result: { value: [] } };
         }
 
         if (method === 'getSignaturesForAddress') {
@@ -1844,7 +1937,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
     expect(response.transactions[1]).toMatchObject({
       signature: transferSignature,
-      type: 'TRANSFER',
+      type: 'TOKEN_TRANSFER',
       direction: 'send',
       rawAmount: '20000000',
     });
@@ -1852,12 +1945,9 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('supplements first-page enhanced wallet history with raw native SOL rows', async () => {
+  it('falls back to raw native SOL rows for first-page wallet history', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = {
-      ...bindings,
-      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
-    } as Bindings;
+    const devnetIndexedBindings = withAlchemyRpc('devnet');
     const enhancedSignature = `${SIGNATURE}history-enhanced-transfer`;
     const withdrawalSignature = `${SIGNATURE}history-nonce-withdraw`;
     const seenMethods: string[] = [];
@@ -1877,6 +1967,10 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
             id: request.id,
             error: { code: -32403, message: 'This feature is only available for paid plans.' },
           };
+        }
+
+        if (method === 'getTokenAccountsByOwner') {
+          return { jsonrpc: '2.0', id: request.id, result: { value: [] } };
         }
 
         if (method === 'getSignaturesForAddress') {
@@ -1943,7 +2037,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     });
     expect(response.transactions[1]).toMatchObject({
       signature: enhancedSignature,
-      type: 'TRANSFER',
+      type: 'TOKEN_TRANSFER',
       direction: 'send',
       tokenMint: SOL_MINT,
       rawAmount: '20000000',
@@ -1952,21 +2046,28 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('does not treat enhanced REST nonce-account rent funding as SOL token activity', async () => {
+  it('does not treat nonce-account rent funding as SOL token activity after indexed fallback', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const devnetIndexedBindings = {
-      ...bindings,
-      HELIUS_DEVNET_API_KEY: 'test-devnet-key',
-    } as Bindings;
+    const devnetIndexedBindings = withAlchemyRpc('devnet');
     const nonceSignature = `${SIGNATURE}nonce-rent`;
     const transferSignature = `${SIGNATURE}real-sol`;
     const seenMethods: string[] = [];
-    const fetchMock = createIndexedPlanGateThenEnhancedRestMock({
+    const fetchMock = createIndexedPlanGateThenRawRpcMock({
       enhancedItems: [
         enhancedNonceAccountFundingItem(nonceSignature, 1781794440, 1_447_680),
         enhancedSolTransferItem(transferSignature, 1781794439, 250_000_000),
       ],
       onRpcMethod: (method) => seenMethods.push(method),
+      rpcTransactionsBySignature: new Map<string, unknown>([
+        [
+          nonceSignature,
+          rpcNonceAccountFundingResult({
+            signature: nonceSignature,
+            blockTime: 1781794440,
+            lamports: 1_447_680,
+          }),
+        ],
+      ]),
     });
 
     setHeliusFetchImplementation(fetchMock);
@@ -1991,7 +2092,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
     warnSpy.mockRestore();
   });
 
-  it('falls back to the raw RPC scan when both indexed Helius transaction APIs fail', async () => {
+  it('falls back to the raw RPC scan when Alchemy indexed transactions fail', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const seenMethods: string[] = [];
     const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
@@ -2069,7 +2170,7 @@ describe('wallet transaction history (indexed getTransactionsForAddress with RPC
 
     setHeliusFetchImplementation(fetchMock);
 
-    const response = await getWalletTransactions(bindings, {
+    const response = await getWalletTransactions(withAlchemyRpc('mainnet'), {
       address: WALLET,
       network: 'mainnet',
       limit: 1,

@@ -12,7 +12,7 @@ import type { PersistedClient } from '@tanstack/react-query-persist-client';
  * cause TanStack to discard any persisted cache from older builds.
  * Bump it whenever a query's response shape changes.
  */
-const APP_QUERY_CACHE_VERSION = 'v5';
+const APP_QUERY_CACHE_VERSION = 'v6';
 
 /** 24 hours of cached query data is plenty for a wallet UI. */
 const QUERY_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
@@ -22,32 +22,27 @@ const QUERY_CACHE_KEY = 'offpay-tanstack-query-cache';
 
 const QUERY_CACHE_WRITE_THROTTLE_MS = 1000;
 
-const VOLATILE_WALLET_QUERY_SCOPES = new Set([
-  'walletDashboard',
-  'walletTransactions',
-  'walletTokenTransactions',
-  'walletBalance',
+const NON_PERSISTED_WALLET_QUERY_SCOPES = new Set([
   'umbraEncryptedBalances',
   'umbraVaultRegistrationStatus',
   'privatePaymentBalance',
-  'portfolioValuation',
-  'tokenPriceHistory',
-  'tokenValuations',
 ]);
 
 let installed = false;
 let restorePromise: Promise<void> | null = null;
 
-function isVolatileWalletQueryKey(queryKey: readonly unknown[]): boolean {
-  return queryKey[0] === 'offpay' && VOLATILE_WALLET_QUERY_SCOPES.has(String(queryKey[1] ?? ''));
+function isNonPersistedWalletQueryKey(queryKey: readonly unknown[]): boolean {
+  return (
+    queryKey[0] === 'offpay' && NON_PERSISTED_WALLET_QUERY_SCOPES.has(String(queryKey[1] ?? ''))
+  );
 }
 
 function shouldDehydrateQuery(query: Query): boolean {
-  return defaultShouldDehydrateQuery(query) && !isVolatileWalletQueryKey(query.queryKey);
+  return defaultShouldDehydrateQuery(query) && !isNonPersistedWalletQueryKey(query.queryKey);
 }
 
-function removeRestoredVolatileWalletQueries(): void {
-  for (const scope of VOLATILE_WALLET_QUERY_SCOPES) {
+function removeRestoredNonPersistedWalletQueries(): void {
+  for (const scope of NON_PERSISTED_WALLET_QUERY_SCOPES) {
     queryClient.removeQueries({
       queryKey: ['offpay', scope],
       exact: false,
@@ -135,7 +130,7 @@ export function installQueryCachePersistence(): Promise<void> {
 
       return persistedRestore;
     })
-    .then(removeRestoredVolatileWalletQueries)
+    .then(removeRestoredNonPersistedWalletQueries)
     .catch((error: unknown) => {
       console.warn('[query-persistence] restore failed:', error);
     });

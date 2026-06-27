@@ -20,7 +20,10 @@ import {
 } from '@/lib/api/offpay-home-loading-gates';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
-import { persistWalletDisplayCacheFromQueryClient } from '@/lib/wallet/wallet-display-cache';
+import {
+  hydrateWalletDisplayCacheIntoQueryClient,
+  persistWalletDisplayCacheFromQueryClient,
+} from '@/lib/wallet/wallet-display-cache';
 
 import type { OffpayNetwork, WalletDashboardResponse } from '@/types/offpay-api';
 
@@ -76,7 +79,7 @@ export function useOffpayHomeSnapshotCoordinator({
       return getWalletDashboard(walletAddress, network, {
         signal,
         limit: WALLET_TRANSACTIONS_PAGE_SIZE,
-        useCache: false,
+        useCache: true,
         includeTransactions: false,
         requestOwner: 'home.snapshot.dashboard',
       });
@@ -84,8 +87,8 @@ export function useOffpayHomeSnapshotCoordinator({
     enabled: canFetchDashboard,
     staleTime: WALLET_DASHBOARD_WARM_STALE_TIME_MS,
     gcTime: HOME_SNAPSHOT_GC_TIME_MS,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: 'always',
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     retry: 1,
   });
@@ -116,12 +119,37 @@ export function useOffpayHomeSnapshotCoordinator({
     startupMeasureRef.current = startedAt;
     startupWallClockRef.current = Date.now();
 
-    setDisplayCacheStatus('miss');
-    setTransactionsCacheStatus('miss');
-    measure('home.snapshot.displayCacheHydrate', startedAt, {
+    void hydrateWalletDisplayCacheIntoQueryClient({
+      queryClient,
+      walletAddress: currentWalletAddress,
       network: currentNetwork,
-      result: 'disabled',
-    });
+      options: {
+        includeBalance: true,
+        includeTransactions: true,
+        includePendingBackupStats: true,
+        measurePrefix: 'home.snapshot.displayCacheHydrate',
+        onTransactionsHydrated: (status) => {
+          if (!cancelled) setTransactionsCacheStatus(status);
+        },
+      },
+    })
+      .then((hydrated) => {
+        if (cancelled) return;
+        setDisplayCacheStatus(hydrated ? 'hit' : 'miss');
+        measure('home.snapshot.displayCacheReady', startedAt, {
+          network: currentNetwork,
+          result: hydrated ? 'hit' : 'miss',
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDisplayCacheStatus('miss');
+        setTransactionsCacheStatus('miss');
+        measure('home.snapshot.displayCacheReady', startedAt, {
+          network: currentNetwork,
+          result: 'error',
+        });
+      });
 
     if (canFetchDashboard) {
       fallbackTimerRef.current = setTimeout(() => {
@@ -211,7 +239,7 @@ export function useOffpayHomeSnapshotCoordinator({
         fallbackGateOpen,
         hasDashboardData: dashboardQuery.data != null,
         dashboardFetching: dashboardQuery.isFetching,
-        hasUsableTransactions: dashboardQuery.data != null,
+        hasUsableTransactions: transactionsCacheStatus === 'hit',
         displayCacheStatus,
         fallbackDeadlineStatus,
       })
@@ -267,13 +295,13 @@ export function useOffpayHomeSnapshotCoordinator({
     canUseNetwork,
     isNetworkAccessSuspended,
     fallbackGateOpen,
-    hasDashboardData: dashboardQuery.data != null,
+    hasDashboardData: dashboardQuery.data != null || displayCacheStatus === 'hit',
   });
   const marketFetchEnabled =
     canCoordinate &&
     canUseNetwork &&
     !isNetworkAccessSuspended &&
-    (fallbackGateOpen || dashboardQuery.data != null);
+    (fallbackGateOpen || dashboardQuery.data != null || displayCacheStatus === 'hit');
   const criticalDataPending =
     canCoordinate &&
     canUseNetwork &&

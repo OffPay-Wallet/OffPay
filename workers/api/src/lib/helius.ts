@@ -3,7 +3,8 @@ import { createNetworkCacheKey, memoryCache } from './cache.js';
 import { writeOperationalLog } from './logging.js';
 import { getOrSetSharedJsonCache } from './shared-cache.js';
 import {
-  getHeliusRpcHttpUrlCandidate,
+  getHistoryRpcHttpUrlCandidates,
+  getIndexedTransactionsRpcHttpUrlCandidates,
   getRpcHttpUrlCandidates,
   type RpcProviderEndpoint,
 } from './solana-rpc-providers.js';
@@ -11,8 +12,6 @@ import type { Bindings, Network } from './types.js';
 import { isRecord, isValidSolanaAddress } from './validation.js';
 
 const MAINNET_WALLET_API_BASE_URL = 'https://api.helius.xyz';
-const MAINNET_ENHANCED_TRANSACTIONS_API_BASE_URL = 'https://mainnet.helius-rpc.com';
-const DEVNET_ENHANCED_TRANSACTIONS_API_BASE_URL = 'https://devnet.helius-rpc.com';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const HELIUS_NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111111';
 const SOL_DECIMALS = 9;
@@ -61,11 +60,11 @@ const MAX_SPL_TOKEN_TRANSACTION_SIGNATURE_SCAN = 200;
 // keeping endpoints < 3s even when most scanned signatures are non-displayable.
 // Tune against the Phase 0 tx_signatures / tx_batch / tx_pages numbers.
 const WALLET_TRANSACTION_SCAN_BUDGET_MS = 2_500;
-// Helius getTransactionsForAddress returns full, newest-first transactions in a
-// single indexed JSON-RPC call (no per-signature getTransaction fan-out) and
-// supports up to 1000 per page. We page backwards with `paginationToken`,
-// collecting displayable (or mint-matching) rows until the requested count is
-// reached or a budget is hit; the response cursor lets the client continue.
+// Indexed getTransactionsForAddress returns full, newest-first transactions in
+// a single JSON-RPC call (no per-signature getTransaction fan-out). We use the
+// Alchemy-supported endpoint for this path and page backwards with
+// `paginationToken`, collecting displayable (or mint-matching) rows until the
+// requested count is reached or a budget is hit.
 const INDEXED_TRANSACTION_PAGE_SIZE = 100;
 // First-page scan ceiling for token-specific history. Token Details uses the
 // wallet-wide balanceChanged indexed feed and local mint matching so it stays
@@ -312,6 +311,8 @@ interface WalletLamportsRequest {
 }
 
 export type TimingRecorder = (name: string, durationMs: number) => void;
+type RpcProviderName = RpcProviderEndpoint['provider'];
+type RpcProviderRecorder = (provider: RpcProviderName) => void;
 
 /**
  * Phase 0 instrumentation: per-request accumulator for the RPC scan sub-steps
@@ -951,21 +952,6 @@ function getHeliusApiKey(bindings: Bindings, network: Network): string {
     : getRequiredBinding(bindings, 'HELIUS_MAINNET_API_KEY');
 }
 
-// Whether the Helius API key needed for the indexed Enhanced Transactions API
-// is configured for this network. When absent (e.g. RPC-only deployments) we
-// skip the indexed path and use the raw RPC signature scan instead.
-function hasHeliusApiKey(bindings: Bindings, network: Network): boolean {
-  const apiKey =
-    network === 'devnet' ? bindings.HELIUS_DEVNET_API_KEY : bindings.HELIUS_MAINNET_API_KEY;
-  return typeof apiKey === 'string' && apiKey.trim().length > 0;
-}
-
-function getEnhancedTransactionsApiBaseUrl(network: Network): string {
-  return network === 'devnet'
-    ? DEVNET_ENHANCED_TRANSACTIONS_API_BASE_URL
-    : MAINNET_ENHANCED_TRANSACTIONS_API_BASE_URL;
-}
-
 function toUpstreamUnavailable(
   response: Response | null,
   message: string,
@@ -994,10 +980,12 @@ function describeIndexedFallbackCause(error: unknown): Record<string, unknown> {
       return {
         status: error.status,
         code: error.code,
+        provider: readTrimmedString(cause.provider),
         httpStatus: readFiniteNumber(cause.httpStatus),
         statusText: readTrimmedString(cause.statusText),
         causeCode: readFiniteNumber(cause.code),
         causeMessage: readTrimmedString(cause.message),
+        causeName: readTrimmedString(cause.causeName),
         upstreamText: readTrimmedString(cause.upstreamText),
       };
     }
@@ -1117,8 +1105,8 @@ async function fetchJson(
 // responds first, aborting the losers. A provider error advances to the next
 // candidate immediately. This removes the additive cost of serial fallthrough
 // on a slow-but-not-failed provider without doubling load on the fast path.
-// NOTE: this only wraps standard JSON-RPC calls; Helius-only enhanced API
-// endpoints don't go through getRpcHttpUrlCandidates, so they're never hedged.
+// NOTE: this only wraps standard JSON-RPC calls; indexed history requests use
+// their own provider selection so they don't inherit this order.
 const RPC_HEDGE_DELAY_MS = 600;
 
 async function requestWithHedge<T>(
@@ -1201,15 +1189,14 @@ async function requestWithHedge<T>(
   });
 }
 
-async function heliusRpcRequest(
-  bindings: Bindings,
+async function rpcRequestFromCandidates(
+  candidates: readonly RpcProviderEndpoint[],
   network: Network,
   method: string,
   params: RpcRequestParams,
+  onSuccessProvider?: RpcProviderRecorder,
 ): Promise<unknown> {
-  const candidates = getRpcHttpUrlCandidates(bindings, network);
-
-  return requestWithHedge(candidates, async (candidate, signal) => {
+  const response = await requestWithHedge(candidates, async (candidate, signal) => {
     const payload = await fetchJson(
       candidate.url,
       {
@@ -1236,61 +1223,130 @@ async function heliusRpcRequest(
       throw new Error('RPC provider returned an error.', { cause: payload.error });
     }
 
-    return payload.result;
+    return {
+      provider: candidate.provider,
+      result: payload.result,
+    };
   });
+
+  onSuccessProvider?.(response.provider);
+  return response.result;
 }
 
-async function heliusExclusiveRpcRequest(
+async function heliusRpcRequest(
   bindings: Bindings,
   network: Network,
   method: string,
   params: RpcRequestParams,
 ): Promise<unknown> {
-  const candidate = getHeliusRpcHttpUrlCandidate(bindings, network);
-  if (candidate == null) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
-  }
-
-  const payload = await fetchJson(
-    candidate.url,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: `${method}:${network}:helius`,
-        method,
-        params,
-      }),
-    },
-    'Wallet provider is temporarily unavailable.',
+  return rpcRequestFromCandidates(
+    getRpcHttpUrlCandidates(bindings, network),
+    network,
+    method,
+    params,
   );
-
-  if (!isRecord(payload)) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
-  }
-
-  if ('error' in payload && payload.error !== null && payload.error !== undefined) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.', payload.error);
-  }
-
-  return payload.result;
 }
 
-async function heliusRpcBatchRequest(
-  bindings: Bindings,
+function addRpcProviderCause(
+  provider: RpcProviderEndpoint['provider'],
+  errorMessage: string,
+  error: unknown,
+): AppError {
+  const cause = error instanceof AppError ? (error as Error & { cause?: unknown }).cause : error;
+  const providerCause: Record<string, unknown> = { provider };
+
+  if (isRecord(cause)) {
+    Object.assign(providerCause, cause);
+  } else if (cause instanceof Error) {
+    providerCause.causeName = cause.name;
+    providerCause.message = cause.message;
+  }
+
+  return toUpstreamUnavailable(null, errorMessage, providerCause);
+}
+
+async function indexedTransactionsRpcRequest(
+  candidates: readonly RpcProviderEndpoint[],
+  network: Network,
+  method: string,
+  params: RpcRequestParams,
+): Promise<unknown> {
+  if (candidates.length === 0) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    try {
+      const payload = await fetchJson(
+        candidate.url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: `${method}:${network}:${candidate.provider}`,
+            method,
+            params,
+          }),
+        },
+        'Wallet provider is temporarily unavailable.',
+      );
+
+      if (!isRecord(payload)) {
+        throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.', {
+          provider: candidate.provider,
+          message: 'RPC provider returned a malformed payload.',
+        });
+      }
+
+      if ('error' in payload && payload.error !== null && payload.error !== undefined) {
+        const upstreamError = payload.error;
+        const cause: Record<string, unknown> = { provider: candidate.provider };
+        if (isRecord(upstreamError)) {
+          cause.code = readFiniteNumber(upstreamError.code);
+          cause.message = readTrimmedString(upstreamError.message);
+        }
+        throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.', cause);
+      }
+
+      return payload.result;
+    } catch (error) {
+      lastError =
+        error instanceof AppError
+          ? addRpcProviderCause(
+              candidate.provider,
+              'Wallet provider is temporarily unavailable.',
+              error,
+            )
+          : error;
+    }
+  }
+
+  if (lastError instanceof AppError) {
+    throw lastError;
+  }
+
+  throw toUpstreamUnavailable(
+    null,
+    'Wallet provider is temporarily unavailable.',
+    lastError ?? undefined,
+  );
+}
+
+async function rpcBatchRequestFromCandidates(
+  candidates: readonly RpcProviderEndpoint[],
   network: Network,
   requests: readonly RpcBatchRequest[],
+  onSuccessProvider?: RpcProviderRecorder,
 ): Promise<unknown[]> {
   if (requests.length === 0) {
     return [];
   }
 
-  const candidates = getRpcHttpUrlCandidates(bindings, network);
-
-  return requestWithHedge(candidates, async (candidate, signal) => {
+  const response = await requestWithHedge(candidates, async (candidate, signal) => {
     const payload = await fetchJson(
       candidate.url,
       {
@@ -1343,8 +1399,49 @@ async function heliusRpcBatchRequest(
       orderedResults.push(resultsById.get(responseId));
     }
 
-    return orderedResults;
+    return {
+      provider: candidate.provider,
+      results: orderedResults,
+    };
   });
+
+  onSuccessProvider?.(response.provider);
+  return response.results;
+}
+
+async function heliusRpcBatchRequest(
+  bindings: Bindings,
+  network: Network,
+  requests: readonly RpcBatchRequest[],
+): Promise<unknown[]> {
+  return rpcBatchRequestFromCandidates(
+    getRpcHttpUrlCandidates(bindings, network),
+    network,
+    requests,
+  );
+}
+
+function getHistoryRpcCandidates(bindings: Bindings, network: Network): RpcProviderEndpoint[] {
+  return getHistoryRpcHttpUrlCandidates(bindings, network);
+}
+
+async function historyRpcRequest(
+  candidates: readonly RpcProviderEndpoint[],
+  network: Network,
+  method: string,
+  params: RpcRequestParams,
+  onSuccessProvider?: RpcProviderRecorder,
+): Promise<unknown> {
+  return rpcRequestFromCandidates(candidates, network, method, params, onSuccessProvider);
+}
+
+async function historyRpcBatchRequest(
+  candidates: readonly RpcProviderEndpoint[],
+  network: Network,
+  requests: readonly RpcBatchRequest[],
+  onSuccessProvider?: RpcProviderRecorder,
+): Promise<unknown[]> {
+  return rpcBatchRequestFromCandidates(candidates, network, requests, onSuccessProvider);
 }
 
 async function getLatestBlockhash(
@@ -2161,8 +2258,10 @@ async function fetchTokenAccountAddressesForProgram(
   network: Network,
   address: string,
   programId: string,
+  rpcCandidates?: readonly RpcProviderEndpoint[],
+  rpcProviderRecorder?: RpcProviderRecorder,
 ): Promise<WalletTokenAccountAddress[]> {
-  const result = await heliusRpcRequest(bindings, network, 'getTokenAccountsByOwner', [
+  const params: RpcRequestParams = [
     address,
     {
       programId,
@@ -2170,7 +2269,17 @@ async function fetchTokenAccountAddressesForProgram(
     {
       encoding: 'jsonParsed',
     },
-  ]);
+  ];
+  const result =
+    rpcCandidates != null
+      ? await historyRpcRequest(
+          rpcCandidates,
+          network,
+          'getTokenAccountsByOwner',
+          params,
+          rpcProviderRecorder,
+        )
+      : await heliusRpcRequest(bindings, network, 'getTokenAccountsByOwner', params);
 
   if (!isRecord(result) || !Array.isArray(result.value)) {
     return [];
@@ -2205,6 +2314,8 @@ async function getWalletTokenAccountAddresses(
   bindings: Bindings,
   address: string,
   network: Network,
+  rpcCandidates?: readonly RpcProviderEndpoint[],
+  rpcProviderRecorder?: RpcProviderRecorder,
 ): Promise<WalletTokenAccountAddress[]> {
   if (!isValidSolanaAddress(address)) {
     throw new AppError({
@@ -2215,8 +2326,22 @@ async function getWalletTokenAccountAddresses(
   }
 
   const [splAccounts, token2022Accounts] = await Promise.all([
-    fetchTokenAccountAddressesForProgram(bindings, network, address, SPL_TOKEN_PROGRAM_ID),
-    fetchTokenAccountAddressesForProgram(bindings, network, address, TOKEN_2022_PROGRAM_ID),
+    fetchTokenAccountAddressesForProgram(
+      bindings,
+      network,
+      address,
+      SPL_TOKEN_PROGRAM_ID,
+      rpcCandidates,
+      rpcProviderRecorder,
+    ),
+    fetchTokenAccountAddressesForProgram(
+      bindings,
+      network,
+      address,
+      TOKEN_2022_PROGRAM_ID,
+      rpcCandidates,
+      rpcProviderRecorder,
+    ),
   ]);
   const seen = new Set<string>();
   return [...splAccounts, ...token2022Accounts].filter((account) => {
@@ -3525,179 +3650,6 @@ function parseEnhancedTransactions(
   return transactions;
 }
 
-interface EnhancedRestTransactionPage {
-  records: WalletTransactionRecord[];
-  rawCount: number;
-  nextCursor: string | null;
-}
-
-async function fetchEnhancedRestTransactionsPage(
-  bindings: Bindings,
-  network: Network,
-  address: string,
-  cursor: string | null,
-  limit: number,
-): Promise<EnhancedRestTransactionPage> {
-  const apiKey = getHeliusApiKey(bindings, network);
-  const url = new URL(
-    `${getEnhancedTransactionsApiBaseUrl(network)}/v0/addresses/${address}/transactions`,
-  );
-  url.searchParams.set('api-key', apiKey);
-  url.searchParams.set('limit', Math.min(100, Math.max(1, limit)).toString());
-  url.searchParams.set('commitment', 'confirmed');
-  url.searchParams.set('sort-order', 'desc');
-  url.searchParams.set('token-accounts', 'balanceChanged');
-  if (cursor) {
-    url.searchParams.set('before-signature', cursor);
-  }
-
-  const payload = await fetchJson(
-    url.toString(),
-    {
-      method: 'GET',
-    },
-    'Wallet provider is temporarily unavailable.',
-  );
-  if (!Array.isArray(payload)) {
-    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
-  }
-
-  const rawTransactions = payload;
-  if (rawTransactions.length === 0) {
-    return {
-      records: [],
-      rawCount: 0,
-      nextCursor: null,
-    };
-  }
-
-  const metadataByMint = await fetchTokenMetadataMap(
-    bindings,
-    network,
-    extractEnhancedTokenMints(payload),
-  );
-  const records = parseEnhancedTransactions(payload, network, address, metadataByMint);
-  await refineEnhancedNativeSolUnknownRecords(bindings, network, address, records);
-  const lastEntry = rawTransactions.at(-1);
-
-  return {
-    records,
-    rawCount: rawTransactions.length,
-    nextCursor:
-      rawTransactions.length >= limit && isRecord(lastEntry)
-        ? readTrimmedString(lastEntry.signature)
-        : null,
-  };
-}
-
-async function collectEnhancedRestWalletTransactions(params: {
-  bindings: Bindings;
-  network: Network;
-  address: string;
-  cursor: string | null;
-  limit: number;
-  maxScan: number;
-  matches: (transaction: WalletTransactionRecord) => boolean;
-}): Promise<WalletTransactionsResponse> {
-  const { bindings, network, address, cursor, limit, maxScan, matches } = params;
-  const scanStartedAt = Date.now();
-  const collected: WalletTransactionRecord[] = [];
-  let scannedTransactions = 0;
-  let scanCursor = cursor;
-  let nextCursor: string | null = null;
-  let pages = 0;
-
-  while (collected.length < limit && scannedTransactions < maxScan) {
-    if (pages > 0 && Date.now() - scanStartedAt > WALLET_TRANSACTION_SCAN_BUDGET_MS) {
-      break;
-    }
-
-    const pageLimit = Math.min(
-      WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
-      maxScan - scannedTransactions,
-    );
-    const page = await fetchEnhancedRestTransactionsPage(
-      bindings,
-      network,
-      address,
-      scanCursor,
-      pageLimit,
-    );
-    pages += 1;
-    scannedTransactions += page.rawCount;
-
-    let reachedLimit = false;
-    for (const transaction of page.records) {
-      if (matches(transaction)) {
-        collected.push(transaction);
-      }
-      if (collected.length >= limit) {
-        nextCursor = transaction.signature;
-        reachedLimit = true;
-        break;
-      }
-    }
-
-    if (reachedLimit) {
-      break;
-    }
-
-    nextCursor = page.nextCursor;
-    if (page.rawCount === 0 || nextCursor === null) {
-      break;
-    }
-    scanCursor = nextCursor;
-  }
-
-  return buildWalletTransactionsResponse({
-    address,
-    network,
-    transactions: collected,
-    cursor: nextCursor,
-  });
-}
-
-async function fetchWalletTransactionsViaEnhancedRestApi(
-  bindings: Bindings,
-  network: Network,
-  address: string,
-  cursor: string | null,
-  limit: number,
-  recordTiming?: TimingRecorder,
-): Promise<WalletTransactionsResponse> {
-  const startedAt = Date.now();
-  const response = await collectEnhancedRestWalletTransactions({
-    bindings,
-    network,
-    address,
-    cursor,
-    limit,
-    maxScan: Math.max(
-      WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
-      Math.min(MAX_WALLET_TRANSACTION_SIGNATURE_SCAN, limit * 5),
-    ),
-    matches: isDisplayableWalletTransactionRecord,
-  });
-  recordTiming?.('etx_ms', Date.now() - startedAt);
-
-  if (limit < WALLET_NATIVE_SOL_SUPPLEMENT_MIN_LIMIT) {
-    return response;
-  }
-
-  const supplementStartedAt = Date.now();
-  const supplemented = await supplementWalletHistoryWithNativeSolRpc({
-    bindings,
-    address,
-    network,
-    cursor,
-    limit,
-    response,
-    recordTiming,
-  });
-  recordTiming?.('tx_sol_supplement_ms', Date.now() - supplementStartedAt);
-  return supplemented;
-}
-
 async function supplementWalletHistoryWithNativeSolRpc(params: {
   bindings: Bindings;
   address: string;
@@ -3809,19 +3761,20 @@ function buildIndexedTokenCursor(pageToken: string | null, offset: number): stri
 }
 
 /**
- * Fetch and parse a single page of Helius `getTransactionsForAddress`
+ * Fetch and parse a single page of indexed `getTransactionsForAddress`
  * (transactionDetails: 'full'). This is the indexed replacement for
  * getSignaturesForAddress + batched getTransaction: one JSON-RPC call returns
  * complete transaction + meta objects already sorted newest-first, including a
  * wallet's associated-token-account activity via `tokenAccounts:
  * 'balanceChanged'`, so there is no per-signature fan-out. When
- * `tokenTransferMint` is set, Helius filters server-side to transactions where
- * the address participated in a transfer of that SPL mint. Native SOL is not a
- * token transfer and cannot be filtered this way, so SOL is matched locally.
- * Results are parsed with the shared raw-transaction parser.
+ * `tokenTransferMint` is set, the indexed provider filters server-side to
+ * transactions where the address participated in a transfer of that SPL mint.
+ * Native SOL is not a token transfer and cannot be filtered this way, so SOL is
+ * matched locally. Results are parsed with the shared raw-transaction parser.
  */
 async function fetchIndexedTransactionsPage(
   bindings: Bindings,
+  indexedRpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
   address: string,
   paginationToken: string | null,
@@ -3846,10 +3799,12 @@ async function fetchIndexedTransactionsPage(
     config.paginationToken = paginationToken;
   }
 
-  const result = await heliusExclusiveRpcRequest(bindings, network, 'getTransactionsForAddress', [
-    address,
-    config,
-  ]);
+  const result = await indexedTransactionsRpcRequest(
+    indexedRpcCandidates,
+    network,
+    'getTransactionsForAddress',
+    [address, config],
+  );
   const data = isRecord(result) && Array.isArray(result.data) ? result.data : [];
   const nextToken = isRecord(result) ? readTrimmedString(result.paginationToken) : null;
 
@@ -3910,6 +3865,7 @@ async function fetchIndexedTransactionsPage(
  */
 async function collectIndexedWalletTransactions(params: {
   bindings: Bindings;
+  indexedRpcCandidates: readonly RpcProviderEndpoint[];
   network: Network;
   address: string;
   cursor: string | null;
@@ -3918,7 +3874,17 @@ async function collectIndexedWalletTransactions(params: {
   tokenTransferMint: string | null;
   matches: (transaction: WalletTransactionRecord) => boolean;
 }): Promise<WalletTransactionsResponse> {
-  const { bindings, network, address, cursor, limit, maxScan, tokenTransferMint, matches } = params;
+  const {
+    bindings,
+    indexedRpcCandidates,
+    network,
+    address,
+    cursor,
+    limit,
+    maxScan,
+    tokenTransferMint,
+    matches,
+  } = params;
   const scanStartedAt = Date.now();
   const collected: WalletTransactionRecord[] = [];
   let scannedTransactions = 0;
@@ -3934,6 +3900,7 @@ async function collectIndexedWalletTransactions(params: {
     const pageLimit = Math.min(INDEXED_TRANSACTION_PAGE_SIZE, maxScan - scannedTransactions);
     const page = await fetchIndexedTransactionsPage(
       bindings,
+      indexedRpcCandidates,
       network,
       address,
       pageToken,
@@ -3964,6 +3931,7 @@ async function collectIndexedWalletTransactions(params: {
 
 async function collectIndexedWalletTokenTransactions(params: {
   bindings: Bindings;
+  indexedRpcCandidates: readonly RpcProviderEndpoint[];
   network: Network;
   address: string;
   cursor: string | null;
@@ -3971,7 +3939,7 @@ async function collectIndexedWalletTokenTransactions(params: {
   maxScan: number;
   matches: (transaction: WalletTransactionRecord) => boolean;
 }): Promise<WalletTransactionsResponse> {
-  const { bindings, network, address, limit, maxScan, matches } = params;
+  const { bindings, indexedRpcCandidates, network, address, limit, maxScan, matches } = params;
   const scanStartedAt = Date.now();
   const collected: WalletTransactionRecord[] = [];
   const parsedCursor = parseIndexedTokenCursor(params.cursor);
@@ -3990,6 +3958,7 @@ async function collectIndexedWalletTokenTransactions(params: {
     const pageLimit = Math.min(INDEXED_TRANSACTION_PAGE_SIZE, maxScan - scannedTransactions);
     const page = await fetchIndexedTransactionsPage(
       bindings,
+      indexedRpcCandidates,
       network,
       address,
       pageToken,
@@ -4043,15 +4012,23 @@ async function collectIndexedWalletTokenTransactions(params: {
 
 async function fetchWalletTransactionsViaIndexedApi(
   bindings: Bindings,
+  indexedRpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
   address: string,
   cursor: string | null,
   limit: number,
   recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
+  const primaryIndexedProvider = indexedRpcCandidates[0];
+  if (primaryIndexedProvider == null) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+
   const startedAt = Date.now();
+  recordTiming?.(`itx_provider_${primaryIndexedProvider.provider}`, 1);
   const response = await collectIndexedWalletTransactions({
     bindings,
+    indexedRpcCandidates,
     network,
     address,
     cursor,
@@ -4753,21 +4730,29 @@ async function buildRpcTransactionRecordFromResult(
 
 async function fetchRpcTransactionRecord(
   bindings: Bindings,
+  rpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
   walletAddress: string,
   walletTokenAccounts: readonly WalletTokenAccountAddress[],
   signature: string,
   fallbackTimestamp: number,
   fallbackStatus: 'success' | 'failed',
+  rpcProviderRecorder?: RpcProviderRecorder,
 ): Promise<WalletTransactionRecord> {
-  const result = await heliusRpcRequest(bindings, network, 'getTransaction', [
-    signature,
-    {
-      commitment: 'confirmed',
-      encoding: 'jsonParsed',
-      maxSupportedTransactionVersion: 0,
-    },
-  ]);
+  const result = await historyRpcRequest(
+    rpcCandidates,
+    network,
+    'getTransaction',
+    [
+      signature,
+      {
+        commitment: 'confirmed',
+        encoding: 'jsonParsed',
+        maxSupportedTransactionVersion: 0,
+      },
+    ],
+    rpcProviderRecorder,
+  );
 
   return buildRpcTransactionRecordFromResult(
     bindings,
@@ -4802,6 +4787,7 @@ function collectBatchTokenMints(results: readonly unknown[]): string[] {
 
 async function fetchRpcTransactionRecordsBatch(
   bindings: Bindings,
+  rpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
   walletAddress: string,
   walletTokenAccounts: readonly WalletTokenAccountAddress[],
@@ -4810,10 +4796,11 @@ async function fetchRpcTransactionRecordsBatch(
     timestamp: number;
     status: 'success' | 'failed';
   }[],
+  rpcProviderRecorder?: RpcProviderRecorder,
 ): Promise<WalletTransactionRecord[]> {
   try {
-    const results = await heliusRpcBatchRequest(
-      bindings,
+    const results = await historyRpcBatchRequest(
+      rpcCandidates,
       network,
       entries.map((entry, index) => ({
         id: `getTransaction:${index}`,
@@ -4827,6 +4814,7 @@ async function fetchRpcTransactionRecordsBatch(
           },
         ],
       })),
+      rpcProviderRecorder,
     );
 
     // Resolve token metadata for the WHOLE batch in one getAssetBatch call. The
@@ -4860,12 +4848,14 @@ async function fetchRpcTransactionRecordsBatch(
       entries.map((entry) =>
         fetchRpcTransactionRecord(
           bindings,
+          rpcCandidates,
           network,
           walletAddress,
           walletTokenAccounts,
           entry.signature,
           entry.timestamp,
           entry.status,
+          rpcProviderRecorder,
         ),
       ),
     );
@@ -4894,13 +4884,14 @@ function parseRpcSignatureEntries(result: unknown): RpcSignatureEntry[] {
 }
 
 async function fetchRpcWalletSignaturePage(
-  bindings: Bindings,
+  rpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
   walletAddress: string,
   cursor: string | null,
   limit: number,
   tokenAccounts: WalletTokenAccountAddress[],
   timings?: WalletScanTimings,
+  rpcProviderRecorder?: RpcProviderRecorder,
 ): Promise<RpcSignaturePage> {
   const seenSources = new Set<string>();
   const sourceAddresses = [
@@ -4927,7 +4918,12 @@ async function fetchRpcWalletSignaturePage(
     };
   });
   const signaturesStartedAt = Date.now();
-  const results = await heliusRpcBatchRequest(bindings, network, requests);
+  const results = await historyRpcBatchRequest(
+    rpcCandidates,
+    network,
+    requests,
+    rpcProviderRecorder,
+  );
   if (timings != null) timings.signaturesMs += Date.now() - signaturesStartedAt;
   const entriesBySignature = new Map<string, RpcSignatureEntry>();
   let anySourceMayHaveMore = false;
@@ -4967,10 +4963,10 @@ async function fetchRpcWalletSignaturePage(
 
 /**
  * Fallback wallet history via raw RPC (getSignaturesForAddress + batched
- * getTransaction). Used only when the indexed Enhanced Transactions API is not
+ * getTransaction). Used only when the Alchemy indexed history endpoint is not
  * configured for the network or is temporarily unavailable. This path is
- * heavier (per-signature fan-out, bounded scan budget) and exists for
- * resilience and RPC-only/devnet deployments.
+ * heavier (per-signature fan-out, bounded scan budget) and uses Solana public
+ * RPC as a history-only backup.
  */
 async function fetchWalletTransactionsViaRpc(
   bindings: Bindings,
@@ -4980,6 +4976,17 @@ async function fetchWalletTransactionsViaRpc(
   limit: number,
   recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
+  const rpcCandidates = getHistoryRpcCandidates(bindings, network);
+  if (rpcCandidates.length === 0) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+  const recordedRpcProviders = new Set<RpcProviderName>();
+  const recordRpcProvider: RpcProviderRecorder = (provider) => {
+    if (recordedRpcProviders.has(provider)) return;
+    recordedRpcProviders.add(provider);
+    recordTiming?.(`tx_rpc_provider_${provider}`, 1);
+  };
+
   const maxSignatureScan = Math.max(
     WALLET_TRANSACTION_SIGNATURE_PAGE_SIZE,
     Math.min(MAX_WALLET_TRANSACTION_SIGNATURE_SCAN, limit * 5),
@@ -4993,7 +5000,13 @@ async function fetchWalletTransactionsViaRpc(
   // Token accounts are stable across the whole scan, so resolve them ONCE here
   // instead of re-fetching (2 RPCs) on every signature page.
   const tokenAccountsStartedAt = Date.now();
-  const tokenAccounts = await getWalletTokenAccountAddresses(bindings, address, network);
+  const tokenAccounts = await getWalletTokenAccountAddresses(
+    bindings,
+    address,
+    network,
+    rpcCandidates,
+    recordRpcProvider,
+  );
   scanTimings.tokenAccountsMs += Date.now() - tokenAccountsStartedAt;
   const scanStartedAt = Date.now();
   const filteredTransactions: WalletTransactionRecord[] = [];
@@ -5014,13 +5027,14 @@ async function fetchWalletTransactionsViaRpc(
     let signaturePage: RpcSignaturePage;
     try {
       signaturePage = await fetchRpcWalletSignaturePage(
-        bindings,
+        rpcCandidates,
         network,
         address,
         scanCursor,
         signatureLimit,
         tokenAccounts,
         scanTimings,
+        recordRpcProvider,
       );
     } catch (error) {
       // Degrade gracefully: if we already have rows, return them with the
@@ -5047,10 +5061,12 @@ async function fetchWalletTransactionsViaRpc(
     try {
       parsedTransactions = await fetchRpcTransactionRecordsBatch(
         bindings,
+        rpcCandidates,
         network,
         address,
         signaturePage.tokenAccounts,
         transactionRequests,
+        recordRpcProvider,
       );
     } catch (error) {
       if (filteredTransactions.length > 0) break;
@@ -5147,6 +5163,7 @@ function walletTransactionMatchesMint(
 
 async function fetchWalletTokenTransactionsViaIndexedApi(
   bindings: Bindings,
+  indexedRpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
   address: string,
   mint: string,
@@ -5154,8 +5171,13 @@ async function fetchWalletTokenTransactionsViaIndexedApi(
   limit: number,
   recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
+  const primaryIndexedProvider = indexedRpcCandidates[0];
+  if (primaryIndexedProvider == null) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+
   const normalizedMint = normalizeTokenTransactionMint(mint);
-  // Token Details must match the canonical History screen. Helius'
+  // Token Details must match the canonical History screen. The indexed
   // tokenTransfer.mint filter is narrower than wallet balance changes and can
   // miss swap/balance-change rows that broad history later resolves. Pull the
   // same wallet-wide balanceChanged feed as History and filter locally.
@@ -5163,8 +5185,10 @@ async function fetchWalletTokenTransactionsViaIndexedApi(
     walletTransactionMatchesMint(transaction, normalizedMint) &&
     isDisplayableWalletTransactionRecord(transaction);
   const startedAt = Date.now();
+  recordTiming?.(`ittx_provider_${primaryIndexedProvider.provider}`, 1);
   const response = await collectIndexedWalletTokenTransactions({
     bindings,
+    indexedRpcCandidates,
     network,
     address,
     cursor,
@@ -5176,71 +5200,8 @@ async function fetchWalletTokenTransactionsViaIndexedApi(
   return response;
 }
 
-async function fetchWalletTokenTransactionsViaEnhancedRestApi(
-  bindings: Bindings,
-  network: Network,
-  address: string,
-  mint: string,
-  cursor: string | null,
-  limit: number,
-  recordTiming?: TimingRecorder,
-): Promise<WalletTransactionsResponse> {
-  const normalizedMint = normalizeTokenTransactionMint(mint);
-  const startedAt = Date.now();
-  const response = await collectEnhancedRestWalletTransactions({
-    bindings,
-    network,
-    address,
-    cursor,
-    limit,
-    maxScan: MAX_INDEXED_TOKEN_TRANSACTION_SCAN,
-    matches: (transaction): boolean =>
-      walletTransactionMatchesMint(transaction, normalizedMint) &&
-      isDisplayableWalletTransactionRecord(transaction),
-  });
-  recordTiming?.('ettx_ms', Date.now() - startedAt);
-  if (normalizedMint !== SOL_MINT || cursor !== null || response.cursor !== null) {
-    return response;
-  }
-
-  const remainingLimit = limit - response.transactions.length;
-  if (remainingLimit <= 0) {
-    return response;
-  }
-
-  let supplement: WalletTransactionsResponse;
-  try {
-    supplement = await fetchWalletTokenTransactionsViaRpc(
-      bindings,
-      address,
-      network,
-      normalizedMint,
-      null,
-      limit,
-      recordTiming,
-    );
-  } catch {
-    return response;
-  }
-  const transactionsBySignature = new Map<string, WalletTransactionRecord>();
-  for (const transaction of [...response.transactions, ...supplement.transactions]) {
-    if (!transactionsBySignature.has(transaction.signature)) {
-      transactionsBySignature.set(transaction.signature, transaction);
-    }
-  }
-
-  return buildWalletTransactionsResponse({
-    address,
-    network,
-    transactions: sortWalletTransactionsMostRecent(
-      Array.from(transactionsBySignature.values()),
-    ).slice(0, limit),
-    cursor: supplement.cursor,
-  });
-}
-
 async function fetchRpcWalletTokenSignaturePage(
-  bindings: Bindings,
+  rpcCandidates: readonly RpcProviderEndpoint[],
   network: Network,
   walletAddress: string,
   mint: string,
@@ -5248,6 +5209,7 @@ async function fetchRpcWalletTokenSignaturePage(
   signatureLimit: number,
   walletTokenAccounts: WalletTokenAccountAddress[],
   timings?: WalletScanTimings,
+  rpcProviderRecorder?: RpcProviderRecorder,
 ): Promise<RpcSignaturePage> {
   const normalizedMint = normalizeTokenTransactionMint(mint);
   const sourceAddresses =
@@ -5281,7 +5243,12 @@ async function fetchRpcWalletTokenSignaturePage(
     };
   });
   const signaturesStartedAt = Date.now();
-  const results = await heliusRpcBatchRequest(bindings, network, requests);
+  const results = await historyRpcBatchRequest(
+    rpcCandidates,
+    network,
+    requests,
+    rpcProviderRecorder,
+  );
   if (timings != null) timings.signaturesMs += Date.now() - signaturesStartedAt;
   const entriesBySignature = new Map<string, RpcSignatureEntry>();
   let anySourceMayHaveMore = false;
@@ -5321,7 +5288,7 @@ async function fetchRpcWalletTokenSignaturePage(
 
 /**
  * Fallback token-specific history via raw RPC. Used only when the indexed
- * Enhanced Transactions API is unavailable for the network. For native SOL it
+ * Alchemy history endpoint is unavailable for the network. For native SOL it
  * scans the wallet address and reconstructs transfers from native-balance
  * deltas (fees excluded); for SPL it scans the relevant token accounts.
  */
@@ -5334,6 +5301,17 @@ async function fetchWalletTokenTransactionsViaRpc(
   limit: number,
   recordTiming?: TimingRecorder,
 ): Promise<WalletTransactionsResponse> {
+  const rpcCandidates = getHistoryRpcCandidates(bindings, network);
+  if (rpcCandidates.length === 0) {
+    throw toUpstreamUnavailable(null, 'Wallet provider is temporarily unavailable.');
+  }
+  const recordedRpcProviders = new Set<RpcProviderName>();
+  const recordRpcProvider: RpcProviderRecorder = (provider) => {
+    if (recordedRpcProviders.has(provider)) return;
+    recordedRpcProviders.add(provider);
+    recordTiming?.(`ttx_rpc_provider_${provider}`, 1);
+  };
+
   const normalizedMint = normalizeTokenTransactionMint(mint);
   const maxSignatureScan = getTokenTransactionMaxSignatureScan(normalizedMint, limit);
   const scanTimings: WalletScanTimings = {
@@ -5351,7 +5329,13 @@ async function fetchWalletTokenTransactionsViaRpc(
   let tokenAccounts: WalletTokenAccountAddress[] = [];
   if (normalizedMint !== SOL_MINT) {
     const tokenAccountsStartedAt = Date.now();
-    tokenAccounts = await getWalletTokenAccountAddresses(bindings, address, network);
+    tokenAccounts = await getWalletTokenAccountAddresses(
+      bindings,
+      address,
+      network,
+      rpcCandidates,
+      recordRpcProvider,
+    );
     scanTimings.tokenAccountsMs += Date.now() - tokenAccountsStartedAt;
   }
   const scanStartedAt = Date.now();
@@ -5372,7 +5356,7 @@ async function fetchWalletTokenTransactionsViaRpc(
     let signaturePage: RpcSignaturePage;
     try {
       signaturePage = await fetchRpcWalletTokenSignaturePage(
-        bindings,
+        rpcCandidates,
         network,
         address,
         normalizedMint,
@@ -5380,6 +5364,7 @@ async function fetchWalletTokenTransactionsViaRpc(
         signatureLimit,
         tokenAccounts,
         scanTimings,
+        recordRpcProvider,
       );
     } catch (error) {
       // Degrade gracefully: return whatever matched so far rather than 503.
@@ -5404,10 +5389,12 @@ async function fetchWalletTokenTransactionsViaRpc(
     try {
       parsedTransactions = await fetchRpcTransactionRecordsBatch(
         bindings,
+        rpcCandidates,
         network,
         address,
         signaturePage.tokenAccounts,
         transactionRequests,
+        recordRpcProvider,
       );
     } catch (error) {
       if (filteredTransactions.length > 0) break;
@@ -5503,14 +5490,20 @@ async function getWalletTransactions(
   ]);
 
   const resolver = async () => {
-    // Prefer paid indexed getTransactionsForAddress on both networks. If that
-    // plan-gated method is unavailable, use Helius enhanced REST before the raw
-    // RPC signature scan; REST is still indexed and avoids per-signature
-    // getTransaction fan-out.
-    if (hasHeliusApiKey(bindings, request.network)) {
+    const indexedRpcCandidates = getIndexedTransactionsRpcHttpUrlCandidates(
+      bindings,
+      request.network,
+    );
+
+    // Alchemy documents getTransactionsForAddress as a native Solana endpoint,
+    // so keep this one-call indexed history path on Alchemy only. When it is
+    // unavailable, skip paid Helius history APIs and fall back to the standard
+    // Solana RPC scan with public RPC as a history-only backup.
+    if (indexedRpcCandidates.length > 0) {
       try {
         return await fetchWalletTransactionsViaIndexedApi(
           bindings,
+          indexedRpcCandidates,
           request.network,
           request.address,
           normalizedCursor,
@@ -5524,27 +5517,6 @@ async function getWalletTransactions(
         request.recordTiming?.('itx_fallback_503', 1);
         writeOperationalLog('warn', {
           event: 'wallet_transactions_indexed_fallback',
-          network: request.network,
-          details: describeIndexedFallbackCause(error),
-        });
-      }
-
-      try {
-        return await fetchWalletTransactionsViaEnhancedRestApi(
-          bindings,
-          request.network,
-          request.address,
-          normalizedCursor,
-          normalizedLimit,
-          request.recordTiming,
-        );
-      } catch (error) {
-        if (!(error instanceof AppError) || error.status !== 503) {
-          throw error;
-        }
-        request.recordTiming?.('etx_fallback_503', 1);
-        writeOperationalLog('warn', {
-          event: 'wallet_transactions_enhanced_rest_fallback',
           network: request.network,
           details: describeIndexedFallbackCause(error),
         });
@@ -5593,14 +5565,19 @@ async function getWalletTokenTransactions(
   ]);
 
   const resolver = async () => {
-    // Prefer paid indexed getTransactionsForAddress on both networks: SPL mints
-    // are filtered server-side there, native SOL is matched locally while
-    // paging. If unavailable, use enhanced REST before falling back to the raw
-    // RPC scan.
-    if (hasHeliusApiKey(bindings, request.network)) {
+    const indexedRpcCandidates = getIndexedTransactionsRpcHttpUrlCandidates(
+      bindings,
+      request.network,
+    );
+
+    // Use the same Alchemy-only indexed provider preference as broad wallet
+    // history. SPL mints are filtered locally against the wallet-wide feed so
+    // Token Details stays consistent with canonical History.
+    if (indexedRpcCandidates.length > 0) {
       try {
         return await fetchWalletTokenTransactionsViaIndexedApi(
           bindings,
+          indexedRpcCandidates,
           request.network,
           request.address,
           normalizedMint,
@@ -5615,31 +5592,6 @@ async function getWalletTokenTransactions(
         request.recordTiming?.('ittx_fallback_503', 1);
         writeOperationalLog('warn', {
           event: 'wallet_token_transactions_indexed_fallback',
-          network: request.network,
-          details: {
-            mint: normalizedMint === SOL_MINT ? 'native-sol' : 'spl',
-            ...describeIndexedFallbackCause(error),
-          },
-        });
-      }
-
-      try {
-        return await fetchWalletTokenTransactionsViaEnhancedRestApi(
-          bindings,
-          request.network,
-          request.address,
-          normalizedMint,
-          normalizedCursor,
-          normalizedLimit,
-          request.recordTiming,
-        );
-      } catch (error) {
-        if (!(error instanceof AppError) || error.status !== 503) {
-          throw error;
-        }
-        request.recordTiming?.('ettx_fallback_503', 1);
-        writeOperationalLog('warn', {
-          event: 'wallet_token_transactions_enhanced_rest_fallback',
           network: request.network,
           details: {
             mint: normalizedMint === SOL_MINT ? 'native-sol' : 'spl',

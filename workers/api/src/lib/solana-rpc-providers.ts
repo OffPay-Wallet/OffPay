@@ -1,10 +1,15 @@
 import type { Bindings, Network } from './types.js';
 
 export interface RpcProviderEndpoint {
-  provider: 'helius' | 'alchemy';
+  provider: 'helius' | 'alchemy' | 'solanaPublic';
   transport: 'http' | 'websocket';
   url: string;
 }
+
+const PUBLIC_SOLANA_RPC_URLS: Readonly<Record<Network, string>> = {
+  devnet: 'https://api.devnet.solana.com',
+  mainnet: 'https://api.mainnet.solana.com',
+};
 
 function readConfiguredUrl(value: string | undefined, protocols: readonly string[]): string | null {
   if (typeof value !== 'string') return null;
@@ -129,11 +134,10 @@ export function getHeliusRpcHttpUrlCandidate(
   return { provider: 'helius', transport: 'http', url: derivedUrl };
 }
 
-export function getRpcHttpUrlCandidates(
+function getAlchemyRpcHttpUrlCandidates(
   bindings: Bindings,
   network: Network,
 ): RpcProviderEndpoint[] {
-  const heliusEndpoint = getHeliusRpcHttpUrlCandidate(bindings, network);
   const alchemyUrl = readConfiguredUrl(readNetworkUrl(bindings, network, 'alchemy', 'http'), [
     'http:',
     'https:',
@@ -144,13 +148,42 @@ export function getRpcHttpUrlCandidates(
   ]);
 
   return uniqueEndpoints([
-    ...(heliusEndpoint != null ? [heliusEndpoint] : []),
     ...(alchemyUrl != null
       ? [{ provider: 'alchemy' as const, transport: 'http' as const, url: alchemyUrl }]
       : []),
     ...(alchemyFallbackUrl != null
       ? [{ provider: 'alchemy' as const, transport: 'http' as const, url: alchemyFallbackUrl }]
       : []),
+  ]);
+}
+
+export function getIndexedTransactionsRpcHttpUrlCandidates(
+  bindings: Bindings,
+  network: Network,
+): RpcProviderEndpoint[] {
+  return getAlchemyRpcHttpUrlCandidates(bindings, network);
+}
+
+export function getHistoryRpcHttpUrlCandidates(
+  bindings: Bindings,
+  network: Network,
+): RpcProviderEndpoint[] {
+  return uniqueEndpoints([
+    ...getAlchemyRpcHttpUrlCandidates(bindings, network),
+    { provider: 'solanaPublic', transport: 'http', url: PUBLIC_SOLANA_RPC_URLS[network] },
+  ]);
+}
+
+export function getRpcHttpUrlCandidates(
+  bindings: Bindings,
+  network: Network,
+): RpcProviderEndpoint[] {
+  const heliusEndpoint = getHeliusRpcHttpUrlCandidate(bindings, network);
+  const alchemyEndpoints = getAlchemyRpcHttpUrlCandidates(bindings, network);
+
+  return uniqueEndpoints([
+    ...(heliusEndpoint != null ? [heliusEndpoint] : []),
+    ...alchemyEndpoints,
   ]);
 }
 

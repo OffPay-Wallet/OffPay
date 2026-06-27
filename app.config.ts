@@ -168,6 +168,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
             // this same ARM set for broad phone compatibility without
             // shipping emulator-only x86/x86_64 native binaries.
             buildArchs: ANDROID_PHONE_BUILD_ARCHS,
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
             networkInspector: false,
           },
         },
