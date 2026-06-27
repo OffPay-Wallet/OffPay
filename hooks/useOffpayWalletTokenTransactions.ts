@@ -105,7 +105,7 @@ function transactionMatchesMint(
   return transaction.tokenMint === mint || transaction.display?.tokenMint === mint;
 }
 
-function buildWarmTokenTransactionsPage(params: {
+export function buildWarmTokenTransactionsPage(params: {
   walletAddress: string;
   network: WalletTransactionsResponse['network'];
   mint: string;
@@ -117,10 +117,12 @@ function buildWarmTokenTransactionsPage(params: {
     WalletTransactionsResponse['transactions'][number]
   >();
   let fetchedAt = 0;
+  let sourceCursor: string | null = null;
 
   for (const page of params.pages) {
     if (page.address !== params.walletAddress || page.network !== params.network) continue;
     fetchedAt = Math.max(fetchedAt, page.fetchedAt);
+    sourceCursor = page.cursor;
 
     for (const transaction of page.transactions) {
       if (transactionsBySignature.has(transaction.signature)) continue;
@@ -129,19 +131,23 @@ function buildWarmTokenTransactionsPage(params: {
     }
   }
 
-  const transactions = Array.from(transactionsBySignature.values())
-    .sort((left, right) => {
-      const timestampDiff = right.timestamp - left.timestamp;
-      if (timestampDiff !== 0) return timestampDiff;
-      return left.signature.localeCompare(right.signature);
-    })
-    .slice(0, params.limit);
+  const matchedTransactions = Array.from(transactionsBySignature.values()).sort((left, right) => {
+    const timestampDiff = right.timestamp - left.timestamp;
+    if (timestampDiff !== 0) return timestampDiff;
+    return left.signature.localeCompare(right.signature);
+  });
+  const transactions = matchedTransactions.slice(0, params.limit);
 
   if (transactions.length === 0) return undefined;
 
   const displayTransactions = transactions
     .map((transaction) => transaction.display)
     .filter((view): view is WalletTransactionView => view != null);
+  const lastIncludedTransaction = transactions.at(-1);
+  const cursor =
+    matchedTransactions.length > params.limit
+      ? (lastIncludedTransaction?.signature ?? null)
+      : (sourceCursor ?? null);
 
   return {
     address: params.walletAddress,
@@ -149,7 +155,7 @@ function buildWarmTokenTransactionsPage(params: {
     transactions,
     displayTransactions,
     historyGroups: [],
-    cursor: null,
+    cursor,
     fetchedAt,
   };
 }
