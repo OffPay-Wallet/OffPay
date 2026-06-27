@@ -69,6 +69,7 @@ import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { presentWalletTransactionEventNotification } from '@/lib/notifications/local-notifications';
@@ -1110,6 +1111,10 @@ export function SwapScreen(): React.JSX.Element {
           queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
           refetchType: 'all',
         }),
+        queryClient.invalidateQueries({
+          queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
+          refetchType: 'all',
+        }),
       ]).catch(() => undefined);
     },
     onError: (error: unknown) => {
@@ -1249,6 +1254,10 @@ export function SwapScreen(): React.JSX.Element {
           }),
           queryClient.invalidateQueries({
             queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+            refetchType: 'all',
+          }),
+          queryClient.invalidateQueries({
+            queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
             refetchType: 'all',
           }),
         ]).catch(() => undefined);

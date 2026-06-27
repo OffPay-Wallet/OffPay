@@ -54,6 +54,7 @@ import {
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { getSwapTokens } from '@/lib/api/offpay-api-client';
@@ -653,6 +654,10 @@ export function AdvancedSwapScreen(): React.JSX.Element {
       }),
       queryClient.invalidateQueries({
         queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+        refetchType: 'all',
+      }),
+      queryClient.invalidateQueries({
+        queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
         refetchType: 'all',
       }),
     ]);

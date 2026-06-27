@@ -169,6 +169,7 @@ export function useOffpayWalletTokenTransactions(options: {
   refetchOnMount?: boolean | 'always';
   refetchOnWindowFocus?: boolean | 'always';
   useCache?: boolean;
+  serverCacheOnly?: boolean;
   enabled?: boolean;
   requestOwner?: string;
   timeoutMs?: number;
@@ -182,6 +183,7 @@ export function useOffpayWalletTokenTransactions(options: {
   const minWarmTransactionRows = options.minWarmTransactionRows ?? 0;
   const deferUntilAfterInteractions = options.deferUntilAfterInteractions ?? false;
   const useCache = options.useCache;
+  const serverCacheOnly = options.serverCacheOnly ?? false;
   const enabledByCaller = options.enabled ?? true;
   const requestOwner = options.requestOwner ?? 'wallet.tokenTransactions';
   const timeoutMs = options.timeoutMs ?? TOKEN_TRANSACTION_REQUEST_TIMEOUT_MS;
@@ -203,16 +205,12 @@ export function useOffpayWalletTokenTransactions(options: {
     requestOwner: `${requestOwner}.capabilities`,
   });
   const { capabilities } = capabilitiesQuery;
+  const queryCacheMode =
+    useCache === false ? 'network' : serverCacheOnly ? 'server-cache' : 'cached';
   const transactionsQueryKey = useMemo(
     () =>
-      offpayWalletTokenTransactionsQueryKey(
-        walletAddress,
-        network,
-        mint,
-        limit,
-        useCache === false ? 'network' : 'cached',
-      ),
-    [limit, mint, network, useCache, walletAddress],
+      offpayWalletTokenTransactionsQueryKey(walletAddress, network, mint, limit, queryCacheMode),
+    [limit, mint, network, queryCacheMode, walletAddress],
   );
   const capability: CapabilityStatus = !canUseNetwork
     ? {
@@ -289,6 +287,7 @@ export function useOffpayWalletTokenTransactions(options: {
   }, [enabledByCaller, mint, network, waitForWalletHistory, walletAddress, walletHistoryFetching]);
 
   const warmInitialData = useMemo<WalletTransactionsInfiniteData | undefined>(() => {
+    if (serverCacheOnly) return undefined;
     if (useCache === false) return undefined;
     if (walletAddress == null || network == null || mint == null) return undefined;
 
@@ -322,6 +321,7 @@ export function useOffpayWalletTokenTransactions(options: {
     mint,
     network,
     queryClient,
+    serverCacheOnly,
     useCache,
     walletAddress,
     walletHistoryBaseQueryKey,
@@ -330,12 +330,10 @@ export function useOffpayWalletTokenTransactions(options: {
   const shouldWaitForWalletHistory =
     waitForWalletHistory && walletHistoryFetching && !walletHistoryWaitExpired;
   const enabled =
-    canRequestTransactions &&
-    enabledByCaller &&
-    interactionsSettled &&
-    !shouldWaitForWalletHistory;
+    canRequestTransactions && enabledByCaller && interactionsSettled && !shouldWaitForWalletHistory;
 
   useEffect(() => {
+    if (serverCacheOnly) return;
     if (warmInitialData == null) return;
 
     const existing = queryClient.getQueryData<WalletTransactionsInfiniteData>(transactionsQueryKey);
@@ -347,7 +345,7 @@ export function useOffpayWalletTokenTransactions(options: {
     }
 
     queryClient.setQueryData(transactionsQueryKey, warmInitialData, { updatedAt: 0 });
-  }, [queryClient, transactionsQueryKey, warmInitialData]);
+  }, [queryClient, serverCacheOnly, transactionsQueryKey, warmInitialData]);
 
   const query = useInfiniteQuery({
     queryKey: transactionsQueryKey,
@@ -375,9 +373,9 @@ export function useOffpayWalletTokenTransactions(options: {
     staleTime: TOKEN_TRANSACTION_STALE_TIME_MS,
     gcTime: TOKEN_TRANSACTION_GC_TIME_MS,
     select: selectTokenTransactionPages,
-    initialData: warmInitialData,
+    initialData: serverCacheOnly ? undefined : warmInitialData,
     initialDataUpdatedAt: () => (warmInitialData == null ? undefined : 0),
-    placeholderData: warmInitialData,
+    placeholderData: serverCacheOnly ? undefined : warmInitialData,
     refetchOnMount: options.refetchOnMount ?? true,
     refetchOnWindowFocus: options.refetchOnWindowFocus,
     refetchOnReconnect: true,

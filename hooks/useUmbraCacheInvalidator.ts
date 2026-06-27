@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { decimalInputToAtomicAmount, formatAtomicAmount } from '@/lib/policy/token-amounts';
@@ -74,6 +75,10 @@ export function useUmbraCacheInvalidator() {
         // Mark inactive history pages stale, but only refetch them if the
         // History surface is mounted. Umbra claim/send flows should not spend
         // foreground bandwidth refreshing off-screen lists.
+        refetchType: 'active',
+      });
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
         refetchType: 'active',
       });
       void queryClient.invalidateQueries({

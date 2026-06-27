@@ -13,16 +13,20 @@ import {
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { getWalletTokenTransactions, getWalletTransactions } from '@/lib/api/offpay-api-client';
 import { connectWalletActivityStream } from '@/lib/api/offpay-wallet-activity-stream';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { useWalletStore } from '@/store/walletStore';
 
+import type { InfiniteData, Query, QueryKey } from '@tanstack/react-query';
 import type {
   OffpayNetwork,
   StreamCapabilitiesResponse,
   WalletActivityEvent,
+  WalletTransactionsResponse,
 } from '@/types/offpay-api';
 import type { WalletActivityStreamConnection } from '@/lib/api/offpay-wallet-activity-stream';
 
@@ -193,6 +197,125 @@ function buildActivityDescription(
     : `${action} ${amount} ${symbol} ${preposition} ${shortenWalletAddress(counterparty)}`;
 }
 
+type WalletTransactionsInfiniteData = InfiniteData<WalletTransactionsResponse, string | undefined>;
+
+type WalletTransactionRecord = WalletTransactionsResponse['transactions'][number];
+
+function readQueryLimit(queryKey: QueryKey, index: number): number | null {
+  const options = queryKey[index];
+  if (typeof options !== 'object' || options == null || !('limit' in options)) return null;
+  const limit = Number((options as { limit?: unknown }).limit);
+  return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
+}
+
+function isNativeSolMint(value: string | null | undefined): boolean {
+  const normalized = value?.trim();
+  return (
+    normalized === 'SOL' ||
+    normalized === 'native-sol' ||
+    normalized === 'So11111111111111111111111111111111111111112'
+  );
+}
+
+function transactionMatchesTokenMint(
+  transaction: WalletTransactionRecord,
+  mint: string | null,
+): boolean {
+  if (mint == null) return false;
+  if (isNativeSolMint(mint)) {
+    return (
+      isNativeSolMint(transaction.tokenMint) ||
+      transaction.tokenSymbol?.trim().toUpperCase() === 'SOL' ||
+      isNativeSolMint(transaction.display?.tokenMint)
+    );
+  }
+
+  return transaction.tokenMint === mint || transaction.display?.tokenMint === mint;
+}
+
+function walletActivityEventToTransaction(event: WalletActivityEvent): WalletTransactionRecord {
+  return {
+    signature: event.signature,
+    timestamp: event.timestamp,
+    type: event.type,
+    description: event.description ?? null,
+    amount: event.amount ?? null,
+    rawAmount: event.rawAmount ?? null,
+    tokenMint: event.tokenMint ?? null,
+    tokenSymbol: event.tokenSymbol ?? null,
+    tokenName: event.tokenName ?? null,
+    tokenLogo: event.tokenLogo ?? null,
+    tokenDecimals: event.tokenDecimals ?? null,
+    fee: event.fee ?? 0,
+    status: event.status === 'failed' ? 'failed' : 'success',
+    direction: event.direction ?? null,
+    sender: event.sender ?? null,
+    recipient: event.recipient ?? null,
+    counterparties: event.counterparties ?? [],
+  };
+}
+
+function sortWalletTransactionsMostRecent(
+  transactions: readonly WalletTransactionRecord[],
+): WalletTransactionRecord[] {
+  return [...transactions].sort((left, right) => {
+    const timestampDiff = right.timestamp - left.timestamp;
+    if (timestampDiff !== 0) return timestampDiff;
+    return left.signature.localeCompare(right.signature);
+  });
+}
+
+function upsertTransactionPage(params: {
+  walletAddress: string;
+  network: OffpayNetwork;
+  transaction: WalletTransactionRecord;
+  current: WalletTransactionsInfiniteData | undefined;
+  limit: number;
+}): WalletTransactionsInfiniteData {
+  const firstPage = params.current?.pages[0];
+  const existingPages = params.current?.pages ?? [];
+  const fallbackPage: WalletTransactionsResponse = {
+    address: params.walletAddress,
+    network: params.network,
+    transactions: [],
+    displayTransactions: [],
+    historyGroups: [],
+    cursor: null,
+    fetchedAt: Date.now(),
+  };
+  const page = firstPage ?? fallbackPage;
+  const bySignature = new Map<string, WalletTransactionRecord>();
+
+  for (const transaction of page.transactions) {
+    bySignature.set(transaction.signature, transaction);
+  }
+  bySignature.set(params.transaction.signature, {
+    ...bySignature.get(params.transaction.signature),
+    ...params.transaction,
+  });
+
+  const transactions = sortWalletTransactionsMostRecent(Array.from(bySignature.values())).slice(
+    0,
+    params.limit,
+  );
+  const displayTransactions = transactions
+    .map((transaction) => transaction.display)
+    .filter((view): view is NonNullable<WalletTransactionRecord['display']> => view != null);
+  const nextFirstPage: WalletTransactionsResponse = {
+    ...page,
+    address: params.walletAddress,
+    network: params.network,
+    transactions,
+    displayTransactions,
+    fetchedAt: Date.now(),
+  };
+
+  return {
+    pages: [nextFirstPage, ...existingPages.slice(1)],
+    pageParams: params.current?.pageParams ?? [undefined],
+  };
+}
+
 export function useOffpayWalletActivityStream(options?: {
   walletAddress?: string | null;
   enabled?: boolean;
@@ -340,8 +463,121 @@ export function useOffpayWalletActivityStream(options?: {
     const walletDataQueryFilters = [
       { queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network) },
       { queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network) },
+      { queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network) },
       { queryKey: offpayWalletBalanceQueryKey(walletAddress, network) },
     ] as const;
+
+    const getActiveHistoryQueries = (queryKey: QueryKey): Query[] =>
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey })
+        .filter((query) => query.getObserversCount() > 0);
+
+    const applyActivityToHistoryCaches = (event: WalletActivityEvent) => {
+      const transaction = walletActivityEventToTransaction(event);
+      const walletHistoryQueries = getActiveHistoryQueries(
+        offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+      );
+      const tokenHistoryQueries = getActiveHistoryQueries(
+        offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
+      );
+
+      for (const query of walletHistoryQueries) {
+        const limit = readQueryLimit(query.queryKey, 4) ?? 20;
+        queryClient.setQueryData<WalletTransactionsInfiniteData>(
+          query.queryKey,
+          (current) =>
+            upsertTransactionPage({
+              walletAddress,
+              network,
+              transaction,
+              current,
+              limit,
+            }),
+          { updatedAt: Date.now() },
+        );
+      }
+
+      for (const query of tokenHistoryQueries) {
+        const mint = typeof query.queryKey[4] === 'string' ? query.queryKey[4] : null;
+        if (!transactionMatchesTokenMint(transaction, mint)) continue;
+
+        const limit = readQueryLimit(query.queryKey, 5) ?? 12;
+        queryClient.setQueryData<WalletTransactionsInfiniteData>(
+          query.queryKey,
+          (current) =>
+            upsertTransactionPage({
+              walletAddress,
+              network,
+              transaction,
+              current,
+              limit,
+            }),
+          { updatedAt: Date.now() },
+        );
+      }
+    };
+
+    const refreshActiveHistoryQueriesFresh = async (event?: WalletActivityEvent): Promise<void> => {
+      const transaction = event == null ? null : walletActivityEventToTransaction(event);
+      const walletHistoryQueries = getActiveHistoryQueries(
+        offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+      );
+      const tokenHistoryQueries = getActiveHistoryQueries(
+        offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
+      );
+      const refreshes: Array<Promise<unknown>> = [];
+
+      for (const query of walletHistoryQueries) {
+        const limit = readQueryLimit(query.queryKey, 4) ?? 20;
+        refreshes.push(
+          (async () => {
+            await queryClient.cancelQueries(
+              { queryKey: query.queryKey, exact: true },
+              { revert: false },
+            );
+            const page = await getWalletTransactions(walletAddress, network, {
+              limit,
+              useCache: false,
+              requestOwner: 'wallet.activityStream.transactions.fresh',
+            });
+            queryClient.setQueryData<WalletTransactionsInfiniteData>(
+              query.queryKey,
+              { pages: [page], pageParams: [undefined] },
+              { updatedAt: page.fetchedAt },
+            );
+          })(),
+        );
+      }
+
+      for (const query of tokenHistoryQueries) {
+        const mint = typeof query.queryKey[4] === 'string' ? query.queryKey[4] : null;
+        if (mint == null) continue;
+        if (transaction != null && !transactionMatchesTokenMint(transaction, mint)) continue;
+
+        const limit = readQueryLimit(query.queryKey, 5) ?? 12;
+        refreshes.push(
+          (async () => {
+            await queryClient.cancelQueries(
+              { queryKey: query.queryKey, exact: true },
+              { revert: false },
+            );
+            const page = await getWalletTokenTransactions(walletAddress, network, mint, {
+              limit,
+              useCache: false,
+              requestOwner: 'wallet.activityStream.tokenTransactions.fresh',
+            });
+            queryClient.setQueryData<WalletTransactionsInfiniteData>(
+              query.queryKey,
+              { pages: [page], pageParams: [undefined] },
+              { updatedAt: page.fetchedAt },
+            );
+          })(),
+        );
+      }
+
+      await Promise.allSettled(refreshes);
+    };
 
     const clearRetryTimer = () => {
       if (retryTimerRef.current == null) return;
@@ -411,7 +647,7 @@ export function useOffpayWalletActivityStream(options?: {
       setStatus('idle');
     };
 
-    const invalidateWalletDataNow = () => {
+    const invalidateWalletDataNow = (options?: { includeHistory?: boolean }) => {
       walletDataInvalidationTimerRef.current = null;
       if (cancelled || streamPaused || isWalletDataFetchInFlight()) return;
       lastWalletDataInvalidatedAtRef.current = Date.now();
@@ -419,29 +655,35 @@ export function useOffpayWalletActivityStream(options?: {
         queryKey: offpayWalletDashboardBaseQueryKey(walletAddress, network),
         refetchType: 'active',
       });
-      void queryClient.invalidateQueries({
-        queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
-        refetchType: 'active',
-      });
+      if (options?.includeHistory !== false) {
+        void queryClient.invalidateQueries({
+          queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+          refetchType: 'active',
+        });
+        void queryClient.invalidateQueries({
+          queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
+          refetchType: 'active',
+        });
+      }
       void queryClient.invalidateQueries({
         queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
         refetchType: 'active',
       });
     };
 
-    const invalidateWalletData = () => {
+    const invalidateWalletData = (options?: { includeHistory?: boolean }) => {
       const elapsedMs = Date.now() - lastWalletDataInvalidatedAtRef.current;
       if (elapsedMs >= MIN_WALLET_DATA_INVALIDATION_INTERVAL_MS) {
         if (walletDataInvalidationTimerRef.current != null) {
           clearTimeout(walletDataInvalidationTimerRef.current);
         }
-        invalidateWalletDataNow();
+        invalidateWalletDataNow(options);
         return;
       }
 
       if (walletDataInvalidationTimerRef.current != null) return;
       walletDataInvalidationTimerRef.current = setTimeout(
-        invalidateWalletDataNow,
+        () => invalidateWalletDataNow(options),
         MIN_WALLET_DATA_INVALIDATION_INTERVAL_MS - elapsedMs,
       );
     };
@@ -449,7 +691,10 @@ export function useOffpayWalletActivityStream(options?: {
     const scheduleIndexedTransactionRefreshes = () => {
       activityRefreshTimerRefs.current.forEach((timer) => clearTimeout(timer));
       activityRefreshTimerRefs.current = ACTIVITY_INDEX_REFRESH_DELAYS_MS.map((delayMs) =>
-        setTimeout(invalidateWalletData, delayMs),
+        setTimeout(() => {
+          void refreshActiveHistoryQueriesFresh();
+          invalidateWalletData({ includeHistory: false });
+        }, delayMs),
       );
     };
 
@@ -553,7 +798,9 @@ export function useOffpayWalletActivityStream(options?: {
             setActivityEvents((events) =>
               [...events, normalizedEvent].slice(-ACTIVITY_EVENTS_LIMIT),
             );
-            invalidateWalletData();
+            applyActivityToHistoryCaches(normalizedEvent);
+            void refreshActiveHistoryQueriesFresh(normalizedEvent);
+            invalidateWalletData({ includeHistory: false });
             scheduleIndexedTransactionRefreshes();
           },
           onPing: (event) => {

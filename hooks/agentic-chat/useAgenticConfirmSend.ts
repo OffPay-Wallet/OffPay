@@ -25,6 +25,7 @@ import { validateAgenticPrivateSendDraft } from '@/lib/agentic-payments/private-
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -552,6 +553,10 @@ function invalidateAfterTransfer({
     }),
     queryClient.invalidateQueries({
       queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+      refetchType: 'all',
+    }),
+    queryClient.invalidateQueries({
+      queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
       refetchType: 'all',
     }),
     ...(isNormalRoute

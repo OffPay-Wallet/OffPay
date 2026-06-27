@@ -72,6 +72,7 @@ import {
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -1687,6 +1688,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
             refetchType: 'all',
           });
+          void queryClient.invalidateQueries({
+            queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
+            refetchType: 'all',
+          });
           const nextResult: SendResultView = {
             status: 'submitted',
             id: result.signature,
@@ -1855,6 +1860,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           }),
           queryClient.invalidateQueries({
             queryKey: offpayWalletTransactionsBaseQueryKey(walletAddress, network),
+            refetchType: 'active',
+          }),
+          queryClient.invalidateQueries({
+            queryKey: offpayWalletTokenTransactionsBaseQueryKey(walletAddress, network),
             refetchType: 'active',
           }),
           queryClient.invalidateQueries({

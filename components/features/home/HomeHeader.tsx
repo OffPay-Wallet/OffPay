@@ -27,6 +27,7 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
 import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
@@ -264,6 +265,9 @@ function HomeHeaderComponent({
       });
       void queryClient.invalidateQueries({
         queryKey: offpayWalletTransactionsBaseQueryKey(publicKey, 'devnet'),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: offpayWalletTokenTransactionsBaseQueryKey(publicKey, 'devnet'),
       });
     } catch (error) {
       showToast({

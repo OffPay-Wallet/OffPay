@@ -15,6 +15,7 @@ import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import {
   offpayWalletDashboardBaseQueryKey,
   offpayWalletBalanceQueryKey,
+  offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
@@ -317,6 +318,10 @@ export function useSettlementEngine() {
         }),
         queryClient.invalidateQueries({
           queryKey: offpayWalletTransactionsBaseQueryKey(wallet, activeNetwork),
+          refetchType: 'active',
+        }),
+        queryClient.invalidateQueries({
+          queryKey: offpayWalletTokenTransactionsBaseQueryKey(wallet, activeNetwork),
           refetchType: 'active',
         }),
         queryClient.invalidateQueries({

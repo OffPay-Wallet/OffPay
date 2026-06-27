@@ -27,6 +27,7 @@ const QUERY_CACHE_WRITE_THROTTLE_MS = 1000;
 // app restarts and paint an incomplete history before the API responds.
 const NON_PERSISTED_WALLET_QUERY_SCOPES = new Set([
   'walletTransactions',
+  'walletTokenTransactions',
   'umbraEncryptedBalances',
   'umbraVaultRegistrationStatus',
   'privatePaymentBalance',

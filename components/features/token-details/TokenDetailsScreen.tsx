@@ -228,6 +228,7 @@ function buildTokenActivityRows(params: {
   transactions: Parameters<typeof buildWalletHistoryGroups>[0]['transactions'];
   transactionViews: Parameters<typeof buildWalletHistoryGroups>[0]['transactionViews'];
   localReceipts: OffpayLocalReceiptViewInput[];
+  includeUnmatchedLocalReceipts?: boolean;
   network: OffpayNetwork | null;
 }): OffpayHistoryTransactionView[] {
   const filter = params.filter;
@@ -236,6 +237,7 @@ function buildTokenActivityRows(params: {
   return buildWalletHistoryGroups({
     transactions: params.transactions,
     transactionViews: params.transactionViews,
+    includeUnmatchedLocalReceipts: params.includeUnmatchedLocalReceipts,
     localReceipts: params.localReceipts,
     network: params.network,
   })
@@ -915,6 +917,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
         filter: tokenActivityFilter,
         transactions: walletHistoryQuery.transactions,
         transactionViews: walletHistoryQuery.transactionViews,
+        includeUnmatchedLocalReceipts: false,
         localReceipts,
         network: walletHistoryQuery.network ?? network,
       }),
@@ -944,6 +947,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     refetchOnWindowFocus: 'always',
     enabled: shouldLoadTokenTransactions,
     requestOwner: 'tokenDetails.transactions.backfill',
+    serverCacheOnly: true,
     useCache: true,
   });
   const tokenEndpointActivity = useMemo<OffpayHistoryTransactionView[]>(
@@ -952,6 +956,8 @@ export function TokenDetailsScreen(): React.JSX.Element {
         filter: tokenActivityFilter,
         transactions: tokenTransactionsQuery.transactions,
         transactionViews: tokenTransactionsQuery.transactionViews,
+        includeUnmatchedLocalReceipts:
+          tokenTransactionsQuery.isFetched && !tokenTransactionsQuery.isError,
         localReceipts,
         network: tokenTransactionsQuery.network ?? network,
       }),
@@ -959,6 +965,8 @@ export function TokenDetailsScreen(): React.JSX.Element {
       localReceipts,
       network,
       tokenActivityFilter,
+      tokenTransactionsQuery.isError,
+      tokenTransactionsQuery.isFetched,
       tokenTransactionsQuery.network,
       tokenTransactionsQuery.transactionViews,
       tokenTransactionsQuery.transactions,
