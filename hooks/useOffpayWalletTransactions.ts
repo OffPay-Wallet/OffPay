@@ -101,6 +101,7 @@ export function useOffpayWalletTransactions(options?: {
   refetchOnMount?: boolean | 'always';
   refetchOnWindowFocus?: boolean | 'always';
   useCache?: boolean;
+  serverCacheOnly?: boolean;
   eagerWithoutCapabilities?: boolean;
   enabled?: boolean;
   requestOwner?: string;
@@ -116,6 +117,7 @@ export function useOffpayWalletTransactions(options?: {
   const deferUntilAfterInteractions = options?.deferUntilAfterInteractions ?? false;
   const autoFetchAllPages = options?.autoFetchAllPages ?? false;
   const useCache = options?.useCache;
+  const serverCacheOnly = options?.serverCacheOnly ?? false;
   const eagerWithoutCapabilities = options?.eagerWithoutCapabilities ?? false;
   const enabledByCaller = options?.enabled ?? true;
   const requestOwner = options?.requestOwner ?? 'wallet.transactions';
@@ -139,15 +141,11 @@ export function useOffpayWalletTransactions(options?: {
   });
   const { capabilities } = capabilitiesQuery;
   const queryClient = useQueryClient();
+  const queryCacheMode =
+    useCache === false ? 'network' : serverCacheOnly ? 'server-cache' : 'cached';
   const transactionsQueryKey = useMemo(
-    () =>
-      offpayWalletTransactionsQueryKey(
-        walletAddress,
-        network,
-        limit,
-        useCache === false ? 'network' : 'cached',
-      ),
-    [limit, network, useCache, walletAddress],
+    () => offpayWalletTransactionsQueryKey(walletAddress, network, limit, queryCacheMode),
+    [limit, network, queryCacheMode, walletAddress],
   );
   const warmTransactionsQueryKey = useMemo(
     () =>
@@ -219,6 +217,7 @@ export function useOffpayWalletTransactions(options?: {
     if (!enabledByCaller || walletAddress == null || network == null) {
       return undefined;
     }
+    if (serverCacheOnly) return undefined;
 
     const warmData =
       queryClient.getQueryData<WalletTransactionsInfiniteData>(warmTransactionsQueryKey);
@@ -244,6 +243,7 @@ export function useOffpayWalletTransactions(options?: {
     minWarmTransactionRows,
     network,
     queryClient,
+    serverCacheOnly,
     warmTransactionsQueryKey,
     walletAddress,
   ]);
@@ -288,11 +288,15 @@ export function useOffpayWalletTransactions(options?: {
         typeof previousLimit === 'object' &&
         previousLimit != null &&
         'limit' in previousLimit &&
-        previousLimit.limit === limit
+        previousLimit.limit === limit &&
+        'cacheMode' in previousLimit &&
+        previousLimit.cacheMode === queryCacheMode
         ? previousData
-        : getWarmInitialTransactionsData();
+        : serverCacheOnly
+          ? undefined
+          : getWarmInitialTransactionsData();
     },
-    initialData: getWarmInitialTransactionsData,
+    initialData: serverCacheOnly ? undefined : getWarmInitialTransactionsData,
     // Warm data is only a paint accelerator. Mark it stale so React Query
     // starts the configured fetch immediately.
     initialDataUpdatedAt: () => (getWarmInitialTransactionsData() == null ? undefined : 0),
@@ -421,6 +425,7 @@ export function useOffpayWalletTransactions(options?: {
           transactionsQueryKey,
           offpayWalletTransactionsQueryKey(walletAddress, network, limit, 'cached'),
           offpayWalletTransactionsQueryKey(walletAddress, network, limit, 'network'),
+          offpayWalletTransactionsQueryKey(walletAddress, network, limit, 'server-cache'),
         ];
         const seenKeys = new Set<string>();
 

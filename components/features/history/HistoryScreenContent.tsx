@@ -23,7 +23,7 @@ import { useOffpayWalletTransactions } from '@/hooks/useOffpayWalletTransactions
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { buildLocalHistoryReceiptInputs } from '@/lib/api/offpay-local-history-receipts';
-import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
+import { WALLET_DEEP_HISTORY_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-keys';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
@@ -70,11 +70,12 @@ export function HistoryScreenContent(): React.JSX.Element {
     deferUntilAfterInteractions: false,
     eagerWithoutCapabilities: true,
     enabled: isFocused,
-    limit: WALLET_TRANSACTIONS_PAGE_SIZE,
+    limit: WALLET_DEEP_HISTORY_PAGE_SIZE,
     refetchOnMount: 'always',
     refetchOnWindowFocus: 'always',
     retry: false,
     requestOwner: 'history.transactions',
+    serverCacheOnly: true,
     useCache: true,
     waitForDashboard: false,
   });
@@ -260,6 +261,7 @@ export function HistoryScreenContent(): React.JSX.Element {
       <View style={styles.listLayer}>
         <HistoryList
           transactionsQuery={transactionsQuery}
+          includeUnmatchedLocalReceipts={transactionsQuery.isFetched}
           localReceipts={localReceipts}
           tokenLogos={tokenLogoMap}
           onTransactionPress={handleTransactionPress}

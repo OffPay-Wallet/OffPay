@@ -2047,6 +2047,55 @@ describe('umbra-execution', () => {
     expect(getSelfClaimableUtxoToEncryptedBalanceClaimerFunction).not.toHaveBeenCalled();
   });
 
+  it('claims multiple receiver UTXOs as single-UTXO encrypted-balance batches', async () => {
+    const firstIndex = 7201;
+    const secondIndex = 7202;
+    const mockReceiverClaim = jest.fn(async (utxos: ReadonlyArray<{ insertionIndex: bigint }>) => {
+      const insertionIndex = Number(utxos[0]?.insertionIndex ?? 0n);
+      return {
+        batches: new Map([
+          [
+            0,
+            {
+              status: 'completed',
+              stealthPoolNoteIds: [`0:${insertionIndex}`],
+              txSignature: `claim-sig-${insertionIndex}`,
+            },
+          ],
+        ]),
+      };
+    });
+
+    configureRegisteredUmbraVault();
+    mockClaimableScanner.mockResolvedValueOnce(makeClaimableScanResult([firstIndex, secondIndex]));
+    getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction.mockReturnValueOnce(
+      mockReceiverClaim,
+    );
+
+    const result = await claimUmbraPrivateP2PToEncryptedBalance({
+      walletAddress: mockWalletAddress,
+      walletId: 'wallet-1',
+      network: 'devnet',
+      startInsertionIndex: firstIndex,
+      endInsertionIndex: secondIndex,
+      excludedInsertionIndices: [],
+    });
+
+    expect(mockReceiverClaim).toHaveBeenCalledTimes(2);
+    expect(mockReceiverClaim.mock.calls[0]?.[0]).toHaveLength(1);
+    expect(mockReceiverClaim.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ insertionIndex: BigInt(firstIndex) }),
+    ]);
+    expect(mockReceiverClaim.mock.calls[1]?.[0]).toHaveLength(1);
+    expect(mockReceiverClaim.mock.calls[1]?.[0]).toEqual([
+      expect.objectContaining({ insertionIndex: BigInt(secondIndex) }),
+    ]);
+    expect(result.claimedUtxoInsertionIndices).toEqual([firstIndex, secondIndex]);
+    expect(result.claimedUtxoCount).toBe(2);
+    expect(result.pendingClaimCount).toBe(0);
+    expect(result.signatures).toEqual([`claim-sig-${firstIndex}`, `claim-sig-${secondIndex}`]);
+  });
+
   it('keeps all master-seed schemes for pending P2P scans when scheme probing fails', async () => {
     const claimableIndex = 7101;
     const tokenKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);

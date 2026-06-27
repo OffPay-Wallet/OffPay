@@ -16,8 +16,8 @@ import { isValidSolanaAddress, networkSchema, readSearchParams } from '../lib/va
 
 const WALLET_BALANCE_EDGE_FRESH_TTL_MS = 10 * 1000;
 const WALLET_BALANCE_EDGE_STALE_TTL_MS = 30 * 1000;
-const WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS = 30 * 1000;
-const WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS = 60 * 1000;
+const WALLET_TRANSACTIONS_EDGE_FRESH_TTL_MS = 15 * 1000;
+const WALLET_TRANSACTIONS_EDGE_STALE_TTL_MS = 5 * 60 * 1000;
 const WALLET_DASHBOARD_EDGE_FRESH_TTL_MS = 10 * 1000;
 const WALLET_DASHBOARD_EDGE_STALE_TTL_MS = 30 * 1000;
 
@@ -208,7 +208,7 @@ walletRoutes.get('/transactions', async (context) => {
     : await resolveTransactions();
 
   const response = context.json(payload);
-  response.headers.set('Cache-Control', canUseEdgeCache ? 'public, max-age=30' : 'no-store');
+  response.headers.set('Cache-Control', canUseEdgeCache ? 'public, max-age=15' : 'no-store');
   return response;
 });
 
@@ -242,7 +242,7 @@ walletRoutes.get('/token-transactions', async (context) => {
     : await resolveTransactions();
 
   const response = context.json(payload);
-  response.headers.set('Cache-Control', canUseEdgeCache ? 'public, max-age=30' : 'no-store');
+  response.headers.set('Cache-Control', canUseEdgeCache ? 'public, max-age=15' : 'no-store');
   return response;
 });
 

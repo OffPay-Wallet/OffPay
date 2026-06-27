@@ -12,7 +12,7 @@ import type { PersistedClient } from '@tanstack/react-query-persist-client';
  * cause TanStack to discard any persisted cache from older builds.
  * Bump it whenever a query's response shape changes.
  */
-const APP_QUERY_CACHE_VERSION = 'v6';
+const APP_QUERY_CACHE_VERSION = 'v7';
 
 /** 24 hours of cached query data is plenty for a wallet UI. */
 const QUERY_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
@@ -22,7 +22,11 @@ const QUERY_CACHE_KEY = 'offpay-tanstack-query-cache';
 
 const QUERY_CACHE_WRITE_THROTTLE_MS = 1000;
 
+// History should cold-start from the worker/server cache. Persisting wallet
+// transaction query data can preserve optimistic single-send pages across
+// app restarts and paint an incomplete history before the API responds.
 const NON_PERSISTED_WALLET_QUERY_SCOPES = new Set([
+  'walletTransactions',
   'umbraEncryptedBalances',
   'umbraVaultRegistrationStatus',
   'privatePaymentBalance',

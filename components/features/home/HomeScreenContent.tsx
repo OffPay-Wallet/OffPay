@@ -226,6 +226,7 @@ export function HomeScreenContent(): React.JSX.Element {
     refetchOnMount: true,
     refetchOnWindowFocus: true,
     requestOwner: 'home.transactions.history',
+    serverCacheOnly: true,
     useCache: true,
   });
   const pendingBackupStatsQuery = usePendingBackupQueueStats({
@@ -288,6 +289,7 @@ export function HomeScreenContent(): React.JSX.Element {
     return buildWalletRecentActivityItems({
       transactions: transactionsQuery.transactions,
       transactionViews: transactionsQuery.transactionViews,
+      includeUnmatchedLocalReceipts: transactionsQuery.isFetched && !transactionsQuery.isError,
       localReceipts: localReceiptsForNetwork,
       network,
     }).slice(0, MAX_HOME_ACTIVITY_ITEMS);
@@ -297,6 +299,8 @@ export function HomeScreenContent(): React.JSX.Element {
     privatePaymentReceipts,
     publicKey,
     swapReceipts,
+    transactionsQuery.isError,
+    transactionsQuery.isFetched,
     transactionsQuery.transactionViews,
     transactionsQuery.transactions,
   ]);

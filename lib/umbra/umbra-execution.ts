@@ -195,6 +195,9 @@ const UMBRA_AWAIT_COMPUTATION_FINALIZATION = {
 } as const;
 const UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT = 384n;
 const UMBRA_CLAIM_SCAN_PAGE_LIMIT = UMBRA_CLAIM_RECENT_SCAN_LEAF_LIMIT;
+// Multi-UTXO encrypted-balance claims can exceed the Umbra program heap on
+// devnet. Claim All still drains the pending set, but it does so via n1 claims.
+const UMBRA_ENCRYPTED_BALANCE_CLAIM_BATCH_SIZE = 1;
 const U64_MAX = (1n << 64n) - 1n;
 const ENCRYPTED_USER_STATUS_BIT_INITIALISED = 0;
 const ENCRYPTED_USER_STATUS_BIT_ACTIVE_FOR_ANONYMOUS_USAGE = 1;
@@ -3187,6 +3190,14 @@ function filterClaimableUtxos<T>(
   });
 }
 
+function splitEncryptedBalanceClaimBatches<T>(utxos: readonly T[]): T[][] {
+  const batches: T[][] = [];
+  for (let index = 0; index < utxos.length; index += UMBRA_ENCRYPTED_BALANCE_CLAIM_BATCH_SIZE) {
+    batches.push(utxos.slice(index, index + UMBRA_ENCRYPTED_BALANCE_CLAIM_BATCH_SIZE));
+  }
+  return batches;
+}
+
 export function getUmbraClaimScanRangeForInsertionIndices(
   insertionIndices: readonly number[] | null | undefined,
 ): Pick<UmbraClaimScanParams, 'scanMode' | 'startInsertionIndex' | 'endInsertionIndex'> {
@@ -3428,8 +3439,8 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
       const unresolvedReceiverIndices = new Set<number>();
       const resolvedSelfIndices = new Set<number>();
       const unresolvedSelfIndices = new Set<number>();
-      let alreadyClaimedAllReceiver = false;
-      let alreadyClaimedAllSelf = false;
+      let alreadyClaimedAllReceiver = receiverClaimableUtxos.length > 0;
+      let alreadyClaimedAllSelf = selfClaimableUtxos.length > 0;
       let firstFailureReason: string | null = null;
       if (receiverClaimableUtxos.length > 0) {
         const claimReceiver =
@@ -3452,98 +3463,121 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
                   awaitCompletion: true,
                 } as never,
               );
-        try {
-          const claimStartedAt = mark();
-          let result: unknown;
+        for (const receiverBatch of splitEncryptedBalanceClaimBatches(receiverClaimableUtxos)) {
           try {
-            result = await claimReceiver(
-              receiverClaimableUtxos as never,
-              new Uint8Array(32) as never,
-            );
-            measure('umbra.claims.claimReceiver', claimStartedAt, {
-              network: params.network,
-              utxoCount: receiverClaimableUtxos.length,
-              ok: true,
-            });
-          } catch (claimCallError) {
-            measure('umbra.claims.claimReceiver', claimStartedAt, {
-              network: params.network,
-              utxoCount: receiverClaimableUtxos.length,
-              ok: false,
-              error:
-                claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
-            });
-            throw claimCallError;
-          }
-          const classified = assertUmbraClaimCompleted(result);
-          for (const index of classified.resolvedInsertionIndices) {
-            resolvedReceiverIndices.add(index);
-          }
-          for (const index of classified.unresolvedInsertionIndices) {
-            unresolvedReceiverIndices.add(index);
-          }
-          // Defensive fallback: if the SDK reports `completed` but
-          // didn't surface specific `utxoIds`, every UTXO we just
-          // submitted has had its nullifier set on-chain (the relayer
-          // would not return `completed` otherwise). Treat all
-          // attempted UTXOs as resolved so the local exclusion set
-          // captures them and the next scan stops re-surfacing them.
-          if (
-            classified.outcome === 'completed' &&
-            resolvedReceiverIndices.size === 0 &&
-            unresolvedReceiverIndices.size === 0
-          ) {
-            for (const utxo of receiverClaimableUtxos) {
-              const index = getUtxoInsertionIndexAsNumber(utxo);
-              if (index != null) resolvedReceiverIndices.add(index);
+            const claimStartedAt = mark();
+            let result: unknown;
+            let classified: ReturnType<typeof assertUmbraClaimCompleted>;
+            try {
+              result = await claimReceiver(receiverBatch as never, new Uint8Array(32) as never);
+              classified = assertUmbraClaimCompleted(result);
+              const batchFailed =
+                classified.failureReason != null ||
+                classified.unresolvedInsertionIndices.length > 0;
+              measure('umbra.claims.claimReceiver', claimStartedAt, {
+                network: params.network,
+                utxoCount: receiverBatch.length,
+                ok: !batchFailed,
+                ...(batchFailed
+                  ? {
+                      error:
+                        classified.failureReason ??
+                        'Umbra receiver claim batch did not land on-chain.',
+                    }
+                  : {}),
+              });
+            } catch (claimCallError) {
+              measure('umbra.claims.claimReceiver', claimStartedAt, {
+                network: params.network,
+                utxoCount: receiverBatch.length,
+                ok: false,
+                error:
+                  claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
+              });
+              throw claimCallError;
             }
-          }
-          if (
-            classified.outcome === 'already_claimed' &&
-            classified.unresolvedInsertionIndices.length === 0
-          ) {
-            alreadyClaimedAllReceiver = true;
-            // Same fallback for the already-claimed path: every UTXO
-            // we submitted is already on-chain (or its nullifier is
-            // already set), so each one belongs in the exclusion set.
-            if (resolvedReceiverIndices.size === 0) {
-              for (const utxo of receiverClaimableUtxos) {
+            if (
+              classified.outcome !== 'already_claimed' ||
+              classified.unresolvedInsertionIndices.length > 0 ||
+              classified.failureReason != null
+            ) {
+              alreadyClaimedAllReceiver = false;
+            }
+            for (const index of classified.resolvedInsertionIndices) {
+              resolvedReceiverIndices.add(index);
+            }
+            for (const index of classified.unresolvedInsertionIndices) {
+              unresolvedReceiverIndices.add(index);
+            }
+            // Defensive fallback: if the SDK reports `completed` but
+            // didn't surface specific `utxoIds`, every UTXO we just
+            // submitted has had its nullifier set on-chain (the relayer
+            // would not return `completed` otherwise). Treat all
+            // attempted UTXOs as resolved so the local exclusion set
+            // captures them and the next scan stops re-surfacing them.
+            if (
+              classified.outcome === 'completed' &&
+              classified.failureReason == null &&
+              classified.resolvedInsertionIndices.length === 0 &&
+              classified.unresolvedInsertionIndices.length === 0
+            ) {
+              for (const utxo of receiverBatch) {
                 const index = getUtxoInsertionIndexAsNumber(utxo);
                 if (index != null) resolvedReceiverIndices.add(index);
               }
             }
-          }
-          if (classified.failureReason != null && firstFailureReason == null) {
-            firstFailureReason = classified.failureReason;
-          }
-          // Persist resolved indices NOW, before any further await,
-          // so the local exclusion set is populated even if the React
-          // component unmounts before the function returns. The
-          // existing post-success persistence in the receive flow
-          // remains as a belt-and-braces safety net.
-          if (params.onUtxoClaimedOnChain != null && resolvedReceiverIndices.size > 0) {
-            params.onUtxoClaimedOnChain(Array.from(resolvedReceiverIndices));
-          }
-          claimResults.push(result);
-        } catch (error: unknown) {
-          if (isBenignAlreadyClaimedFailure(error)) {
-            alreadyClaimedAllReceiver = true;
-            for (const utxo of receiverClaimableUtxos) {
-              const index = getUtxoInsertionIndexAsNumber(utxo);
-              if (index != null) resolvedReceiverIndices.add(index);
+            if (
+              classified.outcome === 'already_claimed' &&
+              classified.unresolvedInsertionIndices.length === 0
+            ) {
+              // Same fallback for the already-claimed path: every UTXO
+              // we submitted is already on-chain (or its nullifier is
+              // already set), so each one belongs in the exclusion set.
+              if (classified.resolvedInsertionIndices.length === 0) {
+                for (const utxo of receiverBatch) {
+                  const index = getUtxoInsertionIndexAsNumber(utxo);
+                  if (index != null) resolvedReceiverIndices.add(index);
+                }
+              }
             }
+            if (classified.failureReason != null) {
+              if (firstFailureReason == null) firstFailureReason = classified.failureReason;
+              if (classified.unresolvedInsertionIndices.length === 0) {
+                for (const utxo of receiverBatch) {
+                  const index = getUtxoInsertionIndexAsNumber(utxo);
+                  if (index != null) unresolvedReceiverIndices.add(index);
+                }
+              }
+            }
+            // Persist resolved indices NOW, before any further await,
+            // so the local exclusion set is populated even if the React
+            // component unmounts before the function returns. The
+            // existing post-success persistence in the receive flow
+            // remains as a belt-and-braces safety net.
             if (params.onUtxoClaimedOnChain != null && resolvedReceiverIndices.size > 0) {
               params.onUtxoClaimedOnChain(Array.from(resolvedReceiverIndices));
             }
-          } else {
-            // Track every receiver UTXO as unresolved so the caller knows
-            // the on-chain state is unchanged. Then surface the error so
-            // the receive flow can run its retry path.
-            for (const utxo of receiverClaimableUtxos) {
-              const index = getUtxoInsertionIndexAsNumber(utxo);
-              if (index != null) unresolvedReceiverIndices.add(index);
+            claimResults.push(result);
+          } catch (error: unknown) {
+            if (isBenignAlreadyClaimedFailure(error)) {
+              for (const utxo of receiverBatch) {
+                const index = getUtxoInsertionIndexAsNumber(utxo);
+                if (index != null) resolvedReceiverIndices.add(index);
+              }
+              if (params.onUtxoClaimedOnChain != null && resolvedReceiverIndices.size > 0) {
+                params.onUtxoClaimedOnChain(Array.from(resolvedReceiverIndices));
+              }
+            } else {
+              // Track every receiver UTXO in this batch as unresolved so
+              // the caller knows the on-chain state is unchanged. Then
+              // surface the error so the receive flow can run its retry path.
+              for (const utxo of receiverBatch) {
+                const index = getUtxoInsertionIndexAsNumber(utxo);
+                if (index != null) unresolvedReceiverIndices.add(index);
+              }
+              alreadyClaimedAllReceiver = false;
+              throw error;
             }
-            throw error;
           }
         }
       }
@@ -3569,86 +3603,110 @@ export async function claimUmbraPrivateP2PToEncryptedBalance(
                   awaitCompletion: true,
                 } as never,
               );
-        try {
-          const claimStartedAt = mark();
-          let result: unknown;
+        for (const selfBatch of splitEncryptedBalanceClaimBatches(selfClaimableUtxos)) {
           try {
-            result = await claimSelf(selfClaimableUtxos as never, new Uint8Array(32) as never);
-            measure('umbra.claims.claimSelf', claimStartedAt, {
-              network: params.network,
-              utxoCount: selfClaimableUtxos.length,
-              ok: true,
-            });
-          } catch (claimCallError) {
-            measure('umbra.claims.claimSelf', claimStartedAt, {
-              network: params.network,
-              utxoCount: selfClaimableUtxos.length,
-              ok: false,
-              error:
-                claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
-            });
-            throw claimCallError;
-          }
-          const classified = assertUmbraClaimCompleted(result);
-          for (const index of classified.resolvedInsertionIndices) {
-            resolvedSelfIndices.add(index);
-          }
-          for (const index of classified.unresolvedInsertionIndices) {
-            unresolvedSelfIndices.add(index);
-          }
-          // Defensive fallback for the self-claim path: same rationale
-          // as the receiver path above. When the relayer reports
-          // `completed` we trust the on-chain nullifier landed for
-          // every UTXO we submitted, even if the SDK didn't surface
-          // per-UTXO ids. Guarded by `failureReason == null` so a failed
-          // batch (e.g. UnableToVerifyGroth16Proof) can never be silently
-          // marked as resolved here.
-          if (
-            classified.outcome === 'completed' &&
-            classified.failureReason == null &&
-            resolvedSelfIndices.size === 0 &&
-            unresolvedSelfIndices.size === 0
-          ) {
-            for (const utxo of selfClaimableUtxos) {
-              const index = getUtxoInsertionIndexAsNumber(utxo);
-              if (index != null) resolvedSelfIndices.add(index);
+            const claimStartedAt = mark();
+            let result: unknown;
+            let classified: ReturnType<typeof assertUmbraClaimCompleted>;
+            try {
+              result = await claimSelf(selfBatch as never, new Uint8Array(32) as never);
+              classified = assertUmbraClaimCompleted(result);
+              const batchFailed =
+                classified.failureReason != null ||
+                classified.unresolvedInsertionIndices.length > 0;
+              measure('umbra.claims.claimSelf', claimStartedAt, {
+                network: params.network,
+                utxoCount: selfBatch.length,
+                ok: !batchFailed,
+                ...(batchFailed
+                  ? {
+                      error:
+                        classified.failureReason ?? 'Umbra self claim batch did not land on-chain.',
+                    }
+                  : {}),
+              });
+            } catch (claimCallError) {
+              measure('umbra.claims.claimSelf', claimStartedAt, {
+                network: params.network,
+                utxoCount: selfBatch.length,
+                ok: false,
+                error:
+                  claimCallError instanceof Error ? claimCallError.message : String(claimCallError),
+              });
+              throw claimCallError;
             }
-          }
-          if (
-            classified.outcome === 'already_claimed' &&
-            classified.unresolvedInsertionIndices.length === 0
-          ) {
-            alreadyClaimedAllSelf = true;
-            if (resolvedSelfIndices.size === 0) {
-              for (const utxo of selfClaimableUtxos) {
+            if (
+              classified.outcome !== 'already_claimed' ||
+              classified.unresolvedInsertionIndices.length > 0 ||
+              classified.failureReason != null
+            ) {
+              alreadyClaimedAllSelf = false;
+            }
+            for (const index of classified.resolvedInsertionIndices) {
+              resolvedSelfIndices.add(index);
+            }
+            for (const index of classified.unresolvedInsertionIndices) {
+              unresolvedSelfIndices.add(index);
+            }
+            // Defensive fallback for the self-claim path: same rationale
+            // as the receiver path above. When the relayer reports
+            // `completed` we trust the on-chain nullifier landed for
+            // every UTXO we submitted, even if the SDK didn't surface
+            // per-UTXO ids. Guarded by `failureReason == null` so a failed
+            // batch (e.g. UnableToVerifyGroth16Proof) can never be silently
+            // marked as resolved here.
+            if (
+              classified.outcome === 'completed' &&
+              classified.failureReason == null &&
+              classified.resolvedInsertionIndices.length === 0 &&
+              classified.unresolvedInsertionIndices.length === 0
+            ) {
+              for (const utxo of selfBatch) {
                 const index = getUtxoInsertionIndexAsNumber(utxo);
                 if (index != null) resolvedSelfIndices.add(index);
               }
             }
-          }
-          if (classified.failureReason != null && firstFailureReason == null) {
-            firstFailureReason = classified.failureReason;
-          }
-          if (params.onUtxoClaimedOnChain != null && resolvedSelfIndices.size > 0) {
-            params.onUtxoClaimedOnChain(Array.from(resolvedSelfIndices));
-          }
-          claimResults.push(result);
-        } catch (error: unknown) {
-          if (isBenignAlreadyClaimedFailure(error)) {
-            alreadyClaimedAllSelf = true;
-            for (const utxo of selfClaimableUtxos) {
-              const index = getUtxoInsertionIndexAsNumber(utxo);
-              if (index != null) resolvedSelfIndices.add(index);
+            if (
+              classified.outcome === 'already_claimed' &&
+              classified.unresolvedInsertionIndices.length === 0
+            ) {
+              if (classified.resolvedInsertionIndices.length === 0) {
+                for (const utxo of selfBatch) {
+                  const index = getUtxoInsertionIndexAsNumber(utxo);
+                  if (index != null) resolvedSelfIndices.add(index);
+                }
+              }
+            }
+            if (classified.failureReason != null) {
+              if (firstFailureReason == null) firstFailureReason = classified.failureReason;
+              if (classified.unresolvedInsertionIndices.length === 0) {
+                for (const utxo of selfBatch) {
+                  const index = getUtxoInsertionIndexAsNumber(utxo);
+                  if (index != null) unresolvedSelfIndices.add(index);
+                }
+              }
             }
             if (params.onUtxoClaimedOnChain != null && resolvedSelfIndices.size > 0) {
               params.onUtxoClaimedOnChain(Array.from(resolvedSelfIndices));
             }
-          } else {
-            for (const utxo of selfClaimableUtxos) {
-              const index = getUtxoInsertionIndexAsNumber(utxo);
-              if (index != null) unresolvedSelfIndices.add(index);
+            claimResults.push(result);
+          } catch (error: unknown) {
+            if (isBenignAlreadyClaimedFailure(error)) {
+              for (const utxo of selfBatch) {
+                const index = getUtxoInsertionIndexAsNumber(utxo);
+                if (index != null) resolvedSelfIndices.add(index);
+              }
+              if (params.onUtxoClaimedOnChain != null && resolvedSelfIndices.size > 0) {
+                params.onUtxoClaimedOnChain(Array.from(resolvedSelfIndices));
+              }
+            } else {
+              for (const utxo of selfBatch) {
+                const index = getUtxoInsertionIndexAsNumber(utxo);
+                if (index != null) unresolvedSelfIndices.add(index);
+              }
+              alreadyClaimedAllSelf = false;
+              throw error;
             }
-            throw error;
           }
         }
       }
