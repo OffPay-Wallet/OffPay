@@ -1,8 +1,8 @@
 /**
  * Sanitize the model's free-text reply before it lands in the chat bubble.
  *
- * Gemma 4 (and similar instruction-tuned models) tend to dump a private
- * scratchpad before the visible answer — for example "1. Greet the user. 2.
+ * Instruction-tuned models can dump a private scratchpad before the visible
+ * answer — for example "1. Greet the user. 2.
  * Briefly state my purpose…" or "I need to look at the safe client context".
  * When tools are attached the same scratchpad echoes the tool name in raw
  * call syntax. Both leak prompt internals and inflate the bubble.

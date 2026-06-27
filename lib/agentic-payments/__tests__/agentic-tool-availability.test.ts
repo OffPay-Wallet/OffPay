@@ -3,6 +3,7 @@ import {
   getAvailableAgenticModelToolSchemas,
 } from '@/lib/agentic-payments/agent-tools';
 
+import type { AgentTurnRequest } from '@/lib/agentic-payments/types';
 import type { CapabilitiesResponse, CapabilityStatus } from '@/types/offpay-api';
 
 const available: CapabilityStatus = {
@@ -16,6 +17,7 @@ const unsupportedNetwork: CapabilityStatus = {
   reason: 'unsupported_network',
   message: 'Unsupported on this network',
 };
+const workerMaxChatBytes = 65_536;
 
 function buildCapabilities(
   network: CapabilitiesResponse['network'],
@@ -118,4 +120,47 @@ describe('agentic tool availability', () => {
     expect(toolNames).not.toContain('flash_get_positions');
     expect(toolNames).not.toContain('flash_open_position');
   });
+
+  it.each(['devnet', 'mainnet'] as const)(
+    'keeps %s agent-turn body inside the AI proxy request limit',
+    (network) => {
+      const toolSchemas = getAvailableAgenticModelToolSchemas({
+        network,
+        walletAddress,
+        walletId,
+        walletMode: 'online',
+        canUseNetwork: true,
+        canUseUmbraWallet: true,
+        capabilities: buildCapabilities(network),
+      });
+      const request: AgentTurnRequest = {
+        responseMode: 'agent_turn',
+        messages: [{ role: 'user', content: 'Show my Umbra vault balance' }],
+        toolSchemas,
+        context: {
+          network,
+          walletMode: 'online',
+          capabilities: {
+            networkAvailable: true,
+            walletBalance: true,
+            normalSend: true,
+            privateSend: true,
+            swap: network === 'mainnet',
+            umbra: true,
+            umbraVaultBalance: true,
+            privateBalance: true,
+            magicblockPrivateBalance: true,
+            flashTrade: network === 'mainnet',
+          },
+          tokenSymbols: ['SOL', 'USDC'],
+        },
+        stream: false,
+      };
+
+      const bodyBytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
+
+      expect(toolSchemas.length).toBeLessThanOrEqual(40);
+      expect(bodyBytes).toBeLessThanOrEqual(workerMaxChatBytes);
+    },
+  );
 });

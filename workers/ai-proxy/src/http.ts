@@ -71,7 +71,8 @@ export async function readAudioUpload(request: Request, maxBytes: number): Promi
 
     return {
       blob: entry,
-      filename: 'name' in entry && typeof entry.name === 'string' ? entry.name : 'offpay-audio.webm',
+      filename:
+        'name' in entry && typeof entry.name === 'string' ? entry.name : 'offpay-audio.webm',
       contentType: entry.type || 'application/octet-stream',
       languageHint: readStringFormValue(form, 'languageHint') ?? languageHint,
     };
@@ -135,12 +136,11 @@ export function normalizeError(error: unknown): Record<string, unknown> {
     // is `proxy` or `gemini`) so misconfigured deploys don't look like a
     // transient outage.
     const useRawMessage =
-      error.status === 503 &&
-      (error.provider === 'proxy' || error.provider === 'gemini');
+      error.status === 503 && (error.provider === 'proxy' || error.provider === 'gemini');
     return {
       kind: 'error',
       code: codeForStatus(error.status),
-      message: useRawMessage ? error.message : publicMessageForStatus(error.status),
+      message: useRawMessage ? error.message : publicMessageForProviderError(error),
       retryAfterMs: error.retryAfterMs,
     };
   }
@@ -310,4 +310,11 @@ function publicMessageForStatus(status: number): string {
   if (status === 429) return 'The AI provider is rate limited. Try again shortly.';
   if (status === 504) return 'The AI provider timed out. Try again.';
   return 'The AI provider is temporarily unavailable.';
+}
+
+function publicMessageForProviderError(error: ProviderError): string {
+  if (error.provider === 'gemini' && (error.status === 400 || error.status === 422)) {
+    return 'The configured AI model rejected the request.';
+  }
+  return publicMessageForStatus(error.status);
 }
