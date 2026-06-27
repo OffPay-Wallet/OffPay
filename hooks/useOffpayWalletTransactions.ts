@@ -216,7 +216,7 @@ export function useOffpayWalletTransactions(options?: {
   const getWarmInitialTransactionsData = useCallback(():
     | WalletTransactionsInfiniteData
     | undefined => {
-    if (limit === WALLET_TRANSACTIONS_PAGE_SIZE || walletAddress == null || network == null) {
+    if (!enabledByCaller || walletAddress == null || network == null) {
       return undefined;
     }
 
@@ -239,6 +239,7 @@ export function useOffpayWalletTransactions(options?: {
     return warmData;
   }, [
     allowPartialWarmData,
+    enabledByCaller,
     limit,
     minWarmTransactionRows,
     network,
@@ -292,8 +293,8 @@ export function useOffpayWalletTransactions(options?: {
         : getWarmInitialTransactionsData();
     },
     initialData: getWarmInitialTransactionsData,
-    // A shallow warm page is only a paint accelerator for deep history.
-    // Mark it stale so React Query starts the full fetch immediately.
+    // Warm data is only a paint accelerator. Mark it stale so React Query
+    // starts the configured fetch immediately.
     initialDataUpdatedAt: () => (getWarmInitialTransactionsData() == null ? undefined : 0),
     refetchOnMount: options?.refetchOnMount ?? true,
     refetchOnWindowFocus: options?.refetchOnWindowFocus,

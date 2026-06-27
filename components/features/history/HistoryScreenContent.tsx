@@ -75,7 +75,7 @@ export function HistoryScreenContent(): React.JSX.Element {
     refetchOnWindowFocus: 'always',
     retry: false,
     requestOwner: 'history.transactions',
-    useCache: false,
+    useCache: true,
     waitForDashboard: false,
   });
   const tokenLogoMap = useOffpayTokenLogoMap();
@@ -135,7 +135,7 @@ export function HistoryScreenContent(): React.JSX.Element {
           refreshHistoryInFlightRef.current = false;
           return;
         }
-        void refetchFreshHistoryQuery({ signal })
+        void refetchFreshHistoryQuery({ signal, useCache: false })
           .catch(() => undefined)
           .finally(() => {
             refreshHistoryInFlightRef.current = false;

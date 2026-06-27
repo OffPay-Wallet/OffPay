@@ -162,8 +162,8 @@ export function getHistoryRpcHttpUrlCandidates(
   network: Network,
 ): RpcProviderEndpoint[] {
   return uniqueEndpoints([
-    { provider: 'solanaPublic', transport: 'http', url: PUBLIC_SOLANA_RPC_URLS[network] },
     ...getAlchemyRpcHttpUrlCandidates(bindings, network),
+    { provider: 'solanaPublic', transport: 'http', url: PUBLIC_SOLANA_RPC_URLS[network] },
   ]);
 }
 

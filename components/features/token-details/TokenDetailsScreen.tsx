@@ -944,7 +944,7 @@ export function TokenDetailsScreen(): React.JSX.Element {
     refetchOnWindowFocus: 'always',
     enabled: shouldLoadTokenTransactions,
     requestOwner: 'tokenDetails.transactions.backfill',
-    useCache: false,
+    useCache: true,
   });
   const tokenEndpointActivity = useMemo<OffpayHistoryTransactionView[]>(
     () =>

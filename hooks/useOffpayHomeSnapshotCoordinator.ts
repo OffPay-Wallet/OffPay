@@ -38,6 +38,11 @@ interface UseOffpayHomeSnapshotCoordinatorParams {
   enabled: boolean;
 }
 
+interface DisplayCacheHydrationRequest {
+  identity: string;
+  promise: Promise<boolean>;
+}
+
 export function useOffpayHomeSnapshotCoordinator({
   walletAddress,
   network,
@@ -57,6 +62,7 @@ export function useOffpayHomeSnapshotCoordinator({
   const startupWallClockRef = useRef<number | null>(null);
   const fallbackFetchMarkKeyRef = useRef<string | null>(null);
   const freshPaintLoggedRef = useRef(false);
+  const displayCacheHydrationRef = useRef<DisplayCacheHydrationRequest | null>(null);
   const identity = useMemo(
     () => `${network ?? 'no-network'}:${walletAddress ?? 'no-wallet'}:${enabled ? 'on' : 'off'}`,
     [enabled, network, walletAddress],
@@ -109,6 +115,7 @@ export function useOffpayHomeSnapshotCoordinator({
     if (!enabled || walletAddress == null || network == null) {
       startupMeasureRef.current = null;
       startupWallClockRef.current = null;
+      displayCacheHydrationRef.current = null;
       return undefined;
     }
 
@@ -119,22 +126,45 @@ export function useOffpayHomeSnapshotCoordinator({
     startupMeasureRef.current = startedAt;
     startupWallClockRef.current = Date.now();
 
-    void hydrateWalletDisplayCacheIntoQueryClient({
-      queryClient,
-      walletAddress: currentWalletAddress,
-      network: currentNetwork,
-      options: {
-        includeBalance: true,
-        includeTransactions: true,
-        includePendingBackupStats: true,
-        measurePrefix: 'home.snapshot.displayCacheHydrate',
-        onTransactionsHydrated: (status) => {
-          if (!cancelled) setTransactionsCacheStatus(status);
+    const existingHydration =
+      displayCacheHydrationRef.current?.identity === identity
+        ? displayCacheHydrationRef.current
+        : null;
+    const hydrationPromise =
+      existingHydration?.promise ??
+      hydrateWalletDisplayCacheIntoQueryClient({
+        queryClient,
+        walletAddress: currentWalletAddress,
+        network: currentNetwork,
+        options: {
+          includeBalance: true,
+          includeTransactions: true,
+          includePendingBackupStats: true,
+          measurePrefix: 'home.snapshot.displayCacheHydrate',
+          onTransactionsHydrated: (status) => {
+            if (!cancelled) setTransactionsCacheStatus(status);
+          },
         },
-      },
-    })
+      });
+    if (existingHydration == null) {
+      displayCacheHydrationRef.current = {
+        identity,
+        promise: hydrationPromise,
+      };
+    }
+
+    void hydrationPromise
       .then((hydrated) => {
         if (cancelled) return;
+        const hydratedTransactions = queryClient.getQueryData(
+          offpayWalletTransactionsQueryKey(
+            currentWalletAddress,
+            currentNetwork,
+            WALLET_TRANSACTIONS_PAGE_SIZE,
+            'cached',
+          ),
+        );
+        setTransactionsCacheStatus(hydratedTransactions == null ? 'miss' : 'hit');
         setDisplayCacheStatus(hydrated ? 'hit' : 'miss');
         measure('home.snapshot.displayCacheReady', startedAt, {
           network: currentNetwork,

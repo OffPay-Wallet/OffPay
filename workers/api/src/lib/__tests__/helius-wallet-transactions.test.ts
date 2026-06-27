@@ -843,10 +843,10 @@ describe('wallet transaction history (standard Solana RPC)', () => {
       recordTiming: (name) => timings.push(name),
     });
 
-    // Public Solana RPC is the primary history provider now; Alchemy is only a
-    // backup when public RPC is slow or unavailable.
+    // Alchemy raw RPC is the fast primary for standard history methods; public
+    // Solana RPC remains the history-only backup when Alchemy fails.
     expect(response.transactions).toEqual([]);
-    expect(calledUrls.some((url) => url.includes('alchemy'))).toBe(false);
+    expect(calledUrls.some((url) => url.includes('alchemy'))).toBe(true);
     expect(calledUrls.some((url) => url === 'https://api.devnet.solana.com')).toBe(true);
     expect(timings).toContain('tx_rpc_provider_solanaPublic');
     expect(timings).not.toContain('tx_rpc_provider_alchemy');
@@ -1353,7 +1353,7 @@ describe('wallet transaction history (standard Solana RPC)', () => {
     expect(configs.every((config) => config.commitment === 'confirmed')).toBe(true);
   });
 
-  it('prefers Solana public RPC for history when Alchemy is also configured', async () => {
+  it('prefers Alchemy raw RPC for history when Alchemy is configured', async () => {
     const multiProviderBindings = {
       ...bindings,
       HELIUS_DEVNET_API_KEY: 'test-devnet-key',
@@ -1380,7 +1380,7 @@ describe('wallet transaction history (standard Solana RPC)', () => {
     });
 
     expect(response.transactions).toHaveLength(1);
-    expect(calledUrls.every((url) => url === 'https://api.devnet.solana.com')).toBe(true);
+    expect(calledUrls.every((url) => url === 'https://alchemy.offpay.test')).toBe(true);
     expect(seenMethods).not.toContain('getTransactionsForAddress');
     expect(seenMethods).toContain('getSignaturesForAddress');
   });

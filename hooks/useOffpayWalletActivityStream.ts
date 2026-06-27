@@ -205,8 +205,18 @@ export function useOffpayWalletActivityStream(options?: {
   const capabilitiesQuery = useOffpayCapabilities();
   const { capabilities } = capabilitiesQuery;
   const queryClient = useQueryClient();
-  const aggregateCapability = getOffpayFeatureCapability(capabilities, 'stream.walletActivity');
-  const aggregateAvailable = isOffpayFeatureAvailable(capabilities, 'stream.walletActivity');
+  const aggregateCapability =
+    capabilities == null && !capabilitiesQuery.hasCapabilityError
+      ? {
+          available: true,
+          reason: 'available' as const,
+          message: 'Wallet activity stream is available.',
+        }
+      : getOffpayFeatureCapability(capabilities, 'stream.walletActivity');
+  const aggregateAvailable =
+    capabilities == null && !capabilitiesQuery.hasCapabilityError
+      ? true
+      : isOffpayFeatureAvailable(capabilities, 'stream.walletActivity');
 
   // Stream capabilities are derived purely from local env config
   // (`hasConfiguredWsProvider`), so the previous `useQuery` round
