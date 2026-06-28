@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, {
@@ -12,6 +12,11 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import type {
+  EntryAnimationsValues,
+  ExitAnimationsValues,
+  LayoutAnimation,
+} from 'react-native-reanimated';
 import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
@@ -22,18 +27,24 @@ import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-walle
 import { parseFormattedFiatCurrency } from '@/lib/currency-rates';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
-import { PrivateRouteSelector } from './PrivateRouteSelector';
 import type { PrivatePaymentRoute, PrivatePaymentRouteOption, SendTokenOption } from './types';
 
 const MIN_AMOUNT_FONT_SIZE = 12;
 const AMOUNT_DISPLAY_BREATHING_ROOM = 48;
-const AMOUNT_ROLL_DURATION_MS = 180;
-const AMOUNT_ROLL_DISTANCE = 22;
+const AMOUNT_SMOOTH_DURATION_MS = 260;
+const AMOUNT_SMOOTH_DISTANCE = 10;
 const AMOUNT_FEEDBACK_DURATION_MS = 180;
+const DROPDOWN_MORPH_OPEN_DURATION_MS = 280;
+const DROPDOWN_MORPH_CLOSE_DURATION_MS = 230;
+const DROPDOWN_MORPH_FADE_DURATION_MS = 160;
+const DROPDOWN_MORPH_TRANSLATE_Y = 6;
+const DROPDOWN_MORPH_SCALE_X = 0.985;
+const DROPDOWN_MORPH_START_RADIUS = 16;
 const KEYPAD_PRESS_IN_MS = 40;
 const KEYPAD_PRESS_OUT_MS = 120;
 const KEYPAD_PRESS_FILL = 'rgba(255, 255, 255, 0.035)';
-const AMOUNT_ROLL_EASING = Easing.bezier(0.16, 1, 0.3, 1);
+const AMOUNT_SMOOTH_EASING = Easing.bezier(0.22, 1, 0.36, 1);
+const DROPDOWN_MORPH_EASING = Easing.bezier(0.2, 0, 0, 1);
 const AMOUNT_FADE_EASING = Easing.out(Easing.quad);
 const MAX_AMOUNT_WHOLE_DIGITS = 10;
 const TOKEN_INPUT_EXTRA_HORIZONTAL_GAP = 6;
@@ -217,47 +228,44 @@ function feedbackExit() {
   };
 }
 
-function amountEnterFromBelow() {
+function dropdownMorphEnter(values: EntryAnimationsValues): LayoutAnimation {
   'worklet';
+  const targetRadius =
+    typeof values.targetBorderRadius === 'number'
+      ? values.targetBorderRadius
+      : DROPDOWN_MORPH_START_RADIUS;
+
   return {
     initialValues: {
       opacity: 0,
-      transform: [{ translateY: AMOUNT_ROLL_DISTANCE }],
+      height: 0,
+      borderRadius: DROPDOWN_MORPH_START_RADIUS,
+      transform: [{ translateY: -DROPDOWN_MORPH_TRANSLATE_Y }, { scaleX: DROPDOWN_MORPH_SCALE_X }],
     },
     animations: {
       opacity: withTiming(1, {
-        duration: AMOUNT_ROLL_DURATION_MS,
-        easing: AMOUNT_ROLL_EASING,
+        duration: DROPDOWN_MORPH_FADE_DURATION_MS,
+        easing: AMOUNT_FADE_EASING,
+      }),
+      height: withTiming(values.targetHeight, {
+        duration: DROPDOWN_MORPH_OPEN_DURATION_MS,
+        easing: DROPDOWN_MORPH_EASING,
+      }),
+      borderRadius: withTiming(targetRadius, {
+        duration: DROPDOWN_MORPH_OPEN_DURATION_MS,
+        easing: DROPDOWN_MORPH_EASING,
       }),
       transform: [
         {
           translateY: withTiming(0, {
-            duration: AMOUNT_ROLL_DURATION_MS,
-            easing: AMOUNT_ROLL_EASING,
+            duration: DROPDOWN_MORPH_OPEN_DURATION_MS,
+            easing: DROPDOWN_MORPH_EASING,
           }),
         },
-      ],
-    },
-  };
-}
-
-function amountEnterFromAbove() {
-  'worklet';
-  return {
-    initialValues: {
-      opacity: 0,
-      transform: [{ translateY: -AMOUNT_ROLL_DISTANCE }],
-    },
-    animations: {
-      opacity: withTiming(1, {
-        duration: AMOUNT_ROLL_DURATION_MS,
-        easing: AMOUNT_ROLL_EASING,
-      }),
-      transform: [
         {
-          translateY: withTiming(0, {
-            duration: AMOUNT_ROLL_DURATION_MS,
-            easing: AMOUNT_ROLL_EASING,
+          scaleX: withTiming(1, {
+            duration: DROPDOWN_MORPH_OPEN_DURATION_MS,
+            easing: DROPDOWN_MORPH_EASING,
           }),
         },
       ],
@@ -265,47 +273,44 @@ function amountEnterFromAbove() {
   };
 }
 
-function amountExitToAbove() {
+function dropdownMorphExit(values: ExitAnimationsValues): LayoutAnimation {
   'worklet';
+  const currentRadius =
+    typeof values.currentBorderRadius === 'number'
+      ? values.currentBorderRadius
+      : DROPDOWN_MORPH_START_RADIUS;
+
   return {
     initialValues: {
       opacity: 1,
-      transform: [{ translateY: 0 }],
+      height: values.currentHeight,
+      borderRadius: currentRadius,
+      transform: [{ translateY: 0 }, { scaleX: 1 }],
     },
     animations: {
       opacity: withTiming(0, {
-        duration: AMOUNT_ROLL_DURATION_MS,
-        easing: AMOUNT_ROLL_EASING,
+        duration: DROPDOWN_MORPH_FADE_DURATION_MS,
+        easing: AMOUNT_FADE_EASING,
+      }),
+      height: withTiming(0, {
+        duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
+        easing: DROPDOWN_MORPH_EASING,
+      }),
+      borderRadius: withTiming(DROPDOWN_MORPH_START_RADIUS, {
+        duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
+        easing: DROPDOWN_MORPH_EASING,
       }),
       transform: [
         {
-          translateY: withTiming(-AMOUNT_ROLL_DISTANCE, {
-            duration: AMOUNT_ROLL_DURATION_MS,
-            easing: AMOUNT_ROLL_EASING,
+          translateY: withTiming(-DROPDOWN_MORPH_TRANSLATE_Y, {
+            duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
+            easing: DROPDOWN_MORPH_EASING,
           }),
         },
-      ],
-    },
-  };
-}
-
-function amountExitToBelow() {
-  'worklet';
-  return {
-    initialValues: {
-      opacity: 1,
-      transform: [{ translateY: 0 }],
-    },
-    animations: {
-      opacity: withTiming(0, {
-        duration: AMOUNT_ROLL_DURATION_MS,
-        easing: AMOUNT_ROLL_EASING,
-      }),
-      transform: [
         {
-          translateY: withTiming(AMOUNT_ROLL_DISTANCE, {
-            duration: AMOUNT_ROLL_DURATION_MS,
-            easing: AMOUNT_ROLL_EASING,
+          scaleX: withTiming(DROPDOWN_MORPH_SCALE_X, {
+            duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
+            easing: DROPDOWN_MORPH_EASING,
           }),
         },
       ],
@@ -446,9 +451,14 @@ interface AmountTokenDropdownProps {
   verticalPadding: number;
   compact: boolean;
   dense: boolean;
+  routeOptions: PrivatePaymentRouteOption[];
+  selectedRoute: PrivatePaymentRoute | null;
+  routeOpen: boolean;
   open: boolean;
   onToggle: () => void;
+  onToggleRoute: () => void;
   onSelectToken: (token: SendTokenOption) => void;
+  onSelectRoute: (route: PrivatePaymentRoute) => void;
 }
 
 function AmountTokenDropdown({
@@ -461,14 +471,24 @@ function AmountTokenDropdown({
   verticalPadding,
   compact,
   dense,
+  routeOptions,
+  selectedRoute,
+  routeOpen,
   open,
   onToggle,
+  onToggleRoute,
   onSelectToken,
+  onSelectRoute,
 }: AmountTokenDropdownProps): React.JSX.Element {
   const symbol = token?.symbol ?? '';
   const iconSize = dense ? 34 : compact ? 36 : 40;
   const optionIconSize = dense ? 28 : 32;
   const menuMaxHeight = dense ? 168 : compact ? 192 : 216;
+  const selectedRouteOption =
+    selectedRoute == null
+      ? null
+      : (routeOptions.find((route) => route.id === selectedRoute) ?? null);
+  const routeDropdownVisible = routeOptions.length > 1 && selectedRouteOption != null;
 
   return (
     <View style={styles.tokenDropdownHost}>
@@ -500,14 +520,26 @@ function AmountTokenDropdown({
               size={iconSize}
               recyclingKey={token?.mint ?? null}
             />
-            <Text
-              variant="bodyBold"
-              color={colors.text.primary}
-              style={styles.tokenDropdownSymbol}
-              numberOfLines={1}
-            >
-              {symbol || 'Token'}
-            </Text>
+            <View style={styles.tokenDropdownNameStack}>
+              <Text
+                variant="bodyBold"
+                color={colors.text.primary}
+                style={styles.tokenDropdownSymbol}
+                numberOfLines={1}
+                maxFontSizeMultiplier={1}
+              >
+                {symbol || 'Token'}
+              </Text>
+              <Text
+                variant="small"
+                color={colors.text.secondary}
+                style={styles.tokenDropdownBalance}
+                numberOfLines={1}
+                maxFontSizeMultiplier={1}
+              >
+                {balanceLabel}
+              </Text>
+            </View>
           </View>
           <Ionicons
             name={open ? 'chevron-up' : 'chevron-down'}
@@ -515,20 +547,38 @@ function AmountTokenDropdown({
             color={colors.text.primary}
           />
         </Pressable>
-        <Text
-          variant="small"
-          color={colors.text.secondary}
-          style={styles.availableBalance}
-          numberOfLines={1}
-        >
-          Available {balanceLabel}
-        </Text>
+        {routeDropdownVisible ? (
+          <View style={styles.tokenDropdownMetaColumn}>
+            <Pressable
+              style={({ pressed }) => [styles.routeDropdownButton, pressed && styles.pressed]}
+              onPress={onToggleRoute}
+              accessibilityRole="button"
+              accessibilityLabel={`Choose route, selected ${selectedRouteOption.label}`}
+              accessibilityState={{ expanded: routeOpen }}
+            >
+              <Text
+                variant="bodyBold"
+                color={colors.text.primary}
+                numberOfLines={1}
+                maxFontSizeMultiplier={1}
+                style={styles.routeDropdownButtonText}
+              >
+                {selectedRouteOption.label}
+              </Text>
+              <Ionicons
+                name={routeOpen ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.text.primary}
+              />
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       {open ? (
         <Animated.View
-          entering={FadeIn.duration(160)}
-          exiting={FadeOut.duration(120)}
+          entering={dropdownMorphEnter}
+          exiting={dropdownMorphExit}
           style={[styles.tokenDropdownMenu, { maxHeight: menuMaxHeight }]}
         >
           <ScrollView
@@ -590,6 +640,64 @@ function AmountTokenDropdown({
           </ScrollView>
         </Animated.View>
       ) : null}
+
+      {routeOpen && routeDropdownVisible ? (
+        <Animated.View
+          entering={dropdownMorphEnter}
+          exiting={dropdownMorphExit}
+          style={styles.routeDropdownMenu}
+        >
+          <View style={styles.routeDropdownMenuContent}>
+            {routeOptions.map((route) => {
+              const selected = route.id === selectedRoute;
+              const disabled = route.disabled === true;
+              return (
+                <Pressable
+                  key={route.id}
+                  style={({ pressed }) => [
+                    styles.routeDropdownOption,
+                    selected && styles.routeDropdownOptionSelected,
+                    disabled && styles.routeDropdownOptionDisabled,
+                    pressed && !disabled && styles.pressed,
+                  ]}
+                  onPress={() => onSelectRoute(route.id)}
+                  disabled={disabled}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected, disabled }}
+                  accessibilityLabel={`Use ${route.label} route`}
+                >
+                  <View style={styles.routeDropdownOptionText}>
+                    <Text
+                      variant="bodyBold"
+                      color={disabled ? colors.text.tertiary : colors.text.primary}
+                      numberOfLines={1}
+                      style={styles.routeDropdownOptionTitle}
+                    >
+                      {route.label}
+                    </Text>
+                    <Text
+                      variant="small"
+                      color={disabled ? colors.text.tertiary : colors.text.secondary}
+                      numberOfLines={1}
+                      style={styles.routeDropdownOptionDescription}
+                    >
+                      {disabled ? (route.disabledReason ?? route.description) : route.description}
+                    </Text>
+                  </View>
+                  {selected ? (
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={disabled ? colors.text.tertiary : colors.text.primary}
+                      style={styles.routeDropdownOptionCheck}
+                    />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -619,6 +727,9 @@ export function SendAmountStep({
   const [amountRowWidth, setAmountRowWidth] = useState(0);
   const [amountMotionDirection, setAmountMotionDirection] = useState<AmountMotionDirection>('up');
   const [tokenDropdownOpen, setTokenDropdownOpen] = useState(false);
+  const [routeDropdownOpen, setRouteDropdownOpen] = useState(false);
+  const amountMotionProgress = useSharedValue(1);
+  const amountMotionDirectionValue = useSharedValue(1);
   const displayAmount = useMemo(() => formatDisplayAmount(amount), [amount]);
   const recipientLabel =
     recipientAddress != null ? shortenWalletAddress(recipientAddress) : recipientInput.trim();
@@ -656,7 +767,19 @@ export function SendAmountStep({
           ? 116
           : 128;
   const amountHeroGap = ultraDense || crowded ? spacing.xs : spacing.sm;
-  const tokenDropdownMinHeight = ultraDense ? 50 : crowded || dense ? 52 : compact ? 58 : 62;
+  const tokenDropdownMinHeight = routeVisible
+    ? ultraDense
+      ? 58
+      : dense
+        ? 62
+        : 66
+    : ultraDense
+      ? 50
+      : crowded || dense
+        ? 52
+        : compact
+          ? 58
+          : 62;
   const tokenDropdownHorizontalPadding =
     fieldHorizontalPadding + (ultraDense ? 0 : TOKEN_INPUT_EXTRA_HORIZONTAL_GAP);
   const tokenDropdownVerticalPadding = ultraDense ? spacing.xs : spacing.sm;
@@ -715,22 +838,47 @@ export function SendAmountStep({
     [amountMetaLabel],
   );
   const showAmountFeedbackError = helper != null && amount.trim().length > 0;
-  const amountEnteringAnimation = reduceMotion
-    ? undefined
-    : amountMotionDirection === 'down'
-      ? amountEnterFromAbove
-      : amountEnterFromBelow;
-  const amountExitingAnimation = reduceMotion
-    ? undefined
-    : amountMotionDirection === 'down'
-      ? amountExitToBelow
-      : amountExitToAbove;
+  useEffect(() => {
+    if (reduceMotion) {
+      amountMotionProgress.value = 1;
+      return;
+    }
+
+    amountMotionDirectionValue.value = amountMotionDirection === 'down' ? -1 : 1;
+    amountMotionProgress.value = 0;
+    amountMotionProgress.value = withTiming(1, {
+      duration: AMOUNT_SMOOTH_DURATION_MS,
+      easing: AMOUNT_SMOOTH_EASING,
+    });
+  }, [
+    amountMotionDirection,
+    amountMotionDirectionValue,
+    amountMotionProgress,
+    displayAmount,
+    reduceMotion,
+  ]);
+  const amountAnimatedStyle = useAnimatedStyle(() => {
+    const progress = amountMotionProgress.value;
+    const direction = amountMotionDirectionValue.value;
+    return {
+      opacity: 0.84 + progress * 0.16,
+      transform: [
+        {
+          translateY: (1 - progress) * direction * AMOUNT_SMOOTH_DISTANCE,
+        },
+        {
+          scale: 0.99 + progress * 0.01,
+        },
+      ],
+    };
+  });
 
   const handleNumpadPress = useCallback(
     (key: NumpadKeyValue): void => {
       const nextAmount = appendNumpadKey(amount, key, token?.decimals ?? 6);
       if (nextAmount === amount) return;
       setTokenDropdownOpen(false);
+      setRouteDropdownOpen(false);
       setAmountMotionDirection(
         key === 'backspace' ? 'down' : getAmountMotionDirection(amount, nextAmount),
       );
@@ -742,6 +890,7 @@ export function SendAmountStep({
   const handlePresetPress = useCallback(
     (preset: AmountPresetValue): void => {
       setTokenDropdownOpen(false);
+      setRouteDropdownOpen(false);
       if (preset === 'max') {
         setAmountMotionDirection(
           token == null ? 'up' : getAmountMotionDirection(amount, token.balance),
@@ -761,15 +910,30 @@ export function SendAmountStep({
   );
 
   const handleToggleTokenDropdown = useCallback((): void => {
+    setRouteDropdownOpen(false);
     setTokenDropdownOpen((open) => !open);
+  }, []);
+
+  const handleToggleRouteDropdown = useCallback((): void => {
+    setTokenDropdownOpen(false);
+    setRouteDropdownOpen((open) => !open);
   }, []);
 
   const handleSelectDropdownToken = useCallback(
     (nextToken: SendTokenOption): void => {
       setTokenDropdownOpen(false);
+      setRouteDropdownOpen(false);
       onSelectToken(nextToken);
     },
     [onSelectToken],
+  );
+
+  const handleSelectDropdownRoute = useCallback(
+    (nextRoute: PrivatePaymentRoute): void => {
+      setRouteDropdownOpen(false);
+      onSelectRoute(nextRoute);
+    },
+    [onSelectRoute],
   );
 
   return (
@@ -832,12 +996,10 @@ export function SendAmountStep({
             accessibilityLiveRegion="polite"
           >
             <Animated.Text
-              key={displayAmount}
-              entering={amountEnteringAnimation}
-              exiting={amountExitingAnimation}
               style={[
                 styles.amountValue,
                 styles.amountTickerValue,
+                amountAnimatedStyle,
                 {
                   color: colors.text.primary,
                   fontSize: amountTextStyle.fontSize,
@@ -925,27 +1087,16 @@ export function SendAmountStep({
           verticalPadding={tokenDropdownVerticalPadding}
           compact={compact}
           dense={dense || ultraDense}
+          routeOptions={routeOptions}
+          selectedRoute={selectedRoute}
+          routeOpen={routeDropdownOpen}
           open={tokenDropdownOpen}
           onToggle={handleToggleTokenDropdown}
+          onToggleRoute={handleToggleRouteDropdown}
           onSelectToken={handleSelectDropdownToken}
+          onSelectRoute={handleSelectDropdownRoute}
         />
       </View>
-
-      {/* Route choice is embedded here so the user picks Normal vs.
-          private route up front, rather than on a separate summary
-          screen. Renders nothing when no route choice applies. */}
-      {routeVisible ? (
-        <Animated.View layout={LinearTransition.duration(220)} style={styles.routeBlock}>
-          <Text variant="small" color={colors.text.secondary} style={styles.routeBlockLabel}>
-            Route
-          </Text>
-          <PrivateRouteSelector
-            routes={routeOptions}
-            selectedRoute={selectedRoute}
-            onSelectRoute={onSelectRoute}
-          />
-        </Animated.View>
-      ) : null}
 
       {selfSend ? (
         <Animated.View
@@ -1150,6 +1301,13 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'right',
   },
+  tokenDropdownMetaColumn: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
   tokenDropdownFrame: {
     width: '100%',
     zIndex: 20,
@@ -1213,7 +1371,7 @@ const styles = StyleSheet.create({
     marginLeft: spacing.xs,
   },
   tokenDropdownButton: {
-    minHeight: 44,
+    minHeight: 52,
     borderRadius: radii.full,
     borderCurve: 'continuous',
     backgroundColor: colors.surface.solidControl,
@@ -1224,18 +1382,96 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    flexShrink: 0,
+    flexShrink: 1,
+    minWidth: 0,
   },
   tokenDropdownLeft: {
     minWidth: 0,
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  tokenDropdownNameStack: {
+    minWidth: 0,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   tokenDropdownSymbol: {
     fontFamily: fontFamily.uiSemiBold,
     includeFontPadding: false,
     lineHeight: 20,
+  },
+  tokenDropdownBalance: {
+    fontFamily: fontFamily.ui,
+    includeFontPadding: false,
+    lineHeight: 15,
+  },
+  routeDropdownButton: {
+    minHeight: 44,
+    maxWidth: '100%',
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    backgroundColor: colors.surface.solidControl,
+    paddingHorizontal: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  routeDropdownButtonText: {
+    includeFontPadding: false,
+    lineHeight: 20,
+  },
+  routeDropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: spacing.xs,
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.surface.solidCardElevated,
+    boxShadow: '0 18px 34px rgba(0, 0, 0, 0.42)',
+    overflow: 'hidden',
+    zIndex: 28,
+  },
+  routeDropdownMenuContent: {
+    padding: spacing.xs,
+    gap: spacing.xs,
+  },
+  routeDropdownOption: {
+    minHeight: 46,
+    borderRadius: radii.lg,
+    borderCurve: 'continuous',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  routeDropdownOptionSelected: {
+    backgroundColor: colors.surface.solidControl,
+  },
+  routeDropdownOptionDisabled: {
+    opacity: 0.62,
+  },
+  routeDropdownOptionText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  routeDropdownOptionTitle: {
+    includeFontPadding: false,
+    lineHeight: 18,
+  },
+  routeDropdownOptionDescription: {
+    includeFontPadding: false,
+    lineHeight: 15,
+  },
+  routeDropdownOptionCheck: {
+    marginLeft: spacing.xs,
   },
   warningLine: {
     paddingHorizontal: spacing.sm,
@@ -1248,13 +1484,6 @@ const styles = StyleSheet.create({
   },
   helper: {
     lineHeight: 18,
-  },
-  routeBlock: {
-    gap: spacing.xs,
-  },
-  routeBlockLabel: {
-    fontFamily: fontFamily.uiMedium,
-    paddingHorizontal: spacing.xs,
   },
   keypadActionStack: {
     width: '100%',

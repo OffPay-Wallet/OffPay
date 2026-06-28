@@ -4187,7 +4187,7 @@ export async function fetchUmbraEncryptedBalances(
             symbol: token.symbol,
             name: token.name,
             decimals: token.decimals,
-            logoUri: token.logoUri ?? null,
+            logoUri: null,
             state: keyStatus?.state === 'mismatched' ? 'shared_key_mismatch' : balance.state,
             rawBalance: balance.rawBalance,
             displayBalance: balance.displayBalance,

@@ -40,6 +40,23 @@ export async function readPersistedJson<T>(
   }
 }
 
+export function readPersistedJsonSync<T>(
+  key: string,
+  normalize: (value: unknown) => T | null,
+): T | null {
+  try {
+    const file = getFileForKey(key);
+    if (!file.exists) return null;
+    const readTextSync = (file as File & { textSync?: () => string }).textSync;
+    if (typeof readTextSync !== 'function') return null;
+    const raw = readTextSync.call(file);
+    if (raw.length === 0) return null;
+    return normalize(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
 export async function writePersistedJson(key: string, value: unknown): Promise<void> {
   const file = getFileForKey(key);
   await yieldToUi();

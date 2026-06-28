@@ -1,6 +1,7 @@
 import {
   classifySendFailure,
   getRecipientStepDisabledReason,
+  resolveCachedTokenLogo,
 } from '@/components/features/private-payment/send-flow/helpers';
 import type { SendTokenOption } from '@/components/features/private-payment/send-flow/types';
 
@@ -84,5 +85,24 @@ describe('send flow helpers', () => {
       title: 'Network issue',
       statusLabel: 'Network failed',
     });
+  });
+
+  it('keeps an already cached API logo ahead of a later token-row logo', () => {
+    expect(
+      resolveCachedTokenLogo({
+        mint: 'DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6',
+        symbol: 'dUSDT',
+        apiLogo: 'https://api.example/fresh-dusdt.svg',
+        logos: {
+          byMint: new Map([
+            [
+              'DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6',
+              'https://api.example/cached-dusdt.png',
+            ],
+          ]),
+          bySymbol: new Map(),
+        },
+      }),
+    ).toBe('https://api.example/cached-dusdt.png');
   });
 });

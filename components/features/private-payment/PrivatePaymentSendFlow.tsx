@@ -105,6 +105,7 @@ import {
   RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE,
 } from '@/lib/umbra/umbra-rn-zk-prover';
 import { applyCachedOfflineDebit } from '@/lib/wallet/wallet-display-cache';
+import { PRIVY_SIGNING_NOT_READY_MESSAGE } from '@/lib/wallet/wallet-capabilities';
 import { formatFiatCurrency, normalizeCurrency } from '@/lib/currency-rates';
 import { resolveXHandle, XHandleNotRegisteredError } from '@/lib/identity/x-handle';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
@@ -137,6 +138,7 @@ import {
 
 type SendStep = 'token' | 'recipient' | 'amount' | 'summary' | 'success';
 type SendStepTransitionDirection = 'forward' | 'backward';
+type FeePrefetchRouteScope = PrivatePaymentRoute | 'all';
 const MAX_AMOUNT_INPUT_CHARACTERS = 48;
 const SEND_CONTENT_MAX_WIDTH = 430;
 const UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS = 300_000;
@@ -424,6 +426,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     capabilities,
     'payment.rpcBroadcast',
   );
+  const privySignerLoadingInBackground = signingBlocker === PRIVY_SIGNING_NOT_READY_MESSAGE;
   const magicBlockPrivatePaymentDisabledReason = signingBlocker
     ? signingBlocker
     : !magicBlockInitMintCapability.available
@@ -434,6 +437,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           ? magicBlockRpcBroadcastCapability.message
           : null;
   const canUseMagicBlockPrivatePayment = magicBlockPrivatePaymentDisabledReason == null;
+  const magicBlockPrivatePaymentRouteMessage = privySignerLoadingInBackground
+    ? null
+    : magicBlockPrivatePaymentDisabledReason;
   const canUseUmbraNativeProver = isRnZkProverNativeModuleAvailable();
   const umbraPrivateP2pCapability = getOffpayFeatureCapability(
     capabilities,
@@ -482,6 +488,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           : !rpcBroadcastCapability.available
             ? rpcBroadcastCapability.message
             : umbraVaultDisabledReason;
+  const umbraPrivateP2pRouteMessage = privySignerLoadingInBackground
+    ? null
+    : umbraPrivateP2pDisabledReason;
   const offlineReadySlots = offlinePaymentSlots.snapshot?.counts.ready ?? 0;
 
   const amountRaw = useMemo(
@@ -556,6 +565,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       },
     });
   }, [effectiveRecipientAddress, network, queryClient, selectedToken?.mint, walletAddress]);
+  const resetCurrentFeeEstimate = useCallback(() => {
+    setFeeEstimateAmountRaw(null);
+    cancelCurrentFeeEstimateQueries();
+  }, [cancelCurrentFeeEstimateQueries]);
   useEffect(() => {
     if (!feeEstimateInputsReady || !amountReadyForFeeEstimate) {
       setFeeEstimateAmountRaw(null);
@@ -605,11 +618,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         id: 'magicblock',
         label: 'MagicBlock',
         description:
-          magicBlockPrivatePaymentDisabledReason == null
+          magicBlockPrivatePaymentRouteMessage == null
             ? 'Private route'
-            : magicBlockPrivatePaymentDisabledReason,
+            : magicBlockPrivatePaymentRouteMessage,
         disabled: !canUseMagicBlockPrivatePayment,
-        disabledReason: magicBlockPrivatePaymentDisabledReason ?? undefined,
+        disabledReason: magicBlockPrivatePaymentRouteMessage ?? undefined,
       });
     }
     if (isUmbraPrivateP2PToken(network, selectedToken)) {
@@ -617,9 +630,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         id: 'umbra',
         label: 'Umbra',
         description:
-          umbraPrivateP2pDisabledReason == null ? 'Mixer route' : umbraPrivateP2pDisabledReason,
+          umbraPrivateP2pRouteMessage == null ? 'Mixer route' : umbraPrivateP2pRouteMessage,
         disabled: !canUseUmbraPrivateP2P,
-        disabledReason: umbraPrivateP2pDisabledReason ?? undefined,
+        disabledReason: umbraPrivateP2pRouteMessage ?? undefined,
       });
     }
     return routes;
@@ -627,10 +640,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     canUseMagicBlockPrivatePayment,
     effectiveWalletMode,
     canUseUmbraPrivateP2P,
-    magicBlockPrivatePaymentDisabledReason,
+    magicBlockPrivatePaymentRouteMessage,
     network,
     selectedToken,
-    umbraPrivateP2pDisabledReason,
+    umbraPrivateP2pRouteMessage,
   ]);
   const effectivePaymentRoute = useMemo<PrivatePaymentRoute | null>(() => {
     const enabledRoutes = paymentRouteOptions.filter((route) => route.disabled !== true);
@@ -661,7 +674,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     (route) => route.id === 'umbra' && route.disabled !== true,
   );
   const prefetchFeeEstimatesForAmount = useCallback(
-    (nextAmountRaw: string | null): void => {
+    (nextAmountRaw: string | null, routeScope: FeePrefetchRouteScope = 'all'): void => {
       if (
         effectiveWalletMode === 'offline' ||
         !canUseNetwork ||
@@ -678,7 +691,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         return;
       }
 
-      if (normalFeeRouteAvailable) {
+      if (normalFeeRouteAvailable && (routeScope === 'all' || routeScope === 'normal')) {
         void queryClient.prefetchQuery({
           queryKey: normalTransferFeeQueryKey({
             network,
@@ -702,7 +715,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         });
       }
 
-      if (magicBlockFeeRouteAvailable) {
+      if (magicBlockFeeRouteAvailable && (routeScope === 'all' || routeScope === 'magicblock')) {
         void queryClient.prefetchQuery({
           queryKey: magicBlockPrivatePaymentFeeQueryKey({
             network,
@@ -723,7 +736,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         });
       }
 
-      if (umbraFeeRouteAvailable) {
+      if (umbraFeeRouteAvailable && (routeScope === 'all' || routeScope === 'umbra')) {
         const displayAmount = formatAtomicAmount(
           nextAmountRaw,
           selectedToken.decimals,
@@ -1180,14 +1193,18 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     router.navigate(`/nearby-wallet-scanner?${searchParams.toString()}` as never);
   }, [amount, router, selectedToken]);
 
-  const handleRecipientChange = useCallback((value: string) => {
-    setRecipient(value);
-    setRecipientResolutionError(null);
-    setResolvedRecipient((current) => {
-      if (current == null || current.input === value.trim()) return current;
-      return null;
-    });
-  }, []);
+  const handleRecipientChange = useCallback(
+    (value: string) => {
+      resetCurrentFeeEstimate();
+      setRecipient(value);
+      setRecipientResolutionError(null);
+      setResolvedRecipient((current) => {
+        if (current == null || current.input === value.trim()) return current;
+        return null;
+      });
+    },
+    [resetCurrentFeeEstimate],
+  );
 
   const handleUseClipboardRecipient = useCallback(() => {
     // Always re-read the clipboard live on tap so the paste is
@@ -1224,33 +1241,59 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const handleSelectToken = useCallback(
     (token: StablecoinOption) => {
       Keyboard.dismiss();
+      resetCurrentFeeEstimate();
       setSelectedMint(token.mint);
       setAmount('');
       transitionToStep('recipient', 'forward');
     },
-    [transitionToStep],
+    [resetCurrentFeeEstimate, transitionToStep],
   );
 
-  const handleSelectAmountToken = useCallback((token: StablecoinOption) => {
-    Keyboard.dismiss();
-    setSelectedMint(token.mint);
-    setAmount((currentAmount) =>
-      sanitizeDecimalInput(currentAmount, token.decimals).slice(0, MAX_AMOUNT_INPUT_CHARACTERS),
-    );
-  }, []);
+  const handleSelectAmountToken = useCallback(
+    (token: StablecoinOption) => {
+      Keyboard.dismiss();
+      resetCurrentFeeEstimate();
+      setSelectedMint(token.mint);
+      setAmount((currentAmount) =>
+        sanitizeDecimalInput(currentAmount, token.decimals).slice(0, MAX_AMOUNT_INPUT_CHARACTERS),
+      );
+    },
+    [resetCurrentFeeEstimate],
+  );
+
+  const handleSelectRoute = useCallback(
+    (route: PrivatePaymentRoute) => {
+      setSelectedPrivateRoute(route);
+      if (!feeEstimateInputsReady || !amountReadyForFeeEstimate) return;
+
+      setFeeEstimateAmountRaw(amountRaw);
+      prefetchFeeEstimatesForAmount(amountRaw, route);
+    },
+    [amountRaw, amountReadyForFeeEstimate, feeEstimateInputsReady, prefetchFeeEstimatesForAmount],
+  );
 
   const handleAmountChange = useCallback(
     (value: string) => {
-      const nextAmount = sanitizeDecimalInput(value, selectedToken?.decimals ?? 6);
-      setAmount(nextAmount.slice(0, MAX_AMOUNT_INPUT_CHARACTERS));
+      const nextAmount = sanitizeDecimalInput(value, selectedToken?.decimals ?? 6).slice(
+        0,
+        MAX_AMOUNT_INPUT_CHARACTERS,
+      );
+      if (nextAmount !== amount) {
+        resetCurrentFeeEstimate();
+      }
+      setAmount(nextAmount);
     },
-    [selectedToken?.decimals],
+    [amount, resetCurrentFeeEstimate, selectedToken?.decimals],
   );
 
   const handleMaxAmount = useCallback(() => {
     if (selectedToken == null) return;
-    setAmount(sanitizeDecimalInput(selectedToken.balance, selectedToken.decimals));
-  }, [selectedToken]);
+    const nextAmount = sanitizeDecimalInput(selectedToken.balance, selectedToken.decimals);
+    if (nextAmount !== amount) {
+      resetCurrentFeeEstimate();
+    }
+    setAmount(nextAmount);
+  }, [amount, resetCurrentFeeEstimate, selectedToken]);
 
   const handleContinueRecipient = useCallback(async () => {
     Keyboard.dismiss();
@@ -1498,9 +1541,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     walletAddress,
     walletId,
   ]);
+  const visibleBaseDisabledReason =
+    baseDisabledReason === PRIVY_SIGNING_NOT_READY_MESSAGE ? null : baseDisabledReason;
 
   const amountHelper = useMemo(() => {
-    if (baseDisabledReason != null) return baseDisabledReason;
+    if (visibleBaseDisabledReason != null) return visibleBaseDisabledReason;
     if (selectedToken == null) return 'Choose a token first.';
     if (amount.trim().length === 0) return null;
     if (!isPositiveRawAmount(amountRaw)) return 'Enter an amount greater than zero.';
@@ -1509,7 +1554,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     // repeating the figure.
     if (!amountValid) return 'Amount exceeds your balance.';
     return null;
-  }, [amount, amountRaw, amountValid, baseDisabledReason, selectedToken]);
+  }, [amount, amountRaw, amountValid, selectedToken, visibleBaseDisabledReason]);
 
   const recipientStepDisabledReason = useMemo(
     () =>
@@ -2146,7 +2191,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       tokens={filteredStablecoins}
       tokenValuations={amountValuationQuery.data?.tokenValues}
       loading={balanceQuery.isLoading || capabilitiesQuery.isCapabilitiesPending}
-      emptyMessage={baseDisabledReason ?? 'Only tokens with a positive balance can be sent.'}
+      emptyMessage={visibleBaseDisabledReason ?? 'Only tokens with a positive balance can be sent.'}
       onQueryChange={setQuery}
       onSelectToken={handleSelectToken}
     />
@@ -2180,7 +2225,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       selfSend={selfSend}
       routeOptions={effectiveWalletMode !== 'offline' ? paymentRouteOptions : []}
       selectedRoute={paymentRouteOptions.length > 0 ? effectivePaymentRoute : null}
-      onSelectRoute={setSelectedPrivateRoute}
+      onSelectRoute={handleSelectRoute}
       onSelectToken={handleSelectAmountToken}
       onAmountChange={handleAmountChange}
       onMax={handleMaxAmount}
@@ -2233,6 +2278,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           style={styles.scroll}
           contentInsetAdjustmentBehavior="automatic"
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={step !== 'amount'}
+          bounces={step !== 'amount'}
+          alwaysBounceVertical={step !== 'amount'}
+          overScrollMode={step === 'amount' ? 'never' : 'auto'}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,

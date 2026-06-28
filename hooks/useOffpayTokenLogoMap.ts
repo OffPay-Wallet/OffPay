@@ -13,8 +13,10 @@ import {
 import {
   getCachedOfflineTokenMetadataEntries,
   getOfflineTokenMetadataEntries,
+  type OfflineTokenMetadata,
   observeOfflineTokenMetadataFromSwapTokens,
 } from '@/lib/offline/offline-token-metadata';
+import { getUmbraSupportedTokens, getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 
 import type {
   CapabilitiesResponse,
@@ -47,6 +49,38 @@ function normalizeSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
 
+function buildLogoMapFromMetadata(entries: readonly OfflineTokenMetadata[]): TokenLogoMap {
+  const byMint = new Map<string, string>();
+  const bySymbol = new Map<string, string>();
+
+  for (const token of entries) {
+    const logo = token.logo?.trim();
+    if (!logo) continue;
+
+    byMint.set(token.mint, logo);
+    bySymbol.set(normalizeSymbol(token.symbol), logo);
+  }
+
+  return { byMint, bySymbol };
+}
+
+function hasMappedLogo(
+  logoMap: TokenLogoMap,
+  mint: string,
+  symbols: readonly (string | null | undefined)[],
+): boolean {
+  if (logoMap.byMint.get(mint)?.trim()) return true;
+
+  for (const symbol of symbols) {
+    const normalized = symbol?.trim();
+    if (normalized && logoMap.bySymbol.get(normalizeSymbol(normalized))?.trim()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function fetchOffpaySwapTokensForLogos(
   network: OffpayNetwork,
   signal?: AbortSignal,
@@ -77,6 +111,43 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     ? (options?.capabilities ?? null)
     : capabilitiesQuery.capabilities;
   const balanceData = hasExternalBalanceData ? options?.balanceData : balanceQuery.data;
+  const cachedPersistedLogoEntries = useMemo(
+    () => (network == null ? [] : getCachedOfflineTokenMetadataEntries(network)),
+    [network],
+  );
+  const cachedPersistedLogoMap = useMemo(
+    () => buildLogoMapFromMetadata(cachedPersistedLogoEntries),
+    [cachedPersistedLogoEntries],
+  );
+  const cachedLogosCoverBalanceTokens = useMemo(() => {
+    if (network == null || balanceData == null || balanceData.tokens.length === 0) {
+      return false;
+    }
+
+    return balanceData.tokens.every((token) => {
+      if (token.logo?.trim()) return true;
+
+      const umbraToken = getUmbraTokenByMint(network, token.mint);
+      return hasMappedLogo(cachedPersistedLogoMap, token.mint, [
+        token.symbol,
+        umbraToken?.symbol,
+        ...(umbraToken?.aliases ?? []),
+      ]);
+    });
+  }, [balanceData, cachedPersistedLogoMap, network]);
+  const cachedLogosCoverUmbraTokens = useMemo(() => {
+    if (network == null || !allowPendingCapabilities) return false;
+    const tokens = getUmbraSupportedTokens(network);
+    if (tokens.length === 0) return false;
+
+    return tokens.every((token) =>
+      hasMappedLogo(cachedPersistedLogoMap, token.mint, [token.symbol, ...(token.aliases ?? [])]),
+    );
+  }, [allowPendingCapabilities, cachedPersistedLogoMap, network]);
+  const hasBalanceLogoTargets = balanceData != null && balanceData.tokens.length > 0;
+  const cachedLogosCoverRequestedTargets = allowPendingCapabilities
+    ? cachedLogosCoverUmbraTokens && (!hasBalanceLogoTargets || cachedLogosCoverBalanceTokens)
+    : cachedLogosCoverBalanceTokens;
   const capability = getOffpayFeatureCapability(capabilities, 'swap.tokens');
   const canFetchCatalogWithCapabilities =
     capabilities == null && allowPendingCapabilities
@@ -86,6 +157,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     network != null &&
     enabledByCaller &&
     fetchSwapTokenCatalog &&
+    !cachedLogosCoverRequestedTargets &&
     canUseNetwork &&
     canFetchCatalogWithCapabilities;
 
@@ -115,7 +187,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
       return getOfflineTokenMetadataEntries(network);
     },
     enabled: enabledByCaller && network != null && !isNetworkAccessSuspended,
-    placeholderData: () => (network == null ? [] : getCachedOfflineTokenMetadataEntries(network)),
+    placeholderData: () => cachedPersistedLogoEntries,
     staleTime: TOKEN_LOGO_CACHE_STALE_MS,
     gcTime: TOKEN_LOGO_CACHE_GC_MS,
     refetchOnMount: false,
@@ -124,16 +196,6 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
   return useMemo(() => {
     const byMint = new Map<string, string>();
     const bySymbol = new Map<string, string>();
-
-    // Seed the canonical native-SOL entry first so SOL transfers in
-    // history have a real logo on the very first paint, before the
-    // swap-token list query lands. Subsequent loops below can still
-    // overwrite this if a custom logo is configured.
-    const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
-    const NATIVE_SOL_LOGO =
-      'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
-    byMint.set(NATIVE_SOL_MINT, NATIVE_SOL_LOGO);
-    bySymbol.set('SOL', NATIVE_SOL_LOGO);
 
     for (const token of persistedLogoQuery.data ?? []) {
       const logo = token.logo?.trim();

@@ -1,5 +1,9 @@
 import { getOfflineTokenContext } from '@/lib/api/offpay-api-client';
-import { readPersistedJson, writePersistedJson } from '@/lib/cache/persistent-json-cache';
+import {
+  readPersistedJson,
+  readPersistedJsonSync,
+  writePersistedJson,
+} from '@/lib/cache/persistent-json-cache';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import { getUmbraSupportedTokens } from '@/lib/umbra/umbra-supported-tokens';
 
@@ -17,12 +21,6 @@ const TOKEN_METADATA_VERSION = 1;
 const TOKEN_CONTEXT_VERSION = 1;
 const TOKEN_CONTEXT_STALE_MS = 24 * 60 * 60 * 1000;
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
-const NATIVE_SOL_LOGO =
-  'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
-const USDC_LOGO =
-  'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png';
-const USDT_LOGO =
-  'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg';
 const NETWORK_DEFAULT_USDC_MINT: Record<OffpayNetwork, string> = {
   mainnet: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   devnet: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
@@ -30,14 +28,6 @@ const NETWORK_DEFAULT_USDC_MINT: Record<OffpayNetwork, string> = {
 const NETWORK_DEFAULT_USDT_MINTS: Partial<Record<OffpayNetwork, string>> = {
   mainnet: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
 };
-
-function getKnownLogoForSymbol(symbol: string): string | null {
-  const normalized = symbol.trim().toUpperCase();
-  if (normalized === 'SOL' || normalized === 'WSOL') return NATIVE_SOL_LOGO;
-  if (normalized === 'USDC' || normalized === 'DUSDC') return USDC_LOGO;
-  if (normalized === 'USDT' || normalized === 'DUSDT') return USDT_LOGO;
-  return null;
-}
 
 export interface OfflineTokenMetadata {
   mint: string;
@@ -91,13 +81,7 @@ function tokenContextStorageKey(params: {
   recipient: string;
   mint: string;
 }): string {
-  return [
-    TOKEN_CONTEXT_KEY_PREFIX,
-    params.network,
-    params.sender,
-    params.recipient,
-    params.mint,
-  ]
+  return [TOKEN_CONTEXT_KEY_PREFIX, params.network, params.sender, params.recipient, params.mint]
     .map((part) => String(part).replace(/[^A-Za-z0-9._-]/g, '_'))
     .join('_');
 }
@@ -109,7 +93,7 @@ function getBuiltInEntries(network: OffpayNetwork): OfflineTokenMetadata[] {
       mint: NATIVE_SOL_MINT,
       symbol: 'SOL',
       name: 'Solana',
-      logo: NATIVE_SOL_LOGO,
+      logo: null,
       decimals: 9,
       verified: true,
       updatedAt,
@@ -118,7 +102,7 @@ function getBuiltInEntries(network: OffpayNetwork): OfflineTokenMetadata[] {
       mint: NETWORK_DEFAULT_USDC_MINT[network],
       symbol: 'USDC',
       name: 'USD Coin',
-      logo: USDC_LOGO,
+      logo: null,
       decimals: 6,
       verified: true,
       updatedAt,
@@ -129,7 +113,7 @@ function getBuiltInEntries(network: OffpayNetwork): OfflineTokenMetadata[] {
             mint: NETWORK_DEFAULT_USDT_MINTS[network],
             symbol: 'USDT',
             name: 'Tether USD',
-            logo: USDT_LOGO,
+            logo: null,
             decimals: 6,
             verified: true,
             updatedAt,
@@ -144,11 +128,7 @@ function getBuiltInEntries(network: OffpayNetwork): OfflineTokenMetadata[] {
       mint: token.mint,
       symbol: token.symbol,
       name: token.name,
-      logo:
-        token.logoUri ??
-        getKnownLogoForSymbol(token.symbol) ??
-        token.aliases?.map(getKnownLogoForSymbol).find((logo): logo is string => logo != null) ??
-        null,
+      logo: null,
       decimals: token.decimals,
       verified: true,
       updatedAt,
@@ -291,10 +271,7 @@ async function persistSnapshot(snapshot: OfflineTokenMetadataSnapshot): Promise<
   await writePersistedJson(storageKey(snapshot.network), snapshot);
 }
 
-async function withWriteLock(
-  network: OffpayNetwork,
-  task: () => Promise<void>,
-): Promise<void> {
+async function withWriteLock(network: OffpayNetwork, task: () => Promise<void>): Promise<void> {
   const previous = writeLocks.get(network) ?? Promise.resolve();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -333,7 +310,8 @@ export async function observeOfflineTokenMetadataFromWalletBalance(
       decimals: token.decimals,
       verified: token.verified,
       updatedAt: balance.fetchedAt,
-      programId: 'programId' in token && typeof token.programId === 'string' ? token.programId : null,
+      programId:
+        'programId' in token && typeof token.programId === 'string' ? token.programId : null,
     });
 
     return normalized == null ? [] : [normalized];
@@ -365,7 +343,8 @@ export async function observeOfflineTokenMetadataFromSwapTokens(
       decimals: token.decimals,
       verified: token.verified,
       updatedAt: Date.now(),
-      programId: 'programId' in token && typeof token.programId === 'string' ? token.programId : null,
+      programId:
+        'programId' in token && typeof token.programId === 'string' ? token.programId : null,
     });
 
     return normalized == null ? [] : [normalized];
@@ -452,7 +431,18 @@ export async function getOfflineTokenMetadataEntries(
 export function getCachedOfflineTokenMetadataEntries(
   network: OffpayNetwork,
 ): OfflineTokenMetadata[] {
-  return (memorySnapshots.get(network) ?? baseSnapshot(network)).tokens;
+  const cached = memorySnapshots.get(network);
+  if (cached != null) return cached.tokens;
+
+  const persisted = readPersistedJsonSync(storageKey(network), (value) =>
+    normalizeSnapshotValue(network, value),
+  );
+  if (persisted != null) {
+    memorySnapshots.set(network, persisted);
+    return persisted.tokens;
+  }
+
+  return baseSnapshot(network).tokens;
 }
 
 export async function getOfflineTokenDecimals(

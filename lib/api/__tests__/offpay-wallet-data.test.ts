@@ -200,7 +200,7 @@ describe('offpay-wallet-data', () => {
     expect(holdings[1]?.balance).toBe('12.999');
   });
 
-  it('uses Umbra devnet token metadata and logos for holdings', () => {
+  it('uses Umbra devnet token metadata and cached API logos for holdings', () => {
     const balance: WalletBalanceResponse = {
       address: 'CBbAfDh79oEhNn2ZouMi97Ek3y1vQYKuH5VbZqx3okMk',
       network: 'devnet',
@@ -220,17 +220,52 @@ describe('offpay-wallet-data', () => {
       fetchedAt: 1,
     };
 
-    const holdings = buildVisibleTokenHoldings(balance);
+    const holdings = buildVisibleTokenHoldings(balance, {
+      byMint: new Map(),
+      bySymbol: new Map([['USDC', 'https://api.example/usdc.png']]),
+    });
 
     expect(holdings[1]).toMatchObject({
       name: 'dUSDC',
       symbol: 'dUSDC',
       priceSymbol: 'USDC',
-      logo: expect.stringContaining('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),
+      logo: 'https://api.example/usdc.png',
       verified: true,
       spam: false,
     });
     expect(holdings[1]?.balance).toBe('2,000');
+  });
+
+  it('does not inject static Umbra token logos when the API cache has no logo', () => {
+    const balance: WalletBalanceResponse = {
+      address: 'CBbAfDh79oEhNn2ZouMi97Ek3y1vQYKuH5VbZqx3okMk',
+      network: 'devnet',
+      solBalance: 0,
+      tokens: [
+        {
+          mint: 'DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6',
+          name: 'DXQw...JkL6',
+          symbol: 'DXQw...JkL6',
+          logo: null,
+          balance: '100',
+          decimals: 6,
+          verified: false,
+          spam: false,
+        },
+      ],
+      fetchedAt: 1,
+    };
+
+    const holdings = buildVisibleTokenHoldings(balance);
+
+    expect(holdings[1]).toMatchObject({
+      name: 'dUSDT',
+      symbol: 'dUSDT',
+      priceSymbol: 'USDT',
+      logo: null,
+      verified: true,
+      spam: false,
+    });
   });
 
   it('uses provider native SOL price when DAS returns one', () => {

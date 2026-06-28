@@ -168,9 +168,6 @@ function lookupTokenLogo(params: {
   aliases?: readonly string[];
   logos?: TokenLogoLookup;
 }): string | null {
-  const fallback = params.fallback?.trim();
-  if (fallback) return fallback;
-
   const mintLogo = params.logos?.byMint?.get(params.mint)?.trim();
   if (mintLogo) return mintLogo;
 
@@ -181,6 +178,9 @@ function lookupTokenLogo(params: {
     const aliasLogo = params.logos?.bySymbol?.get(normalizeTokenSymbol(alias))?.trim();
     if (aliasLogo) return aliasLogo;
   }
+
+  const fallback = params.fallback?.trim();
+  if (fallback) return fallback;
 
   return null;
 }
@@ -287,7 +287,7 @@ export function buildVisibleTokenHoldings(
         logo: lookupTokenLogo({
           mint: token.mint,
           symbol: displaySymbol,
-          fallback: tokenMetadata?.logo ?? umbraToken?.logoUri ?? token.logo,
+          fallback: tokenMetadata?.logo ?? token.logo,
           aliases: umbraToken?.aliases,
           logos,
         }),

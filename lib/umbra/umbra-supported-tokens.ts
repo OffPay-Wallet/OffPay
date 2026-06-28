@@ -12,7 +12,6 @@ export interface UmbraSupportedToken {
   encryptedBalance: boolean;
   mixer: boolean;
   aliases?: readonly string[];
-  logoUri?: string | null;
 }
 
 const MAINNET_TOKENS: UmbraSupportedToken[] = [
@@ -23,8 +22,6 @@ const MAINNET_TOKENS: UmbraSupportedToken[] = [
     decimals: 6,
     encryptedBalance: true,
     mixer: true,
-    logoUri:
-      'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
   },
   {
     symbol: 'USDT',
@@ -33,8 +30,6 @@ const MAINNET_TOKENS: UmbraSupportedToken[] = [
     decimals: 6,
     encryptedBalance: true,
     mixer: true,
-    logoUri:
-      'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
   },
   {
     symbol: 'wSOL',
@@ -43,8 +38,6 @@ const MAINNET_TOKENS: UmbraSupportedToken[] = [
     decimals: 9,
     encryptedBalance: true,
     mixer: true,
-    logoUri:
-      'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
   },
   {
     symbol: 'UMBRA',
@@ -53,7 +46,6 @@ const MAINNET_TOKENS: UmbraSupportedToken[] = [
     decimals: 6,
     encryptedBalance: true,
     mixer: true,
-    logoUri: null,
   },
 ];
 
@@ -66,8 +58,6 @@ const DEVNET_TOKENS: UmbraSupportedToken[] = [
     encryptedBalance: true,
     mixer: true,
     aliases: ['USDC'],
-    logoUri:
-      'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
   },
   {
     symbol: 'dUSDT',
@@ -77,8 +67,6 @@ const DEVNET_TOKENS: UmbraSupportedToken[] = [
     encryptedBalance: true,
     mixer: true,
     aliases: ['USDT'],
-    logoUri:
-      'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
   },
 ];
 

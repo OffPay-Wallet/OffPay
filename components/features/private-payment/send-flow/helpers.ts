@@ -94,8 +94,9 @@ export function routeMintMatchesToken(requestedMint: string, token: SendTokenOpt
 }
 
 /**
- * Resolve the best logo URL for a token, preferring the API-provided
- * logo and falling back to cached lookups by mint, then by symbol.
+ * Resolve the best logo URL for a token. Cached API metadata wins so
+ * a late balance/catalog refresh with the same token does not replace
+ * an already-rendered logo unnecessarily.
  */
 export function resolveCachedTokenLogo(params: {
   mint: string;
@@ -103,14 +104,16 @@ export function resolveCachedTokenLogo(params: {
   apiLogo: string | null;
   logos: TokenLogoLookup;
 }): string | null {
+  const cachedLogo =
+    params.logos.byMint?.get(params.mint) ??
+    params.logos.bySymbol?.get(normalizeTokenSymbol(params.symbol)) ??
+    null;
+  if (cachedLogo != null) return cachedLogo;
+
   const apiLogo = params.apiLogo?.trim();
   if (apiLogo) return apiLogo;
 
-  return (
-    params.logos.byMint?.get(params.mint) ??
-    params.logos.bySymbol?.get(normalizeTokenSymbol(params.symbol)) ??
-    null
-  );
+  return null;
 }
 
 /**
@@ -177,7 +180,7 @@ export function getStablecoinOptions(
         logo: resolveCachedTokenLogo({
           mint: token.mint,
           symbol: displaySymbol,
-          apiLogo: umbraToken?.logoUri ?? token.logo,
+          apiLogo: token.logo,
           logos,
         }),
         balance: token.balance,

@@ -37,14 +37,14 @@ describe('offline-token-metadata', () => {
     ).resolves.toMatchObject({
       symbol: 'dUSDC',
       decimals: 6,
-      logo: expect.stringContaining('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),
+      logo: null,
     });
     expect(getCachedOfflineTokenMetadataEntries('devnet')).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           mint: 'DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6',
           symbol: 'dUSDT',
-          logo: expect.stringContaining('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'),
+          logo: null,
         }),
       ]),
     );
@@ -98,6 +98,30 @@ describe('offline-token-metadata', () => {
       verified: true,
       logo: 'https://example.com/bonk-swap.png',
     });
+  });
+
+  it('hydrates persisted API logos synchronously after memory reset', async () => {
+    await observeOfflineTokenMetadataFromSwapTokens('mainnet', [
+      {
+        mint: BONK_MAINNET_MINT,
+        name: 'Bonk',
+        symbol: 'BONK',
+        logo: 'https://example.com/bonk-cached.png',
+        decimals: 5,
+        verified: true,
+      },
+    ]);
+
+    resetOfflineTokenMetadataCache();
+
+    expect(getCachedOfflineTokenMetadataEntries('mainnet')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mint: BONK_MAINNET_MINT,
+          logo: 'https://example.com/bonk-cached.png',
+        }),
+      ]),
+    );
   });
 
   it('resolves backend-supported stablecoin symbols that are not built in for a network', async () => {
