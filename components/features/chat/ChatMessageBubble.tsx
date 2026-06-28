@@ -38,6 +38,7 @@ import {
 import { ChatBubble } from './ChatBubble';
 import { MarkdownText } from './MarkdownText';
 import { ProcessingShimmerText } from './ProcessingShimmerText';
+import { AgenticToolResultCard } from './AgenticToolResultCard';
 import { messageStyles as styles } from './styles/message';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
@@ -117,6 +118,8 @@ export function ChatMessageBubble({
   const fallbackThinkingPhrase = useAgentThinkingPhrase(showThinkingOnly);
   const thinkingPhrase = message.processingLabel?.trim() || fallbackThinkingPhrase;
   const visibleAction = isAgenticDraftSheetAction(action) ? undefined : action;
+  const toolCards = message.toolCards ?? [];
+  const hasToolCards = toolCards.length > 0;
   const reduceMotion = useReducedMotion();
   const messageEntering = reduceMotion ? undefined : MESSAGE_ENTERING;
   const messageLayout = reduceMotion ? undefined : MESSAGE_LAYOUT;
@@ -168,15 +171,16 @@ export function ChatMessageBubble({
     );
   }
 
-  if (!hasText && visibleAction == null) {
+  if (!hasText && visibleAction == null && !hasToolCards) {
     return null;
   }
 
-  const actionOnly = !hasText && visibleAction != null;
+  const actionOnly = !hasText && visibleAction != null && !hasToolCards;
+  const cardOnly = !hasText && visibleAction == null && hasToolCards;
 
   return (
     <Animated.View
-      entering={actionOnly ? undefined : messageEntering}
+      entering={actionOnly || cardOnly ? undefined : messageEntering}
       layout={messageLayout}
       style={[styles.messageRow, styles.messageRowAgent]}
     >
@@ -186,6 +190,19 @@ export function ChatMessageBubble({
             <MarkdownText text={message.text} variant="agent" />
           </ChatBubble>
         ) : null}
+        {hasToolCards
+          ? toolCards.map((card) => (
+              <Animated.View
+                key={card.id}
+                entering={actionCardEntering}
+                exiting={actionCardExiting}
+                layout={actionCardLayout}
+                style={styles.toolCardWrap}
+              >
+                <AgenticToolResultCard card={card} />
+              </Animated.View>
+            ))
+          : null}
         {visibleAction != null ? (
           <Animated.View
             entering={actionCardEntering}

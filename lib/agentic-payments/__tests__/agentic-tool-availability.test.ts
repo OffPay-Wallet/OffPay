@@ -68,6 +68,8 @@ describe('agentic tool availability', () => {
       'private-send',
       'payroll',
       'umbra-vault',
+      'umbra-deposit',
+      'umbra-withdraw',
       'umbra-claims',
     ]);
   });
@@ -91,6 +93,8 @@ describe('agentic tool availability', () => {
       'swap',
       'payroll',
       'umbra-vault',
+      'umbra-deposit',
+      'umbra-withdraw',
       'umbra-claims',
       'flash',
     ]);

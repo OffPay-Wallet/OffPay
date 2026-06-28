@@ -100,4 +100,9 @@ export const messageStyles = StyleSheet.create({
     maxWidth: '100%',
     flexShrink: 1,
   },
+  toolCardWrap: {
+    marginTop: spacing.sm,
+    maxWidth: '100%',
+    flexShrink: 1,
+  },
 });

@@ -32,6 +32,7 @@ import {
 import { sanitizeAssistantText } from '@/lib/agentic-payments/assistant-text';
 import { hydrateAssistantToolResultPlaceholders } from '@/lib/agentic-payments/assistant-tool-placeholders';
 import type { AgenticKnownWallet } from '@/lib/agentic-payments/private-send-intent';
+import { buildAgenticToolResultCards } from '@/lib/agentic-payments/tool-result-cards';
 import {
   runAgenticPrivacyFirewall,
   sanitizeAgentMessagesForAi,
@@ -44,6 +45,7 @@ import {
   type AgenticChatMessage,
   type AgenticChatScope,
   type AgenticChatAction,
+  type AgenticChatToolCard,
 } from '@/store/agenticChatStore';
 import type { WalletAccount } from '@/store/walletStore';
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
@@ -319,6 +321,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
   let pendingToolCalls: AgentToolCall[] = [];
   let pendingToolResults: AgentToolResult[] = [];
   let attachedActionId: string | null = null;
+  let attachedToolCards: AgenticChatToolCard[] = [];
   const canReadUmbraVaultBalance = isOffpayFeatureAvailable(
     params.capabilities ?? null,
     'umbra.execution',
@@ -399,7 +402,10 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
 
       await revealAssistantMessageText(params.assistantMessageId, cleaned, {
         signal: params.controller.signal,
-        patch: attachedActionId != null ? { actionId: attachedActionId } : undefined,
+        patch: buildAssistantRevealPatch({
+          actionId: attachedActionId,
+          toolCards: attachedToolCards,
+        }),
       });
 
       return;
@@ -451,6 +457,11 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       });
     }
 
+    attachedToolCards = [...attachedToolCards, ...buildAgenticToolResultCards(run.results)].slice(
+      0,
+      3,
+    );
+
     if (run.payrollIntents.length > 0 && params.onPayrollIntent != null) {
       params.onPayrollIntent(run.payrollIntents[0].source);
     }
@@ -468,9 +479,26 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     'I could not finish that in one pass. Send one clear action with the amount, token or market, and any trade details like side, leverage, collateral, and order type.',
     {
       signal: params.controller.signal,
-      patch: attachedActionId != null ? { actionId: attachedActionId } : undefined,
+      patch: buildAssistantRevealPatch({
+        actionId: attachedActionId,
+        toolCards: attachedToolCards,
+      }),
     },
   );
+}
+
+function buildAssistantRevealPatch({
+  actionId,
+  toolCards,
+}: {
+  actionId: string | null;
+  toolCards: readonly AgenticChatToolCard[];
+}): { actionId?: string; toolCards?: AgenticChatToolCard[] } | undefined {
+  if (actionId == null && toolCards.length === 0) return undefined;
+  return {
+    ...(actionId == null ? {} : { actionId }),
+    ...(toolCards.length === 0 ? {} : { toolCards: [...toolCards] }),
+  };
 }
 
 function persistDraftAction({

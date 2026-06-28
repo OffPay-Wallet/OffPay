@@ -14,6 +14,8 @@ export type AgenticChatCtaId =
   | 'swap'
   | 'payroll'
   | 'umbra-vault'
+  | 'umbra-deposit'
+  | 'umbra-withdraw'
   | 'umbra-claims'
   | 'flash';
 
@@ -83,6 +85,7 @@ export function getAvailableAgenticChatCtaIds(
   if (canUseSwapTools(params)) ctas.push('swap');
   if (canUsePayrollTools(params)) ctas.push('payroll');
   if (canUseUmbraVaultTools(params)) ctas.push('umbra-vault');
+  if (canUseUmbraVaultActionTools(params)) ctas.push('umbra-deposit', 'umbra-withdraw');
   if (canUseUmbraClaimTools(params)) ctas.push('umbra-claims');
   if (canUseFlashTools(params)) ctas.push('flash');
   return ctas;

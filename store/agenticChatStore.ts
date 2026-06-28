@@ -190,6 +190,32 @@ export interface AgenticPayrollAction {
   errorMessage?: string | null;
 }
 
+export type AgenticToolCardTone = 'default' | 'success' | 'warning' | 'danger';
+
+export interface AgenticToolCardRow {
+  label: string;
+  value: string;
+  tone?: AgenticToolCardTone;
+  mono?: boolean;
+}
+
+export interface AgenticToolCardItem {
+  title: string;
+  detail?: string | null;
+  tone?: AgenticToolCardTone;
+}
+
+export interface AgenticChatToolCard {
+  id: string;
+  toolName: string;
+  title: string;
+  subtitle?: string | null;
+  tone?: AgenticToolCardTone;
+  rows?: AgenticToolCardRow[];
+  items?: AgenticToolCardItem[];
+  footer?: string | null;
+}
+
 export type AgenticChatAction =
   | AgenticPrivateSendAction
   | AgenticUmbraVaultAction
@@ -215,6 +241,7 @@ export interface AgenticChatMessage {
   pending?: boolean;
   processingLabel?: string | null;
   actionId?: string | null;
+  toolCards?: AgenticChatToolCard[];
 }
 
 interface AgenticChatState {

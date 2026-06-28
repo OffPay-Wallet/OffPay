@@ -1,7 +1,8 @@
-import { useAgenticChatStore } from '@/store/agenticChatStore';
+import { useAgenticChatStore, type AgenticChatToolCard } from '@/store/agenticChatStore';
 
 export type RevealAssistantMessagePatch = {
   actionId?: string;
+  toolCards?: AgenticChatToolCard[];
 };
 
 interface RevealTypingOptions {

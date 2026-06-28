@@ -36,6 +36,44 @@ describe('revealAssistantMessageText', () => {
     });
   });
 
+  it('can attach tool result cards while settling the message', async () => {
+    const id = 'assistant-card';
+    useAgenticChatStore.setState({
+      messages: [
+        {
+          id,
+          role: 'assistant',
+          text: '',
+          createdAt: 1,
+          conversationId: 'c1',
+          pending: true,
+          walletAddress: null,
+          network: null,
+        },
+      ],
+    });
+
+    await revealAssistantMessageText(id, 'Here is the balance.', {
+      typing: false,
+      patch: {
+        toolCards: [
+          {
+            id: 'card-1',
+            toolName: 'get_wallet_balance',
+            title: 'Portfolio',
+            subtitle: '$ 10.00',
+          },
+        ],
+      },
+    });
+
+    expect(useAgenticChatStore.getState().messages[0]).toMatchObject({
+      text: 'Here is the balance.',
+      pending: false,
+      toolCards: [expect.objectContaining({ title: 'Portfolio' })],
+    });
+  });
+
   it('streams longer replies while pending before settling the full text', async () => {
     jest.useFakeTimers();
     const id = 'assistant-stream';
