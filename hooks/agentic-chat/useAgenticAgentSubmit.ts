@@ -506,19 +506,30 @@ function persistDraftAction({
             createdAt: now,
             updatedAt: now,
           }
-        : {
-            ...draft.draft,
-            id: createAgenticId(
-              draft.kind === 'normal_send' ? 'agentic-normal-send' : 'agentic-private-send',
-            ),
-            kind: draft.kind,
-            status: 'needs_confirmation',
-            route: draft.route,
-            conversationId,
-            toolCallId: createAgenticId('intent'),
-            createdAt: now,
-            updatedAt: now,
-          };
+        : draft.kind === 'umbra_vault'
+          ? {
+              ...draft.draft,
+              id: createAgenticId('agentic-umbra-vault'),
+              kind: 'umbra_vault',
+              status: 'needs_confirmation',
+              conversationId,
+              toolCallId: createAgenticId('intent'),
+              createdAt: now,
+              updatedAt: now,
+            }
+          : {
+              ...draft.draft,
+              id: createAgenticId(
+                draft.kind === 'normal_send' ? 'agentic-normal-send' : 'agentic-private-send',
+              ),
+              kind: draft.kind,
+              status: 'needs_confirmation',
+              route: draft.route,
+              conversationId,
+              toolCallId: createAgenticId('intent'),
+              createdAt: now,
+              updatedAt: now,
+            };
   store.upsertAction(action);
   return action.id;
 }

@@ -167,9 +167,21 @@ export const AGENTIC_TOOL_METADATA = {
     pendingLabel: 'Preparing private transfer',
     parallelSafe: false,
     modelInstructions: [
-      'Use when the user explicitly asks for private, shielded, MagicBlock, Umbra, or private P2P transfer.',
+      'Use only when the user explicitly asks for a private, MagicBlock, Umbra, or private P2P payment to a recipient.',
+      'Do not use this for Umbra vault shield, encrypt, deposit, withdraw, or unshield requests; use draft_umbra_vault_action instead.',
       'Do not choose private route for ordinary sends unless the user requested private routing.',
       'For follow-up corrections, reuse prior amount, recipient, and route only when the latest user message clearly continues that send.',
+    ],
+  },
+  draft_umbra_vault_action: {
+    category: 'umbra',
+    networkScope: bothNetworks,
+    pendingLabel: 'Preparing Umbra vault',
+    parallelSafe: false,
+    modelInstructions: [
+      'Use when the user wants to shield, encrypt, deposit, or move public wallet balance into the Umbra vault.',
+      'Use when the user wants to withdraw, unshield, decrypt, or move Umbra vault balance back to public wallet balance.',
+      'This is not a recipient payment. If the user provides a recipient, ask whether they want a private send instead.',
     ],
   },
   stage_payroll: {

@@ -5,14 +5,17 @@ import type {
   AgenticFlashPositionAction,
   AgenticPrivateSendAction,
   AgenticSwapAction,
+  AgenticUmbraVaultAction,
 } from '@/store/agenticChatStore';
 
 import { FlashPositionConfirmationCard } from './FlashPositionConfirmationCard';
 import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
 import { SwapConfirmationCard } from './SwapConfirmationCard';
+import { UmbraVaultConfirmationCard } from './UmbraVaultConfirmationCard';
 
 export type AgenticTransactionAction =
   | AgenticPrivateSendAction
+  | AgenticUmbraVaultAction
   | AgenticSwapAction
   | AgenticFlashPositionAction;
 
@@ -33,6 +36,7 @@ export function isAgenticTransactionAction(
     action != null &&
     (action.kind === 'private_send' ||
       action.kind === 'normal_send' ||
+      action.kind === 'umbra_vault' ||
       action.kind === 'swap' ||
       action.kind === 'flash_position')
   );
@@ -61,6 +65,10 @@ export function AgenticActionCard({
     return (
       <FlashPositionConfirmationCard action={action} onConfirm={onConfirm} onCancel={onCancel} />
     );
+  }
+
+  if (action.kind === 'umbra_vault') {
+    return <UmbraVaultConfirmationCard action={action} onConfirm={onConfirm} onCancel={onCancel} />;
   }
 
   return (

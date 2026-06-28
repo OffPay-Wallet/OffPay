@@ -111,6 +111,7 @@ describe('agentic tool availability', () => {
     expect(toolNames).toContain('get_wallet_history');
     expect(toolNames).toContain('draft_normal_send');
     expect(toolNames).toContain('draft_private_send');
+    expect(toolNames).toContain('draft_umbra_vault_action');
     expect(toolNames).toContain('stage_payroll');
     expect(toolNames).toContain('get_umbra_balances');
     expect(toolNames).toContain('scan_umbra_claims');

@@ -1,5 +1,6 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
+import { QueryClient } from '@tanstack/react-query';
 
 import {
   AGENTIC_TOOL_SCHEMAS,
@@ -179,6 +180,7 @@ describe('runAgenticTools', () => {
         'get_wallet_history',
         'draft_normal_send',
         'draft_private_send',
+        'draft_umbra_vault_action',
         'check_private_send_ready',
       ]),
     );
@@ -197,6 +199,9 @@ describe('runAgenticTools', () => {
   it('formats tool-specific processing labels from metadata', () => {
     expect(getAgenticToolMetadata('draft_private_send')?.pendingLabel).toBe(
       'Preparing private transfer',
+    );
+    expect(getAgenticToolMetadata('draft_umbra_vault_action')?.pendingLabel).toBe(
+      'Preparing Umbra vault',
     );
     expect(formatAgenticToolProcessingLabel([{ name: 'prepare_swap_quote' }])).toBe('Quoting swap');
     expect(
@@ -539,6 +544,126 @@ describe('runAgenticTools', () => {
         tokenSymbol: 'dUSDC',
       },
     });
+  });
+
+  it('builds an Umbra shield draft from public balance without a recipient', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-vault-shield',
+          name: 'draft_umbra_vault_action',
+          args: { operation: 'shield', amount: '3', token: 'USDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        walletId: 'wallet-1',
+        userText: 'shield 3 USDC into my Umbra vault',
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'umbra_vault',
+      draft: {
+        operation: 'shield',
+        rawAmount: '3000000',
+        tokenMint: umbraDusdcMint,
+        tokenSymbol: 'dUSDC',
+      },
+    });
+    expect(run.results[0].result).toMatchObject({
+      status: 'drafted',
+      route: 'umbra_vault',
+      operation: 'shield',
+      tokenSymbol: 'dUSDC',
+    });
+  });
+
+  it('builds an Umbra withdraw draft from cached vault balance', async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      ['offpay', 'umbraEncryptedBalances', 'devnet', walletAddress, 'dUSDC'],
+      {
+        balances: [
+          {
+            mint: umbraDusdcMint,
+            symbol: 'dUSDC',
+            name: 'dUSDC',
+            decimals: 6,
+            state: 'shared',
+            rawBalance: '2500000',
+            displayBalance: '2.5',
+          },
+        ],
+      },
+    );
+
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-vault-withdraw',
+          name: 'draft_umbra_vault_action',
+          args: { operation: 'withdraw', amount: '1.5', token: 'dUSDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        walletId: 'wallet-1',
+        queryClient,
+        userText: 'withdraw 1.5 dUSDC from my Umbra vault',
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'umbra_vault',
+      draft: {
+        operation: 'unshield',
+        rawAmount: '1500000',
+        tokenMint: umbraDusdcMint,
+        tokenSymbol: 'dUSDC',
+      },
+    });
+  });
+
+  it('rejects Umbra withdraw drafts that exceed cached vault balance', async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      ['offpay', 'umbraEncryptedBalances', 'devnet', walletAddress, 'dUSDC'],
+      {
+        balances: [
+          {
+            mint: umbraDusdcMint,
+            symbol: 'dUSDC',
+            name: 'dUSDC',
+            decimals: 6,
+            state: 'shared',
+            rawBalance: '500000',
+            displayBalance: '0.5',
+          },
+        ],
+      },
+    );
+
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-vault-withdraw-too-much',
+          name: 'draft_umbra_vault_action',
+          args: { operation: 'unshield', amount: '1', token: 'dUSDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        walletId: 'wallet-1',
+        queryClient,
+        userText: 'unshield 1 dUSDC from my Umbra vault',
+      },
+    );
+
+    expect(run.drafts).toHaveLength(0);
+    expect(run.results[0].error?.code).toBe('amount_exceeds_umbra_vault_balance');
   });
 
   it('reports unknown_tool when the model calls a tool not in the catalog', async () => {

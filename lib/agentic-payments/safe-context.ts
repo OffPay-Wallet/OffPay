@@ -73,6 +73,7 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
       'get_umbra_balances',
       'draft_normal_send',
       'draft_private_send',
+      'draft_umbra_vault_action',
       'stage_payroll',
       'flash_get_markets',
       'flash_get_positions',

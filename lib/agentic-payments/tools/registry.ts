@@ -16,6 +16,7 @@ import { prepareSwapQuoteTool } from './prepare-swap-quote';
 import { resolveRecipientTool } from './resolve-recipient';
 import { scanUmbraClaimsTool } from './scan-umbra-claims';
 import { stagePayrollTool } from './stage-payroll';
+import { draftUmbraVaultActionTool } from './umbra-vault-actions';
 import {
   flashGetMarketsTool,
   flashGetPositionsTool,
@@ -91,6 +92,7 @@ const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   checkPrivateSendReadyTool,
   draftNormalSendTool,
   draftPrivateSendTool,
+  draftUmbraVaultActionTool,
   stagePayrollTool,
   flashGetMarketsTool,
   flashGetPositionsTool,

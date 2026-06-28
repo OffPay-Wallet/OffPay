@@ -48,9 +48,9 @@ const CHAT_CTAS: readonly ChatCta[] = [
   {
     id: 'private-send',
     title: 'Private',
-    caption: 'Shielded send',
+    caption: 'Shield balance',
     icon: 'lock-closed-outline',
-    prompt: 'I want to send a private payment',
+    prompt: 'Shield funds into my Umbra vault',
   },
   {
     id: 'swap',

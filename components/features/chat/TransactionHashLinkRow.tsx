@@ -8,12 +8,12 @@ import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { buildSolscanTxUrl } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
-import type { AgenticPrivateSendAction } from '@/store/agenticChatStore';
+import type { OffpayNetwork } from '@/types/offpay-api';
 
 interface TransactionHashLinkRowProps {
   label?: string;
   signature: string;
-  network: AgenticPrivateSendAction['network'];
+  network: OffpayNetwork;
   accessibilityLabel?: string;
 }
 

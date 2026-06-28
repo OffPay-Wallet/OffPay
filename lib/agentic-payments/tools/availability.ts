@@ -46,6 +46,7 @@ const PRIVATE_SEND_TOOL_NAMES = new Set<AgenticToolName>(['draft_private_send'])
 
 const PRIVATE_READINESS_TOOL_NAMES = new Set<AgenticToolName>(['check_private_send_ready']);
 
+const UMBRA_VAULT_ACTION_TOOL_NAMES = new Set<AgenticToolName>(['draft_umbra_vault_action']);
 const UMBRA_VAULT_TOOL_NAMES = new Set<AgenticToolName>(['get_umbra_balances']);
 const UMBRA_CLAIM_TOOL_NAMES = new Set<AgenticToolName>(['scan_umbra_claims']);
 
@@ -78,7 +79,7 @@ export function getAvailableAgenticChatCtaIds(
   if (canUseWalletBalanceTools(params)) ctas.push('balance');
   if (canUseWalletActivityTools(params)) ctas.push('activity');
   if (canUseNormalSendTools(params)) ctas.push('send');
-  if (canUsePrivateSendTools(params)) ctas.push('private-send');
+  if (canUseUmbraVaultActionTools(params)) ctas.push('private-send');
   if (canUseSwapTools(params)) ctas.push('swap');
   if (canUsePayrollTools(params)) ctas.push('payroll');
   if (canUseUmbraVaultTools(params)) ctas.push('umbra-vault');
@@ -105,6 +106,7 @@ function isModelToolAvailable(
   if (PRIVATE_READINESS_TOOL_NAMES.has(name)) return hasWalletNetworkScope(params);
   if (NORMAL_SEND_TOOL_NAMES.has(name)) return canUseNormalSendTools(params);
   if (PRIVATE_SEND_TOOL_NAMES.has(name)) return canUsePrivateSendTools(params);
+  if (UMBRA_VAULT_ACTION_TOOL_NAMES.has(name)) return canUseUmbraVaultActionTools(params);
   if (UMBRA_VAULT_TOOL_NAMES.has(name)) return canUseUmbraVaultTools(params);
   if (UMBRA_CLAIM_TOOL_NAMES.has(name)) return canUseUmbraClaimTools(params);
   if (name === 'stage_payroll') return canUsePayrollTools(params);
@@ -172,6 +174,13 @@ function canUseUmbraVaultTools(params: AgenticToolAvailabilityParams): boolean {
   ) {
     return false;
   }
+  const capabilities = params.capabilities ?? null;
+  if (capabilities == null) return true;
+  return isOffpayFeatureAvailable(capabilities, 'umbra.execution');
+}
+
+function canUseUmbraVaultActionTools(params: AgenticToolAvailabilityParams): boolean {
+  if (!canUseUmbraVaultTools(params)) return false;
   const capabilities = params.capabilities ?? null;
   if (capabilities == null) return true;
   return isOffpayFeatureAvailable(capabilities, 'umbra.execution');

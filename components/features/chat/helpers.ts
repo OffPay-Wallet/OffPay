@@ -13,7 +13,11 @@ import {
   AGENTIC_PRIVATE_SEND_TOOL_SCHEMA,
 } from '@/lib/agentic-payments/private-send-tool';
 
-import type { AgenticChatMessage, AgenticPrivateSendAction } from '@/store/agenticChatStore';
+import type {
+  AgenticActionStatus,
+  AgenticChatMessage,
+  AgenticPrivateSendAction,
+} from '@/store/agenticChatStore';
 
 export function createAgenticId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -25,7 +29,7 @@ export function getProxyErrorMessage(error: unknown): string {
   return 'Yuga could not complete that request.';
 }
 
-export function formatPrivateSendStatus(status: AgenticPrivateSendAction['status']): string {
+export function formatPrivateSendStatus(status: AgenticActionStatus): string {
   if (status === 'needs_confirmation') return 'Needs confirmation';
   if (status === 'submitting') return 'Submitting';
   if (status === 'submitted') return 'Submitted';
@@ -34,7 +38,7 @@ export function formatPrivateSendStatus(status: AgenticPrivateSendAction['status
   return 'Failed';
 }
 
-export function isFinalPrivateSendStatus(status: AgenticPrivateSendAction['status']): boolean {
+export function isFinalPrivateSendStatus(status: AgenticActionStatus): boolean {
   return status === 'submitted' || status === 'queued' || status === 'cancelled';
 }
 
@@ -59,8 +63,11 @@ export function buildSolscanTxUrl(
  */
 export function pickPreferredToolName(prompt: string): string | null {
   const normalized = prompt.toLowerCase();
+  const mentionsUmbraVaultAction =
+    /\b(shield|encrypt|deposit|unshield|withdraw|decrypt)\b/.test(normalized) ||
+    /\b(?:to|into|from|out\s+of)\s+(?:my\s+)?(?:umbra\s+)?vault\b/.test(normalized);
   const mentionsPrivate =
-    /\b(magicblock|magic\s*block|private\s+(?:send|route|payment|transfer)|shielded|stealth)\b/.test(
+    /\b(magicblock|magic\s*block|private\s+(?:send|route|payment|transfer)|stealth)\b/.test(
       normalized,
     );
   const mentionsNormal =
@@ -68,6 +75,7 @@ export function pickPreferredToolName(prompt: string): string | null {
       normalized,
     );
 
+  if (mentionsUmbraVaultAction) return AGENTIC_UMBRA_VAULT_ACTION_TOOL_NAME;
   if (mentionsPrivate && !mentionsNormal) return AGENTIC_PRIVATE_SEND_TOOL_NAME;
   if (mentionsNormal && !mentionsPrivate) return AGENTIC_NORMAL_SEND_TOOL_NAME;
   return null;
@@ -101,4 +109,5 @@ export const AGENTIC_TOOL_SCHEMAS = [
   AGENTIC_PRIVATE_SEND_TOOL_SCHEMA,
 ] as const;
 
+export const AGENTIC_UMBRA_VAULT_ACTION_TOOL_NAME = 'draft_umbra_vault_action';
 export { AGENTIC_NORMAL_SEND_TOOL_NAME, AGENTIC_PRIVATE_SEND_TOOL_NAME };

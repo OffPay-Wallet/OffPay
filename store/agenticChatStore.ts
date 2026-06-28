@@ -117,6 +117,30 @@ export interface AgenticPrivateSendAction {
   errorMessage?: string | null;
 }
 
+export type AgenticUmbraVaultOperation = 'shield' | 'unshield';
+
+export interface AgenticUmbraVaultAction {
+  id: string;
+  kind: 'umbra_vault';
+  status: AgenticActionStatus;
+  operation: AgenticUmbraVaultOperation;
+  walletAddress: string;
+  network: OffpayNetwork;
+  amount: string;
+  rawAmount: string;
+  tokenMint: string;
+  tokenSymbol: string;
+  tokenName: string;
+  tokenLogo: string | null;
+  tokenDecimals: number;
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  errorMessage?: string | null;
+}
+
 export interface AgenticSwapAction {
   id: string;
   kind: 'swap';
@@ -168,12 +192,14 @@ export interface AgenticPayrollAction {
 
 export type AgenticChatAction =
   | AgenticPrivateSendAction
+  | AgenticUmbraVaultAction
   | AgenticSwapAction
   | AgenticPayrollAction
   | AgenticFlashPositionAction;
 
 type AgenticActionPatch =
   | Partial<Omit<AgenticPrivateSendAction, 'id'>>
+  | Partial<Omit<AgenticUmbraVaultAction, 'id'>>
   | Partial<Omit<AgenticSwapAction, 'id'>>
   | Partial<Omit<AgenticPayrollAction, 'id'>>
   | Partial<Omit<AgenticFlashPositionAction, 'id'>>;

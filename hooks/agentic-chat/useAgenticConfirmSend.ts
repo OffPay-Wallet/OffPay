@@ -18,6 +18,7 @@ import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useAppToast } from '@/components/ui/AppToast';
+import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { agenticSendOutcomeSpeech } from '@/lib/agentic-payments/send-outcome-speech';
 import { validateAgenticNormalSendDraft } from '@/lib/agentic-payments/normal-send';
@@ -29,7 +30,11 @@ import {
   offpayWalletTransactionsBaseQueryKey,
   pendingBackupQueueStatsQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
-import { presentWalletTransactionEventNotification } from '@/lib/notifications/local-notifications';
+import {
+  buildUmbraTransactionNotificationIdentifier,
+  presentUmbraTransactionNotification,
+  presentWalletTransactionEventNotification,
+} from '@/lib/notifications/local-notifications';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
@@ -47,8 +52,10 @@ import {
   type AgenticPrivateSendAction,
   type AgenticSwapAction,
   type AgenticFlashPositionAction,
+  type AgenticUmbraVaultAction,
 } from '@/store/agenticChatStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
+import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
 import { useWalletStore } from '@/store/walletStore';
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
@@ -96,6 +103,9 @@ export function useAgenticConfirmSend({
   const walletId = useWalletStore((s) => s.activeWalletId);
   const updateAction = useAgenticChatStore((s) => s.updateAction);
   const addPrivateReceipt = usePrivatePaymentStore((s) => s.addReceipt);
+  const addUmbraReceipt = useUmbraPrivacyStore((s) => s.addReceipt);
+  const { scheduleRefresh, applyOptimisticShield, applyOptimisticCredit } =
+    useUmbraCacheInvalidator();
 
   const cancel = useCallback(
     (action: AgenticChatAction) => {
@@ -191,6 +201,27 @@ export function useAgenticConfirmSend({
         });
         return;
       }
+
+      if (action.kind === 'umbra_vault') {
+        await confirmUmbraVaultAction({
+          action,
+          walletId,
+          walletMode,
+          canUseNetwork,
+          capabilities,
+          walletImportMethod,
+          updateAction,
+          showToast,
+          addUmbraReceipt,
+          scheduleRefresh,
+          applyOptimisticShield,
+          applyOptimisticCredit,
+          onSpeakOutcome,
+        });
+        return;
+      }
+
+      if (!isTransferAction(action)) return;
 
       const validation = validateTransferActionForRoute({
         action,
@@ -302,6 +333,9 @@ export function useAgenticConfirmSend({
     },
     [
       addPrivateReceipt,
+      addUmbraReceipt,
+      applyOptimisticCredit,
+      applyOptimisticShield,
       balance,
       canUseNetwork,
       capabilities,
@@ -310,6 +344,7 @@ export function useAgenticConfirmSend({
       queryClient,
       scope.network,
       scope.walletAddress,
+      scheduleRefresh,
       showToast,
       updateAction,
       walletImportMethod,
@@ -426,6 +461,199 @@ function getUmbraRouteBlocker(params: {
     return 'Umbra route is unavailable right now.';
   }
   return null;
+}
+
+function getUmbraVaultBlocker(params: {
+  action: AgenticUmbraVaultAction;
+  walletMode: 'online' | 'offline';
+  canUseNetwork: boolean;
+  capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
+  walletImportMethod: WalletImportMethod | null;
+}): string | null {
+  if (!isUmbraNetworkSupported(params.action.network)) {
+    return 'Umbra vault is not available on this network.';
+  }
+  const signingBlocker = getWalletSigningBlocker(
+    params.walletImportMethod,
+    'Umbra vault',
+    params.action.walletAddress,
+  );
+  if (signingBlocker != null) return signingBlocker;
+  if (params.walletMode !== 'online' || !params.canUseNetwork) {
+    return 'Umbra vault needs online mode.';
+  }
+  if (Platform.OS === 'web' || !isRnZkProverNativeModuleAvailable()) {
+    return 'Umbra vault needs the native app.';
+  }
+  if (!isOffpayFeatureAvailable(params.capabilities ?? null, 'umbra.execution')) {
+    return 'Umbra vault is unavailable right now.';
+  }
+  return null;
+}
+
+function createAgenticUmbraReceiptId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function confirmUmbraVaultAction(params: {
+  action: AgenticUmbraVaultAction;
+  walletId: string | null;
+  walletMode: 'online' | 'offline';
+  canUseNetwork: boolean;
+  capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
+  walletImportMethod: WalletImportMethod | null;
+  updateAction: ReturnType<typeof useAgenticChatStore.getState>['updateAction'];
+  showToast: ReturnType<typeof useAppToast>['showToast'];
+  addUmbraReceipt: ReturnType<typeof useUmbraPrivacyStore.getState>['addReceipt'];
+  scheduleRefresh: ReturnType<typeof useUmbraCacheInvalidator>['scheduleRefresh'];
+  applyOptimisticShield: ReturnType<typeof useUmbraCacheInvalidator>['applyOptimisticShield'];
+  applyOptimisticCredit: ReturnType<typeof useUmbraCacheInvalidator>['applyOptimisticCredit'];
+  onSpeakOutcome?: (phrase: string) => void;
+}): Promise<void> {
+  const {
+    action,
+    walletId,
+    walletMode,
+    canUseNetwork,
+    capabilities,
+    walletImportMethod,
+    updateAction,
+    showToast,
+    addUmbraReceipt,
+    scheduleRefresh,
+    applyOptimisticShield,
+    applyOptimisticCredit,
+    onSpeakOutcome,
+  } = params;
+
+  if (walletId == null) {
+    const message = 'Unlock wallet and try again.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'Confirmation blocked', message, variant: 'error' });
+    return;
+  }
+
+  const blocker = getUmbraVaultBlocker({
+    action,
+    walletMode,
+    canUseNetwork,
+    capabilities,
+    walletImportMethod,
+  });
+  if (blocker != null) {
+    updateAction(action.id, { status: 'failed', errorMessage: blocker });
+    showToast({ title: 'Confirmation blocked', message: blocker, variant: 'error' });
+    return;
+  }
+
+  updateAction(action.id, { status: 'submitting', errorMessage: null });
+  await yieldToUi();
+
+  try {
+    const { shieldTokenWithUmbra, withdrawTokenFromUmbra } =
+      await import('@/lib/umbra/umbra-execution');
+    const result =
+      action.operation === 'shield'
+        ? await shieldTokenWithUmbra({
+            walletAddress: action.walletAddress,
+            walletId,
+            network: action.network,
+            token: action.tokenMint,
+            tokenMint: action.tokenMint,
+            amount: action.amount,
+          })
+        : await withdrawTokenFromUmbra({
+            walletAddress: action.walletAddress,
+            walletId,
+            network: action.network,
+            token: action.tokenMint,
+            tokenMint: action.tokenMint,
+            amount: action.amount,
+            recipient: action.walletAddress,
+          });
+    const signature = result.primarySignature ?? result.signatures[0] ?? null;
+    const notificationAction = action.operation === 'shield' ? 'shield' : 'withdraw';
+    const amountLabel = `${result.amountDisplay ?? action.amount} ${
+      result.tokenSymbol ?? action.tokenSymbol
+    }`;
+
+    addUmbraReceipt({
+      id: createAgenticUmbraReceiptId(`agentic-${action.operation}`),
+      action: result.action,
+      title: result.title,
+      subtitle: result.subtitle,
+      signature,
+      network: result.network,
+      createdAt: Date.now(),
+    });
+
+    void presentUmbraTransactionNotification({
+      identifier: buildUmbraTransactionNotificationIdentifier({
+        network: result.network,
+        action: notificationAction,
+        signature,
+        fallbackId: `${action.walletAddress}-${action.tokenMint}-${action.rawAmount}`,
+      }),
+      action: notificationAction,
+      amountLabel,
+      signature,
+    });
+
+    const atomicAmount = result.amountAtomic ?? action.rawAmount;
+    const mint = result.mint ?? action.tokenMint;
+    if (action.operation === 'shield') {
+      applyOptimisticShield({
+        walletAddress: action.walletAddress,
+        network: action.network,
+        mint,
+        atomicAmount,
+      });
+    } else {
+      applyOptimisticCredit({
+        walletAddress: action.walletAddress,
+        network: action.network,
+        mint,
+        atomicAmount,
+        symbol: action.tokenSymbol,
+        name: action.tokenName,
+        decimals: action.tokenDecimals,
+      });
+    }
+
+    scheduleRefresh({
+      walletAddress: action.walletAddress,
+      network: action.network,
+    });
+
+    updateAction(action.id, {
+      status: 'submitted',
+      signature,
+      errorMessage: null,
+    });
+    showToast({
+      title: action.operation === 'shield' ? 'Umbra shield submitted' : 'Umbra withdraw submitted',
+      message: amountLabel,
+      variant: 'success',
+    });
+    onSpeakOutcome?.(
+      action.operation === 'shield' ? 'Umbra shield submitted.' : 'Umbra withdraw submitted.',
+    );
+  } catch (error) {
+    const fallback =
+      action.operation === 'shield'
+        ? 'Unable to shield funds into Umbra vault.'
+        : 'Unable to withdraw funds from Umbra vault.';
+    const message = error instanceof Error ? error.message : fallback;
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({
+      title: action.operation === 'shield' ? 'Umbra shield failed' : 'Umbra withdraw failed',
+      message,
+      variant: 'error',
+    });
+    onSpeakOutcome?.(
+      action.operation === 'shield' ? 'Umbra shield failed.' : 'Umbra withdraw failed.',
+    );
+  }
 }
 
 interface RunSubmitterParams {

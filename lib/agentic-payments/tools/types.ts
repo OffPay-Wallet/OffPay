@@ -6,6 +6,7 @@ import type { AgentToolCall, AgentToolResult, AgentToolSchema } from '@/lib/agen
 import type {
   AgenticChatScope,
   AgenticPrivateSendAction,
+  AgenticUmbraVaultAction,
   AgenticSwapAction,
   AgenticFlashPositionAction,
 } from '@/store/agenticChatStore';
@@ -29,6 +30,7 @@ export type AgenticToolName =
   | 'check_private_send_ready'
   | 'draft_normal_send'
   | 'draft_private_send'
+  | 'draft_umbra_vault_action'
   | 'stage_payroll'
   | 'flash_get_markets'
   | 'flash_get_positions'
@@ -128,6 +130,10 @@ export type AgenticToolDraft =
   | {
       kind: 'flash_position';
       draft: Omit<AgenticFlashPositionAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
+    }
+  | {
+      kind: 'umbra_vault';
+      draft: Omit<AgenticUmbraVaultAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
     };
 
 export interface PayrollStageIntent {
