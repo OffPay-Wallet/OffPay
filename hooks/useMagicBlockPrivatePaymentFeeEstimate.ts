@@ -17,7 +17,7 @@ interface UseMagicBlockPrivatePaymentFeeEstimateParams {
   enabled?: boolean;
 }
 
-const MAGICBLOCK_FEE_REFRESH_MS = 25_000;
+export const MAGICBLOCK_FEE_REFRESH_MS = 25_000;
 
 export function magicBlockPrivatePaymentFeeQueryKey(params: {
   network: OffpayNetwork | null | undefined;

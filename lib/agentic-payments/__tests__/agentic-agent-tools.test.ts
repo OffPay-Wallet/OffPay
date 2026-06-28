@@ -23,6 +23,7 @@ function addressFromSeedByte(byte: number): string {
 
 const walletAddress = addressFromSeedByte(1);
 const recipient = addressFromSeedByte(2);
+const nativeSolMint = 'So11111111111111111111111111111111111111112';
 const usdcMint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const umbraDusdcMint = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
 
@@ -256,6 +257,43 @@ describe('runAgenticTools', () => {
     });
     expect(JSON.stringify(run.results[0].result)).not.toContain(walletAddress);
     expect(JSON.stringify(run.results[0].result)).not.toContain(usdcMint);
+  });
+
+  it('uses portfolio valuation prices when raw balance rows omit native SOL price', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-wallet-balance', name: 'get_wallet_balance', args: {} }],
+      {
+        ...baseContext,
+        balance,
+        portfolioValuation: {
+          currency: 'USD',
+          totalUsd: 190,
+          total: 190,
+          pricedCount: 3,
+          expectedCount: 3,
+          fetchedAt: 2,
+          unitUsdPrices: {
+            [nativeSolMint]: 100,
+            [usdcMint]: 1,
+            [umbraDusdcMint]: 1,
+          },
+        },
+        userText: 'show my wallet balance',
+      },
+    );
+    const result = run.results[0].result as {
+      portfolioValueUsd: number;
+      portfolioValueUsdLabel: string;
+      valuationCoverage: string;
+      tokens: Array<{ symbol: string; usdPrice: number | null }>;
+    };
+
+    expect(result).toMatchObject({
+      portfolioValueUsd: 190,
+      portfolioValueUsdLabel: '$ 190.00',
+      valuationCoverage: 'complete',
+    });
+    expect(result.tokens.find((token) => token.symbol === 'SOL')?.usdPrice).toBe(100);
   });
 
   it('rejects generic private balance reads from the MagicBlock rail tool', async () => {

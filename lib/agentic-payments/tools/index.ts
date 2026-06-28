@@ -9,6 +9,7 @@ export { runAgenticTools } from './runner';
 export { getAvailableAgenticChatCtaIds, getAvailableAgenticModelToolSchemas } from './availability';
 export type { AgenticChatCtaId, AgenticToolAvailabilityParams } from './availability';
 export type {
+  AgenticPortfolioValuationSnapshot,
   AgenticToolDraft,
   AgenticToolName,
   AgenticToolRun,

@@ -19,7 +19,7 @@ interface UseUmbraPrivateP2PFeeEstimateParams {
   enabled?: boolean;
 }
 
-const UMBRA_FEE_STALE_MS = 60_000;
+export const UMBRA_FEE_STALE_MS = 60_000;
 
 export function umbraPrivateP2PFeeQueryKey(params: {
   network: OffpayNetwork | null | undefined;

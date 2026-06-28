@@ -108,6 +108,7 @@ Thumbs.db
 # AI agent artifacts & configs (not part of app source)
 # ---------------------------------------------------------------------------
 .gemini/
+.kiro/
 .cursor/
 .context/
 .agents/

@@ -42,9 +42,21 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
-import { useMagicBlockPrivatePaymentFeeEstimate } from '@/hooks/useMagicBlockPrivatePaymentFeeEstimate';
-import { useNormalTransferFeeEstimate } from '@/hooks/useNormalTransferFeeEstimate';
-import { useUmbraPrivateP2PFeeEstimate } from '@/hooks/useUmbraPrivateP2PFeeEstimate';
+import {
+  MAGICBLOCK_FEE_REFRESH_MS,
+  magicBlockPrivatePaymentFeeQueryKey,
+  useMagicBlockPrivatePaymentFeeEstimate,
+} from '@/hooks/useMagicBlockPrivatePaymentFeeEstimate';
+import {
+  NORMAL_TRANSFER_FEE_REFRESH_MS,
+  normalTransferFeeQueryKey,
+  useNormalTransferFeeEstimate,
+} from '@/hooks/useNormalTransferFeeEstimate';
+import {
+  UMBRA_FEE_STALE_MS,
+  umbraPrivateP2PFeeQueryKey,
+  useUmbraPrivateP2PFeeEstimate,
+} from '@/hooks/useUmbraPrivateP2PFeeEstimate';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
@@ -84,8 +96,10 @@ import { presentWalletTransactionEventNotification } from '@/lib/notifications/l
 import { loadOfflinePaymentSlotSnapshot } from '@/lib/offline/offline-payment-slots';
 import { parseRecipientInput, type RecipientCandidate } from '@/lib/identity/recipient-parser';
 import { resolveSnsName } from '@/lib/identity/sns';
-import { submitPrivatePayment } from '@/lib/magicblock/private-payment';
+import { preparePrivatePaymentPlan, submitPrivatePayment } from '@/lib/magicblock/private-payment';
+import { estimateNormalTokenTransferFee } from '@/lib/payments/normal-token-transfer-fee';
 import { getResponsiveFooterBottomPadding, getViewportProfile } from '@/lib/ui/responsive-layout';
+import { estimateUmbraPrivateP2PFromPublicBalanceFee } from '@/lib/umbra/umbra-execution';
 import {
   isRnZkProverNativeModuleAvailable,
   RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE,
@@ -477,21 +491,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   );
   const [feeEstimateAmountRaw, setFeeEstimateAmountRaw] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isPositiveRawAmount(amountRaw)) {
-      setFeeEstimateAmountRaw(null);
-      return undefined;
-    }
-
-    const timeout = setTimeout(() => {
-      setFeeEstimateAmountRaw(amountRaw);
-    }, FEE_ESTIMATE_INPUT_DEBOUNCE_MS);
-
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [amountRaw]);
-
   const balanceRaw = useMemo(
     () =>
       selectedToken == null
@@ -524,6 +523,61 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const effectiveRecipientAddress = recipientIsAddress
     ? recipientCandidate.address
     : resolvedRecipientAddress;
+  const amountReadyForFeeEstimate = isPositiveRawAmount(amountRaw);
+  const feeEstimateInputsReady =
+    effectiveWalletMode !== 'offline' &&
+    selectedToken != null &&
+    effectiveRecipientAddress != null &&
+    walletAddress != null &&
+    network != null &&
+    !offlineSending &&
+    !normalSending &&
+    !privateSending;
+  const cancelCurrentFeeEstimateQueries = useCallback(() => {
+    const tokenMint = selectedToken?.mint ?? null;
+    void queryClient.cancelQueries({
+      predicate: (query) => {
+        const queryKey = query.queryKey;
+        if (
+          queryKey[0] !== 'offpay' ||
+          (queryKey[1] !== 'normalTransferFee' &&
+            queryKey[1] !== 'magicBlockPrivatePaymentFee' &&
+            queryKey[1] !== 'umbraPrivateP2PFee')
+        ) {
+          return false;
+        }
+
+        return (
+          queryKey[2] === network &&
+          queryKey[3] === walletAddress &&
+          queryKey[4] === effectiveRecipientAddress &&
+          queryKey[5] === tokenMint
+        );
+      },
+    });
+  }, [effectiveRecipientAddress, network, queryClient, selectedToken?.mint, walletAddress]);
+  useEffect(() => {
+    if (!feeEstimateInputsReady || !amountReadyForFeeEstimate) {
+      setFeeEstimateAmountRaw(null);
+      if (!amountReadyForFeeEstimate) {
+        cancelCurrentFeeEstimateQueries();
+      }
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => {
+      setFeeEstimateAmountRaw(amountRaw);
+    }, FEE_ESTIMATE_INPUT_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [
+    amountRaw,
+    amountReadyForFeeEstimate,
+    cancelCurrentFeeEstimateQueries,
+    feeEstimateInputsReady,
+  ]);
   const routeRecipientBleName =
     typeof params.bleName === 'string' && params.bleName.trim().length > 0
       ? params.bleName.trim()
@@ -597,49 +651,168 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         : effectivePaymentRoute === 'umbra'
           ? 'Umbra'
           : 'Normal transfer';
+  const normalFeeRouteAvailable = paymentRouteOptions.some(
+    (route) => route.id === 'normal' && route.disabled !== true,
+  );
+  const magicBlockFeeRouteAvailable = paymentRouteOptions.some(
+    (route) => route.id === 'magicblock' && route.disabled !== true,
+  );
+  const umbraFeeRouteAvailable = paymentRouteOptions.some(
+    (route) => route.id === 'umbra' && route.disabled !== true,
+  );
+  const prefetchFeeEstimatesForAmount = useCallback(
+    (nextAmountRaw: string | null): void => {
+      if (
+        effectiveWalletMode === 'offline' ||
+        !canUseNetwork ||
+        selectedToken == null ||
+        effectiveRecipientAddress == null ||
+        walletAddress == null ||
+        walletId == null ||
+        network == null ||
+        nextAmountRaw == null ||
+        nextAmountRaw.length === 0 ||
+        !/^\d+$/.test(nextAmountRaw) ||
+        BigInt(nextAmountRaw) <= 0n
+      ) {
+        return;
+      }
+
+      if (normalFeeRouteAvailable) {
+        void queryClient.prefetchQuery({
+          queryKey: normalTransferFeeQueryKey({
+            network,
+            walletAddress,
+            recipient: effectiveRecipientAddress,
+            mint: selectedToken.mint,
+            rawAmount: nextAmountRaw,
+            decimals: selectedToken.decimals,
+          }),
+          queryFn: ({ signal }) =>
+            estimateNormalTokenTransferFee({
+              walletAddress,
+              recipient: effectiveRecipientAddress,
+              mint: selectedToken.mint,
+              rawAmount: nextAmountRaw,
+              decimals: selectedToken.decimals,
+              network,
+              signal,
+            }),
+          staleTime: NORMAL_TRANSFER_FEE_REFRESH_MS,
+        });
+      }
+
+      if (magicBlockFeeRouteAvailable) {
+        void queryClient.prefetchQuery({
+          queryKey: magicBlockPrivatePaymentFeeQueryKey({
+            network,
+            walletAddress,
+            recipient: effectiveRecipientAddress,
+            mint: selectedToken.mint,
+            rawAmount: nextAmountRaw,
+          }),
+          queryFn: () =>
+            preparePrivatePaymentPlan({
+              walletAddress,
+              recipient: effectiveRecipientAddress,
+              mint: selectedToken.mint,
+              amount: nextAmountRaw,
+              network,
+            }),
+          staleTime: MAGICBLOCK_FEE_REFRESH_MS,
+        });
+      }
+
+      if (umbraFeeRouteAvailable) {
+        const displayAmount = formatAtomicAmount(
+          nextAmountRaw,
+          selectedToken.decimals,
+          selectedToken.decimals,
+        );
+        if (displayAmount.length === 0) return;
+
+        void queryClient.prefetchQuery({
+          queryKey: umbraPrivateP2PFeeQueryKey({
+            network,
+            walletAddress,
+            recipient: effectiveRecipientAddress,
+            token: selectedToken.mint,
+            rawAmount: nextAmountRaw,
+          }),
+          queryFn: ({ signal }) =>
+            estimateUmbraPrivateP2PFromPublicBalanceFee({
+              walletAddress,
+              walletId,
+              recipient: effectiveRecipientAddress,
+              token: selectedToken.mint,
+              amount: displayAmount,
+              network,
+              autoSetupSender: false,
+              signal,
+            }),
+          staleTime: UMBRA_FEE_STALE_MS,
+        });
+      }
+    },
+    [
+      canUseNetwork,
+      effectiveRecipientAddress,
+      effectiveWalletMode,
+      magicBlockFeeRouteAvailable,
+      network,
+      normalFeeRouteAvailable,
+      queryClient,
+      selectedToken,
+      umbraFeeRouteAvailable,
+      walletAddress,
+      walletId,
+    ],
+  );
+  const feeEstimateMatchesAmount =
+    feeEstimateAmountRaw != null && feeEstimateAmountRaw === amountRaw;
+  const currentFeeEstimateAmountRaw = feeEstimateMatchesAmount ? feeEstimateAmountRaw : null;
+  const feeEstimateHooksEnabled = feeEstimateInputsReady && currentFeeEstimateAmountRaw != null;
 
   // Live network-fee estimates use getFeeForMessage on the exact
-  // transaction message for the selected route. Normal transfers
-  // compile locally; private routes build their route-specific
-  // transaction plan before the user slides.
-  const normalFeeEstimateEnabled =
-    effectiveWalletMode !== 'offline' && effectivePaymentRoute === 'normal';
+  // transaction message for every available route while the user types.
+  // The debounced amount snapshot avoids request storms and is cleared
+  // immediately when the amount is empty or zero.
+  const normalFeeEstimateEnabled = feeEstimateHooksEnabled && normalFeeRouteAvailable;
   const normalFeeEstimate = useNormalTransferFeeEstimate({
     walletAddress,
     recipient: effectiveRecipientAddress,
     mint: selectedToken?.mint ?? null,
-    rawAmount: amountRaw,
+    rawAmount: currentFeeEstimateAmountRaw,
     decimals: selectedToken?.decimals ?? null,
     network,
     enabled: normalFeeEstimateEnabled,
   });
-  const feeEstimateMatchesAmount =
-    feeEstimateAmountRaw != null && feeEstimateAmountRaw === amountRaw;
   const feeEstimateDisplayAmount = useMemo(
     () =>
-      selectedToken == null || feeEstimateAmountRaw == null
+      selectedToken == null || currentFeeEstimateAmountRaw == null
         ? null
-        : formatAtomicAmount(feeEstimateAmountRaw, selectedToken.decimals, selectedToken.decimals),
-    [feeEstimateAmountRaw, selectedToken],
+        : formatAtomicAmount(
+            currentFeeEstimateAmountRaw,
+            selectedToken.decimals,
+            selectedToken.decimals,
+          ),
+    [currentFeeEstimateAmountRaw, selectedToken],
   );
   const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
     walletAddress,
     recipient: effectiveRecipientAddress,
     mint: selectedToken?.mint ?? null,
-    rawAmount: feeEstimateAmountRaw,
+    rawAmount: currentFeeEstimateAmountRaw,
     network,
     enabled:
-      effectiveWalletMode !== 'offline' &&
-      effectivePaymentRoute === 'magicblock' &&
+      feeEstimateHooksEnabled &&
+      magicBlockFeeRouteAvailable &&
       selectedToken != null &&
       effectiveRecipientAddress != null &&
-      feeEstimateAmountRaw != null &&
+      currentFeeEstimateAmountRaw != null &&
       walletAddress != null &&
       walletId != null &&
-      network != null &&
-      !offlineSending &&
-      !normalSending &&
-      !privateSending,
+      network != null,
   });
   const umbraFeeEstimate = useUmbraPrivateP2PFeeEstimate({
     walletAddress,
@@ -647,29 +820,26 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     recipient: effectiveRecipientAddress,
     token: selectedToken?.mint ?? null,
     amount: feeEstimateDisplayAmount,
-    rawAmount: feeEstimateAmountRaw,
+    rawAmount: currentFeeEstimateAmountRaw,
     network,
     enabled:
-      effectiveWalletMode !== 'offline' &&
-      effectivePaymentRoute === 'umbra' &&
+      feeEstimateHooksEnabled &&
+      umbraFeeRouteAvailable &&
       selectedToken != null &&
       effectiveRecipientAddress != null &&
-      feeEstimateAmountRaw != null &&
+      currentFeeEstimateAmountRaw != null &&
       feeEstimateDisplayAmount != null &&
       walletAddress != null &&
       walletId != null &&
-      network != null &&
-      !offlineSending &&
-      !normalSending &&
-      !privateSending,
+      network != null,
   });
   const networkFeeLabel = useMemo(() => {
     if (effectiveWalletMode === 'offline') return 'Paid at settlement';
     if (effectivePaymentRoute === 'normal') {
+      if (!feeEstimateMatchesAmount || normalFeeEstimate.isFetching) return 'Estimating';
       if (normalFeeEstimate.estimate?.lamports != null) {
         return `${formatLamportsAsSol(normalFeeEstimate.estimate.lamports, 9)} SOL`;
       }
-      if (normalFeeEstimate.isFetching) return 'Estimating';
       if (normalFeeEstimate.isError) return 'Fee unavailable';
       return 'Fee unavailable';
     }
@@ -1061,6 +1231,14 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     [transitionToStep],
   );
 
+  const handleSelectAmountToken = useCallback((token: StablecoinOption) => {
+    Keyboard.dismiss();
+    setSelectedMint(token.mint);
+    setAmount((currentAmount) =>
+      sanitizeDecimalInput(currentAmount, token.decimals).slice(0, MAX_AMOUNT_INPUT_CHARACTERS),
+    );
+  }, []);
+
   const handleAmountChange = useCallback(
     (value: string) => {
       const nextAmount = sanitizeDecimalInput(value, selectedToken?.decimals ?? 6);
@@ -1422,8 +1600,10 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const handleContinueAmount = useCallback(() => {
     if (!baseCanSubmit) return;
     Keyboard.dismiss();
+    setFeeEstimateAmountRaw(amountRaw);
+    prefetchFeeEstimatesForAmount(amountRaw);
     transitionToStep('summary', 'forward');
-  }, [baseCanSubmit, transitionToStep]);
+  }, [amountRaw, baseCanSubmit, prefetchFeeEstimatesForAmount, transitionToStep]);
 
   // Phase for the draggable summary sheet. The sheet owns the whole
   // review → sending → success lifecycle in one card, so there is no
@@ -1991,6 +2171,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const renderAmountStep = (): React.JSX.Element => (
     <SendAmountStep
       token={selectedToken}
+      tokenOptions={stablecoins}
       recipientAddress={effectiveRecipientAddress}
       recipientInput={recipient}
       amount={amount}
@@ -2000,9 +2181,13 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       routeOptions={effectiveWalletMode !== 'offline' ? paymentRouteOptions : []}
       selectedRoute={paymentRouteOptions.length > 0 ? effectivePaymentRoute : null}
       onSelectRoute={setSelectedPrivateRoute}
+      onSelectToken={handleSelectAmountToken}
       onAmountChange={handleAmountChange}
       onMax={handleMaxAmount}
       onEditRecipient={handleEditRecipient}
+      canContinue={baseCanSubmit}
+      onContinue={handleContinueAmount}
+      showContinue={step === 'amount'}
     />
   );
 
@@ -2022,13 +2207,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         onPress={() => void handleContinueRecipient()}
         disabled={!canContinueRecipient}
         loading={recipientResolving}
-        compact={denseSend}
-      />
-    ) : step === 'amount' ? (
-      <PrimaryButton
-        label="Next"
-        onPress={handleContinueAmount}
-        disabled={!baseCanSubmit}
         compact={denseSend}
       />
     ) : (
@@ -2060,12 +2238,13 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             styles.scrollContent,
             {
               paddingTop: denseSend ? spacing.sm : compactSend ? spacing.md : spacing.lg,
-              // Reserve room at the bottom for the absolutely-
-              // positioned footer that sits below this scroll view.
-              // Without this, scrollable content would render
-              // underneath the footer button.
+              // Amount owns its CTA inline. Keep its bottom padding at
+              // zero so unused space is allocated inside the amount
+              // block instead of below the Next button.
               paddingBottom:
-                footerBottomPadding + footerButtonHeight + footerTopPadding + sectionGap,
+                step === 'amount'
+                  ? 0
+                  : footerBottomPadding + footerButtonHeight + footerTopPadding + sectionGap,
               paddingHorizontal: screenHorizontalPadding,
             },
           ]}
@@ -2123,26 +2302,28 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             `buttonHeightLg + insets.bottom + spacing` of bottom
             padding so scrollable content never renders under the
             footer button. */}
-      <View
-        style={[
-          styles.footer,
-          {
-            paddingBottom: footerBottomPadding,
-            paddingTop: footerTopPadding,
-            paddingHorizontal: footerHorizontalPadding,
-          },
-        ]}
-        pointerEvents="box-none"
-      >
-        <Animated.View
-          key={`send-footer-${step}`}
-          entering={getSendStepEnteringAnimation(stepTransitionDirection)}
-          exiting={getSendStepExitingAnimation(stepTransitionDirection)}
-          style={styles.footerActionFrame}
+      {step === 'amount' ? null : (
+        <View
+          style={[
+            styles.footer,
+            {
+              paddingBottom: footerBottomPadding,
+              paddingTop: footerTopPadding,
+              paddingHorizontal: footerHorizontalPadding,
+            },
+          ]}
+          pointerEvents="box-none"
         >
-          {footerContent}
-        </Animated.View>
-      </View>
+          <Animated.View
+            key={`send-footer-${step}`}
+            entering={getSendStepEnteringAnimation(stepTransitionDirection)}
+            exiting={getSendStepExitingAnimation(stepTransitionDirection)}
+            style={styles.footerActionFrame}
+          >
+            {footerContent}
+          </Animated.View>
+        </View>
+      )}
       <SendSummarySheet
         visible={
           (step === 'summary' || step === 'success') &&
@@ -2186,6 +2367,7 @@ function PrimaryButton({
   compact?: boolean;
 }): React.JSX.Element {
   const isDisabled = disabled || loading;
+  const labelColor = isDisabled ? colors.text.tertiary : colors.text.onAccent;
   return (
     <Pressable
       style={({ pressed }) => [
@@ -2201,11 +2383,11 @@ function PrimaryButton({
       accessibilityState={{ disabled: isDisabled, busy: loading }}
     >
       {loading ? (
-        <LazyLoadingSpinner size={18} color={colors.text.onAccent} />
+        <LazyLoadingSpinner size={18} color={labelColor} />
       ) : (
         <Text
           variant="button"
-          color={colors.text.onAccent}
+          color={labelColor}
           numberOfLines={1}
           adjustsFontSizeToFit
           minimumFontScale={0.78}
@@ -2637,9 +2819,9 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rim,
   },
   disabledButton: {
-    opacity: 0.55,
+    backgroundColor: colors.surface.solidControl,
   },
   buttonPressed: {
-    backgroundColor: colors.brand.actionFill,
+    backgroundColor: colors.surface.glossPressed,
   },
 });

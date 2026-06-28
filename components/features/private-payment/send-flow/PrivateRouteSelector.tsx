@@ -191,11 +191,13 @@ const styles = StyleSheet.create({
   routeTitle: {
     fontFamily: fontFamily.semiBold,
     fontSize: 14,
+    includeFontPadding: false,
     lineHeight: 18,
   },
   routeDescription: {
     marginTop: 1,
     fontSize: 11,
+    includeFontPadding: false,
     lineHeight: 14,
   },
 });

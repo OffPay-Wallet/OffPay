@@ -2,21 +2,46 @@ import { buildVisibleTokenHoldings, formatLamportsAsSol } from '@/lib/api/offpay
 import { formatFiatCurrency, isUsdStablePriceSymbol } from '@/lib/currency-rates';
 
 import { EMPTY_PARAMS } from './helpers';
-import type { AgenticToolDefinition } from './types';
+import type { AgenticPortfolioValuationSnapshot, AgenticToolDefinition } from './types';
 
 const MAX_BALANCE_ROWS = 16;
 const MAX_UNPRICED_SYMBOLS = 6;
 
+type VisibleHolding = ReturnType<typeof buildVisibleTokenHoldings>[number];
+
+function getPositiveUsdPrice(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function getHoldingUsdPrice(
-  holding: ReturnType<typeof buildVisibleTokenHoldings>[number],
+  holding: VisibleHolding,
+  portfolioValuation?: AgenticPortfolioValuationSnapshot | null,
 ): number | null {
   if (isUsdStablePriceSymbol(holding.priceSymbol) || isUsdStablePriceSymbol(holding.symbol)) {
     return 1;
   }
-  return holding.usdPrice;
+  return (
+    getPositiveUsdPrice(portfolioValuation?.unitUsdPrices[holding.priceMint]) ??
+    getPositiveUsdPrice(holding.usdPrice)
+  );
 }
 
-function buildPortfolioUsdSummary(holdings: ReturnType<typeof buildVisibleTokenHoldings>): {
+function getPortfolioValuationTotalUsd(
+  portfolioValuation: AgenticPortfolioValuationSnapshot | null | undefined,
+): number | null {
+  if (portfolioValuation == null) return null;
+  if (portfolioValuation.expectedCount > 0 && portfolioValuation.pricedCount <= 0) return null;
+  if (!Number.isFinite(portfolioValuation.totalUsd) || portfolioValuation.totalUsd < 0) {
+    return null;
+  }
+
+  return Number(portfolioValuation.totalUsd.toFixed(2));
+}
+
+function buildPortfolioUsdSummary(
+  holdings: ReturnType<typeof buildVisibleTokenHoldings>,
+  portfolioValuation?: AgenticPortfolioValuationSnapshot | null,
+): {
   portfolioValueUsd: number | null;
   portfolioValueUsdLabel: string | null;
   valuationCurrency: 'USD';
@@ -36,7 +61,7 @@ function buildPortfolioUsdSummary(holdings: ReturnType<typeof buildVisibleTokenH
     if (!Number.isFinite(holding.balanceValue) || holding.balanceValue <= 0) continue;
     positiveAssetCount += 1;
 
-    const usdPrice = getHoldingUsdPrice(holding);
+    const usdPrice = getHoldingUsdPrice(holding, portfolioValuation);
     if (usdPrice == null || !Number.isFinite(usdPrice) || usdPrice <= 0) {
       unpricedAssetCount += 1;
       if (!unpricedSymbolSet.has(holding.symbol) && unpricedSymbols.length < MAX_UNPRICED_SYMBOLS) {
@@ -54,7 +79,8 @@ function buildPortfolioUsdSummary(holdings: ReturnType<typeof buildVisibleTokenH
   const hasUnpricedAssets = unpricedAssetCount > 0;
   const normalizedTotal = Object.is(totalUsd, -0) ? 0 : totalUsd;
   const portfolioValueUsd =
-    hasPricedAssets || positiveAssetCount === 0 ? Number(normalizedTotal.toFixed(2)) : null;
+    getPortfolioValuationTotalUsd(portfolioValuation) ??
+    (hasPricedAssets || positiveAssetCount === 0 ? Number(normalizedTotal.toFixed(2)) : null);
 
   return {
     portfolioValueUsd,
@@ -89,7 +115,7 @@ export const getWalletBalanceTool: AgenticToolDefinition = {
     if (context.balance == null) return { result: { status: 'loading' } };
 
     const holdings = buildVisibleTokenHoldings(context.balance);
-    const portfolio = buildPortfolioUsdSummary(holdings);
+    const portfolio = buildPortfolioUsdSummary(holdings, context.portfolioValuation);
     const sol = formatLamportsAsSol(context.balance.solBalance, 9).replace(/\.?0+$/, '') || '0';
     return {
       result: {
@@ -104,7 +130,7 @@ export const getWalletBalanceTool: AgenticToolDefinition = {
           balance: holding.balance,
           verified: holding.verified,
           spam: holding.spam,
-          usdPrice: holding.usdPrice,
+          usdPrice: getHoldingUsdPrice(holding, context.portfolioValuation),
         })),
         truncated: holdings.length > MAX_BALANCE_ROWS,
         fetchedAt: context.balance.fetchedAt,

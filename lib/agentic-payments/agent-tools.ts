@@ -11,6 +11,7 @@ export {
 
 export type {
   AgenticChatCtaId,
+  AgenticPortfolioValuationSnapshot,
   AgenticToolAvailabilityParams,
   AgenticToolDraft,
   AgenticToolName,

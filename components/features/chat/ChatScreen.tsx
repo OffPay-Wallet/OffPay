@@ -68,6 +68,11 @@ import {
   fallbackPayrollAgentReply,
   type PayrollAgentReplyEvent,
 } from '@/lib/agentic-payments/payroll-agent-reply';
+import { useOffpayPortfolioValuation } from '@/hooks/useOffpayPortfolioValuation';
+import {
+  buildStablecoinMetadataLookup,
+  buildVisibleTokenHoldings,
+} from '@/lib/api/offpay-wallet-data';
 import { usePayrollStore } from '@/store/payrollStore';
 import { revealAssistantMessageText } from '@/hooks/agentic-chat/revealAssistantMessageText';
 import { createAgenticId } from './helpers';
@@ -76,6 +81,15 @@ import type { PayrollStageOutcome } from '@/hooks/payroll/usePayrollChatIntake';
 
 function payrollActionId(runId: string): string {
   return `payroll-action-${runId}`;
+}
+
+function isCompletePortfolioValuation(
+  valuation: { expectedCount: number; pricedCount: number } | null | undefined,
+): boolean {
+  return (
+    valuation != null &&
+    (valuation.expectedCount === 0 || valuation.pricedCount >= valuation.expectedCount)
+  );
 }
 
 const EMPTY_CHAT_MESSAGES: readonly AgenticChatMessage[] = [];
@@ -262,6 +276,45 @@ export function ChatScreen(): React.JSX.Element {
         : buildAgentWalletBalanceResponse(balanceQuery.data, capabilitiesQuery.capabilities),
     [balanceQuery.data, capabilitiesQuery.capabilities],
   );
+  const agentTokenMetadata = useMemo(
+    () =>
+      buildStablecoinMetadataLookup(capabilitiesQuery.capabilities?.offline?.supportedStablecoins),
+    [capabilitiesQuery.capabilities?.offline?.supportedStablecoins],
+  );
+  const agentVisibleHoldings = useMemo(
+    () =>
+      agentBalance == null
+        ? []
+        : buildVisibleTokenHoldings(agentBalance, undefined, agentTokenMetadata),
+    [agentBalance, agentTokenMetadata],
+  );
+  const agentPortfolioValuationQuery = useOffpayPortfolioValuation({
+    holdings: agentVisibleHoldings,
+    currency: 'USD',
+    enabled:
+      scope.walletAddress != null && scope.network != null && agentVisibleHoldings.length > 0,
+  });
+  const agentPortfolioValuationData = agentPortfolioValuationQuery.data;
+  const refetchAgentPortfolioValuation = agentPortfolioValuationQuery.refetch;
+  const agentPortfolioValuationRef = useRef<
+    NonNullable<typeof agentPortfolioValuationData> | null
+  >(null);
+  useEffect(() => {
+    agentPortfolioValuationRef.current = agentPortfolioValuationData ?? null;
+  }, [agentPortfolioValuationData]);
+  const resolveAgentPortfolioValuation = useCallback(async () => {
+    const current = agentPortfolioValuationRef.current;
+    if (agentVisibleHoldings.length === 0 || isCompletePortfolioValuation(current)) {
+      return current;
+    }
+
+    try {
+      const result = await refetchAgentPortfolioValuation({ cancelRefetch: false });
+      return result.data ?? agentPortfolioValuationRef.current;
+    } catch {
+      return agentPortfolioValuationRef.current;
+    }
+  }, [agentVisibleHoldings.length, refetchAgentPortfolioValuation]);
   const availableCtaIds = useMemo(
     () =>
       getAvailableAgenticChatCtaIds({
@@ -297,6 +350,8 @@ export function ChatScreen(): React.JSX.Element {
     walletMode: effectiveWalletMode,
     canUseNetwork,
     balance: agentBalance,
+    portfolioValuation: agentPortfolioValuationData ?? null,
+    resolvePortfolioValuation: resolveAgentPortfolioValuation,
     capabilities: capabilitiesQuery.capabilities,
     knownWallets,
     walletId: activeWalletId,

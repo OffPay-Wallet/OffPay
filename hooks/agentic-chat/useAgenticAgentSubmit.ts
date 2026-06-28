@@ -25,6 +25,7 @@ import {
   formatAgenticToolProcessingLabel,
   getAvailableAgenticModelToolSchemas,
   runAgenticTools,
+  type AgenticPortfolioValuationSnapshot,
   type AgenticToolDraft,
   type AgenticToolRunnerContext,
 } from '@/lib/agentic-payments/agent-tools';
@@ -67,6 +68,12 @@ interface UseAgenticAgentSubmitParams {
   walletMode: 'online' | 'offline';
   canUseNetwork: boolean;
   balance: WalletBalanceResponse | null | undefined;
+  portfolioValuation?: AgenticPortfolioValuationSnapshot | null;
+  resolvePortfolioValuation?: () =>
+    | AgenticPortfolioValuationSnapshot
+    | Promise<AgenticPortfolioValuationSnapshot | null | undefined>
+    | null
+    | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
   walletId?: string | null;
@@ -90,6 +97,8 @@ export function useAgenticAgentSubmit({
   walletMode,
   canUseNetwork,
   balance,
+  portfolioValuation,
+  resolvePortfolioValuation,
   capabilities,
   knownWallets,
   walletId,
@@ -221,6 +230,8 @@ export function useAgenticAgentSubmit({
         walletMode,
         canUseNetwork,
         balance,
+        portfolioValuation,
+        resolvePortfolioValuation,
         capabilities,
         knownWallets,
         queryClient,
@@ -258,6 +269,8 @@ export function useAgenticAgentSubmit({
       knownWallets,
       onPayrollIntent,
       onReplyText,
+      portfolioValuation,
+      resolvePortfolioValuation,
       queryClient,
       scope,
       scopeKey,
@@ -283,6 +296,12 @@ interface RunAgentLoopParams {
   walletMode: 'online' | 'offline';
   canUseNetwork: boolean;
   balance: WalletBalanceResponse | null | undefined;
+  portfolioValuation?: AgenticPortfolioValuationSnapshot | null;
+  resolvePortfolioValuation?: () =>
+    | AgenticPortfolioValuationSnapshot
+    | Promise<AgenticPortfolioValuationSnapshot | null | undefined>
+    | null
+    | undefined;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
   queryClient: ReturnType<typeof useQueryClient>;
@@ -388,11 +407,24 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     store.updateMessage(params.assistantMessageId, {
       processingLabel: formatAgenticToolProcessingLabel(turn.toolCalls),
     });
+    let portfolioValuation = params.portfolioValuation;
+    if (
+      params.resolvePortfolioValuation != null &&
+      shouldResolvePortfolioValuation(turn.toolCalls)
+    ) {
+      try {
+        portfolioValuation = (await params.resolvePortfolioValuation()) ?? portfolioValuation;
+      } catch {
+        portfolioValuation = params.portfolioValuation;
+      }
+      if (params.controller.signal.aborted) return;
+    }
     const toolContext: AgenticToolRunnerContext = {
       scope: params.scope,
       walletMode: params.walletMode,
       canUseNetwork: params.canUseNetwork,
       balance: params.balance,
+      portfolioValuation,
       capabilities: params.capabilities,
       knownWallets: params.knownWallets,
       redactions: params.redactions,
@@ -508,6 +540,10 @@ function isCurrentScope(submittedScope: AgenticChatScope, submittedScopeKey: str
     submittedScope.walletAddress === currentWalletAddress &&
     submittedScope.network === currentNetwork
   );
+}
+
+function shouldResolvePortfolioValuation(toolCalls: readonly AgentToolCall[]): boolean {
+  return toolCalls.some((toolCall) => toolCall.name === 'get_wallet_balance');
 }
 
 function buildSafeTokenSymbols(balance: WalletBalanceResponse | null | undefined): string[] {

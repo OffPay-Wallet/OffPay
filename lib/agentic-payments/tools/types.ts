@@ -83,11 +83,22 @@ export interface AgenticToolMetadata {
   modelInstructions: string[];
 }
 
+export interface AgenticPortfolioValuationSnapshot {
+  currency: string;
+  totalUsd: number;
+  total: number;
+  pricedCount: number;
+  expectedCount: number;
+  fetchedAt: number;
+  unitUsdPrices: Readonly<Record<string, number>>;
+}
+
 export interface AgenticToolRunnerContext {
   scope: AgenticChatScope;
   walletMode: 'online' | 'offline';
   canUseNetwork: boolean;
   balance: WalletBalanceResponse | null | undefined;
+  portfolioValuation?: AgenticPortfolioValuationSnapshot | null;
   capabilities: CapabilitiesResponse['capabilities'] | null | undefined;
   knownWallets: readonly AgenticKnownWallet[];
   redactions: readonly AgenticPrivacyRedaction[];

@@ -19,7 +19,27 @@ interface UseNormalTransferFeeEstimateParams {
   enabled?: boolean;
 }
 
-const FEE_REFRESH_MS = 30_000;
+export const NORMAL_TRANSFER_FEE_REFRESH_MS = 30_000;
+
+export function normalTransferFeeQueryKey(params: {
+  network: OffpayNetwork | null | undefined;
+  walletAddress: string | null | undefined;
+  recipient: string | null | undefined;
+  mint: string | null | undefined;
+  rawAmount: string | null | undefined;
+  decimals: number | null | undefined;
+}) {
+  return [
+    'offpay',
+    'normalTransferFee',
+    params.network,
+    params.walletAddress,
+    params.recipient,
+    params.mint,
+    params.rawAmount,
+    params.decimals,
+  ] as const;
+}
 
 /**
  * Live fee estimate for a normal-route transfer. Recomputes whenever
@@ -48,16 +68,7 @@ export function useNormalTransferFeeEstimate(params: UseNormalTransferFeeEstimat
     params.network != null;
 
   const query = useQuery({
-    queryKey: [
-      'offpay',
-      'normalTransferFee',
-      params.network,
-      params.walletAddress,
-      params.recipient,
-      params.mint,
-      params.rawAmount,
-      params.decimals,
-    ],
+    queryKey: normalTransferFeeQueryKey(params),
     queryFn: async ({ signal }) => {
       if (
         params.walletAddress == null ||
@@ -83,8 +94,8 @@ export function useNormalTransferFeeEstimate(params: UseNormalTransferFeeEstimat
     // The blockhash referenced by the compiled message expires after
     // ~150 slots (~60 s). Refetching every 30 s keeps the lamport
     // figure honest without hammering the RPC.
-    refetchInterval: FEE_REFRESH_MS,
-    staleTime: FEE_REFRESH_MS,
+    refetchInterval: NORMAL_TRANSFER_FEE_REFRESH_MS,
+    staleTime: NORMAL_TRANSFER_FEE_REFRESH_MS,
     gcTime: 5 * 60_000,
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey;
