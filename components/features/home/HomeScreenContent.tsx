@@ -1153,6 +1153,7 @@ export function HomeScreenContent(): React.JSX.Element {
           <View>
             <TokenHoldingsCard
               holdings={previewHoldings}
+              currency={currency}
               onTokenPress={handleTokenPress}
               onViewAll={handleViewAllHoldings}
               emptyTitle={holdingsEmptyTitle}

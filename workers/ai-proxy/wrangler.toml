@@ -7,7 +7,11 @@ workers_dev = true
 # routes = [{ pattern = "ai.offpay.app", custom_domain = true }]
 
 [placement]
-mode = "smart"
+# Gemini Developer API rejects some Cloudflare edge locations with
+# FAILED_PRECONDITION "User location is not supported for the API use".
+# Keep chat provider egress near India instead of letting Smart Placement
+# route this Worker through unsupported colos such as HKG.
+region = "gcp:asia-south1"
 
 [observability]
 enabled = true

@@ -64,6 +64,7 @@ import { WALLET_TRANSACTIONS_PAGE_SIZE } from '@/lib/api/offpay-wallet-query-key
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
+import { formatPercentChange } from '@/lib/ui/token-change-format';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
@@ -422,12 +423,6 @@ function TokenNameCopyButton({
       ) : null}
     </View>
   );
-}
-
-function formatPercentChange(value: number): string {
-  const normalized = Object.is(value, -0) ? 0 : value;
-  const sign = normalized > 0 ? '+' : '';
-  return `${sign}${normalized.toFixed(Math.abs(normalized) >= 100 ? 1 : 2)}%`;
 }
 
 function formatFiatValue(value: number, currencyCode: string, compact = false): string {

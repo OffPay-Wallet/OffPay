@@ -31,6 +31,7 @@ import { useWalletStore } from '@/store/walletStore';
 
 import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
+import type { ViewToken } from 'react-native';
 
 interface HoldingsScreenContentProps {
   paddingTop: number;
@@ -54,6 +55,24 @@ function getQueryErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+/** Stable empty set so the initial visible-mints state keeps a constant identity. */
+const EMPTY_VISIBLE_MINTS: ReadonlySet<string> = new Set<string>();
+
+/** Only rows at least this visible trigger a price-history fetch. */
+const HOLDINGS_VIEWABILITY_CONFIG = {
+  itemVisiblePercentThreshold: 10,
+  minimumViewTime: 120,
+} as const;
+
+function areMintSetsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
+}
+
 export function HoldingsScreenContent({
   paddingTop,
 }: HoldingsScreenContentProps): React.JSX.Element {
@@ -61,6 +80,19 @@ export function HoldingsScreenContent({
   const queryClient = useQueryClient();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const [query, setQuery] = useState('');
+  const [visibleMints, setVisibleMints] = useState<ReadonlySet<string>>(EMPTY_VISIBLE_MINTS);
+  // react-native requires stable identities for these two FlashList props.
+  const viewabilityConfig = useRef(HOLDINGS_VIEWABILITY_CONFIG).current;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[]; changed: ViewToken[] }): void => {
+      const next = new Set<string>();
+      for (const token of viewableItems) {
+        const mint = (token.item as RowItem | null | undefined)?.holding?.mint;
+        if (token.isViewable && mint != null) next.add(mint);
+      }
+      setVisibleMints((prev) => (areMintSetsEqual(prev, next) ? prev : next));
+    },
+  ).current;
   const hydratedKeyRef = useRef<string | null>(null);
   const scheduledHydrationRef = useRef<ReturnType<typeof scheduleUiWorkAfterFirstPaint> | null>(
     null,
@@ -180,11 +212,21 @@ export function HoldingsScreenContent({
             privacyHidden={false}
             valuation={item.valuation}
             valuationLoading={valuationValuesLoading}
+            currency={currency}
+            visible={visibleMints.has(item.holding.mint)}
           />
         </View>
       </View>
     ),
-    [compact, dense, handleTokenPress, rowFrameWidth, valuationValuesLoading],
+    [
+      compact,
+      currency,
+      dense,
+      handleTokenPress,
+      rowFrameWidth,
+      valuationValuesLoading,
+      visibleMints,
+    ],
   );
 
   const keyExtractor = useCallback((item: RowItem) => item.holding.mint, []);
@@ -306,6 +348,8 @@ export function HoldingsScreenContent({
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
             drawDistance={400}
           />
         </StaggerRevealItem>

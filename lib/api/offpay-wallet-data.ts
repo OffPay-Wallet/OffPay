@@ -252,7 +252,7 @@ export function buildVisibleTokenHoldings(
         metadata: tokenMetadata,
         umbraToken,
         displaySymbol,
-        displayName: tokenMetadata?.name ?? umbraToken?.name ?? token.name,
+        displayName: umbraToken?.name ?? tokenMetadata?.name ?? token.name,
         priceSymbol: tokenMetadata?.symbol ?? umbraToken?.aliases?.[0] ?? displaySymbol,
       };
     })

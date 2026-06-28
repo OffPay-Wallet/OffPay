@@ -223,7 +223,7 @@ describe('offpay-wallet-data', () => {
     const holdings = buildVisibleTokenHoldings(balance);
 
     expect(holdings[1]).toMatchObject({
-      name: 'Devnet USDC (Umbra test)',
+      name: 'dUSDC',
       symbol: 'dUSDC',
       priceSymbol: 'USDC',
       logo: expect.stringContaining('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),

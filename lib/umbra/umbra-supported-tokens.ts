@@ -60,7 +60,7 @@ const MAINNET_TOKENS: UmbraSupportedToken[] = [
 const DEVNET_TOKENS: UmbraSupportedToken[] = [
   {
     symbol: 'dUSDC',
-    name: 'Devnet USDC (Umbra test)',
+    name: 'dUSDC',
     mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
     decimals: 6,
     encryptedBalance: true,
@@ -71,7 +71,7 @@ const DEVNET_TOKENS: UmbraSupportedToken[] = [
   },
   {
     symbol: 'dUSDT',
-    name: 'Devnet USDT (Umbra test)',
+    name: 'dUSDT',
     mint: 'DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6',
     decimals: 6,
     encryptedBalance: true,

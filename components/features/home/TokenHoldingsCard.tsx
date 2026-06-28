@@ -5,14 +5,23 @@
  *   - API token logos when available
  *   - 5-decimal token amounts
  *   - verified ticks from API/provider metadata
+ *   - a market price line (symbol · unit price · 24h change) per token
+ *   - an inline micro price chart (sparkline) sourced from the existing
+ *     24H price-history hook, colored by the 24h change direction
  *   - real token valuation labels when price data is available
  */
 import { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { TokenSparkline } from '@/components/features/home/TokenSparkline';
+import {
+  resolveBalanceLabel,
+  resolveFiatValueLabel,
+  resolveUnitPriceAmount,
+  shouldShowPercentChange,
+} from '@/components/features/home/token-row-format';
 import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
-import { FiatUnitPriceText } from '@/components/ui/FiatUnitPriceText';
 import { SlotText } from '@/components/ui/SlotText';
 import { SkeletonBlock } from '@/components/ui/Skeleton';
 import { Text } from '@/components/ui/Text';
@@ -20,6 +29,8 @@ import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useOffpayTokenPriceHistory } from '@/hooks/useOffpayTokenPriceHistory';
+import { formatPercentChange, toneColor } from '@/lib/ui/token-change-format';
 
 import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
 import type { OffpayTokenHoldingView } from '@/lib/api/offpay-wallet-data';
@@ -34,6 +45,8 @@ interface TokenHoldingsCardProps {
   /** Section title displayed above the card */
   title?: string;
   holdings: TokenHolding[];
+  /** Active fiat currency used for the per-row price-history sparkline */
+  currency: string;
   /** Called when a token row is tapped */
   onTokenPress?: (holding: TokenHolding) => void;
   /** Called when "View All" is tapped */
@@ -48,13 +61,32 @@ interface TokenHoldingsCardProps {
   separatedRows?: boolean;
 }
 
-function hasNumericLabel(value: string | null | undefined): value is string {
-  return typeof value === 'string' && /\d/.test(value);
-}
-
 // Flat card treatment — single ambient shadow for lift on dark surfaces.
 // Inset shadows are invisible on Android and cause extra GPU blur passes.
 const HEADER_CONTAINER_SHADOW = '0 10px 22px rgba(0, 0, 0, 0.4)';
+
+// ---------------------------------------------------------------------------
+// Responsive sizing
+// ---------------------------------------------------------------------------
+
+function rowMetrics(
+  compact: boolean,
+  dense: boolean,
+): {
+  iconSize: number;
+  tokenInfoBasis: number;
+  sparklineMinWidth: number;
+  sparklineHeight: number;
+  valueColumnWidth: number;
+} {
+  return {
+    iconSize: dense ? 30 : compact ? 32 : 38,
+    tokenInfoBasis: dense ? 96 : compact ? 112 : 132,
+    sparklineMinWidth: dense ? 56 : compact ? 68 : 84,
+    sparklineHeight: dense ? 22 : compact ? 24 : 28,
+    valueColumnWidth: dense ? 76 : compact ? 86 : 96,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -70,6 +102,8 @@ const TokenRow = memo(function TokenRow({
   privacyHidden,
   valuation,
   valuationLoading = false,
+  currency,
+  visible = true,
 }: {
   holding: TokenHolding;
   isLast: boolean;
@@ -79,21 +113,38 @@ const TokenRow = memo(function TokenRow({
   privacyHidden: boolean;
   valuation?: TokenValuationView;
   valuationLoading?: boolean;
+  currency: string;
+  visible?: boolean;
 }): React.JSX.Element {
+  // Price history drives both the 24h % change and the sparkline. It is fetched
+  // on the 24H timeframe and gated by row visibility so the long holdings list
+  // only fetches charts for rows the user can actually see.
+  const priceHistory = useOffpayTokenPriceHistory({
+    mint: holding.priceMint,
+    symbol: holding.symbol,
+    priceSymbol: holding.priceSymbol,
+    currency,
+    timeframe: '24H',
+    enabled: visible,
+  });
+  const change = priceHistory.data?.change ?? null;
+  const samples = priceHistory.data?.samples ?? [];
+  const tone = change?.tone ?? 'neutral';
+  // `isLoading` (not `isPending`) so disabled/off-screen rows are not treated as
+  // loading; gate on `visible` for extra safety.
+  const sparklineLoading =
+    visible && (priceHistory.isLoading || (priceHistory.isFetching && samples.length < 2));
+
   const showValuationSkeleton = valuationLoading && !privacyHidden;
-  const amountLabel = privacyHidden ? '****' : `${holding.balance} ${holding.symbol}`;
-  const fiatValueLabel = privacyHidden
-    ? '****'
-    : hasNumericLabel(valuation?.fiatValueLabel)
-      ? valuation.fiatValueLabel
-      : '--';
-  const unitPriceLabel = privacyHidden
-    ? '****'
-    : hasNumericLabel(valuation?.unitPriceLabel)
-      ? valuation.unitPriceLabel
-      : null;
-  const iconSize = dense ? 30 : compact ? 32 : 38;
-  const valueColumnWidth = dense ? 90 : compact ? 112 : 136;
+  const amountLabel = resolveBalanceLabel(privacyHidden, holding.balance, holding.symbol);
+  const fiatValueLabel = resolveFiatValueLabel(privacyHidden, valuation?.fiatValueLabel);
+  // Market price line data is public — never masked by privacy mode.
+  const unitPriceAmount = resolveUnitPriceAmount(
+    valuation?.unitPriceLabel ?? priceHistory.data?.unitPriceLabel,
+  );
+
+  const { iconSize, tokenInfoBasis, sparklineMinWidth, sparklineHeight, valueColumnWidth } =
+    rowMetrics(compact, dense);
   const interactive = onPress != null;
 
   const handlePress = useCallback((): void => {
@@ -126,7 +177,7 @@ const TokenRow = memo(function TokenRow({
         />
       </View>
 
-      <View style={styles.tokenInfo}>
+      <View style={[styles.tokenInfo, { flexBasis: tokenInfoBasis }]}>
         <View style={styles.nameRow}>
           <Text
             variant="bodyBold"
@@ -153,22 +204,50 @@ const TokenRow = memo(function TokenRow({
             />
           ) : null}
         </View>
-        <Text
-          variant="small"
-          color={colors.text.secondary}
-          style={[
-            styles.amountText,
-            compact && styles.amountTextCompact,
-            dense && styles.amountTextDense,
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-          adjustsFontSizeToFit
-          minimumFontScale={0.78}
-          maxFontSizeMultiplier={1}
-        >
-          {amountLabel}
-        </Text>
+        <View style={styles.priceLine}>
+          <Text
+            variant="small"
+            color={colors.text.secondary}
+            style={styles.symbolText}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1}
+          >
+            {holding.symbol}
+          </Text>
+          {unitPriceAmount != null ? (
+            <Text
+              color={colors.text.primary}
+              style={[styles.priceText, dense && styles.priceTextDense]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+              maxFontSizeMultiplier={1}
+            >
+              {unitPriceAmount}
+            </Text>
+          ) : null}
+          {shouldShowPercentChange(change) ? (
+            <Text
+              variant="small"
+              color={toneColor(change.tone)}
+              style={styles.changePercent}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1}
+            >
+              {formatPercentChange(change.percent)}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={[styles.sparklineWrap, { minWidth: sparklineMinWidth }]}>
+        <TokenSparkline
+          samples={samples}
+          tone={tone}
+          height={sparklineHeight}
+          loading={sparklineLoading}
+        />
       </View>
 
       <View style={[styles.valueCol, { width: valueColumnWidth }]}>
@@ -209,28 +288,22 @@ const TokenRow = memo(function TokenRow({
                 maxFontSizeMultiplier={1}
               />
             </SlotText>
-            {unitPriceLabel != null ? (
-              <SlotText
-                value={unitPriceLabel}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.62}
-                maxFontSizeMultiplier={1}
-              >
-                <FiatUnitPriceText
-                  value={unitPriceLabel}
-                  size="caption"
-                  compact={compact || dense}
-                  align="right"
-                  color={colors.text.secondary}
-                  style={styles.unitPriceWrap}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.62}
-                  maxFontSizeMultiplier={1}
-                />
-              </SlotText>
-            ) : null}
+            <Text
+              variant="small"
+              color={colors.text.secondary}
+              style={[
+                styles.balanceText,
+                compact && styles.balanceTextCompact,
+                dense && styles.balanceTextDense,
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              adjustsFontSizeToFit
+              minimumFontScale={0.62}
+              maxFontSizeMultiplier={1}
+            >
+              {amountLabel}
+            </Text>
           </>
         )}
       </View>
@@ -249,7 +322,7 @@ export function TokenRowSkeleton({
   dense: boolean;
   isLast: boolean;
 }): React.JSX.Element {
-  const iconSize = dense ? 30 : compact ? 32 : 38;
+  const { iconSize, valueColumnWidth } = rowMetrics(compact, dense);
   return (
     <View
       style={[
@@ -260,7 +333,7 @@ export function TokenRowSkeleton({
       ]}
     >
       <SkeletonBlock width={iconSize} height={iconSize} radius={999} />
-      <View style={styles.tokenInfo}>
+      <View style={[styles.tokenInfo, styles.skeletonInfoGrow]}>
         <SkeletonBlock width="54%" height={compact ? 14 : 16} radius={8} />
         <SkeletonBlock
           width="42%"
@@ -269,7 +342,7 @@ export function TokenRowSkeleton({
           style={styles.skeletonSubline}
         />
       </View>
-      <View style={[styles.valueCol, { width: dense ? 90 : compact ? 112 : 136 }]}>
+      <View style={[styles.valueCol, { width: valueColumnWidth }]}>
         <SkeletonBlock width="78%" height={compact ? 13 : 15} radius={8} />
         <SkeletonBlock
           width="64%"
@@ -289,6 +362,7 @@ export function TokenRowSkeleton({
 export const TokenHoldingsCard = memo(function TokenHoldingsCard({
   title = 'Holdings',
   holdings,
+  currency,
   onTokenPress,
   onViewAll,
   emptyTitle = 'No tokens found',
@@ -368,6 +442,8 @@ export const TokenHoldingsCard = memo(function TokenHoldingsCard({
                 privacyHidden={privacyHidden}
                 valuation={valuations?.[holding.mint]}
                 valuationLoading={valuationsLoading}
+                currency={currency}
+                visible
               />
             ))
           ) : (
@@ -410,6 +486,8 @@ export const TokenHoldingsCard = memo(function TokenHoldingsCard({
                     privacyHidden={privacyHidden}
                     valuation={valuations?.[holding.mint]}
                     valuationLoading={valuationsLoading}
+                    currency={currency}
+                    visible
                   />
                 </View>
               </View>
@@ -558,9 +636,13 @@ const styles = StyleSheet.create({
 
   /* Token info column */
   tokenInfo: {
-    flex: 1,
+    flexShrink: 1,
     minWidth: 0,
     gap: 3,
+  },
+  /* Skeleton keeps the info column growing so its placeholder lines size cleanly */
+  skeletonInfoGrow: {
+    flex: 1,
   },
   nameRow: {
     flexDirection: 'row',
@@ -586,20 +668,34 @@ const styles = StyleSheet.create({
   verifiedIcon: {
     flexShrink: 0,
   },
-  amountText: {
-    fontFamily: fontFamily.moneyLight,
+
+  /* Market price line */
+  priceLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     minWidth: 0,
+  },
+  symbolText: {
+    fontFamily: fontFamily.uiMedium,
+    flexShrink: 0,
+  },
+  priceText: {
+    fontFamily: fontFamily.money,
     fontSize: 13,
     lineHeight: 17,
+    flexShrink: 1,
+    minWidth: 0,
   },
-  amountTextCompact: {
+  priceTextDense: {
     fontSize: 12,
     lineHeight: 16,
   },
-  amountTextDense: {
-    fontSize: 11,
-    lineHeight: 14,
+  changePercent: {
+    fontFamily: fontFamily.uiSemiBold,
+    flexShrink: 0,
   },
+
   skeletonSubline: {
     marginTop: spacing.xs,
   },
@@ -611,9 +707,16 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
 
-  /* Balance column */
+  /* Sparkline fills the space between the token info and the value column */
+  sparklineWrap: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+
+  /* Balance / value column */
   valueCol: {
-    width: 124,
+    width: 112,
     alignItems: 'flex-end',
     gap: 1,
     flexShrink: 0,
@@ -622,8 +725,20 @@ const styles = StyleSheet.create({
   fiatValueWrap: {
     alignSelf: 'flex-end',
   },
-  unitPriceWrap: {
+  balanceText: {
+    fontFamily: fontFamily.moneyLight,
+    minWidth: 0,
+    fontSize: 12,
+    lineHeight: 16,
     alignSelf: 'flex-end',
+  },
+  balanceTextCompact: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  balanceTextDense: {
+    fontSize: 10,
+    lineHeight: 14,
   },
 
   /* Empty state */

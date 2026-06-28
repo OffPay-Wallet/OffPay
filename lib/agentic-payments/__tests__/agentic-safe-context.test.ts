@@ -221,7 +221,7 @@ describe('buildAgentWalletBalanceResponse (local-only enrichment)', () => {
 
     expect(agentBalance.tokens[0]).toMatchObject({
       symbol: 'dUSDC',
-      name: 'Devnet USDC (Umbra test)',
+      name: 'dUSDC',
       mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
     });
   });
