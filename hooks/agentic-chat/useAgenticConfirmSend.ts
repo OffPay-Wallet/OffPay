@@ -54,6 +54,7 @@ import {
   type AgenticFlashPositionAction,
   type AgenticUmbraVaultAction,
 } from '@/store/agenticChatStore';
+import { useContactsStore } from '@/store/contactsStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -103,6 +104,7 @@ export function useAgenticConfirmSend({
   const walletId = useWalletStore((s) => s.activeWalletId);
   const updateAction = useAgenticChatStore((s) => s.updateAction);
   const addPrivateReceipt = usePrivatePaymentStore((s) => s.addReceipt);
+  const markRecipientUsed = useContactsStore((s) => s.markRecipientUsed);
   const addUmbraReceipt = useUmbraPrivacyStore((s) => s.addReceipt);
   const { scheduleRefresh, applyOptimisticShield, applyOptimisticCredit } =
     useUmbraCacheInvalidator();
@@ -276,6 +278,12 @@ export function useAgenticConfirmSend({
                 ? 'Yuga private payment submitted'
                 : 'Yuga private payment queued';
 
+        const submittedAt = Date.now();
+        markRecipientUsed({
+          walletAddress: validation.draft.walletAddress,
+          recipientAddress: validation.draft.recipient,
+          usedAt: submittedAt,
+        });
         addPrivateReceipt({
           id: id ?? action.id,
           status: result.status,
@@ -290,7 +298,7 @@ export function useAgenticConfirmSend({
           tokenLogo: validation.draft.tokenLogo,
           tokenDecimals: validation.draft.tokenDecimals,
           network: validation.draft.network,
-          createdAt: Date.now(),
+          createdAt: submittedAt,
           signature: result.signature,
           txId: result.txId,
           initSignature: result.initSignature,
@@ -340,6 +348,7 @@ export function useAgenticConfirmSend({
       canUseNetwork,
       capabilities,
       knownWallets,
+      markRecipientUsed,
       onSpeakOutcome,
       queryClient,
       scope.network,

@@ -4,6 +4,7 @@ import { resolveSnsName } from '@/lib/identity/sns';
 import { resolveXHandle, XHandleNotRegisteredError } from '@/lib/identity/x-handle';
 import {
   isSelfRecipientIntent,
+  resolveKnownWalletReferenceFromText,
   resolveAgenticPrivateSendRecipient,
 } from '@/lib/agentic-payments/private-send-intent';
 
@@ -54,6 +55,16 @@ function resolveKnownWalletAddress(
   };
 }
 
+function resolveKnownWalletAddressFromText(
+  context: AgenticToolRunnerContext,
+): { address: string; source: ToolRecipientSource } | null {
+  const matchedWallet = resolveKnownWalletReferenceFromText(context.userText, [
+    ...context.knownWallets,
+  ]);
+  if (matchedWallet == null) return null;
+  return { address: matchedWallet.address, source: 'known_wallet' };
+}
+
 export async function resolveRecipientForDraft(params: {
   rawRecipient: string;
   context: AgenticToolRunnerContext;
@@ -79,6 +90,15 @@ export async function resolveRecipientForDraft(params: {
         recipient: walletAddress,
         allowSelfRecipient: true,
         source: 'self',
+      };
+    }
+    const knownFromText = resolveKnownWalletAddressFromText(params.context);
+    if (knownFromText != null) {
+      return {
+        ok: true,
+        recipient: knownFromText.address,
+        allowSelfRecipient: knownFromText.address === walletAddress,
+        source: knownFromText.source,
       };
     }
     return { ok: true, recipient: '', allowSelfRecipient: false, source: 'user_text' };
@@ -145,13 +165,14 @@ export const resolveRecipientTool: AgenticToolDefinition = {
   schema: {
     name: 'resolve_recipient',
     description:
-      'Resolves a recipient reference locally: full Solana address, self, saved wallet name, SNS .sol name, or X handle. Result never includes the resolved address.',
+      'Resolves a recipient reference locally: full Solana address, self, saved contact or wallet name, SNS .sol name, or X handle. Result never includes the resolved address.',
     parameters: {
       type: 'object',
       properties: {
         recipient: {
           type: 'string',
-          description: 'Address, [ADDRESS_1], saved wallet name, .sol name, @handle, or self.',
+          description:
+            'Address, [ADDRESS_1], saved contact or wallet name, .sol name, @handle, or self.',
         },
       },
       required: ['recipient'],

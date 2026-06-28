@@ -32,9 +32,9 @@ export function textField(value: unknown): string {
 }
 
 export function normalizeAgenticPrivateSendInput(input: unknown): NormalizedPrivateSendToolInput {
-  const fields = (typeof input === 'object' && input !== null
-    ? input
-    : {}) as AgenticPrivateSendToolInput;
+  const fields = (
+    typeof input === 'object' && input !== null ? input : {}
+  ) as AgenticPrivateSendToolInput;
 
   return {
     recipient: textField(fields.recipient),
@@ -59,7 +59,10 @@ export function getRequestedNetwork(text: string | null | undefined): OffpayNetw
 }
 
 export function normalizeStablecoinRequest(value: string): 'USDC' | 'USDT' | null {
-  const normalized = value.trim().toUpperCase().replace(/[^A-Z]/g, '');
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '');
   if (normalized === 'USDC' || normalized === 'DUSDC' || normalized === 'DEVNETUSDC') {
     return 'USDC';
   }
@@ -95,6 +98,17 @@ export function resolveAgenticPrivateSendRecipient(params: {
   if (!isValidSolanaAddress(params.aiRecipient)) {
     if (userTextRecipient != null) {
       return { recipient: userTextRecipient, selfRecipientRequested };
+    }
+
+    const knownWalletTextRecipient = resolveKnownWalletReferenceFromText(
+      params.userText,
+      params.knownWallets,
+    );
+    if (knownWalletTextRecipient != null) {
+      return {
+        recipient: knownWalletTextRecipient.address,
+        selfRecipientRequested,
+      };
     }
 
     if (selfRecipientRequested) {
@@ -172,7 +186,53 @@ function resolveKnownWalletReference(
       normalizeReference(wallet.address) === normalized,
   );
 
-  return matches.length === 1 ? (matches[0] ?? null) : null;
+  return getUniqueKnownWalletMatch(matches);
+}
+
+export function resolveKnownWalletReferenceFromText(
+  text: string | null | undefined,
+  knownWallets: AgenticKnownWallet[] | undefined,
+): AgenticKnownWallet | null {
+  if (knownWallets == null || knownWallets.length === 0) return null;
+  const turns = (text ?? '')
+    .split('\n')
+    .map((turn) => normalizeReference(turn))
+    .filter((turn) => turn.length > 0)
+    .reverse();
+
+  for (const turn of turns) {
+    const matches = knownWallets.filter((wallet) => {
+      const name = normalizeReference(wallet.name);
+      if (name.length === 0) return false;
+      return turnMentionsKnownWalletRecipient(turn, name);
+    });
+    const match = getUniqueKnownWalletMatch(matches);
+    if (match != null) return match;
+  }
+
+  return null;
+}
+
+function turnMentionsKnownWalletRecipient(turn: string, name: string): boolean {
+  if (turn === name) return true;
+  const namePattern = `(?:^|[^a-z0-9])${escapeRegExp(name)}(?=$|[^a-z0-9])`;
+  if (!new RegExp(namePattern).test(turn)) return false;
+  const beforeName =
+    String.raw`\b(?:to|for|towards?|recipient|pay|send|transfer|move)\b.{0,96}` + namePattern;
+  const afterName = namePattern + String.raw`.{0,32}\b(?:wallet|recipient)\b`;
+  return new RegExp(beforeName).test(turn) || new RegExp(afterName).test(turn);
+}
+
+function getUniqueKnownWalletMatch(matches: AgenticKnownWallet[]): AgenticKnownWallet | null {
+  const byAddress = new Map<string, AgenticKnownWallet>();
+  for (const match of matches) {
+    byAddress.set(match.address, match);
+  }
+  return byAddress.size === 1 ? ([...byAddress.values()][0] ?? null) : null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeReference(value: string): string {

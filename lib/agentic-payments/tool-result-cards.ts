@@ -10,6 +10,8 @@ const MAX_TOOL_CARDS = 3;
 const MAX_ITEMS_PER_CARD = 5;
 const MAX_ROWS_PER_CARD = 5;
 
+const BACKGROUND_TOOL_NAMES = new Set(['resolve_recipient']);
+
 const DRAFT_TOOL_NAMES = new Set([
   'draft_normal_send',
   'draft_private_send',
@@ -72,6 +74,7 @@ export function buildAgenticToolResultCards(
 }
 
 function buildToolResultCard(toolResult: AgentToolResult): AgenticChatToolCard | null {
+  if (BACKGROUND_TOOL_NAMES.has(toolResult.name)) return null;
   if (toolResult.error != null) return buildErrorCard(toolResult);
   if (DRAFT_TOOL_NAMES.has(toolResult.name)) return null;
   const result = asRecord(toolResult.result);

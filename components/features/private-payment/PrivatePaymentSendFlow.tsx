@@ -30,6 +30,7 @@ import {
   type SendSheetPhase,
 } from '@/components/features/private-payment/send-flow/SendSummarySheet';
 import { SendTokenSelectStep } from '@/components/features/private-payment/send-flow/SendTokenSelectStep';
+import { ContactSavePrompt } from '@/components/features/contacts/ContactSavePrompt';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
@@ -108,6 +109,12 @@ import { applyCachedOfflineDebit } from '@/lib/wallet/wallet-display-cache';
 import { PRIVY_SIGNING_NOT_READY_MESSAGE } from '@/lib/wallet/wallet-capabilities';
 import { formatFiatCurrency, normalizeCurrency } from '@/lib/currency-rates';
 import { resolveXHandle, XHandleNotRegisteredError } from '@/lib/identity/x-handle';
+import {
+  buildFrequentRecipientOptions,
+  type ContactUsageStats,
+  getContactByAddress,
+  useContactsStore,
+} from '@/store/contactsStore';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
@@ -220,6 +227,23 @@ interface ResolvedRecipientView {
     | { kind: 'x-handle'; handle: string; source: 'sns-twitter' };
 }
 
+function addRecipientUsageFallback(
+  usageByAddress: Record<string, ContactUsageStats>,
+  explicitUsageAddresses: ReadonlySet<string>,
+  address: string | null | undefined,
+  usedAt: number | null | undefined,
+): void {
+  const candidate = parseRecipientInput(address ?? '');
+  if (candidate.kind !== 'address' || explicitUsageAddresses.has(candidate.address)) return;
+
+  const timestamp = typeof usedAt === 'number' && Number.isFinite(usedAt) ? usedAt : 0;
+  const current = usageByAddress[candidate.address] ?? { count: 0, lastUsedAt: 0 };
+  usageByAddress[candidate.address] = {
+    count: current.count + 1,
+    lastUsedAt: Math.max(current.lastUsedAt, timestamp),
+  };
+}
+
 function runAfterLoadingPaint(task: () => void): void {
   requestAnimationFrame(() => {
     setTimeout(task, 0);
@@ -289,12 +313,22 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const tokenLogoMap = useOffpayTokenLogoMap({
     deferCapabilitiesUntilAfterInteractions: false,
   });
-  const addOfflineReceipt = useOfflinePaymentStore((state) => state.addReceipt);
-  const clearRecipientHistory = useOfflinePaymentStore((state) => state.clearRecipientHistory);
-  const offlineReceipts = useOfflinePaymentStore((state) => state.receipts);
-  const recipientHistoryClearedAt = useOfflinePaymentStore((state) =>
-    walletAddress == null ? 0 : (state.recipientHistoryClearedAtByWallet[walletAddress] ?? 0),
+  const contacts = useContactsStore((state) => state.contacts);
+  const usageByWalletAddress = useContactsStore((state) => state.usageByWalletAddress);
+  const recentClearedAtByWalletAddress = useContactsStore(
+    (state) => state.recentClearedAtByWalletAddress,
   );
+  const markRecipientUsed = useContactsStore((state) => state.markRecipientUsed);
+  const clearRecentUsage = useContactsStore((state) => state.clearRecentUsage);
+  const offlineReceipts = useOfflinePaymentStore((state) => state.receipts);
+  const addOfflineReceipt = useOfflinePaymentStore((state) => state.addReceipt);
+  const clearOfflineRecipientHistory = useOfflinePaymentStore(
+    (state) => state.clearRecipientHistory,
+  );
+  const offlineRecipientHistoryClearedAtByWallet = useOfflinePaymentStore(
+    (state) => state.recipientHistoryClearedAtByWallet,
+  );
+  const privateReceipts = usePrivatePaymentStore((state) => state.receipts);
   const addPrivateReceipt = usePrivatePaymentStore((state) => state.addReceipt);
 
   const [step, setStep] = useState<SendStep>('token');
@@ -311,6 +345,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const [recipientResolving, setRecipientResolving] = useState(false);
   const [amount, setAmount] = useState('');
   const [clipboardRecipient, setClipboardRecipient] = useState<string | null>(null);
+  const [contactPromptAddress, setContactPromptAddress] = useState<string | null>(null);
   const [offlineSending, setOfflineSending] = useState(false);
   const [normalSending, setNormalSending] = useState(false);
   const [privateSending, setPrivateSending] = useState(false);
@@ -532,6 +567,19 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const effectiveRecipientAddress = recipientIsAddress
     ? recipientCandidate.address
     : resolvedRecipientAddress;
+  const typedRecipientContact =
+    recipientCandidate.kind === 'address'
+      ? getContactByAddress(contacts, recipientCandidate.address)
+      : null;
+  const clipboardRecipientCandidate =
+    clipboardRecipient != null ? parseRecipientInput(clipboardRecipient) : null;
+  const clipboardRecipientAddress =
+    clipboardRecipientCandidate?.kind === 'address' ? clipboardRecipientCandidate.address : null;
+  const canAddClipboardContact =
+    clipboardRecipientAddress != null &&
+    getContactByAddress(contacts, clipboardRecipientAddress) == null;
+  const showAddRecipientContact =
+    recipientCandidate.kind === 'address' && typedRecipientContact == null;
   const amountReadyForFeeEstimate = isPositiveRawAmount(amountRaw);
   const feeEstimateInputsReady =
     effectiveWalletMode !== 'offline' &&
@@ -936,26 +984,56 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     selectedToken,
     selectedTokenUnitUsdPrice,
   ]);
-  const recentRecipients = useMemo<RecentRecipientOption[]>(() => {
-    const byAddress = new Map<string, RecentRecipientOption>();
+  const recentRecipientUsageByAddress = useMemo(() => {
+    if (walletAddress == null) return null;
 
-    for (const receipt of offlineReceipts) {
-      if (receipt.direction !== 'send' || receipt.recipient == null) continue;
-      if (walletAddress != null && receipt.recipient === walletAddress) continue;
-      const usedAt = receipt.createdAt;
-      if (usedAt <= recipientHistoryClearedAt) continue;
+    const explicitUsage = usageByWalletAddress[walletAddress] ?? {};
+    const explicitUsageAddresses = new Set(Object.keys(explicitUsage));
+    const usageByAddress: Record<string, ContactUsageStats> = { ...explicitUsage };
+    const clearedAt = Math.max(
+      recentClearedAtByWalletAddress[walletAddress] ?? 0,
+      offlineRecipientHistoryClearedAtByWallet[walletAddress] ?? 0,
+    );
 
-      const current = byAddress.get(receipt.recipient);
-      if (current == null || usedAt > current.usedAt) {
-        byAddress.set(receipt.recipient, {
-          address: receipt.recipient,
-          usedAt,
-        });
-      }
+    for (const receipt of privateReceipts) {
+      if (receipt.walletAddress !== walletAddress || receipt.createdAt <= clearedAt) continue;
+      addRecipientUsageFallback(
+        usageByAddress,
+        explicitUsageAddresses,
+        receipt.recipient,
+        receipt.createdAt,
+      );
     }
 
-    return [...byAddress.values()].sort((left, right) => right.usedAt - left.usedAt).slice(0, 4);
-  }, [offlineReceipts, recipientHistoryClearedAt, walletAddress]);
+    for (const receipt of offlineReceipts) {
+      if (receipt.direction !== 'send' || receipt.createdAt <= clearedAt) continue;
+      if (receipt.sender != null && receipt.sender !== walletAddress) continue;
+      addRecipientUsageFallback(
+        usageByAddress,
+        explicitUsageAddresses,
+        receipt.recipient,
+        receipt.updatedAt ?? receipt.createdAt,
+      );
+    }
+
+    return usageByAddress;
+  }, [
+    offlineReceipts,
+    offlineRecipientHistoryClearedAtByWallet,
+    privateReceipts,
+    recentClearedAtByWalletAddress,
+    usageByWalletAddress,
+    walletAddress,
+  ]);
+  const recentRecipients = useMemo<RecentRecipientOption[]>(() => {
+    return buildFrequentRecipientOptions({
+      contacts,
+      usageByAddress: recentRecipientUsageByAddress,
+      walletAddress,
+      limit: 5,
+    });
+  }, [contacts, recentRecipientUsageByAddress, walletAddress]);
+  const canClearRecentRecipients = recentRecipients.some((item) => item.useCount > 0);
   const closeToHome = useCallback(() => {
     Keyboard.dismiss();
     // Prefer dismissing the pushed send route back to the tabs. If this
@@ -969,15 +1047,22 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     router.replace('/');
   }, [router]);
   const handleClearRecentRecipients = useCallback(() => {
-    if (walletAddress == null || recentRecipients.length === 0) return;
+    if (walletAddress == null || !canClearRecentRecipients) return;
 
-    clearRecipientHistory(walletAddress);
+    clearRecentUsage(walletAddress);
+    clearOfflineRecipientHistory(walletAddress);
     showToast({
-      title: 'Wallet history cleared',
-      message: 'Recipients cleared',
+      title: 'Recent recipients cleared',
+      message: 'Saved contacts are still available.',
       variant: 'success',
     });
-  }, [clearRecipientHistory, recentRecipients.length, showToast, walletAddress]);
+  }, [
+    canClearRecentRecipients,
+    clearOfflineRecipientHistory,
+    clearRecentUsage,
+    showToast,
+    walletAddress,
+  ]);
   const beginSubmit = useCallback(() => {
     if (submitInFlightRef.current) return false;
     submitInFlightRef.current = true;
@@ -1236,6 +1321,20 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       handleRecipientChange(address);
     },
     [handleRecipientChange],
+  );
+
+  const handleAddRecipientContact = useCallback(
+    (address?: string) => {
+      if (address != null) {
+        const candidate = parseRecipientInput(address);
+        if (candidate.kind !== 'address') return;
+        setContactPromptAddress(candidate.address);
+        return;
+      }
+      if (recipientCandidate.kind !== 'address') return;
+      setContactPromptAddress(recipientCandidate.address);
+    },
+    [recipientCandidate],
   );
 
   const handleSelectToken = useCallback(
@@ -1763,6 +1862,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             }),
           ]);
           const queuedAt = Date.now();
+          markRecipientUsed({
+            walletAddress,
+            recipientAddress: effectiveRecipientAddress,
+            usedAt: queuedAt,
+          });
           addOfflineReceipt({
             id: `offline-send-${network}-${result.txId}`,
             direction: 'send',
@@ -1780,6 +1884,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             createdAt: queuedAt,
             updatedAt: queuedAt,
             txId: result.txId,
+            sender: walletAddress,
             recipient: effectiveRecipientAddress,
           });
           if (effectiveRecipientAddress === walletAddress) {
@@ -1955,6 +2060,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             amountLabel: `-${displayAmount} ${selectedToken.symbol}`,
             signature: result.signature,
           });
+          const submittedAt = Date.now();
+          markRecipientUsed({
+            walletAddress,
+            recipientAddress: effectiveRecipientAddress,
+            usedAt: submittedAt,
+          });
           addPrivateReceipt({
             id: result.signature,
             status: 'submitted',
@@ -1969,7 +2080,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             tokenLogo: selectedToken.logo,
             tokenDecimals: selectedToken.decimals,
             network,
-            createdAt: Date.now(),
+            createdAt: submittedAt,
             signature: result.signature,
             txId: null,
             initSignature: null,
@@ -2070,6 +2181,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           amountLabel: `-${displayAmount} ${selectedToken.symbol}`,
           signature: id,
         });
+        const submittedAt = Date.now();
+        markRecipientUsed({
+          walletAddress,
+          recipientAddress: effectiveRecipientAddress,
+          usedAt: submittedAt,
+        });
         addPrivateReceipt({
           id,
           status: result.status,
@@ -2083,7 +2200,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           tokenLogo: selectedToken.logo,
           tokenDecimals: selectedToken.decimals,
           network,
-          createdAt: Date.now(),
+          createdAt: submittedAt,
           signature: result.status === 'submitted' ? result.signature : null,
           txId: result.status === 'queued' ? result.txId : null,
           initSignature: result.initSignature,
@@ -2162,6 +2279,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     endSubmit,
     magicBlockFeeEstimate.plan,
     magicBlockPlanBlockedReason,
+    markRecipientUsed,
     network,
     offlineRecipientBleName,
     offlinePaymentSlots.targetSlotCount,
@@ -2195,7 +2313,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       clipboardRecipient={clipboardRecipient}
       recentRecipients={recentRecipients}
       isOfflineMode={effectiveWalletMode === 'offline'}
+      showAddContact={showAddRecipientContact}
+      canAddClipboardContact={canAddClipboardContact}
+      showClearRecent={canClearRecentRecipients}
       onRecipientChange={handleRecipientChange}
+      onAddRecipientContact={handleAddRecipientContact}
       onUseClipboard={handleUseClipboardRecipient}
       onSelectRecent={handleSelectRecentRecipient}
       onClearRecent={handleClearRecentRecipients}
@@ -2388,6 +2510,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         onResultAction={sendResult != null ? () => void handleTransactionAction() : undefined}
         onResend={handleResend}
         onDone={closeToHome}
+      />
+      <ContactSavePrompt
+        visible={contactPromptAddress != null}
+        address={contactPromptAddress}
+        onClose={() => setContactPromptAddress(null)}
       />
     </View>
   );

@@ -46,6 +46,7 @@ import {
   useAgenticChatStore,
 } from '@/store/agenticChatStore';
 import { useAppStore } from '@/store/app';
+import { useContactsStore } from '@/store/contactsStore';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -107,6 +108,7 @@ export function ChatScreen(): React.JSX.Element {
   const username = useAppStore((s) => s.username);
   const accountName = useWalletStore((s) => s.accountName);
   const wallets = useWalletStore((s) => s.wallets);
+  const contacts = useContactsStore((s) => s.contacts);
 
   const { effectiveWalletMode, canUseNetwork } = useWalletModeState();
   const { mixerRegisterMutation } = useUmbraExecution();
@@ -269,13 +271,19 @@ export function ChatScreen(): React.JSX.Element {
   );
 
   const knownWallets = useMemo(
-    () =>
-      wallets.map((wallet) => ({
+    () => [
+      ...wallets.map((wallet) => ({
         name: wallet.name,
         address: wallet.publicKey,
         active: wallet.publicKey === scope.walletAddress,
       })),
-    [scope.walletAddress, wallets],
+      ...contacts.map((contact) => ({
+        name: contact.name,
+        address: contact.address,
+        active: contact.address === scope.walletAddress,
+      })),
+    ],
+    [contacts, scope.walletAddress, wallets],
   );
   const activeWalletId = useWalletStore((s) => s.activeWalletId);
   const activeImportMethod = useMemo(() => {

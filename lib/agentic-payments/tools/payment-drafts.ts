@@ -339,7 +339,7 @@ const transferProperties = {
   recipient: {
     type: 'string',
     description:
-      'Address, redaction placeholder ([ADDRESS_1]), SNS/X reference, saved wallet, or self.',
+      'Address, redaction placeholder ([ADDRESS_1]), SNS/X reference, saved contact or wallet, or self.',
   },
   route: {
     type: 'string',

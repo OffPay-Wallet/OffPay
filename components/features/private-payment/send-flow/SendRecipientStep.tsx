@@ -3,6 +3,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/Text';
+import { PuffyAddContactIcon } from '@/components/ui/icons/PuffyAddContactIcon';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -16,7 +17,11 @@ interface SendRecipientStepProps {
   clipboardRecipient: string | null;
   recentRecipients: RecentRecipientOption[];
   isOfflineMode: boolean;
+  showAddContact: boolean;
+  canAddClipboardContact: boolean;
+  showClearRecent: boolean;
   onRecipientChange: (value: string) => void;
+  onAddRecipientContact: (address?: string) => void;
   onUseClipboard: () => void;
   onSelectRecent: (address: string) => void;
   onClearRecent: () => void;
@@ -39,7 +44,11 @@ export function SendRecipientStep({
   clipboardRecipient,
   recentRecipients,
   isOfflineMode,
+  showAddContact,
+  canAddClipboardContact,
+  showClearRecent,
   onRecipientChange,
+  onAddRecipientContact,
   onUseClipboard,
   onSelectRecent,
   onClearRecent,
@@ -79,8 +88,23 @@ export function SendRecipientStep({
           allowFontScaling={false}
           underlineColorAndroid="transparent"
         />
+        {showAddContact ? (
+          <Pressable
+            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+            onPress={() => onAddRecipientContact()}
+            accessibilityRole="button"
+            accessibilityLabel="Save recipient as contact"
+            hitSlop={8}
+          >
+            <PuffyAddContactIcon
+              size={22}
+              color={colors.brand.glossAccent}
+              shadowColor={colors.text.primary}
+            />
+          </Pressable>
+        ) : null}
         <Pressable
-          style={({ pressed }) => [styles.pasteButton, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
           onPress={onUseClipboard}
           accessibilityRole="button"
           accessibilityLabel="Paste wallet address"
@@ -121,19 +145,36 @@ export function SendRecipientStep({
           exiting={FadeOut.duration(160)}
           layout={LinearTransition.duration(220)}
         >
-          <Pressable
-            style={({ pressed }) => [styles.clipboardCard, pressed && styles.pressed]}
-            onPress={onUseClipboard}
-            accessibilityRole="button"
-            accessibilityLabel="Paste recipient from clipboard"
-          >
-            <Text variant="small" color={colors.text.secondary}>
-              Paste from clipboard
-            </Text>
-            <Text variant="bodyBold" color={colors.text.primary} numberOfLines={2}>
-              {clipboardRecipient}
-            </Text>
-          </Pressable>
+          <View style={styles.clipboardCard}>
+            <Pressable
+              style={({ pressed }) => [styles.clipboardSelectArea, pressed && styles.pressed]}
+              onPress={onUseClipboard}
+              accessibilityRole="button"
+              accessibilityLabel="Paste recipient from clipboard"
+            >
+              <Text variant="small" color={colors.text.secondary}>
+                Paste from clipboard
+              </Text>
+              <Text variant="bodyBold" color={colors.text.primary} numberOfLines={2}>
+                {clipboardRecipient}
+              </Text>
+            </Pressable>
+            {canAddClipboardContact ? (
+              <Pressable
+                style={({ pressed }) => [styles.saveContactButton, pressed && styles.pressed]}
+                onPress={() => onAddRecipientContact(clipboardRecipient)}
+                accessibilityRole="button"
+                accessibilityLabel="Save clipboard wallet as contact"
+                hitSlop={6}
+              >
+                <PuffyAddContactIcon
+                  size={24}
+                  color={colors.brand.glossAccent}
+                  shadowColor={colors.text.primary}
+                />
+              </Pressable>
+            ) : null}
+          </View>
         </Animated.View>
       ) : null}
 
@@ -141,33 +182,66 @@ export function SendRecipientStep({
         <View style={styles.recentBlock}>
           <View style={styles.recentHeader}>
             <Text variant="bodyBold" color={colors.text.secondary} numberOfLines={1}>
-              Recently Used
+              Contacts & Recent
             </Text>
-            <Pressable
-              style={({ pressed }) => [styles.clearButton, pressed && styles.pressed]}
-              onPress={onClearRecent}
-              accessibilityRole="button"
-              accessibilityLabel="Clear recent wallet history"
-              hitSlop={6}
-            >
-              <Text variant="captionBold" color={colors.text.primary}>
-                Clear
-              </Text>
-            </Pressable>
+            {showClearRecent ? (
+              <Pressable
+                style={({ pressed }) => [styles.clearButton, pressed && styles.pressed]}
+                onPress={onClearRecent}
+                accessibilityRole="button"
+                accessibilityLabel="Clear recent wallet history"
+                hitSlop={6}
+              >
+                <Text variant="captionBold" color={colors.text.primary}>
+                  Clear
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
           <View style={styles.recentList}>
             {recentRecipients.map((item) => (
-              <Pressable
-                key={item.address}
-                style={({ pressed }) => [styles.recentRow, pressed && styles.pressed]}
-                onPress={() => onSelectRecent(item.address)}
-                accessibilityRole="button"
-                accessibilityLabel={`Use ${shortenWalletAddress(item.address)}`}
-              >
-                <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
-                  {shortenWalletAddress(item.address)}
-                </Text>
-              </Pressable>
+              <View key={item.address} style={styles.recentRow}>
+                <Pressable
+                  style={({ pressed }) => [styles.recentSelectArea, pressed && styles.pressed]}
+                  onPress={() => onSelectRecent(item.address)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${shortenWalletAddress(item.address)}`}
+                >
+                  <View style={styles.recentText}>
+                    <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
+                      {item.name ?? shortenWalletAddress(item.address)}
+                    </Text>
+                    <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+                      {item.name != null
+                        ? shortenWalletAddress(item.address)
+                        : item.useCount > 0
+                          ? `Used ${item.useCount}x`
+                          : 'Saved contact'}
+                    </Text>
+                  </View>
+                </Pressable>
+                {!item.isContact ? (
+                  <Pressable
+                    style={({ pressed }) => [styles.saveContactButton, pressed && styles.pressed]}
+                    onPress={() => onAddRecipientContact(item.address)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Save ${shortenWalletAddress(item.address)} as contact`}
+                    hitSlop={6}
+                  >
+                    <PuffyAddContactIcon
+                      size={24}
+                      color={colors.brand.glossAccent}
+                      shadowColor={colors.text.primary}
+                    />
+                  </Pressable>
+                ) : item.name != null && item.useCount > 0 ? (
+                  <View style={styles.usagePill}>
+                    <Text variant="small" color={colors.text.primary} style={styles.usagePillText}>
+                      {item.useCount}x
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             ))}
           </View>
         </View>
@@ -225,7 +299,7 @@ const styles = StyleSheet.create({
     // because TextInputProps doesn't accept it as a JSX prop.
     includeFontPadding: false,
   },
-  pasteButton: {
+  iconButton: {
     width: 40,
     height: 40,
     borderRadius: radii.full,
@@ -270,8 +344,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.strongFill,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
-    gap: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
     boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+  },
+  clipboardSelectArea: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
   },
   recentBlock: {
     gap: spacing.md,
@@ -312,9 +393,53 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.strongFill,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    justifyContent: 'center',
-    gap: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
     boxShadow: `0 2px 6px rgba(16, 16, 16, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.6)`,
+  },
+  recentSelectArea: {
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  recentText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  saveContactButton: {
+    width: 42,
+    height: 42,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.textBacking,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  usagePill: {
+    minWidth: 36,
+    minHeight: 28,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.glass.textBacking,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    flexShrink: 0,
+  },
+  usagePillText: {
+    fontFamily: fontFamily.uiSemiBold,
   },
   // Reserves vertical room for up to ~3 lines of helper copy. The
   // helper carries advisory hints (handle not registered, online-mode

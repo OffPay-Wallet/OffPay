@@ -13,7 +13,10 @@ export interface SendTokenOption {
 
 export interface RecentRecipientOption {
   address: string;
+  name?: string;
   usedAt: number;
+  useCount: number;
+  isContact: boolean;
 }
 
 export type SendNetwork = NonNullable<ReturnType<typeof useOffpayNetwork>['network']>;

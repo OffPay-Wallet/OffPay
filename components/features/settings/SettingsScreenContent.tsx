@@ -29,17 +29,20 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
+import { ContactsModal } from '@/components/features/contacts/ContactsModal';
 import { PreferencesModal } from '@/components/features/settings/PreferencesModal';
 import { ProfileSettingsModal } from '@/components/features/settings/ProfileSettingsModal';
 import { SecuritySettingsModal } from '@/components/features/settings/SecuritySettingsModal';
 import { useAppToast } from '@/components/ui/AppToast';
 import { Text } from '@/components/ui/Text';
+import { PuffyAddContactIcon } from '@/components/ui/icons/PuffyAddContactIcon';
 import { PuffyTwitterXIcon } from '@/components/ui/icons/PuffyTwitterXIcon';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { resetForgottenWallet } from '@/lib/wallet/wallet-reset';
 import { useAppStore } from '@/store/app';
+import { useContactsStore } from '@/store/contactsStore';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 
 const SUPPORT_EMAIL = 'hello@offpay.app';
@@ -75,6 +78,7 @@ export function SettingsScreenContent({
   const { showToast } = useAppToast();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const username = useAppStore((state) => state.username);
+  const contactCount = useContactsStore((state) => state.contacts.length);
   const appVersion = Constants.expoConfig?.version?.trim();
   const versionLabel =
     appVersion != null && appVersion.length > 0 ? `Version ${appVersion}` : 'Version';
@@ -110,6 +114,7 @@ export function SettingsScreenContent({
   // pushing a new screen (which flashed the navigator backdrop).
   const [preferencesVisible, setPreferencesVisible] = useState(false);
   const [profileVisible, setProfileVisible] = useState(false);
+  const [contactsVisible, setContactsVisible] = useState(false);
   const [securityVisible, setSecurityVisible] = useState(false);
   const resetConfirmScrim = useSharedValue(0);
   const resetConfirmMotion = useSharedValue(0);
@@ -145,7 +150,8 @@ export function SettingsScreenContent({
   // stable overlay id so overlapping opens/closes stay consistent, and
   // the cleanup always releases the flag if this screen unmounts while a
   // sheet is still open (no stuck-hidden tab bar).
-  const anySettingsSheetOpen = preferencesVisible || profileVisible || securityVisible;
+  const anySettingsSheetOpen =
+    preferencesVisible || profileVisible || contactsVisible || securityVisible;
   useEffect(() => {
     const overlayId = 'settings-sheet';
     if (anySettingsSheetOpen) {
@@ -345,6 +351,20 @@ export function SettingsScreenContent({
                     compact={compact}
                     dense={dense}
                     onPress={() => setPreferencesVisible(true)}
+                  />
+                  <SettingsRow
+                    iconNode={
+                      <PuffyAddContactIcon
+                        size={rowIconSize}
+                        color={colors.text.primary}
+                        shadowColor={colors.brand.glossAccent}
+                      />
+                    }
+                    label="Contacts"
+                    badgeCount={contactCount > 0 ? contactCount : undefined}
+                    compact={compact}
+                    dense={dense}
+                    onPress={() => setContactsVisible(true)}
                   />
                 </SettingsSectionCard>
               </View>
@@ -596,6 +616,8 @@ export function SettingsScreenContent({
       <PreferencesModal visible={preferencesVisible} onClose={() => setPreferencesVisible(false)} />
 
       <ProfileSettingsModal visible={profileVisible} onClose={() => setProfileVisible(false)} />
+
+      <ContactsModal visible={contactsVisible} onClose={() => setContactsVisible(false)} />
 
       <SecuritySettingsModal visible={securityVisible} onClose={() => setSecurityVisible(false)} />
     </>

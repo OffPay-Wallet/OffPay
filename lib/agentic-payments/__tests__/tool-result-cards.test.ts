@@ -116,6 +116,28 @@ describe('buildAgenticToolResultCards', () => {
     expect(cards).toHaveLength(0);
   });
 
+  it('keeps recipient resolution in the background', () => {
+    const cards = buildAgenticToolResultCards([
+      {
+        toolCallId: 'call-resolve',
+        name: 'resolve_recipient',
+        result: {
+          status: 'resolved',
+          source: 'known_wallet',
+          selfRecipient: false,
+          addressAvailableLocally: true,
+        },
+      },
+      {
+        toolCallId: 'call-resolve-error',
+        name: 'resolve_recipient',
+        error: { code: 'recipient_invalid' },
+      },
+    ]);
+
+    expect(cards).toHaveLength(0);
+  });
+
   it('keeps error cards for failed tools', () => {
     const cards = buildAgenticToolResultCards([
       {

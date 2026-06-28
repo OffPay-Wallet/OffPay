@@ -23,6 +23,7 @@ function addressFromSeedByte(byte: number): string {
 
 const walletAddress = addressFromSeedByte(1);
 const recipient = addressFromSeedByte(2);
+const contactRecipient = addressFromSeedByte(3);
 const nativeSolMint = 'So11111111111111111111111111111111111111112';
 const usdcMint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const umbraDusdcMint = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
@@ -388,6 +389,147 @@ describe('runAgenticTools', () => {
     });
   });
 
+  it('builds a normal-send draft when the model passes a saved contact name', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-contact-draft',
+          name: 'draft_normal_send',
+          args: { amount: '3', token: 'USDC', recipient: 'Karan' },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: 'send 3 USDC to Karan',
+      },
+    );
+
+    expect(run.drafts).toHaveLength(1);
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'normal_send',
+      route: 'normal',
+      draft: {
+        recipient: contactRecipient,
+        rawAmount: '3000000',
+        tokenMint: usdcMint,
+      },
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(contactRecipient);
+  });
+
+  it('builds a MagicBlock draft when the model passes a saved contact name', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-contact-private-draft',
+          name: 'draft_private_send',
+          args: { amount: '3', token: 'USDC', recipient: 'Karan' },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: 'send 3 USDC to Karan privately',
+      },
+    );
+
+    expect(run.drafts).toHaveLength(1);
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'private_send',
+      route: 'magicblock',
+      draft: {
+        recipient: contactRecipient,
+        rawAmount: '3000000',
+        tokenMint: usdcMint,
+      },
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(contactRecipient);
+  });
+
+  it('builds an Umbra private P2P draft when the model passes a saved contact name', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-contact-umbra-draft',
+          name: 'draft_private_send',
+          args: { amount: '2', token: 'dUSDC', recipient: 'Karan', route: 'umbra' },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: 'send 2 dUSDC to Karan using umbra',
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'private_send',
+      route: 'umbra',
+      draft: {
+        recipient: contactRecipient,
+        rawAmount: '2000000',
+        tokenMint: umbraDusdcMint,
+      },
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(contactRecipient);
+  });
+
+  it('accepts saved contact names in normal transfer fee validation', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-contact-fee',
+          name: 'get_normal_transfer_fee',
+          args: { amount: '', token: 'USDC', recipient: 'Karan' },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: 'what is the fee to send 1 USDC to Karan',
+      },
+    );
+
+    expect(run.results[0].error?.code).toBe('amount_missing');
+    expect(run.results[0].error?.code).not.toBe('recipient_invalid');
+    expect(JSON.stringify(run.results[0])).not.toContain(contactRecipient);
+  });
+
+  it('resolves saved contact names without returning the address to the model', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-contact-resolve', name: 'resolve_recipient', args: { recipient: 'Karan' } }],
+      {
+        ...baseContext,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: 'send to Karan',
+      },
+    );
+
+    expect(run.results[0].result).toMatchObject({
+      status: 'resolved',
+      source: 'known_wallet',
+      addressAvailableLocally: true,
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(contactRecipient);
+  });
+
   it('returns a structured rejection code when the validator refuses an unknown token', async () => {
     const run = await runAgenticTools(
       [
@@ -496,6 +638,65 @@ describe('runAgenticTools', () => {
         tokenSymbol: 'dUSDC',
       },
     });
+  });
+
+  it('recovers the previous contact recipient for an Umbra token correction', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-umbra-contact-recovery',
+          name: 'draft_private_send',
+          args: { token: 'USDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: [
+          'Send 2 dUSDC to Karan using umbra',
+          'What tokens are supported by the Umbra route?',
+          'Yes send USDC',
+        ].join('\n'),
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      route: 'umbra',
+      draft: {
+        recipient: contactRecipient,
+        rawAmount: '2000000',
+        tokenMint: umbraDusdcMint,
+        tokenSymbol: 'dUSDC',
+      },
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(contactRecipient);
+  });
+
+  it('does not recover contact names from non-recipient chat text', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-contact-non-recipient',
+          name: 'draft_private_send',
+          args: { amount: '1', token: 'USDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: ['Karan asked what tokens are supported.', 'Yes send 1 USDC'].join('\n'),
+      },
+    );
+
+    expect(run.drafts).toHaveLength(0);
+    expect(run.results[0].error?.code).toBe('recipient_invalid');
   });
 
   it('does not recover stale draft fields for a supported-token question', async () => {

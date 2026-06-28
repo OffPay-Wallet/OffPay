@@ -19,7 +19,8 @@ export const getNormalTransferFeeTool: AgenticToolDefinition = {
         token: { type: 'string' },
         recipient: {
           type: 'string',
-          description: 'Address, redaction placeholder, SNS/X reference, saved wallet, or self.',
+          description:
+            'Address, redaction placeholder, SNS/X reference, saved contact or wallet, or self.',
         },
       },
       required: ['amount', 'token', 'recipient'],

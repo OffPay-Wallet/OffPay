@@ -44,7 +44,7 @@ export const AGENTIC_TOOL_METADATA = {
     pendingLabel: 'Resolving recipient',
     parallelSafe: true,
     modelInstructions: [
-      'Use for .sol names, @X handles, saved-wallet names, or ambiguous recipient references before drafting a send.',
+      'Use for .sol names, @X handles, saved contact names, saved wallet names, or ambiguous recipient references before drafting a send.',
       'Pass redacted placeholders exactly as provided.',
     ],
   },

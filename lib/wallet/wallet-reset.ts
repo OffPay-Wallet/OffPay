@@ -11,6 +11,7 @@ import { clearSecuritySettings } from '@/lib/wallet/security-settings';
 import { deleteStoredWallet } from '@/lib/wallet/secure-wallet-store';
 import { deleteWalletDisplayCache } from '@/lib/wallet/wallet-display-cache';
 import { useAppStore } from '@/store/app';
+import { useContactsStore } from '@/store/contactsStore';
 import { useNotificationStore } from '@/store/notificationStore';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
 import { useOffpayAuthStore } from '@/store/offpayAuthStore';
@@ -76,6 +77,7 @@ function resetWalletScopedStores(): void {
   });
   usePrivatePaymentStore.setState({ receipts: [] });
   useAdvancedSwapStore.setState({ receipts: [] });
+  useContactsStore.getState().clearContacts();
   useUmbraPrivacyStore.setState({
     receipts: [],
     registeredVaultKeys: [],
