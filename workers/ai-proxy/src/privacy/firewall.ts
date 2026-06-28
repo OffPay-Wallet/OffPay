@@ -26,6 +26,8 @@ const FORBIDDEN_CONTEXT_KEY_PATTERN =
   /\b(walletAddress|walletBalanceApiResponse|tokenMints|tokenMint|contractAddress|privateKey|seedPhrase|mnemonic|txHash|signature)\b/i;
 const FORBIDDEN_PROVIDER_OBJECT_KEY_PATTERN =
   /\b(walletAddress|owner|recipientAddress|tokenMint|mint|contractAddress|privateKey|seedPhrase|mnemonic|txHash|signature|transactionBase64|serializedTransaction|rawTransaction|blockhash|publicKey|address)\b/i;
+const PROVIDER_NUMERIC_LITERAL_KEY_PATTERN =
+  /^(?:amount|displayBalance|rawAmount|fee|feeLamports)$/i;
 const BIP39_WORDS = new Set<string>(wordlist);
 const MAX_SAFE_CONTEXT_TOKEN_SYMBOLS = 24;
 const MAX_SAFE_CONTEXT_ACTIONS = 40;
@@ -49,16 +51,35 @@ export function sanitizeChatRequestForProvider(body: AgentChatRequest): AgentCha
 }
 
 export function sanitizeTextForProvider(text: string): string {
+  return sanitizeTextForProviderWithOptions(text);
+}
+
+function sanitizeToolFieldTextForProvider(text: string, key: string | undefined): string {
+  return sanitizeTextForProviderWithOptions(text, {
+    preserveNumericLiterals: key != null && PROVIDER_NUMERIC_LITERAL_KEY_PATTERN.test(key),
+  });
+}
+
+function sanitizeTextForProviderWithOptions(
+  text: string,
+  options: { preserveNumericLiterals?: boolean } = {},
+): string {
   assertNoHardBlockedSecret(text);
 
-  return text
+  let sanitized = text
     .replace(IMAGE_ATTACHMENT_PATTERN, '[ATTACHMENT]')
     .replace(EMAIL_PATTERN, '[EMAIL]')
-    .replace(IP_PATTERN, '[IP]')
-    .replace(PRECISE_AMOUNT_PATTERN, '[AMOUNT]')
+    .replace(IP_PATTERN, '[IP]');
+
+  if (!options.preserveNumericLiterals) {
+    sanitized = sanitized
+      .replace(PRECISE_AMOUNT_PATTERN, '[AMOUNT]')
+      .replace(PAYMENT_CARD_PATTERN, '[PAYMENT_CARD]')
+      .replace(PHONE_PATTERN, '[PHONE]');
+  }
+
+  return sanitized
     .replace(EVM_ADDRESS_PATTERN, '[ADDRESS]')
-    .replace(PAYMENT_CARD_PATTERN, '[PAYMENT_CARD]')
-    .replace(PHONE_PATTERN, '[PHONE]')
     .replace(SNS_PATTERN, '[SNS]')
     .replace(SOLANA_BASE58_PATTERN, '[ADDRESS]');
 }
@@ -97,23 +118,23 @@ function sanitizeProviderRecord(value: unknown): Record<string, unknown> {
   return isPlainSanitizedObject(sanitized) ? sanitized : {};
 }
 
-function sanitizeProviderValue(value: unknown, depth = 0): unknown {
+function sanitizeProviderValue(value: unknown, depth = 0, key?: string): unknown {
   if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
   if (typeof value === 'string') {
-    return sanitizeTextForProvider(value).slice(0, MAX_SANITIZED_STRING_CHARS);
+    return sanitizeToolFieldTextForProvider(value, key).slice(0, MAX_SANITIZED_STRING_CHARS);
   }
   if (Array.isArray(value)) {
     if (depth >= 4) return [];
     return value
       .slice(0, MAX_SANITIZED_ARRAY_ITEMS)
-      .map((entry) => sanitizeProviderValue(entry, depth + 1));
+      .map((entry) => sanitizeProviderValue(entry, depth + 1, key));
   }
   if (typeof value === 'object') {
     if (depth >= 4) return {};
     const sanitized: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value).slice(0, MAX_SANITIZED_OBJECT_KEYS)) {
       if (FORBIDDEN_PROVIDER_OBJECT_KEY_PATTERN.test(key)) continue;
-      sanitized[key] = sanitizeProviderValue(entry, depth + 1);
+      sanitized[key] = sanitizeProviderValue(entry, depth + 1, key);
     }
     return sanitized;
   }

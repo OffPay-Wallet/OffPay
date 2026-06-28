@@ -67,13 +67,6 @@ const CHAT_CTAS: readonly ChatCta[] = [
     prompt: 'Run batch send',
   },
   {
-    id: 'private-balance',
-    title: 'Private Bal',
-    caption: 'MagicBlock rail',
-    icon: 'shield-outline',
-    prompt: 'Show my MagicBlock private-payment balance',
-  },
-  {
     id: 'umbra-vault',
     title: 'Umbra',
     caption: 'Vault balance',

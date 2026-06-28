@@ -202,6 +202,11 @@ export function ChatScreen(): React.JSX.Element {
         .sort((left, right) => left.createdAt - right.createdAt),
     ),
   );
+  const latestMessage = scopedMessages[scopedMessages.length - 1] ?? null;
+  const latestMessageScrollAnchor =
+    latestMessage == null
+      ? 'empty'
+      : `${latestMessage.id}:${latestMessage.text.length}:${latestMessage.pending === true ? 1 : 0}`;
   const scopedActionIds = useMemo(() => {
     const actionIds = new Set<string>();
     for (const message of scopedMessages) {
@@ -312,9 +317,9 @@ export function ChatScreen(): React.JSX.Element {
   });
   const agentPortfolioValuationData = agentPortfolioValuationQuery.data;
   const refetchAgentPortfolioValuation = agentPortfolioValuationQuery.refetch;
-  const agentPortfolioValuationRef = useRef<
-    NonNullable<typeof agentPortfolioValuationData> | null
-  >(null);
+  const agentPortfolioValuationRef = useRef<NonNullable<typeof agentPortfolioValuationData> | null>(
+    null,
+  );
   useEffect(() => {
     agentPortfolioValuationRef.current = agentPortfolioValuationData ?? null;
   }, [agentPortfolioValuationData]);
@@ -611,7 +616,7 @@ export function ChatScreen(): React.JSX.Element {
       scrollRef.current?.scrollToEnd({ animated: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [promptDockHeight, scopedMessages.length]);
+  }, [latestMessageScrollAnchor, promptDockHeight, scopedMessages.length]);
 
   useEffect(
     () => () => {

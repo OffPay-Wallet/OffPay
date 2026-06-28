@@ -9,7 +9,6 @@ import {
   runAgenticTools,
   type AgenticToolRunnerContext,
 } from '@/lib/agentic-payments/agent-tools';
-import * as offpayApiClient from '@/lib/api/offpay-api-client';
 
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
 
@@ -294,49 +293,6 @@ describe('runAgenticTools', () => {
       valuationCoverage: 'complete',
     });
     expect(result.tokens.find((token) => token.symbol === 'SOL')?.usdPrice).toBe(100);
-  });
-
-  it('rejects generic private balance reads from the MagicBlock rail tool', async () => {
-    const run = await runAgenticTools(
-      [{ id: 'call-private-balance', name: 'get_private_payment_balance', args: {} }],
-      {
-        ...baseContext,
-        userText: 'what is my private balance',
-      },
-    );
-
-    expect(run.results[0].error?.code).toBe('use_umbra_vault_balance');
-  });
-
-  it('returns an explicit MagicBlock private-payment balance summary without addresses or mints', async () => {
-    jest.spyOn(offpayApiClient, 'getPrivatePaymentBalance').mockResolvedValueOnce({
-      address: walletAddress,
-      mint: usdcMint,
-      baseBalance: '20000000',
-      privateBalance: '0',
-    });
-
-    const run = await runAgenticTools(
-      [{ id: 'call-private-balance', name: 'get_private_payment_balance', args: {} }],
-      {
-        ...baseContext,
-        userText: 'what is my MagicBlock private-payment balance',
-      },
-    );
-
-    expect(run.results[0].error).toBeUndefined();
-    expect(run.results[0].result).toMatchObject({
-      status: 'ok',
-      route: 'magicblock',
-      routeLabel: 'MagicBlock private-payment balance',
-      network: 'devnet',
-      symbol: 'USDC',
-      publicBalance: '20',
-      privateBalance: '0',
-      privateBalanceIsZero: true,
-    });
-    expect(JSON.stringify(run.results[0].result)).not.toContain(walletAddress);
-    expect(JSON.stringify(run.results[0].result)).not.toContain(usdcMint);
   });
 
   it('returns SOL balance as a human-readable amount only', async () => {

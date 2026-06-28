@@ -1,16 +1,24 @@
 import React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  useReducedMotion,
+} from 'react-native-reanimated';
 
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 
+import { AgenticActionCard, type AgenticTransactionAction } from './AgenticActionCard';
 import {
-  AgenticActionCard,
-  type AgenticTransactionAction,
-} from './AgenticActionCard';
-import { actionCardMorphEnter, actionCardMorphExit } from './action-card-motion';
+  ACTION_CARD_MORPH_EASING,
+  ACTION_CARD_MORPH_OPEN_DURATION_MS,
+  actionCardMorphEnter,
+  actionCardMorphExit,
+} from './action-card-motion';
 
 import type { AgenticChatAction, AgenticPrivateSendAction } from '@/store/agenticChatStore';
 
@@ -27,7 +35,11 @@ interface AgenticActionDraftSheetProps {
   ) => void;
 }
 
-const ACTION_SHEET_LAYOUT = LinearTransition.duration(210);
+const ACTION_SHEET_LAYOUT = LinearTransition.duration(ACTION_CARD_MORPH_OPEN_DURATION_MS).easing(
+  ACTION_CARD_MORPH_EASING,
+);
+const ACTION_SHEET_BACKDROP_ENTERING = FadeIn.duration(180).easing(Easing.out(Easing.quad));
+const ACTION_SHEET_BACKDROP_EXITING = FadeOut.duration(150).easing(Easing.in(Easing.quad));
 const SHEET_GRADIENT_COLORS = [
   colors.holdingsCard.gradientTop,
   colors.holdingsCard.gradientMid,
@@ -43,20 +55,22 @@ export function AgenticActionDraftSheet({
   onCancel,
   onRouteChange,
 }: AgenticActionDraftSheetProps): React.JSX.Element | null {
+  const reduceMotion = useReducedMotion();
+
   if (action == null) return null;
 
   return (
     <Animated.View pointerEvents="box-none" style={styles.layer}>
       <Animated.View
         pointerEvents="none"
-        entering={FadeIn.duration(140)}
-        exiting={FadeOut.duration(140)}
+        entering={reduceMotion ? undefined : ACTION_SHEET_BACKDROP_ENTERING}
+        exiting={reduceMotion ? undefined : ACTION_SHEET_BACKDROP_EXITING}
         style={styles.backdrop}
       />
       <Animated.View
-        entering={actionCardMorphEnter}
-        exiting={actionCardMorphExit}
-        layout={ACTION_SHEET_LAYOUT}
+        entering={reduceMotion ? undefined : actionCardMorphEnter}
+        exiting={reduceMotion ? undefined : actionCardMorphExit}
+        layout={reduceMotion ? undefined : ACTION_SHEET_LAYOUT}
         style={[
           styles.sheet,
           {
@@ -107,7 +121,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.38)',
   },
   sheet: {
     position: 'absolute',

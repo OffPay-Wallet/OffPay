@@ -11,7 +11,7 @@ describe('revealAssistantMessageText', () => {
     });
   });
 
-  it('commits text and clears pending in one update', async () => {
+  it('can commit text immediately and clear pending', async () => {
     const id = 'assistant-1';
     useAgenticChatStore.setState({
       messages: [
@@ -28,12 +28,54 @@ describe('revealAssistantMessageText', () => {
       ],
     });
 
-    await revealAssistantMessageText(id, 'Hello');
+    await revealAssistantMessageText(id, 'Hello', { typing: false });
 
     expect(useAgenticChatStore.getState().messages[0]).toMatchObject({
       text: 'Hello',
       pending: false,
     });
+  });
+
+  it('streams longer replies while pending before settling the full text', async () => {
+    jest.useFakeTimers();
+    const id = 'assistant-stream';
+    useAgenticChatStore.setState({
+      messages: [
+        {
+          id,
+          role: 'assistant',
+          text: '',
+          createdAt: 1,
+          conversationId: 'c1',
+          pending: true,
+          processingLabel: 'Writing response',
+          walletAddress: null,
+          network: null,
+        },
+      ],
+    });
+
+    const fullText = 'Here is your wallet activity in a readable summary.';
+    const reveal = revealAssistantMessageText(id, fullText, {
+      typing: { intervalMs: 10, minChunkCharacters: 8 },
+    });
+
+    await Promise.resolve();
+    expect(useAgenticChatStore.getState().messages[0]).toMatchObject({
+      text: expect.stringMatching(/^Here is/),
+      pending: true,
+      processingLabel: null,
+    });
+    expect(useAgenticChatStore.getState().messages[0].text).not.toBe(fullText);
+
+    await jest.runAllTimersAsync();
+    await reveal;
+
+    expect(useAgenticChatStore.getState().messages[0]).toMatchObject({
+      text: fullText,
+      pending: false,
+    });
+    jest.useRealTimers();
   });
 
   it('commits full text even when the provided signal is aborted', async () => {

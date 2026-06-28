@@ -2095,15 +2095,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             refetchType: 'active',
           }),
           queryClient.invalidateQueries({
-            queryKey: [
-              'offpay',
-              'privatePaymentBalance',
-              network,
-              walletAddress,
-              selectedToken.mint,
-            ],
-          }),
-          queryClient.invalidateQueries({
             queryKey: offpayWalletBalanceQueryKey(walletAddress, network),
             refetchType: 'active',
           }),

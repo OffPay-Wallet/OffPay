@@ -43,7 +43,6 @@ export type AgentSafeContext = {
     swap?: boolean;
     umbra?: boolean;
     umbraVaultBalance?: boolean;
-    magicblockPrivateBalance?: boolean;
     privateBalance?: boolean;
     flashTrade?: boolean;
   };
@@ -108,7 +107,6 @@ export type AiIntentContext = {
     swap?: boolean;
     umbra?: boolean;
     umbraVaultBalance?: boolean;
-    magicblockPrivateBalance?: boolean;
     privateBalance?: boolean;
     flashTrade?: boolean;
   };

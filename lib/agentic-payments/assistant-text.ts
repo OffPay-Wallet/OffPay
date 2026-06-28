@@ -55,6 +55,48 @@ const ANSWER_MARKER_PATTERN =
 
 const MAX_VISIBLE_ASSISTANT_CHARS = 480;
 const MIN_TEXT_WITH_DRAFT_CHARS = 36;
+const ACTIVITY_ITEM_START_PATTERN =
+  /\b(Sent|Received|Swapped|Bought|Sold|Claimed|Deposited|Withdrew|Paid|Queued|Submitted)\b/g;
+
+function normalizeMarkdownListMarkers(text: string): string {
+  const withDashBullets = text.replace(/(^|\n)(\s*)\*\s+(?=\S)/g, '$1$2- ');
+  const inlineMarkers = withDashBullets.match(/(?:^|\s)[*-]\s+(?=\S)/g) ?? [];
+  if (inlineMarkers.length < 2) return withDashBullets;
+
+  return withDashBullets.replace(/([^\n])\s+[*-]\s+(?=\S)/g, '$1\n- ');
+}
+
+function formatDenseActivitySummary(text: string): string {
+  if (text.includes('\n')) return text;
+  if (!/\b(?:recent activity|recent wallet activity|activity summary)\b/i.test(text)) {
+    return text;
+  }
+
+  const compact = text.replace(/\s+/g, ' ').trim();
+  const matches = Array.from(compact.matchAll(ACTIVITY_ITEM_START_PATTERN));
+  if (matches.length < 3) return text;
+
+  const firstActivityIndex = matches[0].index ?? 0;
+  const introColonIndex = compact.lastIndexOf(':', firstActivityIndex);
+  const intro =
+    introColonIndex >= 0 && introColonIndex < firstActivityIndex
+      ? compact.slice(0, introColonIndex + 1).trim()
+      : '';
+  const body = intro.length > 0 ? compact.slice(introColonIndex + 1).trim() : compact;
+
+  let first = true;
+  const formattedBody = body.replace(ACTIVITY_ITEM_START_PATTERN, (match) => {
+    const prefix = first ? '- ' : '\n- ';
+    first = false;
+    return `${prefix}${match}`;
+  }).replace(/[ \t]+\n/g, '\n');
+
+  return intro.length > 0 ? `${intro}\n${formattedBody}` : formattedBody;
+}
+
+function formatAssistantTextForChat(text: string): string {
+  return formatDenseActivitySummary(normalizeMarkdownListMarkers(text));
+}
 
 /**
  * Within a single line, split off a trailing answer if the line begins with
@@ -123,12 +165,13 @@ export function sanitizeAssistantText(rawText: string, hasToolDraft: boolean): s
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  const formatted = formatAssistantTextForChat(cleaned);
 
   // Hard length cap as defense-in-depth.
   const capped =
-    cleaned.length > MAX_VISIBLE_ASSISTANT_CHARS
-      ? `${cleaned.slice(0, MAX_VISIBLE_ASSISTANT_CHARS - 1).trimEnd()}…`
-      : cleaned;
+    formatted.length > MAX_VISIBLE_ASSISTANT_CHARS
+      ? `${formatted.slice(0, MAX_VISIBLE_ASSISTANT_CHARS - 1).trimEnd()}…`
+      : formatted;
 
   // If a tool draft is attached, the confirmation card is the authoritative
   // summary. Drop short stubs that survived sanitization.

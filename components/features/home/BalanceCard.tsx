@@ -81,8 +81,6 @@ const PRIVACY_TOGGLE_TIMING = {
   duration: 220,
   easing: Easing.bezier(0.22, 1, 0.36, 1),
 } as const;
-const PRIVACY_VALUE_ENTERING = FadeIn.duration(170).easing(Easing.out(Easing.cubic));
-const PRIVACY_VALUE_EXITING = FadeOut.duration(120).easing(Easing.in(Easing.cubic));
 
 // Static gradient overlay — all props are constants so this never
 // needs to re-render. Memoising prevents the native LinearGradient
@@ -337,6 +335,7 @@ export const BalanceCard = memo(function BalanceCard({
   const statusPillHeight = ultraCompact ? 22 : 24;
   const refreshIconSize = ultraCompact ? 14 : 15;
   const portfolioAmountFontSize = ultraCompact ? 28 : compact ? 31 : 36;
+  const hiddenMaskFontSize = ultraCompact ? 30 : compact ? 34 : 38;
   const currencyPillWidth = ultraCompact ? 62 : compact ? 68 : 76;
   const chartHeight = ultraCompact ? 48 : compact ? 58 : 68;
   const currencySheetTopInset = Math.max(insets.top, spacing.md) + spacing.sm;
@@ -364,7 +363,7 @@ export const BalanceCard = memo(function BalanceCard({
     ],
   }));
   const privateValueStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(privacyProgress.value, [0, 1], [1, 0.74]),
+    opacity: interpolate(privacyProgress.value, [0, 1], [1, 0.88]),
     transform: [
       { translateY: interpolate(privacyProgress.value, [0, 1], [0, 1]) },
       { scale: interpolate(privacyProgress.value, [0, 1], [1, 0.985]) },
@@ -398,11 +397,7 @@ export const BalanceCard = memo(function BalanceCard({
         currency.symbol.toLowerCase().includes(query),
     );
   }, [currencySearch]);
-  const displayedPortfolioValue = portfolioValueLoading
-    ? '--'
-    : privacyHidden
-      ? '****'
-      : (portfolioValueLabel ?? '--');
+  const displayedPortfolioValue = portfolioValueLoading ? '--' : (portfolioValueLabel ?? '--');
   const showPortfolioSkeleton = loading || portfolioValueLoading;
   const showActionSkeletons = loading || actionsLoading;
   const valueChange = holdingsValueChange ?? null;
@@ -590,97 +585,118 @@ export const BalanceCard = memo(function BalanceCard({
                 </>
               )}
             </View>
-            <View style={styles.metricRow}>
-              <View style={styles.valueCol}>
-                {showPortfolioSkeleton ? (
+            <View style={[styles.metricRow, privacyHidden && styles.metricRowHidden]}>
+              {showPortfolioSkeleton ? (
+                <View style={styles.valueCol}>
                   <SkeletonBlock
                     width={compact ? 156 : 196}
                     height={compact ? 34 : 42}
                     radius={radii.lg}
                     style={styles.balanceSkeleton}
                   />
-                ) : (
-                  <Animated.View
-                    key={privacyHidden ? 'balance-hidden' : 'balance-visible'}
-                    entering={PRIVACY_VALUE_ENTERING}
-                    exiting={PRIVACY_VALUE_EXITING}
-                    style={[styles.balanceValueMotion, privateValueStyle]}
+                </View>
+              ) : privacyHidden ? (
+                <Animated.View style={[styles.hiddenBalanceFrame, privateValueStyle]}>
+                  <Text
+                    variant="bodyBold"
+                    color={colors.text.primary}
+                    style={[
+                      styles.hiddenBalanceMask,
+                      {
+                        fontSize: hiddenMaskFontSize,
+                        lineHeight: Math.round(hiddenMaskFontSize * 1.16),
+                      },
+                    ]}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
                   >
-                    <SlotText
-                      value={displayedPortfolioValue}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.42}
-                      maxFontSizeMultiplier={1}
-                    >
-                      <FiatMoneyText
+                    ****
+                  </Text>
+                </Animated.View>
+              ) : (
+                <>
+                  <View style={styles.valueCol}>
+                    <Animated.View style={[styles.balanceValueMotion, privateValueStyle]}>
+                      <SlotText
                         value={displayedPortfolioValue}
-                        size="hero"
-                        compact={compact}
-                        amountFontSize={portfolioAmountFontSize}
-                        style={styles.balanceAmount}
                         numberOfLines={1}
                         adjustsFontSizeToFit
                         minimumFontScale={0.42}
                         maxFontSizeMultiplier={1}
-                      />
-                    </SlotText>
-                  </Animated.View>
-                )}
-              </View>
-              <Animated.View style={[styles.valueChangeRow, privateDetailsStyle]}>
-                {showValueChangeSkeleton ? (
-                  <>
-                    <SkeletonBlock width={compact ? 76 : 88} height={18} radius={radii.full} />
-                    <SkeletonBlock width={compact ? 54 : 62} height={20} radius={radii.full} />
-                  </>
-                ) : showValueChange ? (
-                  <>
-                    <Text
-                      variant="bodyBold"
-                      color={valueChangeColor}
-                      style={[styles.valueChangeText, compact && styles.valueChangeTextCompact]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.72}
-                      maxFontSizeMultiplier={1}
-                    >
-                      {valueChange.changeAbsoluteLabel}
-                    </Text>
-                    <View
-                      style={[
-                        styles.valueChangePercentPill,
-                        valueChangeTone === 'positive' && styles.valueChangePercentPillPositive,
-                        valueChangeTone === 'negative' && styles.valueChangePercentPillNegative,
-                      ]}
-                    >
-                      {valueChangeIconName != null ? (
-                        <Ionicons name={valueChangeIconName} size={10} color={valueChangeColor} />
-                      ) : null}
-                      <Text
-                        variant="captionBold"
-                        color={valueChangeColor}
-                        style={styles.valueChangePercentText}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.76}
-                        maxFontSizeMultiplier={1}
                       >
-                        {valueChange.changePercentLabel}
-                      </Text>
-                    </View>
-                  </>
-                ) : null}
-              </Animated.View>
-              <Animated.View style={[styles.chartFrame, privateDetailsStyle]}>
-                <HoldingsValueChangeChart
-                  samples={valueChange?.samples ?? []}
-                  tone={valueChangeTone}
-                  height={chartHeight}
-                  loading={holdingsValueChangeLoading}
-                  hidden={privacyHidden}
-                />
-              </Animated.View>
+                        <FiatMoneyText
+                          value={displayedPortfolioValue}
+                          size="hero"
+                          compact={compact}
+                          amountFontSize={portfolioAmountFontSize}
+                          style={styles.balanceAmount}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.42}
+                          maxFontSizeMultiplier={1}
+                        />
+                      </SlotText>
+                    </Animated.View>
+                  </View>
+                  <Animated.View style={[styles.valueChangeRow, privateDetailsStyle]}>
+                    {showValueChangeSkeleton ? (
+                      <>
+                        <SkeletonBlock width={compact ? 76 : 88} height={18} radius={radii.full} />
+                        <SkeletonBlock width={compact ? 54 : 62} height={20} radius={radii.full} />
+                      </>
+                    ) : showValueChange ? (
+                      <>
+                        <Text
+                          variant="bodyBold"
+                          color={valueChangeColor}
+                          style={[styles.valueChangeText, compact && styles.valueChangeTextCompact]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.72}
+                          maxFontSizeMultiplier={1}
+                        >
+                          {valueChange.changeAbsoluteLabel}
+                        </Text>
+                        <View
+                          style={[
+                            styles.valueChangePercentPill,
+                            valueChangeTone === 'positive' && styles.valueChangePercentPillPositive,
+                            valueChangeTone === 'negative' && styles.valueChangePercentPillNegative,
+                          ]}
+                        >
+                          {valueChangeIconName != null ? (
+                            <Ionicons
+                              name={valueChangeIconName}
+                              size={10}
+                              color={valueChangeColor}
+                            />
+                          ) : null}
+                          <Text
+                            variant="captionBold"
+                            color={valueChangeColor}
+                            style={styles.valueChangePercentText}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.76}
+                            maxFontSizeMultiplier={1}
+                          >
+                            {valueChange.changePercentLabel}
+                          </Text>
+                        </View>
+                      </>
+                    ) : null}
+                  </Animated.View>
+                  <Animated.View style={[styles.chartFrame, privateDetailsStyle]}>
+                    <HoldingsValueChangeChart
+                      samples={valueChange?.samples ?? []}
+                      tone={valueChangeTone}
+                      height={chartHeight}
+                      loading={holdingsValueChangeLoading}
+                      hidden={false}
+                    />
+                  </Animated.View>
+                </>
+              )}
             </View>
             <View
               style={[
@@ -1039,6 +1055,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: spacing.xs,
   },
+  metricRowHidden: {
+    justifyContent: 'center',
+    gap: 0,
+  },
   valueCol: {
     width: '92%',
     maxWidth: '92%',
@@ -1264,6 +1284,21 @@ const styles = StyleSheet.create({
   },
   balanceValueMotion: {
     width: '100%',
+  },
+  hiddenBalanceFrame: {
+    flex: 1,
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hiddenBalanceMask: {
+    fontFamily: fontFamily.displaySemiBold,
+    color: colors.text.primary,
+    opacity: 0.72,
+    textAlign: 'center',
+    letterSpacing: 0,
+    fontVariant: ['tabular-nums'],
   },
   balanceSkeleton: {
     alignSelf: 'center',

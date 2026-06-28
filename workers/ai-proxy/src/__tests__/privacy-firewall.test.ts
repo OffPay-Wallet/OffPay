@@ -74,4 +74,77 @@ describe('AI Worker privacy firewall', () => {
     expect(JSON.stringify(request)).not.toContain('AQIDBAUG');
     expect(JSON.stringify(request)).not.toContain('4GdHZyr7wXQjDHFx3jGg7f9E2SbfcMrkMWCHnKyvh5kx');
   });
+
+  it('preserves wallet tool amount and balance fields before provider calls', () => {
+    const request = sanitizeChatRequestForProvider({
+      responseMode: 'agent_turn',
+      messages: [{ role: 'user', content: 'show my private balances and recent activity' }],
+      toolResults: [
+        {
+          toolCallId: 'call-umbra-balance',
+          name: 'get_umbra_balances',
+          result: {
+            route: 'umbra',
+            balances: [
+              {
+                symbol: 'dUSDC',
+                displayBalance: '100.000000000',
+                mint: '8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz',
+              },
+            ],
+          },
+        },
+        {
+          toolCallId: 'call-umbra-atomic-balance',
+          name: 'get_umbra_balances',
+          result: {
+            route: 'umbra',
+            symbol: 'dUSDC',
+            displayBalance: '1000000000',
+            rawAmount: '1234567890123456',
+            walletAddress: '8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz',
+          },
+        },
+        {
+          toolCallId: 'call-wallet-history',
+          name: 'get_wallet_history',
+          result: {
+            status: 'ok',
+            transactions: [
+              {
+                type: 'umbra_private_send',
+                amount: '2.123456789',
+                tokenSymbol: 'dUSDC',
+                signature: '4GdHZyr7wXQjDHFx3jGg7f9E2SbfcMrkMWCHnKyvh5kx',
+              },
+              {
+                type: 'magicblock_private_send',
+                amount: '1000000000',
+                tokenSymbol: 'USDC',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const [umbra, umbraAtomic, history] = request.toolResults ?? [];
+    const umbraResult = umbra?.result as { balances?: Array<{ displayBalance?: string }> };
+    const umbraAtomicResult = umbraAtomic?.result as {
+      displayBalance?: string;
+      rawAmount?: string;
+    };
+    const historyResult = history?.result as { transactions?: Array<{ amount?: string }> };
+    const serialized = JSON.stringify(request);
+
+    expect(umbraResult.balances?.[0]?.displayBalance).toBe('100.000000000');
+    expect(umbraAtomicResult.displayBalance).toBe('1000000000');
+    expect(umbraAtomicResult.rawAmount).toBe('1234567890123456');
+    expect(historyResult.transactions?.[0]?.amount).toBe('2.123456789');
+    expect(historyResult.transactions?.[1]?.amount).toBe('1000000000');
+    expect(serialized).not.toContain('[AMOUNT]');
+    expect(serialized).not.toContain('[PHONE]');
+    expect(serialized).not.toContain('8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz');
+    expect(serialized).not.toContain('4GdHZyr7wXQjDHFx3jGg7f9E2SbfcMrkMWCHnKyvh5kx');
+  });
 });

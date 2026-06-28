@@ -89,16 +89,6 @@ export const AGENTIC_TOOL_METADATA = {
       'Do not guess missing token or amount fields; ask one short clarification instead.',
     ],
   },
-  get_private_payment_balance: {
-    category: 'private_balance',
-    networkScope: bothNetworks,
-    pendingLabel: 'Checking MagicBlock balance',
-    parallelSafe: true,
-    modelInstructions: [
-      'Use only for explicit MagicBlock or private-payment rail balance requests.',
-      'For generic private, encrypted, shielded, or vault balance requests, use get_umbra_balances.',
-    ],
-  },
   scan_umbra_claims: {
     category: 'umbra',
     networkScope: bothNetworks,
@@ -117,6 +107,7 @@ export const AGENTIC_TOOL_METADATA = {
     modelInstructions: [
       'Use for private balance, encrypted balance, shielded balance, vault balance, Umbra balance, or Umbra vault balance.',
       'Call it Umbra vault balance in replies and do not call it MagicBlock.',
+      'Do not use for explicit MagicBlock balance or MagicBlock private-payment balance requests; MagicBlock has no separate balance vault.',
     ],
   },
   list_wallet_tokens: {

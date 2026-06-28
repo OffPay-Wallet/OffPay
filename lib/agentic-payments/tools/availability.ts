@@ -13,7 +13,6 @@ export type AgenticChatCtaId =
   | 'private-send'
   | 'swap'
   | 'payroll'
-  | 'private-balance'
   | 'umbra-vault'
   | 'umbra-claims'
   | 'flash';
@@ -46,8 +45,6 @@ const NORMAL_SEND_TOOL_NAMES = new Set<AgenticToolName>([
 const PRIVATE_SEND_TOOL_NAMES = new Set<AgenticToolName>(['draft_private_send']);
 
 const PRIVATE_READINESS_TOOL_NAMES = new Set<AgenticToolName>(['check_private_send_ready']);
-
-const MAGICBLOCK_PRIVATE_TOOL_NAMES = new Set<AgenticToolName>(['get_private_payment_balance']);
 
 const UMBRA_VAULT_TOOL_NAMES = new Set<AgenticToolName>(['get_umbra_balances']);
 const UMBRA_CLAIM_TOOL_NAMES = new Set<AgenticToolName>(['scan_umbra_claims']);
@@ -84,7 +81,6 @@ export function getAvailableAgenticChatCtaIds(
   if (canUsePrivateSendTools(params)) ctas.push('private-send');
   if (canUseSwapTools(params)) ctas.push('swap');
   if (canUsePayrollTools(params)) ctas.push('payroll');
-  if (canUseMagicBlockPrivateBalanceTools(params)) ctas.push('private-balance');
   if (canUseUmbraVaultTools(params)) ctas.push('umbra-vault');
   if (canUseUmbraClaimTools(params)) ctas.push('umbra-claims');
   if (canUseFlashTools(params)) ctas.push('flash');
@@ -109,7 +105,6 @@ function isModelToolAvailable(
   if (PRIVATE_READINESS_TOOL_NAMES.has(name)) return hasWalletNetworkScope(params);
   if (NORMAL_SEND_TOOL_NAMES.has(name)) return canUseNormalSendTools(params);
   if (PRIVATE_SEND_TOOL_NAMES.has(name)) return canUsePrivateSendTools(params);
-  if (MAGICBLOCK_PRIVATE_TOOL_NAMES.has(name)) return canUseMagicBlockPrivateBalanceTools(params);
   if (UMBRA_VAULT_TOOL_NAMES.has(name)) return canUseUmbraVaultTools(params);
   if (UMBRA_CLAIM_TOOL_NAMES.has(name)) return canUseUmbraClaimTools(params);
   if (name === 'stage_payroll') return canUsePayrollTools(params);
@@ -167,13 +162,6 @@ function canUsePayrollTools(params: AgenticToolAvailabilityParams): boolean {
     hasPrivateSendCapabilities(capabilities) ||
     hasUmbraSendCapabilities(capabilities)
   );
-}
-
-function canUseMagicBlockPrivateBalanceTools(params: AgenticToolAvailabilityParams): boolean {
-  if (!hasActiveWallet(params) || !isOnlineNetworkReady(params)) return false;
-  const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
-  return isOffpayFeatureAvailable(capabilities, 'payment.privateBalance');
 }
 
 function canUseUmbraVaultTools(params: AgenticToolAvailabilityParams): boolean {

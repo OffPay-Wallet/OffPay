@@ -4,8 +4,13 @@
  */
 
 import React from 'react';
-import { Text as RNText, View } from 'react-native';
-import Animated, { Easing, FadeInUp, LinearTransition } from 'react-native-reanimated';
+import { View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeInUp,
+  LinearTransition,
+  useReducedMotion,
+} from 'react-native-reanimated';
 
 import {
   PayrollChatController,
@@ -25,8 +30,14 @@ import {
   isAgenticDraftSheetAction,
   isAgenticTransactionAction,
 } from './AgenticActionCard';
+import {
+  ACTION_CARD_MORPH_EASING,
+  actionCardSummaryEnter,
+  actionCardSummaryExit,
+} from './action-card-motion';
 import { ChatBubble } from './ChatBubble';
 import { MarkdownText } from './MarkdownText';
+import { ProcessingShimmerText } from './ProcessingShimmerText';
 import { messageStyles as styles } from './styles/message';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
@@ -34,6 +45,7 @@ import type { PayrollRoutePolicy } from '@/lib/payroll/payroll-types';
 
 const MESSAGE_ENTERING = FadeInUp.duration(170).easing(Easing.out(Easing.cubic));
 const MESSAGE_LAYOUT = LinearTransition.duration(190).easing(Easing.out(Easing.cubic));
+const ACTION_CARD_LAYOUT = LinearTransition.duration(280).easing(ACTION_CARD_MORPH_EASING);
 
 interface ChatMessageBubbleProps {
   message: AgenticChatMessage;
@@ -61,9 +73,11 @@ function AgentThinkingContent({ statusPhrase }: { statusPhrase: string }): React
       <View style={styles.agentLoaderSlot}>
         <AiLoaderLottie size={20} tone="onDark" accessibilityLabel={statusPhrase} />
       </View>
-      <RNText style={styles.thinkingStatusText} numberOfLines={2}>
-        {statusPhrase}
-      </RNText>
+      <ProcessingShimmerText
+        text={statusPhrase}
+        style={styles.thinkingStatusText}
+        numberOfLines={2}
+      />
     </View>
   );
 }
@@ -103,14 +117,20 @@ export function ChatMessageBubble({
   const fallbackThinkingPhrase = useAgentThinkingPhrase(showThinkingOnly);
   const thinkingPhrase = message.processingLabel?.trim() || fallbackThinkingPhrase;
   const visibleAction = isAgenticDraftSheetAction(action) ? undefined : action;
+  const reduceMotion = useReducedMotion();
+  const messageEntering = reduceMotion ? undefined : MESSAGE_ENTERING;
+  const messageLayout = reduceMotion ? undefined : MESSAGE_LAYOUT;
+  const actionCardEntering = reduceMotion ? undefined : actionCardSummaryEnter;
+  const actionCardExiting = reduceMotion ? undefined : actionCardSummaryExit;
+  const actionCardLayout = reduceMotion ? undefined : ACTION_CARD_LAYOUT;
 
   if (fromUser) {
     if (!hasText) return null;
 
     return (
       <Animated.View
-        entering={MESSAGE_ENTERING}
-        layout={MESSAGE_LAYOUT}
+        entering={messageEntering}
+        layout={messageLayout}
         style={[styles.messageRow, styles.messageRowUser]}
       >
         <ChatBubble variant="user">
@@ -123,8 +143,8 @@ export function ChatMessageBubble({
   if (showThinkingOnly) {
     return (
       <Animated.View
-        entering={MESSAGE_ENTERING}
-        layout={MESSAGE_LAYOUT}
+        entering={messageEntering}
+        layout={messageLayout}
         style={[styles.messageRow, styles.messageRowAgent]}
       >
         <ChatBubble variant="agent">
@@ -137,8 +157,8 @@ export function ChatMessageBubble({
   if (showStreamRow) {
     return (
       <Animated.View
-        entering={MESSAGE_ENTERING}
-        layout={MESSAGE_LAYOUT}
+        entering={messageEntering}
+        layout={messageLayout}
         style={[styles.messageRow, styles.messageRowAgent]}
       >
         <ChatBubble variant="agent">
@@ -152,10 +172,12 @@ export function ChatMessageBubble({
     return null;
   }
 
+  const actionOnly = !hasText && visibleAction != null;
+
   return (
     <Animated.View
-      entering={MESSAGE_ENTERING}
-      layout={MESSAGE_LAYOUT}
+      entering={actionOnly ? undefined : messageEntering}
+      layout={messageLayout}
       style={[styles.messageRow, styles.messageRowAgent]}
     >
       <View style={styles.agentMessageStack}>
@@ -166,8 +188,9 @@ export function ChatMessageBubble({
         ) : null}
         {visibleAction != null ? (
           <Animated.View
-            entering={MESSAGE_ENTERING}
-            layout={MESSAGE_LAYOUT}
+            entering={actionCardEntering}
+            exiting={actionCardExiting}
+            layout={actionCardLayout}
             style={styles.actionCardWrap}
           >
             {visibleAction.kind === 'payroll' ? (

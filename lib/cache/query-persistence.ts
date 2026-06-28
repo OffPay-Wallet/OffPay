@@ -30,7 +30,6 @@ const NON_PERSISTED_WALLET_QUERY_SCOPES = new Set([
   'walletTokenTransactions',
   'umbraEncryptedBalances',
   'umbraVaultRegistrationStatus',
-  'privatePaymentBalance',
 ]);
 
 let installed = false;

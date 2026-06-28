@@ -62,7 +62,6 @@ import type {
   OfflineNoncePoolStatusResponse,
   OfflineRentEstimateResponse,
   OfflineTokenContextResponse,
-  PrivateBalanceResponse,
   PrivateInitMintRequest,
   PrivateInitMintResponse,
   PrivateSendRequest,
@@ -1696,18 +1695,6 @@ export function initializePrivatePaymentMint(
     method: 'POST',
     body: request,
     network: request.network,
-  });
-}
-
-export function getPrivatePaymentBalance(
-  walletAddress: string,
-  network: OffpayNetwork,
-  mint?: string,
-): Promise<PrivateBalanceResponse> {
-  return offpayApiRequest<PrivateBalanceResponse>({
-    path: '/api/payment/private-balance',
-    query: { wallet: walletAddress, network, mint },
-    network,
   });
 }
 

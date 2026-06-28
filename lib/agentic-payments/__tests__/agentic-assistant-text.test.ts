@@ -5,7 +5,7 @@ describe('sanitizeAssistantText', () => {
     // Mirrors the model output from the user-reported screenshot.
     const raw = [
       'The user is asking to list all the tokens they hold.',
-      "I need to look at the `walletBalanceApiResponse.tokens` in the provided safe client context.",
+      'I need to look at the `walletBalanceApiResponse.tokens` in the provided safe client context.',
       '',
       'You hold the following tokens:',
       '* dUSDT: Devnet USDT (Umbra test) | Balance: 1000',
@@ -133,5 +133,42 @@ describe('sanitizeAssistantText', () => {
 
     expect(cleaned).toContain('USDC — USD Coin · 20');
     expect(cleaned).toContain('dUSDC — Devnet USDC (Umbra test) · 499.97');
+  });
+
+  it('normalizes markdown bullet markers before display', () => {
+    const raw = ['Here is your activity:', '* Sent 2 USDC', '* Received 1 SOL'].join('\n');
+
+    const cleaned = sanitizeAssistantText(raw, false);
+
+    expect(cleaned).toBe(
+      ['Here is your activity:', '- Sent 2 USDC', '- Received 1 SOL'].join('\n'),
+    );
+  });
+
+  it('splits dense recent activity summaries into one item per line', () => {
+    const raw =
+      'Here is a summary of your recent activity: Sent 22 USDC via Umbra private send Received 0.25 SOL Received 20 USDC Sent 1 USDC';
+
+    const cleaned = sanitizeAssistantText(raw, false);
+
+    expect(cleaned).toBe(
+      [
+        'Here is a summary of your recent activity:',
+        '- Sent 22 USDC via Umbra private send',
+        '- Received 0.25 SOL',
+        '- Received 20 USDC',
+        '- Sent 1 USDC',
+      ].join('\n'),
+    );
+  });
+
+  it('splits inline markdown bullets that arrive in one model paragraph', () => {
+    const raw = 'Here is your activity: * Sent 2 USDC * Received 1 SOL * Sent 1 USDC';
+
+    const cleaned = sanitizeAssistantText(raw, false);
+
+    expect(cleaned).toBe(
+      ['Here is your activity:', '- Sent 2 USDC', '- Received 1 SOL', '- Sent 1 USDC'].join('\n'),
+    );
   });
 });

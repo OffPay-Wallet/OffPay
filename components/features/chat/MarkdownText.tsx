@@ -17,7 +17,7 @@ interface TextSegment {
   code?: boolean;
 }
 
-function parseMarkdown(text: string): TextSegment[] {
+function parseInlineMarkdown(text: string): TextSegment[] {
   const segments: TextSegment[] = [];
   let remaining = text;
 
@@ -63,6 +63,28 @@ function parseMarkdown(text: string): TextSegment[] {
 
     remaining = remaining.slice(earliestMatch.index + earliestMatch.length);
   }
+
+  return segments;
+}
+
+function parseMarkdown(text: string): TextSegment[] {
+  const lines = text.split(/\r?\n/);
+  const segments: TextSegment[] = [];
+
+  lines.forEach((line, lineIndex) => {
+    if (lineIndex > 0) {
+      segments.push({ text: '\n' });
+    }
+
+    const bulletMatch = /^(\s*)[-*]\s+(.+)$/.exec(line);
+    if (bulletMatch != null) {
+      segments.push({ text: `${bulletMatch[1]}• ` });
+      segments.push(...parseInlineMarkdown(bulletMatch[2]));
+      return;
+    }
+
+    segments.push(...parseInlineMarkdown(line));
+  });
 
   return segments;
 }

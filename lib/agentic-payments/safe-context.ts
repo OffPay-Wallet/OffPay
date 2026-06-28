@@ -58,7 +58,6 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
       umbra: umbraVaultBalance && isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p'),
       umbraVaultBalance,
       privateBalance: umbraVaultBalance,
-      magicblockPrivateBalance: isOffpayFeatureAvailable(capabilities, 'payment.privateBalance'),
       flashTrade: params.network === 'mainnet' && params.canUseNetwork,
     },
     supportedActions: [
@@ -70,7 +69,6 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
       'get_swap_tokens',
       'get_swap_price',
       'prepare_swap_quote',
-      'get_private_payment_balance',
       'scan_umbra_claims',
       'get_umbra_balances',
       'draft_normal_send',

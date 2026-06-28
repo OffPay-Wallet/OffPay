@@ -30,6 +30,7 @@ import {
   type AgenticToolRunnerContext,
 } from '@/lib/agentic-payments/agent-tools';
 import { sanitizeAssistantText } from '@/lib/agentic-payments/assistant-text';
+import { hydrateAssistantToolResultPlaceholders } from '@/lib/agentic-payments/assistant-tool-placeholders';
 import type { AgenticKnownWallet } from '@/lib/agentic-payments/private-send-intent';
 import {
   runAgenticPrivacyFirewall,
@@ -363,10 +364,6 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p'),
             umbraVaultBalance: activeWalletCanUseUmbra && canReadUmbraVaultBalance,
             privateBalance: activeWalletCanUseUmbra && canReadUmbraVaultBalance,
-            magicblockPrivateBalance: isOffpayFeatureAvailable(
-              params.capabilities ?? null,
-              'payment.privateBalance',
-            ),
             flashTrade: params.scope.network === 'mainnet' && params.canUseNetwork,
           },
           tokenSymbols: buildSafeTokenSymbols(params.balance),
@@ -387,8 +384,13 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     }
 
     if (turn.kind === 'agent_text') {
+      const textWithToolValues = hydrateAssistantToolResultPlaceholders(
+        turn.text,
+        pendingToolResults,
+      );
       const cleaned =
-        sanitizeAssistantText(turn.text, attachedActionId != null) || turn.text.trim();
+        sanitizeAssistantText(textWithToolValues, attachedActionId != null) ||
+        textWithToolValues.trim();
 
       // Start voice synthesis immediately in parallel with text reveal
       if (cleaned.length > 0) {

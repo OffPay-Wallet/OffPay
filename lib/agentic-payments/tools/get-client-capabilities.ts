@@ -70,10 +70,6 @@ export const getClientCapabilitiesTool: AgenticToolDefinition = {
             activeWalletCanUseUmbra && umbraVaultBalanceAvailable,
             signingBlocker ?? capabilities.umbra?.execution?.reason,
           ),
-          magicblockPrivatePaymentBalance: capabilityResult(
-            isOffpayFeatureAvailable(capabilities, 'payment.privateBalance'),
-            capabilities.payment.privateBalance.reason,
-          ),
           umbraPrivateP2p: capabilityResult(
             activeWalletCanUseUmbra &&
               isOffpayFeatureAvailable(capabilities, 'umbra.execution') &&

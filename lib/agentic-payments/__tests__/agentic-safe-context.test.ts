@@ -100,7 +100,6 @@ describe('buildAgentSafeContext (privacy-narrowed)', () => {
       umbra: true,
       umbraVaultBalance: true,
       privateBalance: true,
-      magicblockPrivateBalance: true,
       flashTrade: false,
     });
     expect(context.supportedActions).toEqual([
@@ -112,7 +111,6 @@ describe('buildAgentSafeContext (privacy-narrowed)', () => {
       'get_swap_tokens',
       'get_swap_price',
       'prepare_swap_quote',
-      'get_private_payment_balance',
       'scan_umbra_claims',
       'get_umbra_balances',
       'draft_normal_send',

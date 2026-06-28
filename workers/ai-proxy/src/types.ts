@@ -67,7 +67,6 @@ export type AiIntentContext = {
     swap?: boolean;
     umbra?: boolean;
     umbraVaultBalance?: boolean;
-    magicblockPrivateBalance?: boolean;
     privateBalance?: boolean;
     flashTrade?: boolean;
   };

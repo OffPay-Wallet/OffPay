@@ -67,7 +67,6 @@ describe('agentic tool availability', () => {
       'send',
       'private-send',
       'payroll',
-      'private-balance',
       'umbra-vault',
       'umbra-claims',
     ]);
@@ -91,7 +90,6 @@ describe('agentic tool availability', () => {
       'private-send',
       'swap',
       'payroll',
-      'private-balance',
       'umbra-vault',
       'umbra-claims',
       'flash',
@@ -116,6 +114,7 @@ describe('agentic tool availability', () => {
     expect(toolNames).toContain('stage_payroll');
     expect(toolNames).toContain('get_umbra_balances');
     expect(toolNames).toContain('scan_umbra_claims');
+    expect(toolNames).not.toContain('get_private_payment_balance');
     expect(toolNames).not.toContain('prepare_swap_quote');
     expect(toolNames).not.toContain('flash_get_positions');
     expect(toolNames).not.toContain('flash_open_position');
@@ -149,7 +148,6 @@ describe('agentic tool availability', () => {
             umbra: true,
             umbraVaultBalance: true,
             privateBalance: true,
-            magicblockPrivateBalance: true,
             flashTrade: network === 'mainnet',
           },
           tokenSymbols: ['SOL', 'USDC'],

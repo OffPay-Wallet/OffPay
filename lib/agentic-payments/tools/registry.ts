@@ -5,7 +5,6 @@ import { checkPrivateSendReadyTool } from './check-private-send-ready';
 import { draftNormalSendTool, draftPrivateSendTool } from './payment-drafts';
 import { getClientCapabilitiesTool } from './get-client-capabilities';
 import { getNormalTransferFeeTool } from './get-normal-transfer-fee';
-import { getPrivatePaymentBalanceTool } from './get-private-payment-balance';
 import { getSolBalanceTool } from './get-sol-balance';
 import { getSwapPriceTool } from './get-swap-price';
 import { getSwapTokensTool } from './get-swap-tokens';
@@ -84,7 +83,6 @@ const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   getSwapTokensTool,
   getSwapPriceTool,
   prepareSwapQuoteTool,
-  getPrivatePaymentBalanceTool,
   scanUmbraClaimsTool,
   getUmbraBalancesTool,
   listWalletTokensTool,
