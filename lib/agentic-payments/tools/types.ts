@@ -60,6 +60,28 @@ export type AgenticToolName =
 
 export type AgenticTransferRoute = 'normal' | 'magicblock' | 'umbra';
 export type AgenticSwapRoute = 'normal';
+export type AgenticToolCategory =
+  | 'capability'
+  | 'wallet_read'
+  | 'recipient_resolution'
+  | 'fee_quote'
+  | 'payment_draft'
+  | 'swap'
+  | 'private_balance'
+  | 'umbra'
+  | 'payroll'
+  | 'flash_read'
+  | 'flash_draft'
+  | 'internal_read';
+export type AgenticToolNetworkScope = 'devnet_and_mainnet' | 'mainnet_only';
+
+export interface AgenticToolMetadata {
+  category: AgenticToolCategory;
+  networkScope: AgenticToolNetworkScope;
+  pendingLabel: string;
+  parallelSafe: boolean;
+  modelInstructions: string[];
+}
 
 export interface AgenticToolRunnerContext {
   scope: AgenticChatScope;
@@ -96,10 +118,7 @@ export type AgenticToolDraft =
     }
   | {
       kind: 'flash_position';
-      draft: Omit<
-        AgenticFlashPositionAction,
-        'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'
-      >;
+      draft: Omit<AgenticFlashPositionAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
     };
 
 export interface PayrollStageIntent {
@@ -134,6 +153,7 @@ export type ToolHandler = (
 export interface AgenticToolDefinition {
   name: AgenticToolName;
   schema: AgentToolSchema;
+  metadata?: AgenticToolMetadata;
   run: ToolHandler;
 }
 

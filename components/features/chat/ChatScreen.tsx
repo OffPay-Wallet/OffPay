@@ -389,6 +389,7 @@ export function ChatScreen(): React.JSX.Element {
         role: 'assistant',
         text: '',
         pending: true,
+        processingLabel: 'Writing response',
         createdAt: Date.now(),
         conversationId,
         walletAddress: scope.walletAddress,

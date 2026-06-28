@@ -59,6 +59,12 @@ describe('Gemini tool declaration normalization', () => {
           name: 'get_wallet_balance',
           description: 'Returns wallet balance.',
           parameters: { type: 'object', properties: {} },
+          xOffpay: {
+            category: 'wallet_read',
+            networkScope: 'devnet_and_mainnet',
+            pendingLabel: 'Checking wallet balance',
+            modelInstructions: ['Use for generic balance questions.'],
+          },
         },
       ],
     });
@@ -85,6 +91,12 @@ describe('Gemini tool declaration normalization', () => {
           name: 'get_wallet_balance',
           description: 'Returns wallet balance.',
           parameters: { type: 'object', properties: {} },
+          xOffpay: {
+            category: 'wallet_read',
+            networkScope: 'devnet_and_mainnet',
+            pendingLabel: 'Checking wallet balance',
+            modelInstructions: ['Use for generic balance questions.'],
+          },
         },
       ],
     });
@@ -94,6 +106,7 @@ describe('Gemini tool declaration normalization', () => {
     });
     expect(JSON.stringify(request)).toContain('agent_tool_calls');
     expect(JSON.stringify(request)).toContain('get_wallet_balance');
+    expect(JSON.stringify(request)).toContain('devnet_and_mainnet');
     expect(request).not.toHaveProperty('tools');
     expect(request).not.toHaveProperty('systemInstruction');
   });

@@ -98,7 +98,8 @@ export function ChatMessageBubble({
   const agentPending = !fromUser && message.pending === true;
   const showThinkingOnly = agentPending && !hasText;
   const showStreamRow = agentPending && hasText;
-  const thinkingPhrase = useAgentThinkingPhrase(showThinkingOnly);
+  const fallbackThinkingPhrase = useAgentThinkingPhrase(showThinkingOnly);
+  const thinkingPhrase = message.processingLabel?.trim() || fallbackThinkingPhrase;
 
   if (fromUser) {
     if (!hasText) return null;

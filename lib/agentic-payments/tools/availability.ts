@@ -3,6 +3,7 @@ import type { AgentToolSchema } from '@/lib/agentic-payments/types';
 import type { CapabilitiesResponse, OffpayNetwork } from '@/types/offpay-api';
 
 import { AGENTIC_MODEL_TOOL_DEFINITIONS } from './registry';
+import { buildModelFacingToolSchema } from './tool-metadata';
 import type { AgenticToolName } from './types';
 
 export type AgenticChatCtaId =
@@ -95,7 +96,7 @@ export function getAvailableAgenticModelToolSchemas(
 ): AgentToolSchema[] {
   return AGENTIC_MODEL_TOOL_DEFINITIONS.filter((definition) =>
     isModelToolAvailable(definition.name, params),
-  ).map((definition) => definition.schema);
+  ).map(buildModelFacingToolSchema);
 }
 
 function isModelToolAvailable(

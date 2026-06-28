@@ -3,6 +3,9 @@ import bs58 from 'bs58';
 
 import {
   AGENTIC_TOOL_SCHEMAS,
+  formatAgenticToolProcessingLabel,
+  getAgenticToolMetadata,
+  getAvailableAgenticModelToolSchemas,
   runAgenticTools,
   type AgenticToolRunnerContext,
 } from '@/lib/agentic-payments/agent-tools';
@@ -130,6 +133,80 @@ describe('runAgenticTools', () => {
     }
   });
 
+  it('attaches model-facing metadata and refined instructions to tool schemas', () => {
+    const balanceSchema = AGENTIC_TOOL_SCHEMAS.find(
+      (schema) => schema.name === 'get_wallet_balance',
+    );
+    const swapSchema = AGENTIC_TOOL_SCHEMAS.find((schema) => schema.name === 'prepare_swap_quote');
+
+    expect(balanceSchema?.xOffpay).toMatchObject({
+      category: 'wallet_read',
+      networkScope: 'devnet_and_mainnet',
+      pendingLabel: 'Checking wallet balance',
+    });
+    expect(balanceSchema?.description).toContain('available on devnet and mainnet');
+    expect(swapSchema?.xOffpay).toMatchObject({
+      category: 'swap',
+      networkScope: 'mainnet_only',
+      pendingLabel: 'Quoting swap',
+    });
+    expect(swapSchema?.description).toContain('mainnet only');
+  });
+
+  it('scopes model-visible tools by active network while preserving both-network tools', () => {
+    const devnetToolNames = getAvailableAgenticModelToolSchemas({
+      network: 'devnet',
+      walletAddress,
+      walletId: 'wallet-1',
+      walletMode: 'online',
+      canUseNetwork: true,
+      canUseUmbraWallet: true,
+      capabilities,
+    }).map((schema) => schema.name);
+    const mainnetToolNames = getAvailableAgenticModelToolSchemas({
+      network: 'mainnet',
+      walletAddress,
+      walletId: 'wallet-1',
+      walletMode: 'online',
+      canUseNetwork: true,
+      canUseUmbraWallet: true,
+      capabilities,
+    }).map((schema) => schema.name);
+
+    expect(devnetToolNames).toEqual(
+      expect.arrayContaining([
+        'get_wallet_balance',
+        'get_wallet_history',
+        'draft_normal_send',
+        'draft_private_send',
+        'check_private_send_ready',
+      ]),
+    );
+    expect(devnetToolNames).not.toContain('prepare_swap_quote');
+    expect(devnetToolNames).not.toContain('flash_open_position');
+    expect(mainnetToolNames).toEqual(
+      expect.arrayContaining([
+        'get_wallet_balance',
+        'prepare_swap_quote',
+        'flash_get_markets',
+        'flash_open_position',
+      ]),
+    );
+  });
+
+  it('formats tool-specific processing labels from metadata', () => {
+    expect(getAgenticToolMetadata('draft_private_send')?.pendingLabel).toBe(
+      'Preparing private transfer',
+    );
+    expect(formatAgenticToolProcessingLabel([{ name: 'prepare_swap_quote' }])).toBe('Quoting swap');
+    expect(
+      formatAgenticToolProcessingLabel([
+        { name: 'get_wallet_balance' },
+        { name: 'get_wallet_history' },
+      ]),
+    ).toBe('Checking wallet balance and checking recent activity');
+  });
+
   it('returns a privacy-safe token list without addresses or mints', async () => {
     const run = await runAgenticTools(
       [{ id: 'call-1', name: 'list_wallet_tokens', args: {} }],
@@ -232,6 +309,26 @@ describe('runAgenticTools', () => {
 
     expect(run.results[0].result).toMatchObject({ status: 'ok', sol: '1.5' });
     expect(JSON.stringify(run.results[0].result)).not.toContain(walletAddress);
+  });
+
+  it('runs parallel-safe read tool batches together', async () => {
+    const startedBatches: string[][] = [];
+    const run = await runAgenticTools(
+      [
+        { id: 'call-balance', name: 'get_wallet_balance', args: {} },
+        { id: 'call-sol', name: 'get_sol_balance', args: {} },
+      ],
+      {
+        ...baseContext,
+        balance: { ...balance, nativeSolUsdPrice: 100 },
+      },
+      {
+        onToolStart: (toolCalls) => startedBatches.push(toolCalls.map((call) => call.name)),
+      },
+    );
+
+    expect(startedBatches).toEqual([['get_wallet_balance', 'get_sol_balance']]);
+    expect(run.results).toHaveLength(2);
   });
 
   it('emits insight ids only — the model writes the prose', async () => {

@@ -9,6 +9,14 @@ export type AgentToolSchema = {
   name: string;
   description: string;
   parameters?: Record<string, unknown>;
+  xOffpay?: AgentToolSchemaMetadata;
+};
+
+export type AgentToolSchemaMetadata = {
+  category?: string;
+  networkScope?: string;
+  pendingLabel?: string;
+  modelInstructions?: string[];
 };
 
 export type AgentToolResult = {

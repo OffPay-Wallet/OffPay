@@ -187,6 +187,7 @@ export interface AgenticChatMessage {
   network: OffpayNetwork | null;
   conversationId?: string | null;
   pending?: boolean;
+  processingLabel?: string | null;
   actionId?: string | null;
 }
 

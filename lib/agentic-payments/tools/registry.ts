@@ -51,6 +51,13 @@ import type {
   AgenticToolRunnerContext,
   ToolHandlerOutcome,
 } from './types';
+import {
+  buildModelFacingToolSchema,
+  formatAgenticToolProcessingLabel,
+  getAgenticToolMetadata,
+  isAgenticToolParallelSafe,
+  withAgenticToolMetadata,
+} from './tool-metadata';
 
 const MODEL_HIDDEN_TOOL_NAMES = new Set<AgenticToolName>([
   'flash_get_pool_stats',
@@ -68,7 +75,7 @@ const MODEL_HIDDEN_TOOL_NAMES = new Set<AgenticToolName>([
   'flash_get_rate_limits',
 ]);
 
-export const AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
+const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   getClientCapabilitiesTool,
   getWalletBalanceTool,
   getWalletHistoryTool,
@@ -115,13 +122,14 @@ export const AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   flashGetRateLimitsTool,
 ] as const;
 
+export const AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] =
+  RAW_AGENTIC_TOOL_DEFINITIONS.map(withAgenticToolMetadata);
+
 export const AGENTIC_MODEL_TOOL_DEFINITIONS = AGENTIC_TOOL_DEFINITIONS.filter(
   (definition) => !MODEL_HIDDEN_TOOL_NAMES.has(definition.name),
 );
 
-export const AGENTIC_TOOL_SCHEMAS = AGENTIC_MODEL_TOOL_DEFINITIONS.map(
-  (definition) => definition.schema,
-);
+export const AGENTIC_TOOL_SCHEMAS = AGENTIC_MODEL_TOOL_DEFINITIONS.map(buildModelFacingToolSchema);
 
 const TOOL_HANDLERS = new Map<AgenticToolName, AgenticToolDefinition>(
   AGENTIC_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]),
@@ -135,3 +143,5 @@ export async function runToolHandler(
   if (handler == null) return { error: { code: 'unknown_tool' } };
   return handler.run(call, context);
 }
+
+export { formatAgenticToolProcessingLabel, getAgenticToolMetadata, isAgenticToolParallelSafe };

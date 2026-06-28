@@ -22,6 +22,7 @@ import {
   sendAgentTurn,
 } from '@/lib/agentic-payments/ai-proxy-client';
 import {
+  formatAgenticToolProcessingLabel,
   getAvailableAgenticModelToolSchemas,
   runAgenticTools,
   type AgenticToolDraft,
@@ -33,6 +34,7 @@ import {
   runAgenticPrivacyFirewall,
   sanitizeAgentMessagesForAi,
 } from '@/lib/agentic-payments/privacy-firewall';
+import { getUnclearAgentPromptMessage } from '@/lib/agentic-payments/unclear-prompt';
 import type { AgentMessage, AgentToolCall, AgentToolResult } from '@/lib/agentic-payments/types';
 import {
   getAgenticConversationScopeKey,
@@ -133,6 +135,7 @@ export function useAgenticAgentSubmit({
         createdAt: Date.now() + 1,
         conversationId,
         pending: true,
+        processingLabel: 'Reading request',
         walletAddress: scope.walletAddress,
         network: scope.network,
       };
@@ -145,6 +148,17 @@ export function useAgenticAgentSubmit({
             promptPrivacy.blockReason ??
             'That looks like sensitive wallet material. OffPay never needs it.',
           pending: false,
+          processingLabel: null,
+        });
+        return;
+      }
+
+      const unclearPromptMessage = getUnclearAgentPromptMessage(prompt);
+      if (unclearPromptMessage != null) {
+        store.updateMessage(assistantMessage.id, {
+          text: unclearPromptMessage,
+          pending: false,
+          processingLabel: null,
         });
         return;
       }
@@ -153,6 +167,7 @@ export function useAgenticAgentSubmit({
         store.updateMessage(assistantMessage.id, {
           text: 'Yuga is not configured for this build.',
           pending: false,
+          processingLabel: null,
         });
         return;
       }
@@ -173,6 +188,7 @@ export function useAgenticAgentSubmit({
             sanitizedRequest.blockReason ??
             'That chat includes sensitive wallet material. Start a new prompt without it.',
           pending: false,
+          processingLabel: null,
         });
         if (abortRef.current === controller) abortRef.current = null;
         setBusy(false);
@@ -219,12 +235,14 @@ export function useAgenticAgentSubmit({
             useAgenticChatStore.getState().updateMessage(assistantMessage.id, {
               text: 'The previous response was interrupted. Try again.',
               pending: false,
+              processingLabel: null,
             });
             return;
           }
           useAgenticChatStore.getState().updateMessage(assistantMessage.id, {
             text: getProxyErrorMessage(error),
             pending: false,
+            processingLabel: null,
           });
         })
         .finally(() => {
@@ -344,6 +362,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       store.updateMessage(params.assistantMessageId, {
         text: 'The wallet or network changed during this request. Send the prompt again.',
         pending: false,
+        processingLabel: null,
       });
       return;
     }
@@ -366,6 +385,9 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     }
 
     // tool-calls turn — run them on-device
+    store.updateMessage(params.assistantMessageId, {
+      processingLabel: formatAgenticToolProcessingLabel(turn.toolCalls),
+    });
     const toolContext: AgenticToolRunnerContext = {
       scope: params.scope,
       walletMode: params.walletMode,
@@ -380,7 +402,13 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       walletId: params.walletId,
       walletImportMethod: params.walletImportMethod ?? null,
     };
-    const run = await runAgenticTools(turn.toolCalls, toolContext);
+    const run = await runAgenticTools(turn.toolCalls, toolContext, {
+      onToolStart: (toolCalls) => {
+        store.updateMessage(params.assistantMessageId, {
+          processingLabel: formatAgenticToolProcessingLabel(toolCalls),
+        });
+      },
+    });
 
     if (run.drafts.length > 0) {
       attachedActionId = persistDraftAction({
@@ -395,6 +423,9 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
 
     pendingToolCalls = [...run.toolCalls];
     pendingToolResults = run.results;
+    store.updateMessage(params.assistantMessageId, {
+      processingLabel: 'Writing response',
+    });
   }
 
   // Loop hit its budget without a final text turn.

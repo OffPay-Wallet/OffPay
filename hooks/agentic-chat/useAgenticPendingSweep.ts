@@ -10,10 +10,7 @@
 
 import { useEffect } from 'react';
 
-import {
-  useAgenticChatStore,
-  type AgenticChatScope,
-} from '@/store/agenticChatStore';
+import { useAgenticChatStore, type AgenticChatScope } from '@/store/agenticChatStore';
 
 export function useAgenticPendingSweep(scope: AgenticChatScope): void {
   // Read the current set of messages once via the store ref so this hook
@@ -32,6 +29,7 @@ export function useAgenticPendingSweep(scope: AgenticChatScope): void {
     for (const message of stranded) {
       state.updateMessage(message.id, {
         pending: false,
+        processingLabel: null,
         text: 'The previous response was interrupted. Try again.',
       });
     }

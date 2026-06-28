@@ -1,13 +1,12 @@
 /** Short status lines shown while Yuga is processing wallet-safe work. */
 export const AGENT_THINKING_PHRASES = [
-  'cooking',
-  'checking',
-  'routing',
-  'quoting',
-  'reviewing',
+  'Reading request',
+  'Choosing the right tool',
+  'Checking safely',
+  'Preparing response',
 ] as const;
 
-export const DEFAULT_AGENT_THINKING_PHRASE = 'cooking';
+export const DEFAULT_AGENT_THINKING_PHRASE = 'Reading request';
 
 export function pickRandomThinkingPhrase(): string {
   const index = Math.floor(Math.random() * AGENT_THINKING_PHRASES.length);

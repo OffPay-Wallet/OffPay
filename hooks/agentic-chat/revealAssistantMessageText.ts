@@ -21,6 +21,7 @@ export async function revealAssistantMessageText(
   store.updateMessage(messageId, {
     text: fullText,
     pending: false,
+    processingLabel: null,
     ...options.patch,
   });
 }

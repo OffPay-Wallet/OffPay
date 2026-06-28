@@ -158,6 +158,7 @@ function buildGemmaJsonAgentTurnPrompt(body: AgentChatRequest): string {
         name: schema.name,
         description: schema.description,
         parameters: normalizeGeminiToolParameters(schema.parameters) ?? { type: 'OBJECT' },
+        metadata: toolMetadataForPrompt(schema),
       })),
       18_000,
     ),
@@ -170,6 +171,15 @@ function buildGemmaJsonAgentTurnPrompt(body: AgentChatRequest): string {
     'To call tools, return {"kind":"agent_tool_calls","toolCalls":[{"name":"tool_name","args":{}}]}.',
     'Use only tool names from Available local tools. Do not include private wallet data.',
   ].join('\n');
+}
+
+function toolMetadataForPrompt(schema: AgentToolSchema): Record<string, unknown> | undefined {
+  if (schema.xOffpay == null) return undefined;
+  return {
+    category: schema.xOffpay.category,
+    networkScope: schema.xOffpay.networkScope,
+    modelInstructions: schema.xOffpay.modelInstructions,
+  };
 }
 
 function buildJsonProtocolConversationTrace(body: AgentChatRequest): unknown[] {
