@@ -89,6 +89,9 @@ describe('Gemini tool declaration normalization', () => {
       ],
     });
 
+    expect(request).toMatchObject({
+      contents: [{ role: 'user' }],
+    });
     expect(JSON.stringify(request)).toContain('agent_tool_calls');
     expect(JSON.stringify(request)).toContain('get_wallet_balance');
     expect(request).not.toHaveProperty('tools');

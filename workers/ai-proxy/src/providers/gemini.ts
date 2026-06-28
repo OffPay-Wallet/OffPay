@@ -43,7 +43,7 @@ export async function generateGeminiIntent(
     throw new ProviderError('gemini', 503, 'Gemini API key is not configured.');
   }
 
-  const payload = await fetchGeminiJson(buildGeminiIntentRequest(body), env);
+  const payload = await fetchGeminiJson(buildGeminiIntentRequest(body), env, 'intent');
   const text = geminiText(payload);
   return parseIntentResult(text);
 }
@@ -63,11 +63,15 @@ export async function generateGeminiAgentTurn(
   }
 
   try {
-    const payload = await fetchGeminiJson(buildGeminiAgentTurnRequest(body), env);
+    const payload = await fetchGeminiJson(buildGeminiAgentTurnRequest(body), env, 'agent_native');
     return parseGeminiAgentTurn(payload);
   } catch (error) {
     if (!shouldRetryAgentTurnAsJson(error)) throw error;
-    const fallbackPayload = await fetchGeminiJson(buildGemmaJsonAgentTurnRequest(body), env);
+    const fallbackPayload = await fetchGeminiJson(
+      buildGemmaJsonAgentTurnRequest(body),
+      env,
+      'agent_json_fallback',
+    );
     return parseGemmaJsonAgentTurn(fallbackPayload);
   }
 }
@@ -130,6 +134,7 @@ export function buildGemmaJsonAgentTurnRequest(body: AgentChatRequest): Record<s
   return {
     contents: [
       {
+        role: 'user',
         parts: [
           {
             text: buildGemmaJsonAgentTurnPrompt(body),
@@ -407,9 +412,11 @@ function parseGeminiAgentTurn(payload: GeminiResponse): AgentTurn {
 async function fetchGeminiJson(
   geminiRequest: Record<string, unknown>,
   env: AiProxyEnv,
+  requestKind: string,
 ): Promise<GeminiResponse> {
-  const model = encodeURIComponent(env.GEMINI_CHAT_MODEL?.trim() || DEFAULT_GEMINI_MODEL);
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const model = env.GEMINI_CHAT_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  const encodedModel = encodeURIComponent(model);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodedModel}:generateContent`;
   const response = await fetchWithTimeout(
     url,
     {
@@ -424,7 +431,7 @@ async function fetchGeminiJson(
   );
 
   if (!response.ok) {
-    throw await providerErrorFromResponse('gemini', response);
+    throw await providerErrorFromResponse('gemini', response, { requestKind, model });
   }
 
   return (await response.json()) as GeminiResponse;

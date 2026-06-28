@@ -118,8 +118,27 @@ export async function fetchWithTimeout(
 export async function providerErrorFromResponse(
   provider: string,
   response: Response,
+  context?: Record<string, string | number | boolean | undefined>,
 ): Promise<ProviderError> {
   const retryAfterMs = retryAfterHeaderToMs(response.headers.get('retry-after'));
+  const bodyText = await response.text().catch(() => '');
+  const detail = bodyText.trim().slice(0, 1600);
+
+  if (detail.length > 0) {
+    console.warn(
+      'aiProxy.providerError',
+      safeJson(
+        {
+          provider,
+          status: response.status,
+          ...context,
+          body: detail,
+        },
+        2400,
+      ),
+    );
+  }
+
   return new ProviderError(
     provider,
     response.status,
