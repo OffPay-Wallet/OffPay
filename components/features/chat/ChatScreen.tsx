@@ -54,6 +54,8 @@ import { ChatHistoryDrawer } from './ChatHistoryDrawer';
 import { ChatCtaCards } from './ChatCtaCards';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatPromptDock } from './ChatPromptDock';
+import { AgenticActionDraftSheet } from './AgenticActionDraftSheet';
+import { isAgenticDraftSheetAction } from './AgenticActionCard';
 import { CHAT_DRAWER_MAX_WIDTH, PROMPT_DOCK_COLLAPSED_BASE_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
 import { PayrollChatController } from '@/components/features/payroll/PayrollChatController';
@@ -220,6 +222,20 @@ export function ChatScreen(): React.JSX.Element {
     for (const action of scopedActions) byId.set(action.id, action);
     return byId;
   }, [scopedActions]);
+  const activeDraftAction = useMemo(() => {
+    let latest: AgenticChatAction | null = null;
+    for (const action of scopedActions) {
+      if (!isAgenticDraftSheetAction(action)) continue;
+      if (latest == null || action.updatedAt > latest.updatedAt) {
+        latest = action;
+      }
+    }
+    return isAgenticDraftSheetAction(latest) ? latest : null;
+  }, [scopedActions]);
+  const draftSheetOpen = activeDraftAction != null;
+  useEffect(() => {
+    if (draftSheetOpen) Keyboard.dismiss();
+  }, [activeDraftAction?.id, draftSheetOpen]);
   const payrollActionRunIds = useMemo(() => {
     const runIds = new Set<string>();
     for (const action of scopedActions) {
@@ -723,6 +739,17 @@ export function ChatScreen(): React.JSX.Element {
   ]);
 
   const canSubmit = prompt.trim().length > 0 && !agentBusy;
+  const draftSheetBottomOffset = draftSheetOpen
+    ? Math.max(insets.bottom, spacing.lg)
+    : keyboardOffset + reservedPromptDockHeight + spacing.sm;
+  const draftSheetMaxHeight = Math.max(
+    180,
+    Math.min(480, windowHeight - draftSheetBottomOffset - insets.top - spacing['2xl']),
+  );
+  const hiddenComposerBottomPadding = Math.max(insets.bottom, spacing.lg);
+  const scrollBottomPadding =
+    (draftSheetOpen ? hiddenComposerBottomPadding : bottomPadding) +
+    (activeDraftAction == null ? 0 : Math.min(draftSheetMaxHeight, 360));
   const showEmptyState =
     scopedMessages.length === 0 &&
     activePayrollRunId == null &&
@@ -763,7 +790,7 @@ export function ChatScreen(): React.JSX.Element {
           style={headerStyles.chatScroll}
           contentContainerStyle={[
             headerStyles.scrollContent,
-            { paddingHorizontal: horizontalPadding, paddingBottom: bottomPadding },
+            { paddingHorizontal: horizontalPadding, paddingBottom: scrollBottomPadding },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -897,41 +924,57 @@ export function ChatScreen(): React.JSX.Element {
         </ScrollView>
       </View>
 
-      <ChatPromptDock
-        inputRef={inputRef}
-        prompt={prompt}
-        busy={agentBusy}
-        canSubmit={canSubmit}
-        bottomInset={promptBottomInset}
-        keyboardOffset={keyboardOffset}
+      {!draftSheetOpen ? (
+        <ChatPromptDock
+          inputRef={inputRef}
+          prompt={prompt}
+          busy={agentBusy}
+          canSubmit={canSubmit}
+          bottomInset={promptBottomInset}
+          keyboardOffset={keyboardOffset}
+          horizontalPadding={horizontalPadding}
+          onLayout={handlePromptDockLayout}
+          onChangeText={setPrompt}
+          onSubmit={handleSubmit}
+          onUpload={() => {
+            void payrollIntake.pickFile().then((result) => {
+              if (result != null) announcePayrollStageOutcome(result);
+            });
+          }}
+          onUploadLongPress={() => setPayrollPasteOpen(true)}
+          onPastePayroll={() => setPayrollPasteOpen(true)}
+          uploadBusy={payrollIntake.busy}
+          voice={{
+            state: voice.state,
+            transcript: voice.transcript,
+            level: voice.level,
+            onPress: () => {
+              if (voice.state === 'idle') speech.stop();
+              voice.toggle();
+            },
+            onAccept: voice.accept,
+            onCancel: voice.cancel,
+          }}
+          speech={{
+            state: speech.state,
+            muted: speech.muted,
+            onStop: speech.stop,
+            onToggleMuted: speech.toggleMuted,
+          }}
+        />
+      ) : null}
+
+      <AgenticActionDraftSheet
+        action={activeDraftAction}
+        bottomOffset={draftSheetBottomOffset}
         horizontalPadding={horizontalPadding}
-        onLayout={handlePromptDockLayout}
-        onChangeText={setPrompt}
-        onSubmit={handleSubmit}
-        onUpload={() => {
-          void payrollIntake.pickFile().then((result) => {
-            if (result != null) announcePayrollStageOutcome(result);
-          });
+        maxHeight={draftSheetMaxHeight}
+        onConfirm={(action) => {
+          void confirmPrivateSend(action);
         }}
-        onUploadLongPress={() => setPayrollPasteOpen(true)}
-        onPastePayroll={() => setPayrollPasteOpen(true)}
-        uploadBusy={payrollIntake.busy}
-        voice={{
-          state: voice.state,
-          transcript: voice.transcript,
-          level: voice.level,
-          onPress: () => {
-            if (voice.state === 'idle') speech.stop();
-            voice.toggle();
-          },
-          onAccept: voice.accept,
-          onCancel: voice.cancel,
-        }}
-        speech={{
-          state: speech.state,
-          muted: speech.muted,
-          onStop: speech.stop,
-          onToggleMuted: speech.toggleMuted,
+        onCancel={cancelPrivateSend}
+        onRouteChange={(action, route) => {
+          void changePrivateSendRoute(action, route);
         }}
       />
 

@@ -20,11 +20,13 @@ import type {
 } from '@/store/agenticChatStore';
 
 import { AiLoaderLottie } from './AiLoaderLottie';
+import {
+  AgenticActionCard,
+  isAgenticDraftSheetAction,
+  isAgenticTransactionAction,
+} from './AgenticActionCard';
 import { ChatBubble } from './ChatBubble';
 import { MarkdownText } from './MarkdownText';
-import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
-import { SwapConfirmationCard } from './SwapConfirmationCard';
-import { FlashPositionConfirmationCard } from './FlashPositionConfirmationCard';
 import { messageStyles as styles } from './styles/message';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
@@ -100,6 +102,7 @@ export function ChatMessageBubble({
   const showStreamRow = agentPending && hasText;
   const fallbackThinkingPhrase = useAgentThinkingPhrase(showThinkingOnly);
   const thinkingPhrase = message.processingLabel?.trim() || fallbackThinkingPhrase;
+  const visibleAction = isAgenticDraftSheetAction(action) ? undefined : action;
 
   if (fromUser) {
     if (!hasText) return null;
@@ -145,7 +148,7 @@ export function ChatMessageBubble({
     );
   }
 
-  if (!hasText && action == null) {
+  if (!hasText && visibleAction == null) {
     return null;
   }
 
@@ -161,48 +164,42 @@ export function ChatMessageBubble({
             <MarkdownText text={message.text} variant="agent" />
           </ChatBubble>
         ) : null}
-        {action != null ? (
+        {visibleAction != null ? (
           <Animated.View
             entering={MESSAGE_ENTERING}
             layout={MESSAGE_LAYOUT}
             style={styles.actionCardWrap}
           >
-            {action.kind === 'payroll' ? (
+            {visibleAction.kind === 'payroll' ? (
               <PayrollChatController
-                runId={action.runId}
+                runId={visibleAction.runId}
                 walletId={walletId}
-                summary={action.runId === activePayrollRunId ? payrollSummary : action.summary}
+                summary={
+                  visibleAction.runId === activePayrollRunId
+                    ? payrollSummary
+                    : visibleAction.summary
+                }
                 onSetupUmbra={onSetupPayrollUmbra}
                 onRefreshRoutes={
-                  action.runId === activePayrollRunId ? onRefreshPayrollRoutes : undefined
+                  visibleAction.runId === activePayrollRunId ? onRefreshPayrollRoutes : undefined
                 }
                 onRoutePolicyChange={
-                  action.runId === activePayrollRunId ? onPayrollRoutePolicyChange : undefined
+                  visibleAction.runId === activePayrollRunId
+                    ? onPayrollRoutePolicyChange
+                    : undefined
                 }
                 onSpeakOutcome={onSpeakPayrollOutcome}
                 onAnnounceOutcome={onAnnouncePayrollOutcome}
                 setupBusy={payrollSetupBusy}
               />
-            ) : action.kind === 'swap' ? (
-              <SwapConfirmationCard
-                action={action}
-                onConfirm={onConfirmPrivateSend}
-                onCancel={onCancelPrivateSend}
-              />
-            ) : action.kind === 'flash_position' ? (
-              <FlashPositionConfirmationCard
-                action={action}
-                onConfirm={onConfirmPrivateSend}
-                onCancel={onCancelPrivateSend}
-              />
-            ) : (
-              <PrivateSendConfirmationCard
-                action={action}
+            ) : isAgenticTransactionAction(visibleAction) ? (
+              <AgenticActionCard
+                action={visibleAction}
                 onConfirm={onConfirmPrivateSend}
                 onCancel={onCancelPrivateSend}
                 onRouteChange={onChangePrivateSendRoute}
               />
-            )}
+            ) : null}
           </Animated.View>
         ) : null}
       </View>

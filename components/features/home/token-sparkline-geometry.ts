@@ -6,11 +6,12 @@
  */
 import { toneColor, type ChangeTone } from '@/lib/ui/token-change-format';
 
-import type { ConvertedTokenPriceHistorySample } from '@/hooks/useOffpayTokenPriceHistory';
-
 export type SparklineTone = ChangeTone;
 
 export type SparklineRenderMode = 'chart' | 'loading' | 'empty';
+export interface SparklineValueSample {
+  price: number;
+}
 
 /** Vertical breathing room (px) reserved at the top and bottom of the plot. */
 export const SPARKLINE_VERTICAL_PADDING = 2;
@@ -24,7 +25,7 @@ export const SPARKLINE_VERTICAL_PADDING = 2;
  * non-decreasing in sample order.
  */
 export function buildSparklinePath(
-  samples: ConvertedTokenPriceHistorySample[],
+  samples: readonly SparklineValueSample[],
   width: number,
   height: number,
 ): { linePath: string; areaPath: string } | null {

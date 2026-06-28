@@ -6,7 +6,6 @@
 
 import React, { useCallback } from 'react';
 import { Pressable, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
@@ -18,6 +17,8 @@ import { useAppToast } from '@/components/ui/AppToast';
 import type { AgenticPrivateSendAction } from '@/store/agenticChatStore';
 
 import { ConfirmationRow } from './ConfirmationRow';
+import { ConfirmationCardSurface } from './ConfirmationCardSurface';
+import { TransactionHashLinkRow } from './TransactionHashLinkRow';
 import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
@@ -36,12 +37,6 @@ const ROUTE_OPTIONS: { route: AgenticPrivateSendAction['route']; label: string }
   { route: 'umbra', label: 'Umbra' },
   { route: 'magicblock', label: 'MagicBlock' },
 ];
-
-function routeIconName(route: AgenticPrivateSendAction['route']): keyof typeof Ionicons.glyphMap {
-  if (route === 'normal') return 'paper-plane-outline';
-  if (route === 'umbra') return 'shield-half-outline';
-  return 'shield-checkmark-outline';
-}
 
 function routeLabel(route: AgenticPrivateSendAction['route']): string {
   if (route === 'normal') return 'Normal';
@@ -69,14 +64,11 @@ export function PrivateSendConfirmationCard({
   );
 
   return (
-    <View style={styles.confirmationCard}>
+    <ConfirmationCardSurface>
       <View style={styles.confirmationHeader}>
-        <View style={styles.confirmationIcon}>
-          <Ionicons name={routeIconName(action.route)} size={18} color={colors.brand.deepShadow} />
-        </View>
         <View style={styles.confirmationTitleStack}>
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
-            Yuga Transfer
+            Transfer
           </Text>
           <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
             {formatPrivateSendStatus(action.status)}
@@ -131,15 +123,10 @@ export function PrivateSendConfirmationCard({
           <ConfirmationRow label="Route" value={routeLabel(action.route)} />
         )}
         {action.signature != null ? (
-          <ConfirmationRow
-            label="Tx"
-            value={shortenWalletAddress(action.signature, 5)}
-            mono
-            onPress={() => {
-              if (action.signature == null) return;
-              void copyHash(action.signature, 'Transaction hash');
-            }}
-            accessibilityLabel="Copy transaction hash"
+          <TransactionHashLinkRow
+            signature={action.signature}
+            network={action.network}
+            accessibilityLabel="View transfer transaction on Solscan"
           />
         ) : null}
         {action.txId != null ? (
@@ -200,6 +187,6 @@ export function PrivateSendConfirmationCard({
           </Pressable>
         </View>
       ) : null}
-    </View>
+    </ConfirmationCardSurface>
   );
 }

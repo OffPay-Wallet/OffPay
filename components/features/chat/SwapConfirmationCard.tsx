@@ -1,16 +1,14 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { Pressable, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import * as Clipboard from 'expo-clipboard';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
-import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
-import { useAppToast } from '@/components/ui/AppToast';
 import type { AgenticSwapAction } from '@/store/agenticChatStore';
 
 import { ConfirmationRow } from './ConfirmationRow';
+import { ConfirmationCardSurface } from './ConfirmationCardSurface';
+import { TransactionHashLinkRow } from './TransactionHashLinkRow';
 import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
@@ -29,28 +27,13 @@ export function SwapConfirmationCard({
   const submitting = action.status === 'submitting';
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
-  const { showToast } = useAppToast();
-  const copyHash = useCallback(
-    async (value: string) => {
-      await Clipboard.setStringAsync(value);
-      showToast({
-        title: 'Copied',
-        message: 'Transaction hash copied to clipboard.',
-        variant: 'success',
-      });
-    },
-    [showToast],
-  );
 
   return (
-    <View style={styles.confirmationCard}>
+    <ConfirmationCardSurface>
       <View style={styles.confirmationHeader}>
-        <View style={styles.confirmationIcon}>
-          <Ionicons name="swap-horizontal-outline" size={18} color={colors.brand.deepShadow} />
-        </View>
         <View style={styles.confirmationTitleStack}>
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
-            Yuga Swap
+            Swap
           </Text>
           <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
             {formatPrivateSendStatus(action.status)}
@@ -69,15 +52,10 @@ export function SwapConfirmationCard({
         <ConfirmationRow label="Price impact" value={`${action.priceImpactPct}%`} />
         <ConfirmationRow label="Quote fee" value={action.fee} />
         {action.signature != null ? (
-          <ConfirmationRow
-            label="Tx"
-            value={shortenWalletAddress(action.signature, 5)}
-            mono
-            onPress={() => {
-              if (action.signature == null) return;
-              void copyHash(action.signature);
-            }}
-            accessibilityLabel="Copy swap transaction hash"
+          <TransactionHashLinkRow
+            signature={action.signature}
+            network={action.network}
+            accessibilityLabel="View swap transaction on Solscan"
           />
         ) : null}
       </View>
@@ -126,6 +104,6 @@ export function SwapConfirmationCard({
           </Pressable>
         </View>
       ) : null}
-    </View>
+    </ConfirmationCardSurface>
   );
 }

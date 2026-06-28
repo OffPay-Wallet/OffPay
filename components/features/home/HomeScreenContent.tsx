@@ -44,6 +44,10 @@ import {
   useOffpayTokenLogoMap,
 } from '@/hooks/useOffpayTokenLogoMap';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
+import {
+  useOffpayHoldingsValueChange,
+  type HoldingsValueChangeTimeframeId,
+} from '@/hooks/useOffpayHoldingsValueChange';
 import { useOffpayPortfolioValuation } from '@/hooks/useOffpayPortfolioValuation';
 import { useOffpayHomeSnapshotCoordinator } from '@/hooks/useOffpayHomeSnapshotCoordinator';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -163,6 +167,8 @@ export function HomeScreenContent(): React.JSX.Element {
   const homeBalanceModeScopeKey = `${network ?? 'no-network'}:${publicKey ?? 'no-wallet'}`;
   const getScreenSignal = useScreenAbortSignal();
   const [privacyHidden, setPrivacyHidden] = useState(false);
+  const [holdingsValueChangeTimeframe, setHoldingsValueChangeTimeframe] =
+    useState<HoldingsValueChangeTimeframeId>('7D');
   const [homeBalanceModeState, setHomeBalanceModeState] = useState<HomeBalanceModeState>(() => ({
     scopeKey: homeBalanceModeScopeKey,
     mode: 'default',
@@ -289,6 +295,18 @@ export function HomeScreenContent(): React.JSX.Element {
   const tokenValuations = portfolioValuationDisplayReady
     ? (portfolioValuationData?.tokenValues ?? EMPTY_TOKEN_VALUATIONS)
     : EMPTY_TOKEN_VALUATIONS;
+  const holdingsValueChangeQuery = useOffpayHoldingsValueChange({
+    holdings: allVisibleHoldings,
+    currency,
+    timeframe: holdingsValueChangeTimeframe,
+    enabled: homeDataReady,
+    networkFetchEnabled: homeSnapshot.marketFetchEnabled,
+    currentValuation: portfolioValuationData ?? null,
+  });
+  const holdingsValueChangeLoading =
+    holdingsValueChangeQuery.isLoading ||
+    (holdingsValueChangeQuery.isFetching &&
+      (holdingsValueChangeQuery.data?.samples.length ?? 0) < 2);
   const recentActivity = useMemo(() => {
     const localReceiptsForNetwork = buildLocalHistoryReceiptInputs({
       network,
@@ -1003,6 +1021,9 @@ export function HomeScreenContent(): React.JSX.Element {
           pendingBackupStatsQuery.refetch({ cancelRefetch: true }),
           portfolioValuationQuery.refetch({ cancelRefetch: true }),
         ];
+        if (homeSnapshot.marketFetchEnabled) {
+          networkRefreshes.push(holdingsValueChangeQuery.refetch());
+        }
 
         void Promise.allSettled(networkRefreshes).finally(finishRefresh);
       }
@@ -1021,6 +1042,8 @@ export function HomeScreenContent(): React.JSX.Element {
     transactionsQuery,
     pendingBackupStatsQuery,
     portfolioValuationQuery,
+    holdingsValueChangeQuery,
+    homeSnapshot.marketFetchEnabled,
   ]);
 
   const handleTokenPress = useCallback(
@@ -1124,7 +1147,6 @@ export function HomeScreenContent(): React.JSX.Element {
         >
           <View style={[styles.balanceSection, { marginBottom: sectionGap }]}>
             <BalanceCard
-              publicKey={publicKey}
               offlineSlotsLabel={offlineSlotsLabel}
               portfolioValueLabel={portfolioValueLabel}
               portfolioValueLoading={
@@ -1135,13 +1157,17 @@ export function HomeScreenContent(): React.JSX.Element {
                   balanceQuery.isLoading ||
                   balanceQuery.isCapabilitiesPending)
               }
+              holdingsValueChange={holdingsValueChangeQuery.data}
+              holdingsValueChangeLoading={holdingsValueChangeLoading}
+              holdingsValueChangeTimeframe={holdingsValueChangeTimeframe}
+              onHoldingsValueChangeTimeframeChange={setHoldingsValueChangeTimeframe}
               selectedCurrency={currency}
               onCurrencyChange={setCurrency}
               onRefresh={handleRefreshHomeData}
               refreshing={homeRefreshPending}
               privacyHidden={privacyHidden}
               onTogglePrivacy={handleTogglePrivacy}
-              balanceTicker="Portfolio"
+              balanceTicker="Total balance"
               balanceLabel={balanceLabel}
               onAction={handleAction}
               disabledActionIds={

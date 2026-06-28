@@ -13,9 +13,10 @@ import type {
   AlchemyHistoricalPriceInterval,
   AlchemyHistoricalUsdPricePoint,
 } from '@/lib/api/alchemy-prices-api';
+import type { OffpayNetwork } from '@/types/offpay-api';
 
-const TOKEN_PRICE_HISTORY_STALE_TIME_MS = 1000 * 60 * 5;
-const TOKEN_PRICE_HISTORY_REFETCH_INTERVAL_MS = 1000 * 60 * 10;
+export const TOKEN_PRICE_HISTORY_STALE_TIME_MS = 1000 * 60 * 5;
+export const TOKEN_PRICE_HISTORY_REFETCH_INTERVAL_MS = 1000 * 60 * 10;
 const MAX_TOKEN_PRICE_HISTORY_SAMPLES = 180;
 
 export type TokenPriceHistoryTimeframeId = '1H' | '4H' | '24H' | '7D' | '30D' | '1Y';
@@ -64,6 +65,8 @@ export const TOKEN_PRICE_HISTORY_TIMEFRAMES = [
   interval: AlchemyHistoricalPriceInterval;
 }>;
 
+export type TokenPriceHistoryTimeframe = (typeof TOKEN_PRICE_HISTORY_TIMEFRAMES)[number];
+
 export interface ConvertedTokenPriceHistorySample {
   price: number;
   usdPrice: number;
@@ -100,11 +103,37 @@ function isPositiveNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
-function resolveTimeframe(timeframe: TokenPriceHistoryTimeframeId) {
+export function resolveTokenPriceHistoryTimeframe(
+  timeframe: TokenPriceHistoryTimeframeId,
+): TokenPriceHistoryTimeframe {
   return (
     TOKEN_PRICE_HISTORY_TIMEFRAMES.find((entry) => entry.id === timeframe) ??
     TOKEN_PRICE_HISTORY_TIMEFRAMES[0]
   );
+}
+
+export function buildTokenPriceHistoryQueryKey(params: {
+  network: string | null | undefined;
+  currency: string;
+  mint: string;
+  symbol: string;
+  priceSymbol: string;
+  timeframe: TokenPriceHistoryTimeframe;
+  onlineState: 'online' | 'offline';
+}) {
+  return [
+    'offpay',
+    'tokenPriceHistory',
+    'alchemy',
+    params.network,
+    params.currency,
+    params.mint,
+    params.symbol,
+    params.priceSymbol,
+    params.timeframe.id,
+    params.timeframe.interval,
+    params.onlineState,
+  ] as const;
 }
 
 function formatUnitFiatCurrency(value: number, currencyCode: string): string {
@@ -178,6 +207,80 @@ function calculateChange(
   };
 }
 
+export async function fetchTokenPriceHistoryView(params: {
+  network: OffpayNetwork;
+  normalizedMint: string;
+  normalizedSymbol: string;
+  normalizedPriceSymbol: string;
+  normalizedCurrency: string;
+  activeTimeframe: TokenPriceHistoryTimeframe;
+  signal?: AbortSignal;
+}): Promise<TokenPriceHistoryView> {
+  const endTime = new Date();
+  const startTime = new Date(endTime.getTime() - params.activeTimeframe.durationMs);
+  const [historicalUsdSamples, livePrice, cachedRate] = await Promise.all([
+    getTokenUsdPriceHistory({
+      mint: params.normalizedMint,
+      network: params.network,
+      symbol: params.normalizedSymbol,
+      priceSymbol: params.normalizedPriceSymbol,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      interval: params.activeTimeframe.interval,
+      withMarketData: true,
+      signal: params.signal,
+    }),
+    getTokenUsdPriceForValuation({
+      mint: params.normalizedMint,
+      network: params.network,
+      symbol: params.normalizedSymbol,
+      priceSymbol: params.normalizedPriceSymbol,
+      signal: params.signal,
+    }),
+    readCachedUsdToCurrencyRate(params.normalizedCurrency),
+  ]);
+
+  const rate =
+    params.normalizedCurrency === 'USD'
+      ? 1
+      : await fetchUsdToCurrencyRate(params.normalizedCurrency).catch(() => cachedRate);
+  const normalizedRate = isPositiveNumber(rate)
+    ? rate
+    : params.normalizedCurrency === 'USD'
+      ? 1
+      : null;
+  const convertedSamples =
+    normalizedRate == null ? [] : convertSamples(historicalUsdSamples, normalizedRate);
+  const samples = downsampleSamples(convertedSamples);
+  const latestSample = samples.at(-1);
+  const liveUsdPrice = isPositiveNumber(livePrice) ? livePrice : (latestSample?.usdPrice ?? null);
+  const livePriceConverted =
+    normalizedRate != null && isPositiveNumber(liveUsdPrice) ? liveUsdPrice * normalizedRate : null;
+
+  return {
+    currency: params.normalizedCurrency,
+    rate: normalizedRate ?? 1,
+    timeframe: params.activeTimeframe.id,
+    timeframeLabel: params.activeTimeframe.label,
+    interval: params.activeTimeframe.interval,
+    liveUsdPrice,
+    livePrice: livePriceConverted,
+    unitPriceLabel:
+      livePriceConverted != null
+        ? `${formatUnitFiatCurrency(livePriceConverted, params.normalizedCurrency)}/${params.normalizedSymbol}`
+        : null,
+    samples,
+    change: calculateChange(samples),
+    latestMarketCapUsd: latestSample?.marketCapUsd ?? null,
+    latestTotalVolumeUsd: latestSample?.totalVolumeUsd ?? null,
+    fetchedAt: Date.now(),
+    statusMessage:
+      samples.length >= 2
+        ? null
+        : `Alchemy has no ${params.activeTimeframe.label} chart data for this token.`,
+  };
+}
+
 export function useOffpayTokenPriceHistory({
   mint,
   symbol,
@@ -199,25 +302,21 @@ export function useOffpayTokenPriceHistory({
   const normalizedMint = mint?.trim() ?? '';
   const normalizedSymbol = symbol?.trim().toUpperCase() || priceSymbol?.trim().toUpperCase() || '';
   const normalizedPriceSymbol = priceSymbol?.trim().toUpperCase() || normalizedSymbol;
-  const activeTimeframe = resolveTimeframe(timeframe);
+  const activeTimeframe = resolveTokenPriceHistoryTimeframe(timeframe);
 
   const queryKey = useMemo(
-    () => [
-      'offpay',
-      'tokenPriceHistory',
-      'alchemy',
-      network,
-      normalizedCurrency,
-      normalizedMint,
-      normalizedSymbol,
-      normalizedPriceSymbol,
-      activeTimeframe.id,
-      activeTimeframe.interval,
-      canUseNetwork ? 'online' : 'offline',
-    ],
+    () =>
+      buildTokenPriceHistoryQueryKey({
+        network,
+        currency: normalizedCurrency,
+        mint: normalizedMint,
+        symbol: normalizedSymbol,
+        priceSymbol: normalizedPriceSymbol,
+        timeframe: activeTimeframe,
+        onlineState: canUseNetwork ? 'online' : 'offline',
+      }),
     [
-      activeTimeframe.id,
-      activeTimeframe.interval,
+      activeTimeframe,
       canUseNetwork,
       network,
       normalizedCurrency,
@@ -241,74 +340,18 @@ export function useOffpayTokenPriceHistory({
           throw new Error('Network access is unavailable for Alchemy price history.');
         }
 
-        const endTime = new Date();
-        const startTime = new Date(endTime.getTime() - activeTimeframe.durationMs);
-        const [historicalUsdSamples, livePrice, cachedRate] = await Promise.all([
-          getTokenUsdPriceHistory({
-            mint: normalizedMint,
-            network,
-            symbol: normalizedSymbol,
-            priceSymbol: normalizedPriceSymbol,
-            startTime: startTime.toISOString(),
-            endTime: endTime.toISOString(),
-            interval: activeTimeframe.interval,
-            withMarketData: true,
-            signal,
-          }),
-          getTokenUsdPriceForValuation({
-            mint: normalizedMint,
-            network,
-            symbol: normalizedSymbol,
-            priceSymbol: normalizedPriceSymbol,
-            signal,
-          }),
-          readCachedUsdToCurrencyRate(normalizedCurrency),
-        ]);
-
-        const rate =
-          normalizedCurrency === 'USD'
-            ? 1
-            : await fetchUsdToCurrencyRate(normalizedCurrency).catch(() => cachedRate);
-        const normalizedRate = isPositiveNumber(rate)
-          ? rate
-          : normalizedCurrency === 'USD'
-            ? 1
-            : null;
-        const convertedSamples =
-          normalizedRate == null ? [] : convertSamples(historicalUsdSamples, normalizedRate);
-        const samples = downsampleSamples(convertedSamples);
+        const data = await fetchTokenPriceHistoryView({
+          network,
+          normalizedMint,
+          normalizedSymbol,
+          normalizedPriceSymbol,
+          normalizedCurrency,
+          activeTimeframe,
+          signal,
+        });
+        const samples = data.samples;
         sampleCount = samples.length;
-        const latestSample = samples.at(-1);
-        const liveUsdPrice = isPositiveNumber(livePrice)
-          ? livePrice
-          : (latestSample?.usdPrice ?? null);
-        const livePriceConverted =
-          normalizedRate != null && isPositiveNumber(liveUsdPrice)
-            ? liveUsdPrice * normalizedRate
-            : null;
-
-        return {
-          currency: normalizedCurrency,
-          rate: normalizedRate ?? 1,
-          timeframe: activeTimeframe.id,
-          timeframeLabel: activeTimeframe.label,
-          interval: activeTimeframe.interval,
-          liveUsdPrice,
-          livePrice: livePriceConverted,
-          unitPriceLabel:
-            livePriceConverted != null
-              ? `${formatUnitFiatCurrency(livePriceConverted, normalizedCurrency)}/${normalizedSymbol}`
-              : null,
-          samples,
-          change: calculateChange(samples),
-          latestMarketCapUsd: latestSample?.marketCapUsd ?? null,
-          latestTotalVolumeUsd: latestSample?.totalVolumeUsd ?? null,
-          fetchedAt: Date.now(),
-          statusMessage:
-            samples.length >= 2
-              ? null
-              : `Alchemy has no ${activeTimeframe.label} chart data for this token.`,
-        };
+        return data;
       } finally {
         measure('prices.tokenHistory.query', startedAt, {
           network: network ?? 'unknown',

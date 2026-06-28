@@ -1,10 +1,11 @@
 /**
  * BalanceCard — unified balance display + quick actions card.
  *
- * Top section: frosted balance panel with wallet address, balance, and label.
+ * Top section: frosted balance panel with total balance, currency, refresh,
+ * and holdings-value change graph.
  * Bottom section: quick action buttons on the same solid glass surface.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -14,12 +15,20 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeIn, FadeOut, useAnimatedStyle } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  interpolate,
+  useAnimatedStyle,
+  useDerivedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
+import { HoldingsValueChangeChart } from '@/components/features/home/HoldingsValueChangeChart';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { PuffyReceiveIcon } from '@/components/ui/icons/PuffyReceiveIcon';
 import { PuffyRefreshIcon } from '@/components/ui/icons/PuffyRefreshIcon';
@@ -35,6 +44,12 @@ import { CURRENCIES } from '@/constants/currencies';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import {
+  HOLDINGS_VALUE_CHANGE_TIMEFRAMES,
+  type HoldingsValueChangeTimeframeId,
+  type HoldingsValueChangeView,
+} from '@/hooks/useOffpayHoldingsValueChange';
+import { toneColor } from '@/lib/ui/token-change-format';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
 
 // ---------------------------------------------------------------------------
@@ -52,9 +67,6 @@ interface QuickAction {
 // Constants
 // ---------------------------------------------------------------------------
 
-const COPY_FEEDBACK_MS = 1800;
-const ADDRESS_TRUNCATE_CHARS = 5;
-
 const QUICK_ACTIONS: QuickAction[] = [
   { id: 'send', label: 'Send' },
   { id: 'receive', label: 'Receive' },
@@ -65,6 +77,12 @@ const QUICK_ACTIONS: QuickAction[] = [
 // Android devices but each layer triggers a separate GPU blur pass during
 // animated transitions, causing frame drops on mid-range hardware.
 const HEADER_CONTAINER_SHADOW = '0 10px 24px rgba(0, 0, 0, 0.45)';
+const PRIVACY_TOGGLE_TIMING = {
+  duration: 220,
+  easing: Easing.bezier(0.22, 1, 0.36, 1),
+} as const;
+const PRIVACY_VALUE_ENTERING = FadeIn.duration(170).easing(Easing.out(Easing.cubic));
+const PRIVACY_VALUE_EXITING = FadeOut.duration(120).easing(Easing.in(Easing.cubic));
 
 // Static gradient overlay — all props are constants so this never
 // needs to re-render. Memoising prevents the native LinearGradient
@@ -186,11 +204,6 @@ function ActionButtonSkeleton({ compact }: { compact: boolean }): React.JSX.Elem
   );
 }
 
-function truncateAddress(address: string): string {
-  if (address.length <= ADDRESS_TRUNCATE_CHARS * 2 + 3) return address;
-  return `${address.slice(0, ADDRESS_TRUNCATE_CHARS)}...${address.slice(-ADDRESS_TRUNCATE_CHARS)}`;
-}
-
 function useCancelSafePressed(disabled = false): {
   pressed: boolean;
   onPressIn: () => void;
@@ -228,11 +241,13 @@ function useCancelSafePressed(disabled = false): {
 // ---------------------------------------------------------------------------
 
 interface BalanceCardProps {
-  /** Wallet public key — displayed truncated with copy button */
-  publicKey: string | null;
   offlineSlotsLabel?: string | null;
   portfolioValueLabel?: string;
   portfolioValueLoading?: boolean;
+  holdingsValueChange?: HoldingsValueChangeView | null;
+  holdingsValueChangeLoading?: boolean;
+  holdingsValueChangeTimeframe?: HoldingsValueChangeTimeframeId;
+  onHoldingsValueChangeTimeframeChange?: (timeframe: HoldingsValueChangeTimeframeId) => void;
   selectedCurrency?: string;
   onCurrencyChange?: (currency: string) => void;
   onRefresh?: () => void;
@@ -255,10 +270,13 @@ interface BalanceCardProps {
 // ---------------------------------------------------------------------------
 
 export const BalanceCard = memo(function BalanceCard({
-  publicKey,
   offlineSlotsLabel,
   portfolioValueLabel,
   portfolioValueLoading = false,
+  holdingsValueChange,
+  holdingsValueChangeLoading = false,
+  holdingsValueChangeTimeframe = '7D',
+  onHoldingsValueChangeTimeframeChange,
   selectedCurrency = 'USD',
   onCurrencyChange,
   onRefresh,
@@ -285,10 +303,8 @@ export const BalanceCard = memo(function BalanceCard({
   const ultraCompact = viewportProfile.dense;
   const hasOfflineStatus = offlineSlotsLabel != null;
   const stackFooter = windowWidth < 300 || fontScale > 1.45;
-  const [copied, setCopied] = useState(false);
   const [currencyMenuOpen, setCurrencyMenuOpen] = useState(false);
   const [currencySearch, setCurrencySearch] = useState('');
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visibleActions = useMemo(
     () => QUICK_ACTIONS.filter((action) => !disabledActionIds.includes(action.id)),
     [disabledActionIds],
@@ -306,21 +322,6 @@ export const BalanceCard = memo(function BalanceCard({
     transform: [{ translateY: (1 - currencyMenuProgress.value) * 28 }],
   }));
 
-  useEffect(
-    () => () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    },
-    [],
-  );
-
-  const handleCopy = useCallback((): void => {
-    if (publicKey == null) return;
-    void Clipboard.setStringAsync(publicKey);
-    setCopied(true);
-    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
-  }, [publicKey]);
-
   const handleAction = useCallback(
     (actionId: string): void => {
       onAction(actionId);
@@ -328,18 +329,16 @@ export const BalanceCard = memo(function BalanceCard({
     [onAction],
   );
 
-  const displayAddress = publicKey != null ? truncateAddress(publicKey) : '—';
-  const maskedAddress = privacyHidden ? '****' : displayAddress;
   const cardHPadding = compact ? spacing.sm : spacing.md;
   const cardVPadding = compact ? spacing.sm : spacing.md;
-  const portfolioCardMinHeight = stackFooter ? 188 : ultraCompact ? 154 : compact ? 170 : 196;
+  const portfolioCardMinHeight = stackFooter ? 232 : ultraCompact ? 194 : compact ? 214 : 240;
   const topControlSize = ultraCompact ? 28 : compact ? 30 : 32;
   const footerControlHeight = ultraCompact ? 28 : 30;
   const statusPillHeight = ultraCompact ? 22 : 24;
   const refreshIconSize = ultraCompact ? 14 : 15;
   const portfolioAmountFontSize = ultraCompact ? 28 : compact ? 31 : 36;
-  const addressPillMaxWidth = ultraCompact ? 122 : compact ? 148 : 176;
   const currencyPillWidth = ultraCompact ? 62 : compact ? 68 : 76;
+  const chartHeight = ultraCompact ? 48 : compact ? 58 : 68;
   const currencySheetTopInset = Math.max(insets.top, spacing.md) + spacing.sm;
   const currencySheetMaxHeight = Math.max(0, windowHeight - currencySheetTopInset);
   const currencySheetPreferredHeight = Math.max(
@@ -350,10 +349,31 @@ export const BalanceCard = memo(function BalanceCard({
   const currencySheetBottomPadding = Math.max(insets.bottom, spacing.md) + spacing.md;
   const currencyCode = selectedCurrency ?? 'USD';
   const refreshDisabled = onRefresh == null || refreshing;
-  const copyPress = useCancelSafePressed(publicKey == null);
   const refreshPress = useCancelSafePressed(refreshDisabled);
   const privacyPress = useCancelSafePressed(onTogglePrivacy == null);
   const currencyPress = useCancelSafePressed(false);
+  const privacyProgress = useDerivedValue(
+    () => withTiming(privacyHidden ? 1 : 0, PRIVACY_TOGGLE_TIMING),
+    [privacyHidden],
+  );
+  const privacyIconStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(privacyProgress.value, [0, 1], [0.78, 0.58]),
+    transform: [
+      { scale: interpolate(privacyProgress.value, [0, 0.5, 1], [1, 0.86, 1]) },
+      { rotate: `${interpolate(privacyProgress.value, [0, 1], [0, -8])}deg` },
+    ],
+  }));
+  const privateValueStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(privacyProgress.value, [0, 1], [1, 0.74]),
+    transform: [
+      { translateY: interpolate(privacyProgress.value, [0, 1], [0, 1]) },
+      { scale: interpolate(privacyProgress.value, [0, 1], [1, 0.985]) },
+    ],
+  }));
+  const privateDetailsStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(privacyProgress.value, [0, 1], [1, 0.2]),
+    transform: [{ translateY: interpolate(privacyProgress.value, [0, 1], [0, 3]) }],
+  }));
   const displayedOfflineSlotsLabel =
     ultraCompact && offlineSlotsLabel != null
       ? offlineSlotsLabel.replace(/\s+slots$/i, '').trim()
@@ -385,6 +405,23 @@ export const BalanceCard = memo(function BalanceCard({
       : (portfolioValueLabel ?? '--');
   const showPortfolioSkeleton = loading || portfolioValueLoading;
   const showActionSkeletons = loading || actionsLoading;
+  const valueChange = holdingsValueChange ?? null;
+  const valueChangeTone = privacyHidden ? 'neutral' : (valueChange?.change?.tone ?? 'neutral');
+  const valueChangeColor = toneColor(valueChangeTone);
+  const showValueChange =
+    !privacyHidden &&
+    valueChange?.changeAbsoluteLabel != null &&
+    valueChange.changePercentLabel != null;
+  const showValueChangeSkeleton = !privacyHidden && holdingsValueChangeLoading && !showValueChange;
+  const selectedValueChangeTimeframe =
+    holdingsValueChangeTimeframe ?? valueChange?.timeframe ?? '7D';
+  const valueChangeIconName =
+    valueChangeTone === 'positive'
+      ? 'caret-up'
+      : valueChangeTone === 'negative'
+        ? 'caret-down'
+        : null;
+
   return (
     <View style={[styles.outer, wideLayout && styles.outerWide]}>
       {/* Single hero container: solid glossy shell, no gradients. */}
@@ -415,7 +452,7 @@ export const BalanceCard = memo(function BalanceCard({
                   />
                   <View style={styles.topActions}>
                     <SkeletonBlock
-                      width={addressPillMaxWidth}
+                      width={currencyPillWidth}
                       height={topControlSize}
                       radius={radii.full}
                     />
@@ -428,61 +465,79 @@ export const BalanceCard = memo(function BalanceCard({
                 </>
               ) : (
                 <>
-                  <Text
-                    variant="bodyBold"
-                    color={colors.text.primary}
-                    style={[styles.ticker, compact && styles.tickerCompact]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.82}
-                    maxFontSizeMultiplier={1.1}
-                  >
-                    {balanceTicker}
-                  </Text>
-                  <View style={styles.topActions}>
-                    <View
-                      style={[
-                        styles.addressPill,
-                        { height: topControlSize, maxWidth: addressPillMaxWidth },
-                      ]}
+                  <View style={styles.tickerGroup}>
+                    <Text
+                      variant="bodyBold"
+                      color={colors.text.secondary}
+                      style={[styles.ticker, compact && styles.tickerCompact]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.82}
+                      maxFontSizeMultiplier={1.05}
                     >
-                      <View style={styles.addressPillGlass}>
+                      {balanceTicker}
+                    </Text>
+                    <Pressable
+                      style={[
+                        styles.inlinePrivacyButton,
+                        privacyPress.pressed && styles.inlinePrivacyButtonPressed,
+                      ]}
+                      onPress={onTogglePrivacy}
+                      onPressIn={privacyPress.onPressIn}
+                      onPressOut={privacyPress.onPressOut}
+                      onResponderTerminate={privacyPress.onResponderTerminate}
+                      onResponderTerminationRequest={() => true}
+                      disabled={onTogglePrivacy == null}
+                      hitSlop={10}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        privacyHidden ? 'Show wallet values' : 'Hide wallet values'
+                      }
+                      accessibilityState={{
+                        checked: privacyHidden,
+                        disabled: onTogglePrivacy == null,
+                      }}
+                    >
+                      <Animated.View style={[styles.inlinePrivacyIcon, privacyIconStyle]}>
+                        <Ionicons
+                          name={privacyHidden ? 'eye-off' : 'eye'}
+                          size={compact ? 15 : 16}
+                          color={colors.text.secondary}
+                        />
+                      </Animated.View>
+                    </Pressable>
+                  </View>
+                  <View style={styles.topActions}>
+                    <Pressable
+                      style={[
+                        styles.currencyPill,
+                        { width: currencyPillWidth, height: topControlSize },
+                        currencyPress.pressed && styles.controlPressed,
+                      ]}
+                      onPress={() => setCurrencyMenuOpen(true)}
+                      onPressIn={currencyPress.onPressIn}
+                      onPressOut={currencyPress.onPressOut}
+                      onResponderTerminate={currencyPress.onResponderTerminate}
+                      onResponderTerminationRequest={() => true}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Select display currency"
+                    >
+                      <View style={styles.currencyPillGlass}>
                         <Text
                           variant="small"
                           color={colors.text.primary}
-                          style={styles.addressText}
+                          style={styles.currencyText}
                           numberOfLines={1}
-                          ellipsizeMode="middle"
                           adjustsFontSizeToFit
-                          minimumFontScale={0.78}
+                          minimumFontScale={0.82}
                           maxFontSizeMultiplier={1}
                         >
-                          {maskedAddress}
+                          {currencyCode}
                         </Text>
-                        <Pressable
-                          style={[
-                            styles.addressCopyButton,
-                            copyPress.pressed && styles.addressCopyButtonPressed,
-                          ]}
-                          onPress={handleCopy}
-                          onPressIn={copyPress.onPressIn}
-                          onPressOut={copyPress.onPressOut}
-                          onResponderTerminate={copyPress.onResponderTerminate}
-                          onResponderTerminationRequest={() => true}
-                          disabled={publicKey == null}
-                          hitSlop={8}
-                          accessibilityRole="button"
-                          accessibilityLabel="Copy wallet address"
-                          accessibilityState={{ disabled: publicKey == null }}
-                        >
-                          <Ionicons
-                            name={copied ? 'checkmark' : 'copy-outline'}
-                            size={compact ? 14 : 15}
-                            color={colors.text.primary}
-                          />
-                        </Pressable>
+                        <Ionicons name="chevron-down" size={12} color={colors.text.secondary} />
                       </View>
-                    </View>
+                    </Pressable>
                     <Pressable
                       style={[
                         styles.refreshButton,
@@ -545,34 +600,93 @@ export const BalanceCard = memo(function BalanceCard({
                     style={styles.balanceSkeleton}
                   />
                 ) : (
-                  <SlotText
-                    value={displayedPortfolioValue}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.42}
-                    maxFontSizeMultiplier={1}
+                  <Animated.View
+                    key={privacyHidden ? 'balance-hidden' : 'balance-visible'}
+                    entering={PRIVACY_VALUE_ENTERING}
+                    exiting={PRIVACY_VALUE_EXITING}
+                    style={[styles.balanceValueMotion, privateValueStyle]}
                   >
-                    <FiatMoneyText
+                    <SlotText
                       value={displayedPortfolioValue}
-                      size="hero"
-                      compact={compact}
-                      amountFontSize={portfolioAmountFontSize}
-                      style={styles.balanceAmount}
                       numberOfLines={1}
                       adjustsFontSizeToFit
                       minimumFontScale={0.42}
                       maxFontSizeMultiplier={1}
-                    />
-                  </SlotText>
+                    >
+                      <FiatMoneyText
+                        value={displayedPortfolioValue}
+                        size="hero"
+                        compact={compact}
+                        amountFontSize={portfolioAmountFontSize}
+                        style={styles.balanceAmount}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.42}
+                        maxFontSizeMultiplier={1}
+                      />
+                    </SlotText>
+                  </Animated.View>
                 )}
               </View>
+              <Animated.View style={[styles.valueChangeRow, privateDetailsStyle]}>
+                {showValueChangeSkeleton ? (
+                  <>
+                    <SkeletonBlock width={compact ? 76 : 88} height={18} radius={radii.full} />
+                    <SkeletonBlock width={compact ? 54 : 62} height={20} radius={radii.full} />
+                  </>
+                ) : showValueChange ? (
+                  <>
+                    <Text
+                      variant="bodyBold"
+                      color={valueChangeColor}
+                      style={[styles.valueChangeText, compact && styles.valueChangeTextCompact]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.72}
+                      maxFontSizeMultiplier={1}
+                    >
+                      {valueChange.changeAbsoluteLabel}
+                    </Text>
+                    <View
+                      style={[
+                        styles.valueChangePercentPill,
+                        valueChangeTone === 'positive' && styles.valueChangePercentPillPositive,
+                        valueChangeTone === 'negative' && styles.valueChangePercentPillNegative,
+                      ]}
+                    >
+                      {valueChangeIconName != null ? (
+                        <Ionicons name={valueChangeIconName} size={10} color={valueChangeColor} />
+                      ) : null}
+                      <Text
+                        variant="captionBold"
+                        color={valueChangeColor}
+                        style={styles.valueChangePercentText}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.76}
+                        maxFontSizeMultiplier={1}
+                      >
+                        {valueChange.changePercentLabel}
+                      </Text>
+                    </View>
+                  </>
+                ) : null}
+              </Animated.View>
+              <Animated.View style={[styles.chartFrame, privateDetailsStyle]}>
+                <HoldingsValueChangeChart
+                  samples={valueChange?.samples ?? []}
+                  tone={valueChangeTone}
+                  height={chartHeight}
+                  loading={holdingsValueChangeLoading}
+                  hidden={privacyHidden}
+                />
+              </Animated.View>
             </View>
             <View
               style={[
                 styles.bottomRow,
                 compact && styles.bottomRowCompact,
                 stackFooter && styles.bottomRowStacked,
-                offlineSlotsLabel == null && styles.bottomRowNoStatus,
               ]}
             >
               {loading ? (
@@ -591,23 +705,24 @@ export const BalanceCard = memo(function BalanceCard({
                         radius={radii.full}
                       />
                     </View>
-                  ) : null}
-                  <View
-                    style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}
-                  >
-                    <View style={styles.privacyCurrencyRow}>
-                      <SkeletonBlock
-                        width={footerControlHeight}
-                        height={footerControlHeight}
-                        radius={radii.full}
-                      />
-                      <SkeletonBlock
-                        width={currencyPillWidth}
-                        height={footerControlHeight}
-                        radius={radii.full}
-                      />
-                    </View>
+                  ) : (
+                    <View
+                      style={[
+                        styles.bottomSideSpacer,
+                        stackFooter && styles.bottomSideSpacerStacked,
+                      ]}
+                    />
+                  )}
+                  <View style={styles.timeframeControls}>
+                    <SkeletonBlock
+                      width={compact ? 116 : 132}
+                      height={footerControlHeight}
+                      radius={radii.full}
+                    />
                   </View>
+                  <View
+                    style={[styles.bottomSideSpacer, stackFooter && styles.bottomSideSpacerStacked]}
+                  />
                 </>
               ) : (
                 <>
@@ -649,73 +764,50 @@ export const BalanceCard = memo(function BalanceCard({
                         </View>
                       </View>
                     </View>
-                  ) : null}
-                  <View
-                    style={[styles.metricControls, stackFooter && styles.metricControlsStacked]}
-                  >
-                    <View style={styles.privacyCurrencyRow}>
-                      <Pressable
-                        style={[
-                          styles.privacyButton,
-                          { width: footerControlHeight, height: footerControlHeight },
-                          privacyPress.pressed && styles.controlPressed,
-                        ]}
-                        onPress={onTogglePrivacy}
-                        onPressIn={privacyPress.onPressIn}
-                        onPressOut={privacyPress.onPressOut}
-                        onResponderTerminate={privacyPress.onResponderTerminate}
-                        onResponderTerminationRequest={() => true}
-                        disabled={onTogglePrivacy == null}
-                        hitSlop={8}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          privacyHidden ? 'Show wallet values' : 'Hide wallet values'
-                        }
-                        accessibilityState={{
-                          checked: privacyHidden,
-                          disabled: onTogglePrivacy == null,
-                        }}
-                      >
-                        <View style={styles.iconControlGlass}>
-                          <Ionicons
-                            name={privacyHidden ? 'eye-off-outline' : 'eye-outline'}
-                            size={16}
-                            color={colors.text.primary}
-                          />
-                        </View>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.currencyPill,
-                          { width: currencyPillWidth, height: footerControlHeight },
-                          currencyPress.pressed && styles.controlPressed,
-                        ]}
-                        onPress={() => setCurrencyMenuOpen(true)}
-                        onPressIn={currencyPress.onPressIn}
-                        onPressOut={currencyPress.onPressOut}
-                        onResponderTerminate={currencyPress.onResponderTerminate}
-                        onResponderTerminationRequest={() => true}
-                        hitSlop={8}
-                        accessibilityRole="button"
-                        accessibilityLabel="Select display currency"
-                      >
-                        <View style={styles.currencyPillGlass}>
+                  ) : (
+                    <View
+                      style={[
+                        styles.bottomSideSpacer,
+                        stackFooter && styles.bottomSideSpacerStacked,
+                      ]}
+                    />
+                  )}
+                  <View style={styles.timeframeControls}>
+                    {HOLDINGS_VALUE_CHANGE_TIMEFRAMES.map((entry) => {
+                      const active = entry.id === selectedValueChangeTimeframe;
+                      return (
+                        <Pressable
+                          key={entry.id}
+                          style={[styles.timeframeButton, active && styles.timeframeButtonActive]}
+                          onPress={() =>
+                            onHoldingsValueChangeTimeframeChange?.(
+                              entry.id as HoldingsValueChangeTimeframeId,
+                            )
+                          }
+                          disabled={onHoldingsValueChangeTimeframeChange == null}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Show ${entry.label} balance chart`}
+                          accessibilityState={{
+                            selected: active,
+                            disabled: onHoldingsValueChangeTimeframeChange == null,
+                          }}
+                        >
                           <Text
-                            variant="small"
-                            color={colors.text.primary}
-                            style={styles.currencyText}
+                            variant="captionBold"
+                            color={active ? colors.text.primary : colors.text.secondary}
+                            style={[styles.timeframeText, active && styles.timeframeTextActive]}
                             numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.82}
                             maxFontSizeMultiplier={1}
                           >
-                            {currencyCode}
+                            {entry.label}
                           </Text>
-                          <Ionicons name="chevron-down" size={12} color={colors.text.secondary} />
-                        </View>
-                      </Pressable>
-                    </View>
+                        </Pressable>
+                      );
+                    })}
                   </View>
+                  <View
+                    style={[styles.bottomSideSpacer, stackFooter && styles.bottomSideSpacerStacked]}
+                  />
                 </>
               )}
             </View>
@@ -940,24 +1032,81 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   metricRow: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
     minWidth: 0,
+    gap: spacing.xs,
   },
   valueCol: {
-    width: '72%',
-    maxWidth: '72%',
+    width: '92%',
+    maxWidth: '92%',
     minWidth: 0,
     alignItems: 'center',
+  },
+  valueChangeRow: {
+    minHeight: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  valueChangeText: {
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 16,
+    lineHeight: 20,
+    fontVariant: ['tabular-nums'],
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  valueChangeTextCompact: {
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  valueChangePercentPill: {
+    minWidth: 56,
+    height: 22,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    backgroundColor: colors.glass.strongFill,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+  },
+  valueChangePercentPillPositive: {
+    backgroundColor: 'rgba(39, 201, 127, 0.18)',
+    borderColor: 'rgba(39, 201, 127, 0.28)',
+  },
+  valueChangePercentPillNegative: {
+    backgroundColor: 'rgba(255, 92, 92, 0.16)',
+    borderColor: 'rgba(255, 92, 92, 0.28)',
+  },
+  valueChangePercentText: {
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    fontVariant: ['tabular-nums'],
+  },
+  chartFrame: {
+    width: '100%',
+    minWidth: 0,
+    overflow: 'hidden',
   },
   bottomRow: {
     flexShrink: 0,
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
+    gap: spacing.sm,
     minWidth: 0,
   },
   bottomRowCompact: {
@@ -968,8 +1117,12 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: spacing.sm,
   },
-  bottomRowNoStatus: {
-    justifyContent: 'flex-end',
+  bottomSideSpacer: {
+    flex: 1,
+    minWidth: 0,
+  },
+  bottomSideSpacerStacked: {
+    display: 'none',
   },
   statusPillRow: {
     flex: 1,
@@ -1024,64 +1177,25 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0,
   },
-  metricControls: {
-    flexShrink: 0,
-    alignItems: 'flex-end',
-    justifyContent: 'flex-end',
-  },
-  metricControlsStacked: {
-    width: '100%',
-    alignItems: 'flex-end',
-  },
-  privacyCurrencyRow: {
+  tickerGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: spacing.xs,
+    gap: 5,
+    flexShrink: 1,
     minWidth: 0,
   },
   ticker: {
     flexShrink: 1,
-    fontFamily: fontFamily.displaySemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    fontFamily: fontFamily.uiMedium,
+    fontSize: 14,
+    lineHeight: 18,
+    opacity: 0.66,
   },
   tickerCompact: {
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 17,
   },
-  controlPressed: {
-    opacity: 0.72,
-  },
-  addressPill: {
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    flexShrink: 1,
-    minWidth: 0,
-    backgroundColor: colors.glass.strongFill,
-    boxShadow: [
-      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
-      '0 3px 8px rgba(0, 0, 0, 0.18)',
-    ].join(', '),
-  },
-  addressPillGlass: {
-    height: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    paddingLeft: spacing.sm,
-    paddingRight: 5,
-    minWidth: 0,
-  },
-  addressCopyButton: {
+  inlinePrivacyButton: {
     width: 22,
     height: 22,
     borderRadius: radii.full,
@@ -1090,18 +1204,65 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
-  addressCopyButtonPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    opacity: 0.74,
+  inlinePrivacyButtonPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
-  addressText: {
-    fontFamily: fontFamily.mono,
-    minWidth: 0,
-    flexShrink: 1,
+  inlinePrivacyIcon: {
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlPressed: {
+    opacity: 0.72,
+  },
+  timeframeControls: {
+    height: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    padding: 2,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(0, 0, 0, 0.18)',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    flexShrink: 0,
+  },
+  timeframeButton: {
+    minWidth: 38,
+    height: 24,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timeframeButtonActive: {
+    backgroundColor: colors.glass.strongFill,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+  },
+  timeframeText: {
+    fontFamily: fontFamily.uiSemiBold,
     fontSize: 10,
     lineHeight: 13,
+    fontVariant: ['tabular-nums'],
+  },
+  timeframeTextActive: {
+    color: colors.text.primary,
   },
   balanceAmount: {
+    width: '100%',
+  },
+  balanceValueMotion: {
     width: '100%',
   },
   balanceSkeleton: {
@@ -1172,23 +1333,6 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  privacyButton: {
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    backgroundColor: colors.glass.strongFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    flexShrink: 0,
-    boxShadow: [
-      'inset 0 1px 1px rgba(255, 255, 255, 0.18)',
-      'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
-      '0 3px 8px rgba(0, 0, 0, 0.18)',
-    ].join(', '),
   },
   modalBackdrop: {
     flex: 1,

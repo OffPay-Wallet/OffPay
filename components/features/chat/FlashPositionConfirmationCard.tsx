@@ -1,19 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import * as Clipboard from 'expo-clipboard';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
-import { useAppToast } from '@/components/ui/AppToast';
 import type {
   AgenticFlashPositionAction,
   AgenticFlashTriggerOrderSummary,
 } from '@/store/agenticChatStore';
 
 import { ConfirmationRow } from './ConfirmationRow';
+import { ConfirmationCardSurface } from './ConfirmationCardSurface';
+import { TransactionHashLinkRow } from './TransactionHashLinkRow';
 import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
@@ -59,22 +58,6 @@ function getSideColor(side: 'long' | 'short'): string {
   return side === 'long' ? colors.semantic.receive : colors.semantic.error;
 }
 
-function getOperationIcon(action: AgenticFlashPositionAction): keyof typeof Ionicons.glyphMap {
-  if (action.operation === 'close_position') return 'log-out-outline';
-  if (action.operation === 'add_collateral') return 'add-circle-outline';
-  if (action.operation === 'remove_collateral') return 'remove-circle-outline';
-  if (
-    action.operation === 'place_trigger_order' ||
-    action.operation === 'edit_trigger_order' ||
-    action.operation === 'cancel_trigger_order' ||
-    action.operation === 'cancel_all_trigger_orders'
-  ) {
-    return 'git-branch-outline';
-  }
-  if (action.operation === 'reverse_position') return 'swap-vertical-outline';
-  return action.side === 'long' ? 'trending-up-outline' : 'trending-down-outline';
-}
-
 function formatTriggerOrder(order: AgenticFlashTriggerOrderSummary): string {
   const label = order.orderType === 'take_profit' ? 'TP' : 'SL';
   return `${label} ${formatPrice(order.triggerPrice)} / ${order.sizePercent}%`;
@@ -104,7 +87,6 @@ export function FlashPositionConfirmationCard({
   const submitting = action.status === 'submitting';
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
-  const { showToast } = useAppToast();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -112,18 +94,6 @@ export function FlashPositionConfirmationCard({
     const id = setInterval(() => setNow(Date.now()), EXPIRY_TICK_MS);
     return () => clearInterval(id);
   }, [canAct]);
-
-  const copyHash = useCallback(
-    async (value: string, label: string) => {
-      await Clipboard.setStringAsync(value);
-      showToast({
-        title: 'Copied',
-        message: `${label} copied to clipboard.`,
-        variant: 'success',
-      });
-    },
-    [showToast],
-  );
 
   const handleConfirm = useCallback(() => {
     onConfirm(action);
@@ -151,11 +121,8 @@ export function FlashPositionConfirmationCard({
   }, [action.limitPrice, action.tradeType, action.warnings, isExpired, isExpiringSoon]);
 
   return (
-    <View style={styles.confirmationCard}>
+    <ConfirmationCardSurface>
       <View style={styles.confirmationHeader}>
-        <View style={styles.confirmationIcon}>
-          <Ionicons name={getOperationIcon(action)} size={18} color={getSideColor(action.side)} />
-        </View>
         <View style={styles.confirmationTitleStack}>
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             {action.actionLabel}
@@ -277,16 +244,10 @@ export function FlashPositionConfirmationCard({
         <ConfirmationRow label="Network" value="Solana Mainnet" />
 
         {action.signature != null ? (
-          <ConfirmationRow
-            label="Tx"
-            value={shortenWalletAddress(action.signature, 5)}
-            mono
-            onPress={() => {
-              if (action.signature != null) {
-                void copyHash(action.signature, 'Transaction hash');
-              }
-            }}
-            accessibilityLabel="Copy Flash Trade transaction hash"
+          <TransactionHashLinkRow
+            signature={action.signature}
+            network={action.network}
+            accessibilityLabel="View Flash Trade transaction on Solscan"
           />
         ) : null}
       </View>
@@ -349,6 +310,6 @@ export function FlashPositionConfirmationCard({
           </Pressable>
         </View>
       ) : null}
-    </View>
+    </ConfirmationCardSurface>
   );
 }

@@ -99,12 +99,5 @@ export const messageStyles = StyleSheet.create({
     marginTop: spacing.sm,
     maxWidth: '100%',
     flexShrink: 1,
-    borderRadius: BUBBLE_RADIUS,
-    borderCurve: 'continuous',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.brand.graphiteDepth,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(247, 247, 242, 0.12)',
   },
 });
