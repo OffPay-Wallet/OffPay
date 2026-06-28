@@ -8,6 +8,7 @@ import Animated, {
   useDerivedValue,
   useSharedValue,
   withSpring,
+  type SharedValue,
   type WithSpringConfig,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +24,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useWalletModeState } from '@/hooks/useWalletModeState';
+import { scheduleUiWorkAfterFirstPaint, type ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 import { useTabHistoryStore, isTabRouteName } from '@/store/tabHistoryStore';
 
@@ -112,11 +114,18 @@ const TAB_PILL_FEEDBACK_SPRING: WithSpringConfig = {
   mass: 0.45,
 };
 const TAB_PILL_SLIDE_SPRING: WithSpringConfig = {
-  damping: 24,
-  stiffness: 440,
+  damping: 30,
+  stiffness: 620,
   mass: 0.42,
 };
+const TAB_ITEM_STATE_SPRING: WithSpringConfig = {
+  damping: 24,
+  stiffness: 560,
+  mass: 0.36,
+};
 const TAB_PILL_PRESS_SCALE = 0.96;
+const HISTORY_PRELOAD_FALLBACK_DELAY_MS = 180;
+const HISTORY_PRELOAD_TIMEOUT_MS = 1600;
 
 function runAfterNavigationFrame(task: () => void): void {
   requestAnimationFrame(() => {
@@ -197,6 +206,100 @@ const QUICK_ACTIONS: QuickAction[] = [
   },
 ];
 
+function renderRouteIcon(
+  routeName: string,
+  tint: string,
+  iconSize: number,
+): React.JSX.Element | null {
+  if (routeName === 'index') {
+    return <PuffyHomeIcon size={iconSize} color={tint} focused />;
+  }
+  if (routeName === 'history') {
+    return <PuffyHistoryIcon size={iconSize} color={tint} focused />;
+  }
+  if (routeName === 'settings') {
+    return <PuffySettingsIcon size={iconSize} color={tint} focused />;
+  }
+  return null;
+}
+
+interface PrimaryTabContentProps {
+  activePrimaryIndexValue: SharedValue<number>;
+  iconSize: number;
+  label: string;
+  labelFontSize: number;
+  labelLineHeight: number;
+  primaryIndex: number;
+  routeName: string;
+}
+
+function PrimaryTabContent({
+  activePrimaryIndexValue,
+  iconSize,
+  label,
+  labelFontSize,
+  labelLineHeight,
+  primaryIndex,
+  routeName,
+}: PrimaryTabContentProps): React.JSX.Element {
+  const activeProgress = useDerivedValue(() =>
+    withSpring(activePrimaryIndexValue.value === primaryIndex ? 1 : 0, TAB_ITEM_STATE_SPRING),
+  );
+  const activeLayerStyle = useAnimatedStyle(() => ({
+    opacity: activeProgress.value,
+    transform: [{ scale: 0.95 + activeProgress.value * 0.05 }],
+  }));
+  const inactiveLayerStyle = useAnimatedStyle(() => ({
+    opacity: 1 - activeProgress.value,
+    transform: [{ scale: 1 - activeProgress.value * 0.04 }],
+  }));
+  const labelMetrics = {
+    fontSize: labelFontSize,
+    lineHeight: labelLineHeight,
+  };
+
+  return (
+    <View style={styles.tabContent}>
+      <Animated.View
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={[styles.tabVisualLayer, inactiveLayerStyle]}
+      >
+        <View style={styles.tabVisualContent}>
+          {renderRouteIcon(routeName, TAB_INACTIVE_TINT, iconSize)}
+          <Text
+            color={TAB_INACTIVE_LABEL}
+            style={[styles.tabLabel, labelMetrics, { fontFamily: fontFamily.uiMedium }]}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1}
+          >
+            {label}
+          </Text>
+        </View>
+      </Animated.View>
+      <Animated.View
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={[styles.tabVisualLayer, activeLayerStyle]}
+      >
+        <View style={styles.tabVisualContent}>
+          {renderRouteIcon(routeName, TAB_ACTIVE_TINT, iconSize)}
+          <Text
+            color={TAB_ACTIVE_LABEL}
+            style={[styles.tabLabel, labelMetrics, { fontFamily: fontFamily.uiSemiBold }]}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1}
+          >
+            {label}
+          </Text>
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -228,6 +331,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const lastVisibleTabIndexRef = useRef(state.index);
   const fabExpandedRef = useRef(false);
   const fabTouchHandledRef = useRef(false);
+  const historyPreloadedRef = useRef(false);
+  const historyPreloadTaskRef = useRef<ScheduledUiWork | null>(null);
   const fabExpansion = useSharedValue(0);
   const activePillFeedback = useSharedValue(1);
 
@@ -279,6 +384,31 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       closeFabMenu();
     }
   }, [closeFabMenu, tabBarHidden]);
+
+  useEffect(() => {
+    if (historyPreloadedRef.current) return undefined;
+    const historyRoute = state.routes.find((route) => route.name === 'history');
+    if (historyRoute == null) return undefined;
+
+    historyPreloadTaskRef.current?.cancel();
+    historyPreloadTaskRef.current = scheduleUiWorkAfterFirstPaint(
+      () => {
+        if (historyPreloadedRef.current) return;
+        historyPreloadedRef.current = true;
+        navigation.preload(historyRoute.name, historyRoute.params);
+        historyPreloadTaskRef.current = null;
+      },
+      {
+        fallbackDelayMs: HISTORY_PRELOAD_FALLBACK_DELAY_MS,
+        timeoutMs: HISTORY_PRELOAD_TIMEOUT_MS,
+      },
+    );
+
+    return () => {
+      historyPreloadTaskRef.current?.cancel();
+      historyPreloadTaskRef.current = null;
+    };
+  }, [navigation, state.routes]);
 
   useEffect(() => {
     if (!offlineSwapNoticeVisible) return;
@@ -358,6 +488,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const actionRowRight = windowWidth - (fabCenterX + QUICK_ACTION_PUCK_SIZE / 2);
   const actionStackBottom = bottomGap + barHeight + QUICK_ACTION_ROW_GAP;
   const activePillTranslateX = useSharedValue(activePillX);
+  const activePrimaryIndexValue = useSharedValue(visualActivePrimaryIndex);
 
   useAnimatedReaction(
     () => activePillX,
@@ -365,6 +496,13 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       activePillTranslateX.value = withSpring(currentPillX, TAB_PILL_SLIDE_SPRING);
     },
     [activePillX],
+  );
+  useAnimatedReaction(
+    () => visualActivePrimaryIndex,
+    (currentPrimaryIndex) => {
+      activePrimaryIndexValue.value = currentPrimaryIndex;
+    },
+    [visualActivePrimaryIndex],
   );
 
   const handleTabLongPress = useCallback(
@@ -386,6 +524,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const primePrimaryTabFeedback = useCallback(
     (primaryIndex: number) => {
+      activePrimaryIndexValue.value = primaryIndex;
       activePillTranslateX.value = withSpring(
         primaryIndex * tabSlotWidth + pillInsetX,
         TAB_PILL_SLIDE_SPRING,
@@ -393,7 +532,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       activePillFeedback.value = TAB_PILL_PRESS_SCALE;
       activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
     },
-    [activePillFeedback, activePillTranslateX, pillInsetX, tabSlotWidth],
+    [activePillFeedback, activePillTranslateX, activePrimaryIndexValue, pillInsetX, tabSlotWidth],
   );
 
   const recordTabSwitchAfterNavigation = useCallback(
@@ -436,6 +575,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     });
 
     if (event.defaultPrevented) {
+      activePrimaryIndexValue.value = visualActivePrimaryIndex;
       activePillTranslateX.value = withSpring(activePillX, TAB_PILL_SLIDE_SPRING);
       return;
     }
@@ -447,23 +587,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       }
       navigation.navigate(route.name, route.params);
     }
-  }
-
-  function renderRouteIcon(
-    routeName: string,
-    tint: string,
-    focused: boolean,
-  ): React.JSX.Element | null {
-    if (routeName === 'index') {
-      return <PuffyHomeIcon size={iconSize} color={tint} focused={focused} />;
-    }
-    if (routeName === 'history') {
-      return <PuffyHistoryIcon size={iconSize} color={tint} focused={focused} />;
-    }
-    if (routeName === 'settings') {
-      return <PuffySettingsIcon size={iconSize} color={tint} focused={focused} />;
-    }
-    return null;
   }
 
   const handleFabToggle = useCallback(() => {
@@ -572,8 +695,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
             const focused = committedActiveIndex === originalIndex;
             const visuallyFocused =
               hasPrimaryActiveRoute && visualActiveOriginalIndex === originalIndex;
-            const tint = visuallyFocused ? TAB_ACTIVE_TINT : TAB_INACTIVE_TINT;
-            const labelColor = visuallyFocused ? TAB_ACTIVE_LABEL : TAB_INACTIVE_LABEL;
             const label = TAB_LABELS[route.name] ?? route.name;
 
             return (
@@ -599,27 +720,15 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                 accessibilityLabel={label}
                 accessibilityState={{ selected: focused }}
               >
-                <View style={styles.tabContent}>
-                  {/* Always render the focused (filled) variant so the
-                      icons read as flat solid silhouettes; the colour
-                      and label weight differentiate the active state. */}
-                  {renderRouteIcon(route.name, tint, true)}
-                  <Text
-                    color={labelColor}
-                    style={[
-                      styles.tabLabel,
-                      {
-                        fontSize: labelFontSize,
-                        lineHeight: labelLineHeight,
-                        fontFamily: visuallyFocused ? fontFamily.uiSemiBold : fontFamily.uiMedium,
-                      },
-                    ]}
-                    numberOfLines={1}
-                    maxFontSizeMultiplier={1}
-                  >
-                    {label}
-                  </Text>
-                </View>
+                <PrimaryTabContent
+                  activePrimaryIndexValue={activePrimaryIndexValue}
+                  iconSize={iconSize}
+                  label={label}
+                  labelFontSize={labelFontSize}
+                  labelLineHeight={labelLineHeight}
+                  primaryIndex={primaryIndex}
+                  routeName={route.name}
+                />
               </Pressable>
             );
           })}
@@ -822,6 +931,16 @@ const styles = StyleSheet.create({
   tabContent: {
     width: '100%',
     height: '100%',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabVisualLayer: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabVisualContent: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,

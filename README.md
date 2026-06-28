@@ -89,7 +89,7 @@ flowchart TB
 ## Environment
 
 - Local environment values live in `.env`, which is ignored by git.
-- EAS builds need `EXPO_PUBLIC_OFFPAY_API_ORIGIN=https://api.offpay.app` and `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS=https://api.offpay.app` configured as public client config.
+- EAS builds need the public client config used by the app: `EXPO_PUBLIC_OFFPAY_API_ORIGIN`, `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_URL`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE`, `EXPO_PUBLIC_PRIVY_APP_ID`, and `EXPO_PUBLIC_PRIVY_CLIENT_ID`.
 
 ## Backend And Provider Surfaces Used
 
@@ -110,9 +110,9 @@ flowchart TB
 - iOS bundle identifier and Android package: `com.offpay.app`.
 - Expo new architecture is enabled.
 - Bluetooth permissions are configured for offline payment receipt transport.
-- EAS project id is `7a90d5e4-cb4d-4c23-927c-84cd72247cec`.
+- EAS project is `@offpay_app/offpay` with id `56dc74fa-f0b3-4927-86a5-00e2c7c8f417`.
 - `development` uses the EAS `development` environment; `preview` uses the EAS `preview` environment and builds an internal Android APK.
-- Public client environment values such as `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE` should be configured in EAS environments, not hardcoded in the profile.
+- Public client environment values are configured in the EAS `development`, `preview`, and `production` environments, not hardcoded in the profile.
 
 ## Verification Commands
 

@@ -16,11 +16,14 @@ export function PuffyHistoryIcon({
 }: PuffyIconProps) {
   // Ultra-thick, solid document with overlapping clock, featuring a pristine transparent cutout gap
   const opacity = focused ? 1 : 0.4; // Fades naturally into glassmorphism when inactive
+  const maskId = React.useId().replace(/:/g, '');
+  const docMaskId = `puffy-history-doc-${maskId}`;
+  const clockMaskId = `puffy-history-clock-${maskId}`;
 
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" opacity={opacity}>
       <Defs>
-        <Mask id="docMask">
+        <Mask id={docMaskId}>
           <Rect x="0" y="0" width="24" height="24" fill="white" />
           {/* Circular transparent gap around the clock */}
           <Circle cx="16" cy="16" r="8.5" fill="black" />
@@ -30,7 +33,7 @@ export function PuffyHistoryIcon({
           <Rect x="5" y="11" width="6" height="2.5" rx="1.2" fill="black" />
         </Mask>
 
-        <Mask id="clockMask">
+        <Mask id={clockMaskId}>
           <Rect x="0" y="0" width="24" height="24" fill="white" />
           {/* Cutout hands of the clock */}
           <Path
@@ -45,10 +48,10 @@ export function PuffyHistoryIcon({
       </Defs>
 
       {/* Back Document Shape */}
-      <Rect x="2" y="2" width="16" height="20" rx="5" fill={color} mask="url(#docMask)" />
+      <Rect x="2" y="2" width="16" height="20" rx="5" fill={color} mask={`url(#${docMaskId})`} />
 
       {/* Front Clock Shape */}
-      <Circle cx="16" cy="16" r="6.5" fill={color} mask="url(#clockMask)" />
+      <Circle cx="16" cy="16" r="6.5" fill={color} mask={`url(#${clockMaskId})`} />
     </Svg>
   );
 }

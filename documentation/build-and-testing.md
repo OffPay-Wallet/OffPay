@@ -63,7 +63,7 @@ Instead of Expo Go, use:
 - Android package `com.offpay.app`
 - Expo new architecture enabled
 - Bluetooth permissions for offline payment receipt transport
-- EAS project id `7a90d5e4-cb4d-4c23-927c-84cd72247cec`
+- EAS project `@offpay_app/offpay` with id `56dc74fa-f0b3-4927-86a5-00e2c7c8f417`
 
 `eas.json` defines:
 
@@ -71,7 +71,7 @@ Instead of Expo Go, use:
 - `preview`: internal Android APK using the EAS `preview` environment
 - `production`: Android app bundle for store distribution using the EAS `production` environment
 
-Public client environment values such as `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE` should be configured in EAS environments instead of hardcoded in `eas.json`.
+Public client environment values should be configured in EAS environments instead of hardcoded in `eas.json`. Required client build variables are `EXPO_PUBLIC_OFFPAY_API_ORIGIN`, `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_URL`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE`, `EXPO_PUBLIC_PRIVY_APP_ID`, and `EXPO_PUBLIC_PRIVY_CLIENT_ID`.
 
 ## Build Profiles
 
