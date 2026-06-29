@@ -6,7 +6,7 @@
  * Uses FlashList so a 5,000-row run stays smooth.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, TextInput, View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -79,6 +79,22 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
   );
   const canEdit = run != null && isEditableRun(run);
   const canAddRow = canEdit && run != null && resolveDefaultNewRowToken(run, tokenOptions) != null;
+  const latestReviewStateRef = useRef({
+    runId,
+    run,
+    rows,
+    canEdit,
+    tokenOptions,
+  });
+  useEffect(() => {
+    latestReviewStateRef.current = {
+      runId,
+      run,
+      rows,
+      canEdit,
+      tokenOptions,
+    };
+  }, [canEdit, rows, run, runId, tokenOptions]);
 
   const totals = useMemo(() => {
     const list = rows ?? [];
@@ -140,34 +156,39 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
 
   const persistEditedRows = useCallback(
     (nextRows: PayrollRow[]) => {
-      if (runId == null || run == null) return;
-      replaceRows(runId, nextRows);
-      setRunToken(runId, resolveRunToken(nextRows, run));
+      const current = latestReviewStateRef.current;
+      if (current.runId == null || current.run == null) return;
+      replaceRows(current.runId, nextRows);
+      setRunToken(current.runId, resolveRunToken(nextRows, current.run));
     },
-    [replaceRows, run, runId, setRunToken],
+    [replaceRows, setRunToken],
   );
 
   const commitRowPatch = useCallback(
     (row: PayrollRow, patch: RowEditPatch) => {
-      if (!canEdit || run == null || rows == null || !isEditableRow(row)) return;
-      const nextRows = rows.map((candidate) => {
+      const current = latestReviewStateRef.current;
+      if (!current.canEdit || current.run == null || current.rows == null || !isEditableRow(row)) {
+        return;
+      }
+      const nextRows = current.rows.map((candidate) => {
         if (candidate.id !== row.id) return candidate;
         return applyPatchToRow(candidate, patch);
       });
-      persistEditedRows(revalidateEditableRows(run, nextRows));
+      persistEditedRows(revalidateEditableRows(current.run, nextRows));
     },
-    [canEdit, persistEditedRows, rows, run],
+    [persistEditedRows],
   );
 
   const applyTokenToAll = useCallback(
     (token: ReviewTokenOption) => {
-      if (!canEdit || run == null || rows == null) return;
-      const nextRows = rows.map((row) =>
+      const current = latestReviewStateRef.current;
+      if (!current.canEdit || current.run == null || current.rows == null) return;
+      const nextRows = current.rows.map((row) =>
         isEditableRow(row) ? applyPatchToRow(row, { token }) : row,
       );
-      persistEditedRows(revalidateEditableRows(run, nextRows));
+      persistEditedRows(revalidateEditableRows(current.run, nextRows));
     },
-    [canEdit, persistEditedRows, rows, run],
+    [persistEditedRows],
   );
 
   const handleSelectToken = useCallback(
@@ -185,30 +206,38 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
   );
 
   const addRow = useCallback(() => {
-    if (!canEdit || run == null || rows == null) return;
-    const token = resolveDefaultNewRowToken(run, tokenOptions);
+    const current = latestReviewStateRef.current;
+    if (!current.canEdit || current.run == null || current.rows == null) return;
+    const token = resolveDefaultNewRowToken(current.run, current.tokenOptions);
     if (token == null) return;
-    const nextRows = [...rows, buildManualPayrollRow(run, rows, token)];
-    persistEditedRows(revalidateEditableRows(run, nextRows));
-  }, [canEdit, persistEditedRows, rows, run, tokenOptions]);
+    const nextRows = [...current.rows, buildManualPayrollRow(current.run, current.rows, token)];
+    persistEditedRows(revalidateEditableRows(current.run, nextRows));
+  }, [persistEditedRows]);
 
   const deleteRow = useCallback(
     (row: PayrollRow) => {
-      if (!canEdit || run == null || rows == null || !isEditableRow(row)) return;
-      const nextRows = rows.filter((candidate) => candidate.id !== row.id);
-      persistEditedRows(revalidateEditableRows(run, nextRows));
+      const current = latestReviewStateRef.current;
+      if (!current.canEdit || current.run == null || current.rows == null || !isEditableRow(row)) {
+        return;
+      }
+      const nextRows = current.rows.filter((candidate) => candidate.id !== row.id);
+      persistEditedRows(revalidateEditableRows(current.run, nextRows));
     },
-    [canEdit, persistEditedRows, rows, run],
+    [persistEditedRows],
   );
 
   const toggleSkip = useCallback(
     (row: PayrollRow) => {
-      if (runId == null) return;
-      if (row.status === 'ready') setRowSkipped(runId, row.id, true);
-      else if (row.status === 'skipped') setRowSkipped(runId, row.id, false);
+      const currentRunId = latestReviewStateRef.current.runId;
+      if (currentRunId == null) return;
+      if (row.status === 'ready') setRowSkipped(currentRunId, row.id, true);
+      else if (row.status === 'skipped') setRowSkipped(currentRunId, row.id, false);
     },
-    [runId, setRowSkipped],
+    [setRowSkipped],
   );
+  const openTokenPickerForRow = useCallback((row: PayrollRow) => {
+    setTokenPickerTarget({ type: 'row', rowId: row.id });
+  }, []);
 
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<PayrollRow>) => (
@@ -216,14 +245,15 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
         row={item}
         rowNumber={index + 1}
         canEdit={canEdit}
-        tokenOptions={tokenOptions}
+        tokenLabel={resolveRowTokenDisplaySymbol(item, tokenOptions)}
+        canSelectToken={tokenOptions.length > 0}
         onCommitPatch={commitRowPatch}
         onToggleSkip={toggleSkip}
-        onOpenTokenPicker={(row) => setTokenPickerTarget({ type: 'row', rowId: row.id })}
+        onOpenTokenPicker={openTokenPickerForRow}
         onDeleteRow={deleteRow}
       />
     ),
-    [canEdit, commitRowPatch, deleteRow, toggleSkip, tokenOptions],
+    [canEdit, commitRowPatch, deleteRow, openTokenPickerForRow, toggleSkip, tokenOptions],
   );
   const keyExtractor = useCallback((item: PayrollRow) => item.id, []);
   const selectedPickerMint =
@@ -334,11 +364,12 @@ export function PayrollReviewScreen({ runId }: PayrollReviewScreenProps): React.
   );
 }
 
-function PayrollReviewRow({
+const PayrollReviewRow = React.memo(function PayrollReviewRow({
   row,
   rowNumber,
   canEdit,
-  tokenOptions,
+  tokenLabel,
+  canSelectToken,
   onCommitPatch,
   onToggleSkip,
   onOpenTokenPicker,
@@ -347,7 +378,8 @@ function PayrollReviewRow({
   row: PayrollRow;
   rowNumber: number;
   canEdit: boolean;
-  tokenOptions: readonly ReviewTokenOption[];
+  tokenLabel: string;
+  canSelectToken: boolean;
   onCommitPatch: (row: PayrollRow, patch: RowEditPatch) => void;
   onToggleSkip: (row: PayrollRow) => void;
   onOpenTokenPicker: (row: PayrollRow) => void;
@@ -356,7 +388,34 @@ function PayrollReviewRow({
   const canToggle = row.status === 'ready' || row.status === 'skipped';
   const canEditRow = canEdit && isEditableRow(row);
   const isSkipped = row.status === 'skipped';
-  const tokenLabel = resolveRowTokenDisplaySymbol(row, tokenOptions);
+  const [recipientDraft, setRecipientDraft] = useState(row.recipient);
+  const [amountDraft, setAmountDraft] = useState(row.amountDisplay);
+
+  useEffect(() => {
+    setRecipientDraft(row.recipient);
+  }, [row.recipient]);
+
+  useEffect(() => {
+    setAmountDraft(row.amountDisplay);
+  }, [row.amountDisplay]);
+
+  const handleRecipientEndEditing = useCallback(() => {
+    const recipient = recipientDraft.trim();
+    if (recipient !== row.recipient) {
+      onCommitPatch(row, { recipient });
+      return;
+    }
+    if (recipientDraft !== row.recipient) setRecipientDraft(row.recipient);
+  }, [onCommitPatch, recipientDraft, row]);
+
+  const handleAmountEndEditing = useCallback(() => {
+    const amountDisplay = amountDraft.trim();
+    if (amountDisplay !== row.amountDisplay) {
+      onCommitPatch(row, { amountDisplay });
+      return;
+    }
+    if (amountDraft !== row.amountDisplay) setAmountDraft(row.amountDisplay);
+  }, [amountDraft, onCommitPatch, row]);
 
   return (
     <View
@@ -373,12 +432,9 @@ function PayrollReviewRow({
         </View>
         {canEditRow ? (
           <TextInput
-            key={`${row.id}:recipient:${row.updatedAt}`}
-            defaultValue={row.recipient}
-            onEndEditing={(event) => {
-              const recipient = event.nativeEvent.text.trim();
-              if (recipient !== row.recipient) onCommitPatch(row, { recipient });
-            }}
+            value={recipientDraft}
+            onChangeText={setRecipientDraft}
+            onEndEditing={handleRecipientEndEditing}
             autoCapitalize="none"
             autoCorrect={false}
             spellCheck={false}
@@ -402,12 +458,9 @@ function PayrollReviewRow({
         {canEditRow ? (
           <View style={reviewStyles.amountInputWrap}>
             <TextInput
-              key={`${row.id}:amount:${row.updatedAt}`}
-              defaultValue={row.amountDisplay}
-              onEndEditing={(event) => {
-                const amountDisplay = event.nativeEvent.text.trim();
-                if (amountDisplay !== row.amountDisplay) onCommitPatch(row, { amountDisplay });
-              }}
+              value={amountDraft}
+              onChangeText={setAmountDraft}
+              onEndEditing={handleAmountEndEditing}
               keyboardType="decimal-pad"
               style={reviewStyles.amountInput}
               placeholder="0"
@@ -440,7 +493,7 @@ function PayrollReviewRow({
           <TokenSelectButton
             label={tokenLabel}
             compact
-            disabled={tokenOptions.length === 0}
+            disabled={!canSelectToken}
             onPress={() => onOpenTokenPicker(row)}
           />
           <Pressable
@@ -461,7 +514,7 @@ function PayrollReviewRow({
       ) : null}
     </View>
   );
-}
+});
 
 function TokenSelectButton({
   label,
@@ -838,7 +891,7 @@ function applyPatchToRow(row: PayrollRow, patch: RowEditPatch): PayrollRow {
     patch.amountDisplay ??
     (token == null ? row.amountDisplay : sanitizeDecimalInput(row.amountDisplay, decimals));
 
-  return {
+  const nextRow = {
     ...row,
     recipient: patch.recipient ?? row.recipient,
     tokenMint: token?.mint ?? row.tokenMint,
@@ -847,8 +900,29 @@ function applyPatchToRow(row: PayrollRow, patch: RowEditPatch): PayrollRow {
     amountDisplay,
     route: null,
     requiresRecipientClaim: false,
-    updatedAt: Date.now(),
+    updatedAt: row.updatedAt,
   };
+  return finalizePayrollRowUpdate(row, nextRow, Date.now());
+}
+
+function payrollRowsEqualExceptUpdatedAt(left: PayrollRow, right: PayrollRow): boolean {
+  const leftRecord = left as unknown as Record<string, unknown>;
+  const rightRecord = right as unknown as Record<string, unknown>;
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
+  for (const key of keys) {
+    if (key === 'updatedAt') continue;
+    if (leftRecord[key] !== rightRecord[key]) return false;
+  }
+  return true;
+}
+
+function finalizePayrollRowUpdate(
+  current: PayrollRow,
+  next: PayrollRow,
+  updatedAt: number,
+): PayrollRow {
+  if (payrollRowsEqualExceptUpdatedAt(current, next)) return current;
+  return { ...next, updatedAt };
 }
 
 function revalidateEditableRows(run: PayrollRun, rows: readonly PayrollRow[]): PayrollRow[] {
@@ -861,18 +935,23 @@ function revalidateEditableRows(run: PayrollRun, rows: readonly PayrollRow[]): P
     const recipient = row.recipient.trim();
     const amountRaw = row.amountDisplay.trim();
     const display = sanitizeDecimalInput(amountRaw, row.tokenDecimals);
-    const invalid = (message: string): PayrollRow => ({
-      ...row,
-      recipient,
-      amountDisplay: amountRaw,
-      amountAtomic: '0',
-      route: null,
-      status: 'invalid',
-      requiresRecipientClaim: false,
-      validationError: message,
-      idempotencyKey: buildIdempotencyKey(run.id, recipient, '0', row.tokenMint),
-      updatedAt: now,
-    });
+    const invalid = (message: string): PayrollRow =>
+      finalizePayrollRowUpdate(
+        row,
+        {
+          ...row,
+          recipient,
+          amountDisplay: amountRaw,
+          amountAtomic: '0',
+          route: null,
+          status: 'invalid',
+          requiresRecipientClaim: false,
+          validationError: message,
+          idempotencyKey: buildIdempotencyKey(run.id, recipient, '0', row.tokenMint),
+          updatedAt: row.updatedAt,
+        },
+        now,
+      );
 
     if (!isValidSolanaAddress(recipient)) {
       return invalid('Recipient is not a valid Solana wallet address.');
@@ -907,18 +986,22 @@ function revalidateEditableRows(run: PayrollRun, rows: readonly PayrollRow[]): P
       seenRecipients.add(recipient);
     }
 
-    return {
-      ...row,
-      recipient,
-      amountDisplay: display,
-      amountAtomic: atomic,
-      route: null,
-      status: row.status === 'skipped' ? 'skipped' : 'ready',
-      requiresRecipientClaim: false,
-      validationError: null,
-      idempotencyKey: buildIdempotencyKey(run.id, recipient, atomic, row.tokenMint),
-      updatedAt: now,
-    };
+    return finalizePayrollRowUpdate(
+      row,
+      {
+        ...row,
+        recipient,
+        amountDisplay: display,
+        amountAtomic: atomic,
+        route: null,
+        status: row.status === 'skipped' ? 'skipped' : 'ready',
+        requiresRecipientClaim: false,
+        validationError: null,
+        idempotencyKey: buildIdempotencyKey(run.id, recipient, atomic, row.tokenMint),
+        updatedAt: row.updatedAt,
+      },
+      now,
+    );
   });
 }
 

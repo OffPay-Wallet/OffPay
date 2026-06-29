@@ -18,7 +18,7 @@ import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
-import { normalizeContactName, useContactsStore } from '@/store/contactsStore';
+import { getContactByAddress, normalizeContactName, useContactsStore } from '@/store/contactsStore';
 
 interface ContactSavePromptProps {
   visible: boolean;
@@ -38,6 +38,7 @@ export function ContactSavePrompt({
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const { showToast } = useAppToast();
   const upsertContact = useContactsStore((s) => s.upsertContact);
+  const existingContact = useContactsStore((s) => getContactByAddress(s.contacts, address));
   const [draftName, setDraftName] = useState(initialName ?? '');
 
   useEffect(() => {
@@ -61,6 +62,14 @@ export function ContactSavePrompt({
 
   const handleSave = useCallback((): void => {
     if (!canSave) return;
+    if (existingContact != null) {
+      showToast({
+        title: 'Contact already saved',
+        message: existingContact.name,
+        variant: 'warning',
+      });
+      return;
+    }
 
     const saved = upsertContact({
       name: normalizedName,
@@ -83,7 +92,16 @@ export function ContactSavePrompt({
     Keyboard.dismiss();
     onSaved?.();
     onClose();
-  }, [canSave, normalizedAddress, normalizedName, onClose, onSaved, showToast, upsertContact]);
+  }, [
+    canSave,
+    existingContact,
+    normalizedAddress,
+    normalizedName,
+    onClose,
+    onSaved,
+    showToast,
+    upsertContact,
+  ]);
 
   if (!visible) return null;
 

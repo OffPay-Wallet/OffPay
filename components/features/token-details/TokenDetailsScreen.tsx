@@ -7,13 +7,12 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import Svg, {
   Circle,
   Defs,
@@ -26,7 +25,10 @@ import Svg, {
 } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { TransactionActivityRow } from '@/components/features/history/TransactionActivityRow';
+import {
+  TransactionActivityRow,
+  type ActivityTransactionRowData,
+} from '@/components/features/history/TransactionActivityRow';
 import { TransactionDetailsSheet } from '@/components/features/history/TransactionDetailsSheet';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { PuffyReceiveIcon } from '@/components/ui/icons/PuffyReceiveIcon';
@@ -115,12 +117,18 @@ type PriceChartPoint = {
   y: number;
   sample: ConvertedTokenPriceHistorySample;
 };
+type TokenActivityListItem = {
+  id: string;
+  transaction: OffpayHistoryTransactionView;
+  tx: ActivityTransactionRowData;
+};
 
 const TOKEN_DETAIL_ACTIONS: { id: TokenDetailActionId; label: string }[] = [
   { id: 'send', label: 'Send' },
   { id: 'receive', label: 'Receive' },
   { id: 'swap', label: 'Swap' },
 ];
+const EMPTY_TOKEN_ACTIVITY_ITEMS: TokenActivityListItem[] = [];
 
 type TokenDetailsRouteParams = {
   mint?: string;
@@ -801,6 +809,33 @@ function TokenActivitySkeletonList({
   );
 }
 
+const TokenActivityListRow = React.memo(function TokenActivityListRow({
+  item,
+  compact,
+  tokenLogos,
+  onPress,
+}: {
+  item: TokenActivityListItem;
+  compact: boolean;
+  tokenLogos: Parameters<typeof TransactionActivityRow>[0]['tokenLogos'];
+  onPress: (transaction: OffpayHistoryTransactionView) => void;
+}): React.JSX.Element {
+  const handlePress = useCallback(() => {
+    onPress(item.transaction);
+  }, [item.transaction, onPress]);
+
+  return (
+    <View style={styles.activityRowWrap}>
+      <TransactionActivityRow
+        tx={item.tx}
+        compact={compact}
+        tokenLogos={tokenLogos}
+        onPress={handlePress}
+      />
+    </View>
+  );
+});
+
 export function TokenDetailsScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -987,6 +1022,24 @@ export function TokenDetailsScreen(): React.JSX.Element {
       return left.id.localeCompare(right.id);
     });
   }, [tokenEndpointActivity, walletHistoryActivity]);
+  const tokenActivityItems = useMemo<TokenActivityListItem[]>(
+    () =>
+      tokenActivity.map((transaction) => {
+        const activityDate = formatActivityDateTime(transaction.detailTimestampMs);
+        return {
+          id: transaction.id,
+          transaction,
+          tx:
+            activityDate == null
+              ? transaction
+              : {
+                  ...transaction,
+                  subtitle: `${transaction.subtitle} · ${activityDate}`,
+                },
+        };
+      }),
+    [tokenActivity],
+  );
   const tokenActivityRowCount = tokenActivity.length;
   useEffect(() => {
     if (tokenDetailsFirstPaintLoggedRef.current) return;
@@ -1015,6 +1068,10 @@ export function TokenDetailsScreen(): React.JSX.Element {
     (walletHistoryQuery.isInitialDataPending ||
       tokenTransactionsQuery.isInitialDataPending ||
       (tokenActivityFetching && walletHistoryQuery.transactions.length === 0));
+  const tokenActivityListData =
+    tokenActivity.length > 0 && !tokenActivityLoading
+      ? tokenActivityItems
+      : EMPTY_TOKEN_ACTIVITY_ITEMS;
   const tokenActivityScrollMetricsRef = useRef({
     contentHeight: 0,
     layoutHeight: 0,
@@ -1077,6 +1134,18 @@ export function TokenDetailsScreen(): React.JSX.Element {
   const handleDismissTransactionDetails = useCallback((): void => {
     setSelectedTransaction(null);
   }, []);
+  const renderTokenActivityItem = useCallback(
+    ({ item }: ListRenderItemInfo<TokenActivityListItem>) => (
+      <TokenActivityListRow
+        item={item}
+        compact={compact}
+        tokenLogos={tokenLogoMap}
+        onPress={handleTokenActivityPress}
+      />
+    ),
+    [compact, handleTokenActivityPress, tokenLogoMap],
+  );
+  const tokenActivityKeyExtractor = useCallback((item: TokenActivityListItem) => item.id, []);
 
   const requestNextTokenActivityPage = useCallback(
     (requestOwnerSuffix: string): void => {
@@ -1122,6 +1191,9 @@ export function TokenDetailsScreen(): React.JSX.Element {
     },
     [requestNextTokenActivityPage],
   );
+  const handleTokenActivityEndReached = useCallback((): void => {
+    requestNextTokenActivityPage('endReachedPage');
+  }, [requestNextTokenActivityPage]);
 
   const handleTokenDetailsScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
@@ -1170,167 +1242,166 @@ export function TokenDetailsScreen(): React.JSX.Element {
     Math.max(insets.bottom, dense ? spacing.md : spacing.lg) +
     (dense ? spacing['2xl'] : spacing['4xl']);
   const emptyStateMinHeight = dense ? 180 : compact ? 220 : 260;
+  const tokenDetailsContentGap = compact ? spacing.lg : spacing.xl;
 
   return (
     <View style={styles.container}>
       <GradientBackground />
-      <ScrollView
+      <FlashList<TokenActivityListItem>
+        data={tokenActivityListData}
+        renderItem={renderTokenActivityItem}
+        keyExtractor={tokenActivityKeyExtractor}
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentInsetAdjustmentBehavior="automatic"
-        removeClippedSubviews={Platform.OS === 'android'}
         onLayout={handleTokenDetailsLayout}
         onScroll={handleTokenDetailsScroll}
         onScrollEndDrag={handleTokenDetailsScroll}
         onMomentumScrollEnd={handleTokenDetailsScroll}
+        onEndReached={handleTokenActivityEndReached}
+        onEndReachedThreshold={0.45}
         onContentSizeChange={handleTokenDetailsContentSizeChange}
         scrollEventThrottle={16}
-        contentContainerStyle={[
-          styles.scrollContent,
-          {
-            paddingTop: insets.top + (dense ? spacing.sm : spacing.lg),
-            paddingBottom: bottomPadding,
-            paddingHorizontal: screenHorizontalPadding,
-            gap: compact ? spacing.lg : spacing.xl,
-          },
-        ]}
-      >
-        <View style={styles.contentFrame}>
-          <View style={styles.header}>
-            <HeaderIconButton onPress={() => router.back()} accessibilityLabel="Go back">
-              <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
-            </HeaderIconButton>
-            <Text
-              variant="h2"
-              color={colors.text.inverse}
-              style={styles.headerTitle}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.86}
-              maxFontSizeMultiplier={1}
-            >
-              Token Details
-            </Text>
-            <View
-              style={styles.headerIconPlaceholder}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-            />
-          </View>
-        </View>
-
-        {holding == null ? (
-          <StaggerRevealItem
-            index={0}
-            style={[styles.contentFrame, styles.emptyState, { minHeight: emptyStateMinHeight }]}
-          >
-            <Text variant="bodyBold" color={colors.text.primary} align="center">
-              {balanceQuery.isLoading || balanceQuery.isCapabilitiesPending
-                ? 'Loading token'
-                : 'Token not found'}
-            </Text>
-            <Text
-              variant="small"
-              color={colors.text.secondary}
-              align="center"
-              style={styles.emptyText}
-            >
-              Refresh holdings or open a token from the holdings list.
-            </Text>
-          </StaggerRevealItem>
-        ) : (
-          <StaggerRevealGroup itemStyle={styles.contentFrame}>
-            <TokenPriceHistoryCard
-              priceHistory={priceHistoryQuery}
-              selectedTimeframe={selectedTimeframe}
-              onTimeframeChange={setSelectedTimeframe}
-              holding={holding}
-              valuation={valuation}
-              mintForDisplay={mintForDisplay}
-              onCopyMint={handleCopyMint}
-              dense={dense}
-              compact={compact}
-            />
-
-            <View style={styles.actionsRow}>
-              {TOKEN_DETAIL_ACTIONS.map((action) => (
-                <TokenActionButton
-                  key={action.id}
-                  action={action}
-                  compact={actionCompact}
-                  onPress={handleTokenAction}
+        drawDistance={600}
+        contentContainerStyle={{
+          paddingTop: insets.top + (dense ? spacing.sm : spacing.lg),
+          paddingBottom: bottomPadding,
+          paddingHorizontal: screenHorizontalPadding,
+        }}
+        ListHeaderComponent={
+          <View style={[styles.scrollContent, { gap: tokenDetailsContentGap }]}>
+            <View style={styles.contentFrame}>
+              <View style={styles.header}>
+                <HeaderIconButton onPress={() => router.back()} accessibilityLabel="Go back">
+                  <Ionicons
+                    name="chevron-back"
+                    size={layout.iconSizeNav}
+                    color={colors.text.primary}
+                  />
+                </HeaderIconButton>
+                <Text
+                  variant="h2"
+                  color={colors.text.inverse}
+                  style={styles.headerTitle}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.86}
+                  maxFontSizeMultiplier={1}
+                >
+                  Token Details
+                </Text>
+                <View
+                  style={styles.headerIconPlaceholder}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
                 />
-              ))}
+              </View>
             </View>
 
-            <View style={styles.section}>
-              <Text variant="bodyBold" color={colors.text.primary} style={styles.sectionTitle}>
-                Recent Activity
-              </Text>
-              {tokenActivityLoading ? (
-                <TokenActivitySkeletonList compact={compact} />
-              ) : tokenActivity.length > 0 ? (
-                <View style={styles.activityList}>
-                  {tokenActivity.map((transaction) => {
-                    const activityDate = formatActivityDateTime(transaction.detailTimestampMs);
+            {holding == null ? (
+              <StaggerRevealItem
+                index={0}
+                style={[styles.contentFrame, styles.emptyState, { minHeight: emptyStateMinHeight }]}
+              >
+                <Text variant="bodyBold" color={colors.text.primary} align="center">
+                  {balanceQuery.isLoading || balanceQuery.isCapabilitiesPending
+                    ? 'Loading token'
+                    : 'Token not found'}
+                </Text>
+                <Text
+                  variant="small"
+                  color={colors.text.secondary}
+                  align="center"
+                  style={styles.emptyText}
+                >
+                  Refresh holdings or open a token from the holdings list.
+                </Text>
+              </StaggerRevealItem>
+            ) : (
+              <StaggerRevealGroup
+                style={[styles.scrollContent, { gap: tokenDetailsContentGap }]}
+                itemStyle={styles.contentFrame}
+              >
+                <TokenPriceHistoryCard
+                  priceHistory={priceHistoryQuery}
+                  selectedTimeframe={selectedTimeframe}
+                  onTimeframeChange={setSelectedTimeframe}
+                  holding={holding}
+                  valuation={valuation}
+                  mintForDisplay={mintForDisplay}
+                  onCopyMint={handleCopyMint}
+                  dense={dense}
+                  compact={compact}
+                />
 
-                    return (
-                      <TransactionActivityRow
-                        key={transaction.id}
-                        tx={
-                          activityDate == null
-                            ? transaction
-                            : {
-                                ...transaction,
-                                subtitle: `${transaction.subtitle} · ${activityDate}`,
-                              }
-                        }
-                        compact={compact}
-                        tokenLogos={tokenLogoMap}
-                        onPress={() => handleTokenActivityPress(transaction)}
-                      />
-                    );
-                  })}
-                  {tokenActivityPaginationPending ? (
-                    <View style={styles.activityPaginationSpinner}>
-                      <LazyLoadingSpinner size={22} color={colors.text.secondary} />
-                    </View>
-                  ) : tokenActivityCanLoadMore ? (
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.activityLoadMoreButton,
-                        pressed ? styles.controlPressed : null,
-                      ]}
-                      onPress={handleLoadMoreTokenActivity}
-                      accessibilityRole="button"
-                      accessibilityLabel="Load more token activity"
-                    >
-                      <Text
-                        variant="captionBold"
-                        color={colors.semantic.info}
-                        style={styles.activityLoadMoreText}
-                        numberOfLines={1}
-                        maxFontSizeMultiplier={1}
-                      >
-                        Load more
+                <View style={styles.actionsRow}>
+                  {TOKEN_DETAIL_ACTIONS.map((action) => (
+                    <TokenActionButton
+                      key={action.id}
+                      action={action}
+                      compact={actionCompact}
+                      onPress={handleTokenAction}
+                    />
+                  ))}
+                </View>
+
+                <View
+                  style={[
+                    styles.section,
+                    tokenActivity.length > 0 ? styles.activitySectionHeader : null,
+                  ]}
+                >
+                  <Text variant="bodyBold" color={colors.text.primary} style={styles.sectionTitle}>
+                    Recent Activity
+                  </Text>
+                  {tokenActivityLoading ? (
+                    <TokenActivitySkeletonList compact={compact} />
+                  ) : tokenActivity.length > 0 ? null : (
+                    <View style={styles.emptyActivityCard}>
+                      <Text variant="bodyBold" color={colors.text.primary}>
+                        No token activity
                       </Text>
-                    </Pressable>
-                  ) : null}
+                      <Text variant="small" color={colors.text.secondary} style={styles.emptyText}>
+                        Confirmed transfers and swaps for this token will appear here.
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              ) : (
-                <View style={styles.emptyActivityCard}>
-                  <Text variant="bodyBold" color={colors.text.primary}>
-                    No token activity
-                  </Text>
-                  <Text variant="small" color={colors.text.secondary} style={styles.emptyText}>
-                    Confirmed transfers and swaps for this token will appear here.
-                  </Text>
+              </StaggerRevealGroup>
+            )}
+          </View>
+        }
+        ListFooterComponent={
+          tokenActivity.length > 0 ? (
+            <View style={styles.activityFooter}>
+              {tokenActivityPaginationPending ? (
+                <View style={styles.activityPaginationSpinner}>
+                  <LazyLoadingSpinner size={22} color={colors.text.secondary} />
                 </View>
-              )}
+              ) : tokenActivityCanLoadMore ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.activityLoadMoreButton,
+                    pressed ? styles.controlPressed : null,
+                  ]}
+                  onPress={handleLoadMoreTokenActivity}
+                  accessibilityRole="button"
+                  accessibilityLabel="Load more token activity"
+                >
+                  <Text
+                    variant="captionBold"
+                    color={colors.semantic.info}
+                    style={styles.activityLoadMoreText}
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={1}
+                  >
+                    Load more
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
-          </StaggerRevealGroup>
-        )}
-      </ScrollView>
+          ) : null
+        }
+      />
       <TransactionDetailsSheet
         transaction={selectedTransaction}
         tokenLogos={tokenLogoMap}
@@ -1556,6 +1627,15 @@ const styles = StyleSheet.create({
   },
   activityList: {
     gap: spacing.md,
+  },
+  activitySectionHeader: {
+    marginBottom: spacing.md,
+  },
+  activityRowWrap: {
+    marginBottom: spacing.md,
+  },
+  activityFooter: {
+    minHeight: spacing.xl,
   },
   activitySkeletonRow: {
     minHeight: 78,

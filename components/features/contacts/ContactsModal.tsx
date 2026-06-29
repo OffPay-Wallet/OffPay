@@ -29,7 +29,12 @@ import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
-import { normalizeContactName, type SavedContact, useContactsStore } from '@/store/contactsStore';
+import {
+  getContactByAddress,
+  normalizeContactName,
+  type SavedContact,
+  useContactsStore,
+} from '@/store/contactsStore';
 
 interface ContactsModalProps {
   visible: boolean;
@@ -64,6 +69,10 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
   const listMaxHeight = Math.max(160, maxSheetHeight - (editorMode == null ? 160 : 340));
   const normalizedName = useMemo(() => normalizeContactName(draftName), [draftName]);
   const normalizedAddress = draftAddress.trim();
+  const existingContact = getContactByAddress(contacts, normalizedAddress);
+  const duplicateContact =
+    existingContact != null &&
+    (editingAddress == null || existingContact.address !== editingAddress);
   const canSave = normalizedName.length > 0 && isValidSolanaAddress(normalizedAddress);
   const sortedContacts = useMemo(
     () =>
@@ -134,12 +143,24 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
 
   const handleSave = useCallback((): void => {
     if (!canSave) return;
+    if (duplicateContact) {
+      showToast({
+        title: 'Contact already saved',
+        message: existingContact?.name ?? shortenWalletAddress(normalizedAddress),
+        variant: 'warning',
+      });
+      return;
+    }
 
-    const saved = upsertContact({ name: normalizedName, address: normalizedAddress });
+    const saved = upsertContact({
+      name: normalizedName,
+      address: normalizedAddress,
+      editingAddress,
+    });
     if (saved == null) {
       showToast({
         title: 'Contact not saved',
-        message: 'Enter a valid Solana wallet address.',
+        message: 'Check the wallet address and try again.',
         variant: 'error',
       });
       return;
@@ -153,7 +174,9 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
   }, [
     canSave,
     deleteContact,
+    duplicateContact,
     editingAddress,
+    existingContact,
     normalizedAddress,
     normalizedName,
     resetEditor,
@@ -346,53 +369,12 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
                 keyboardShouldPersistTaps="handled"
               >
                 {sortedContacts.map((contact) => (
-                  <View key={contact.address} style={styles.contactRow}>
-                    <View style={styles.contactAvatar}>
-                      <Text variant="bodyBold" color={colors.text.onAccent} numberOfLines={1}>
-                        {contact.name.slice(0, 1).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.contactText}>
-                      <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
-                        {contact.name}
-                      </Text>
-                      <CopyableAddress
-                        address={contact.address}
-                        label={shortenWalletAddress(contact.address)}
-                        color={colors.text.secondary}
-                        iconSize={16}
-                        maxFontSizeMultiplier={1}
-                      />
-                    </View>
-                    <View style={styles.contactActions}>
-                      <Pressable
-                        style={({ pressed }) => [styles.rowIconButton, pressed && styles.pressed]}
-                        onPress={() => openEditEditor(contact)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Edit ${contact.name}`}
-                        hitSlop={6}
-                      >
-                        <Ionicons
-                          name="create-outline"
-                          size={layout.iconSizeInline}
-                          color={colors.text.primary}
-                        />
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [styles.rowIconButton, pressed && styles.pressed]}
-                        onPress={() => handleDelete(contact)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete ${contact.name}`}
-                        hitSlop={6}
-                      >
-                        <Ionicons
-                          name="trash-outline"
-                          size={layout.iconSizeInline}
-                          color={colors.semantic.error}
-                        />
-                      </Pressable>
-                    </View>
-                  </View>
+                  <ContactRow
+                    key={contact.address}
+                    contact={contact}
+                    onEdit={openEditEditor}
+                    onDelete={handleDelete}
+                  />
                 ))}
               </ScrollView>
             )}
@@ -402,6 +384,73 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
     </View>
   );
 }
+
+const ContactRow = React.memo(function ContactRow({
+  contact,
+  onEdit,
+  onDelete,
+}: {
+  contact: SavedContact;
+  onEdit: (contact: SavedContact) => void;
+  onDelete: (contact: SavedContact) => void;
+}): React.JSX.Element {
+  const handleEdit = useCallback(() => {
+    onEdit(contact);
+  }, [contact, onEdit]);
+  const handleDelete = useCallback(() => {
+    onDelete(contact);
+  }, [contact, onDelete]);
+
+  return (
+    <View style={styles.contactRow}>
+      <View style={styles.contactAvatar}>
+        <Text variant="bodyBold" color={colors.text.onAccent} numberOfLines={1}>
+          {contact.name.slice(0, 1).toUpperCase()}
+        </Text>
+      </View>
+      <View style={styles.contactText}>
+        <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
+          {contact.name}
+        </Text>
+        <CopyableAddress
+          address={contact.address}
+          label={shortenWalletAddress(contact.address)}
+          color={colors.text.secondary}
+          iconSize={16}
+          maxFontSizeMultiplier={1}
+        />
+      </View>
+      <View style={styles.contactActions}>
+        <Pressable
+          style={({ pressed }) => [styles.rowIconButton, pressed && styles.pressed]}
+          onPress={handleEdit}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${contact.name}`}
+          hitSlop={6}
+        >
+          <Ionicons
+            name="create-outline"
+            size={layout.iconSizeInline}
+            color={colors.text.primary}
+          />
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.rowIconButton, pressed && styles.pressed]}
+          onPress={handleDelete}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${contact.name}`}
+          hitSlop={6}
+        >
+          <Ionicons
+            name="trash-outline"
+            size={layout.iconSizeInline}
+            color={colors.semantic.error}
+          />
+        </Pressable>
+      </View>
+    </View>
+  );
+});
 
 const styles = StyleSheet.create({
   overlay: {

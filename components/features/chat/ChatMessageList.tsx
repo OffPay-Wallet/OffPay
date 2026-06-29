@@ -39,7 +39,7 @@ interface ChatMessageListProps {
   onAnnouncePayrollOutcome?: (outcome: PayrollOutcomeAnnouncement) => void;
 }
 
-export function ChatMessageList({
+function ChatMessageListComponent({
   messages,
   actionsById,
   onConfirmPrivateSend,
@@ -79,3 +79,5 @@ export function ChatMessageList({
     </View>
   );
 }
+
+export const ChatMessageList = React.memo(ChatMessageListComponent);

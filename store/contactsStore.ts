@@ -28,6 +28,7 @@ export interface FrequentRecipientOption {
 interface ContactUpsertInput {
   name: string;
   address: string;
+  editingAddress?: string | null;
 }
 
 interface MarkRecipientUsedInput {
@@ -40,11 +41,13 @@ interface ContactsState {
   contacts: SavedContact[];
   usageByWalletAddress: Record<string, Record<string, ContactUsageStats>>;
   recentClearedAtByWalletAddress: Record<string, number>;
+  hiddenRecentRecipientsByWalletAddress: Record<string, Record<string, number>>;
   upsertContact: (input: ContactUpsertInput) => SavedContact | null;
   deleteContact: (address: string) => void;
   clearContacts: () => void;
   markRecipientUsed: (input: MarkRecipientUsedInput) => void;
   clearRecentUsage: (walletAddress: string) => void;
+  dismissRecentRecipient: (walletAddress: string, recipientAddress: string) => void;
 }
 
 const MAX_CONTACTS = 250;
@@ -201,21 +204,55 @@ function normalizePersistedClearTimes(value: unknown): Record<string, number> {
   return next;
 }
 
+function normalizePersistedHiddenRecipients(
+  value: unknown,
+): Record<string, Record<string, number>> {
+  if (typeof value !== 'object' || value == null) return {};
+  const next: Record<string, Record<string, number>> = {};
+  for (const [walletAddress, hiddenByAddress] of Object.entries(value as Record<string, unknown>)) {
+    if (!isValidSolanaAddress(walletAddress)) continue;
+    if (typeof hiddenByAddress !== 'object' || hiddenByAddress == null) continue;
+
+    const normalizedHidden: Record<string, number> = {};
+    for (const [recipientAddress, timestamp] of Object.entries(
+      hiddenByAddress as Record<string, unknown>,
+    )) {
+      if (!isValidSolanaAddress(recipientAddress)) continue;
+      if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp <= 0) continue;
+      normalizedHidden[recipientAddress] = timestamp;
+    }
+    if (Object.keys(normalizedHidden).length > 0) {
+      next[walletAddress] = normalizedHidden;
+    }
+  }
+  return next;
+}
+
 export const useContactsStore = create<ContactsState>()(
   persist(
     (set) => ({
       contacts: [],
       usageByWalletAddress: {},
       recentClearedAtByWalletAddress: {},
-      upsertContact: ({ name, address }) => {
+      hiddenRecentRecipientsByWalletAddress: {},
+      upsertContact: ({ name, address, editingAddress }) => {
         const normalizedName = normalizeContactName(name);
         const normalizedAddress = normalizeAddress(address);
         if (normalizedName.length === 0 || !isValidSolanaAddress(normalizedAddress)) return null;
+        const normalizedEditingAddress = normalizeAddress(editingAddress ?? '');
 
         const now = Date.now();
         let savedContact: SavedContact | null = null;
         set((state) => {
           const existing = getContactByAddress(state.contacts, normalizedAddress);
+          if (
+            existing != null &&
+            (normalizedEditingAddress.length === 0 || existing.address !== normalizedEditingAddress)
+          ) {
+            savedContact = null;
+            return state;
+          }
+
           savedContact =
             existing == null
               ? {
@@ -250,7 +287,12 @@ export const useContactsStore = create<ContactsState>()(
         }));
       },
       clearContacts: () =>
-        set({ contacts: [], usageByWalletAddress: {}, recentClearedAtByWalletAddress: {} }),
+        set({
+          contacts: [],
+          usageByWalletAddress: {},
+          recentClearedAtByWalletAddress: {},
+          hiddenRecentRecipientsByWalletAddress: {},
+        }),
       markRecipientUsed: ({ walletAddress, recipientAddress, usedAt }) => {
         const normalizedWallet = normalizeAddress(walletAddress ?? '');
         const normalizedRecipient = normalizeAddress(recipientAddress ?? '');
@@ -269,6 +311,17 @@ export const useContactsStore = create<ContactsState>()(
             count: 0,
             lastUsedAt: 0,
           };
+          const currentHidden = state.hiddenRecentRecipientsByWalletAddress[normalizedWallet];
+          const nextHiddenByWalletAddress = { ...state.hiddenRecentRecipientsByWalletAddress };
+          if (currentHidden != null && currentHidden[normalizedRecipient] != null) {
+            const nextWalletHidden = { ...currentHidden };
+            delete nextWalletHidden[normalizedRecipient];
+            if (Object.keys(nextWalletHidden).length > 0) {
+              nextHiddenByWalletAddress[normalizedWallet] = nextWalletHidden;
+            } else {
+              delete nextHiddenByWalletAddress[normalizedWallet];
+            }
+          }
           return {
             usageByWalletAddress: {
               ...state.usageByWalletAddress,
@@ -280,6 +333,7 @@ export const useContactsStore = create<ContactsState>()(
                 },
               },
             },
+            hiddenRecentRecipientsByWalletAddress: nextHiddenByWalletAddress,
           };
         });
       },
@@ -289,11 +343,45 @@ export const useContactsStore = create<ContactsState>()(
         set((state) => {
           const nextUsage = { ...state.usageByWalletAddress };
           delete nextUsage[normalizedWallet];
+          const nextHidden = { ...state.hiddenRecentRecipientsByWalletAddress };
+          delete nextHidden[normalizedWallet];
           return {
             usageByWalletAddress: nextUsage,
             recentClearedAtByWalletAddress: {
               ...state.recentClearedAtByWalletAddress,
               [normalizedWallet]: Date.now(),
+            },
+            hiddenRecentRecipientsByWalletAddress: nextHidden,
+          };
+        });
+      },
+      dismissRecentRecipient: (walletAddress, recipientAddress) => {
+        const normalizedWallet = normalizeAddress(walletAddress);
+        const normalizedRecipient = normalizeAddress(recipientAddress);
+        if (!isValidSolanaAddress(normalizedWallet) || !isValidSolanaAddress(normalizedRecipient)) {
+          return;
+        }
+
+        set((state) => {
+          const currentWalletUsage = state.usageByWalletAddress[normalizedWallet] ?? {};
+          const nextWalletUsage = { ...currentWalletUsage };
+          delete nextWalletUsage[normalizedRecipient];
+
+          const nextUsage = { ...state.usageByWalletAddress };
+          if (Object.keys(nextWalletUsage).length > 0) {
+            nextUsage[normalizedWallet] = nextWalletUsage;
+          } else {
+            delete nextUsage[normalizedWallet];
+          }
+
+          return {
+            usageByWalletAddress: nextUsage,
+            hiddenRecentRecipientsByWalletAddress: {
+              ...state.hiddenRecentRecipientsByWalletAddress,
+              [normalizedWallet]: {
+                ...(state.hiddenRecentRecipientsByWalletAddress[normalizedWallet] ?? {}),
+                [normalizedRecipient]: Date.now(),
+              },
             },
           };
         });
@@ -318,12 +406,16 @@ export const useContactsStore = create<ContactsState>()(
           recentClearedAtByWalletAddress: normalizePersistedClearTimes(
             state.recentClearedAtByWalletAddress,
           ),
+          hiddenRecentRecipientsByWalletAddress: normalizePersistedHiddenRecipients(
+            state.hiddenRecentRecipientsByWalletAddress,
+          ),
         };
       },
       partialize: (state) => ({
         contacts: state.contacts,
         usageByWalletAddress: state.usageByWalletAddress,
         recentClearedAtByWalletAddress: state.recentClearedAtByWalletAddress,
+        hiddenRecentRecipientsByWalletAddress: state.hiddenRecentRecipientsByWalletAddress,
       }),
     },
   ),

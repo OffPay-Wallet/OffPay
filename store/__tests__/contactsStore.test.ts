@@ -23,6 +23,7 @@ describe('contactsStore', () => {
       contacts: [],
       usageByWalletAddress: {},
       recentClearedAtByWalletAddress: {},
+      hiddenRecentRecipientsByWalletAddress: {},
     });
     jest.spyOn(Date, 'now').mockReturnValue(1000);
   });
@@ -31,7 +32,7 @@ describe('contactsStore', () => {
     jest.restoreAllMocks();
   });
 
-  it('saves contacts locally by address and updates duplicate names', () => {
+  it('saves contacts locally by address', () => {
     const first = useContactsStore
       .getState()
       .upsertContact({ name: '  Karan   Singh  ', address: karanAddress });
@@ -41,10 +42,33 @@ describe('contactsStore', () => {
       address: karanAddress,
     });
     expect(useContactsStore.getState().contacts).toHaveLength(1);
+  });
 
+  it('rejects duplicate contact addresses unless editing that contact', () => {
+    useContactsStore.getState().upsertContact({ name: 'Karan Singh', address: karanAddress });
     jest.spyOn(Date, 'now').mockReturnValue(2000);
-    useContactsStore.getState().upsertContact({ name: 'Karan', address: karanAddress });
 
+    const duplicate = useContactsStore
+      .getState()
+      .upsertContact({ name: 'Karan Duplicate', address: karanAddress });
+
+    expect(duplicate).toBeNull();
+    expect(useContactsStore.getState().contacts).toEqual([
+      expect.objectContaining({
+        name: 'Karan Singh',
+        address: karanAddress,
+        createdAt: 1000,
+        updatedAt: 1000,
+      }),
+    ]);
+
+    const edited = useContactsStore.getState().upsertContact({
+      name: 'Karan',
+      address: karanAddress,
+      editingAddress: karanAddress,
+    });
+
+    expect(edited).toMatchObject({ name: 'Karan', address: karanAddress });
     expect(useContactsStore.getState().contacts).toEqual([
       expect.objectContaining({
         name: 'Karan',
@@ -120,5 +144,39 @@ describe('contactsStore', () => {
     });
     expect(useContactsStore.getState().usageByWalletAddress[walletAddress]).toBeUndefined();
     expect(useContactsStore.getState().recentClearedAtByWalletAddress[walletAddress]).toBe(1000);
+  });
+
+  it('dismisses one recent recipient until it is used again', () => {
+    useContactsStore
+      .getState()
+      .markRecipientUsed({ walletAddress, recipientAddress: karanAddress, usedAt: 10 });
+    useContactsStore
+      .getState()
+      .markRecipientUsed({ walletAddress, recipientAddress: ninaAddress, usedAt: 20 });
+
+    useContactsStore.getState().dismissRecentRecipient(walletAddress, karanAddress);
+
+    expect(useContactsStore.getState().usageByWalletAddress[walletAddress]).toEqual({
+      [ninaAddress]: { count: 1, lastUsedAt: 20 },
+    });
+    expect(
+      useContactsStore.getState().hiddenRecentRecipientsByWalletAddress[walletAddress]?.[
+        karanAddress
+      ],
+    ).toBe(1000);
+
+    jest.spyOn(Date, 'now').mockReturnValue(3000);
+    useContactsStore
+      .getState()
+      .markRecipientUsed({ walletAddress, recipientAddress: karanAddress });
+
+    expect(
+      useContactsStore.getState().hiddenRecentRecipientsByWalletAddress[walletAddress]?.[
+        karanAddress
+      ],
+    ).toBeUndefined();
+    expect(useContactsStore.getState().usageByWalletAddress[walletAddress]?.[karanAddress]).toEqual(
+      { count: 1, lastUsedAt: 3000 },
+    );
   });
 });

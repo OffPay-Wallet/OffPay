@@ -230,6 +230,7 @@ interface ResolvedRecipientView {
 function addRecipientUsageFallback(
   usageByAddress: Record<string, ContactUsageStats>,
   explicitUsageAddresses: ReadonlySet<string>,
+  hiddenByAddress: Readonly<Record<string, number>>,
   address: string | null | undefined,
   usedAt: number | null | undefined,
 ): void {
@@ -237,6 +238,9 @@ function addRecipientUsageFallback(
   if (candidate.kind !== 'address' || explicitUsageAddresses.has(candidate.address)) return;
 
   const timestamp = typeof usedAt === 'number' && Number.isFinite(usedAt) ? usedAt : 0;
+  const hiddenAt = hiddenByAddress[candidate.address] ?? 0;
+  if (hiddenAt > 0 && timestamp <= hiddenAt) return;
+
   const current = usageByAddress[candidate.address] ?? { count: 0, lastUsedAt: 0 };
   usageByAddress[candidate.address] = {
     count: current.count + 1,
@@ -318,8 +322,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const recentClearedAtByWalletAddress = useContactsStore(
     (state) => state.recentClearedAtByWalletAddress,
   );
+  const hiddenRecentRecipientsByWalletAddress = useContactsStore(
+    (state) => state.hiddenRecentRecipientsByWalletAddress,
+  );
   const markRecipientUsed = useContactsStore((state) => state.markRecipientUsed);
   const clearRecentUsage = useContactsStore((state) => state.clearRecentUsage);
+  const dismissRecentRecipient = useContactsStore((state) => state.dismissRecentRecipient);
   const offlineReceipts = useOfflinePaymentStore((state) => state.receipts);
   const addOfflineReceipt = useOfflinePaymentStore((state) => state.addReceipt);
   const clearOfflineRecipientHistory = useOfflinePaymentStore(
@@ -984,22 +992,45 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     selectedToken,
     selectedTokenUnitUsdPrice,
   ]);
+  const contactRecipients = useMemo<RecentRecipientOption[]>(() => {
+    const usageByAddress = walletAddress == null ? null : usageByWalletAddress[walletAddress];
+    return contacts.slice(0, 3).map((contact) => {
+      const usage = usageByAddress?.[contact.address];
+      return {
+        address: contact.address,
+        name: contact.name,
+        usedAt: Math.max(contact.updatedAt, usage?.lastUsedAt ?? 0),
+        useCount: usage?.count ?? 0,
+        isContact: true,
+      };
+    });
+  }, [contacts, usageByWalletAddress, walletAddress]);
   const recentRecipientUsageByAddress = useMemo(() => {
     if (walletAddress == null) return null;
 
     const explicitUsage = usageByWalletAddress[walletAddress] ?? {};
-    const explicitUsageAddresses = new Set(Object.keys(explicitUsage));
-    const usageByAddress: Record<string, ContactUsageStats> = { ...explicitUsage };
+    const hiddenByAddress = hiddenRecentRecipientsByWalletAddress[walletAddress] ?? {};
+    const usageByAddress: Record<string, ContactUsageStats> = {};
     const clearedAt = Math.max(
       recentClearedAtByWalletAddress[walletAddress] ?? 0,
       offlineRecipientHistoryClearedAtByWallet[walletAddress] ?? 0,
     );
+
+    for (const [address, stats] of Object.entries(explicitUsage)) {
+      const hiddenAt = hiddenByAddress[address] ?? 0;
+      if (stats.lastUsedAt <= clearedAt || (hiddenAt > 0 && stats.lastUsedAt <= hiddenAt)) {
+        continue;
+      }
+      usageByAddress[address] = stats;
+    }
+    const explicitUsageAddresses = new Set(Object.keys(usageByAddress));
 
     for (const receipt of privateReceipts) {
       if (receipt.walletAddress !== walletAddress || receipt.createdAt <= clearedAt) continue;
       addRecipientUsageFallback(
         usageByAddress,
         explicitUsageAddresses,
+        hiddenByAddress,
         receipt.recipient,
         receipt.createdAt,
       );
@@ -1011,6 +1042,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       addRecipientUsageFallback(
         usageByAddress,
         explicitUsageAddresses,
+        hiddenByAddress,
         receipt.recipient,
         receipt.updatedAt ?? receipt.createdAt,
       );
@@ -1018,6 +1050,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
 
     return usageByAddress;
   }, [
+    hiddenRecentRecipientsByWalletAddress,
     offlineReceipts,
     offlineRecipientHistoryClearedAtByWallet,
     privateReceipts,
@@ -1030,10 +1063,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       contacts,
       usageByAddress: recentRecipientUsageByAddress,
       walletAddress,
-      limit: 5,
-    });
+      limit: 50,
+    })
+      .filter((item) => !item.isContact)
+      .slice(0, 5);
   }, [contacts, recentRecipientUsageByAddress, walletAddress]);
-  const canClearRecentRecipients = recentRecipients.some((item) => item.useCount > 0);
+  const canClearRecentRecipients = recentRecipients.length > 0;
   const closeToHome = useCallback(() => {
     Keyboard.dismiss();
     // Prefer dismissing the pushed send route back to the tabs. If this
@@ -1321,6 +1356,18 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       handleRecipientChange(address);
     },
     [handleRecipientChange],
+  );
+  const handleDismissRecentRecipient = useCallback(
+    (address: string) => {
+      if (walletAddress == null) return;
+      dismissRecentRecipient(walletAddress, address);
+      showToast({
+        title: 'Recent recipient removed',
+        message: shortenWalletAddress(address),
+        variant: 'success',
+      });
+    },
+    [dismissRecentRecipient, showToast, walletAddress],
   );
 
   const handleAddRecipientContact = useCallback(
@@ -2311,6 +2358,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       recipient={recipient}
       helper={recipientHelper}
       clipboardRecipient={clipboardRecipient}
+      contactRecipients={contactRecipients}
       recentRecipients={recentRecipients}
       isOfflineMode={effectiveWalletMode === 'offline'}
       showAddContact={showAddRecipientContact}
@@ -2320,6 +2368,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       onAddRecipientContact={handleAddRecipientContact}
       onUseClipboard={handleUseClipboardRecipient}
       onSelectRecent={handleSelectRecentRecipient}
+      onDismissRecent={handleDismissRecentRecipient}
       onClearRecent={handleClearRecentRecipients}
       onScanQr={handleScanRecipient}
       onScanNearby={handleOpenNearbyWalletScanner}

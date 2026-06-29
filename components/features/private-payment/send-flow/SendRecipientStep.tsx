@@ -15,6 +15,7 @@ interface SendRecipientStepProps {
   recipient: string;
   helper: string | null;
   clipboardRecipient: string | null;
+  contactRecipients: RecentRecipientOption[];
   recentRecipients: RecentRecipientOption[];
   isOfflineMode: boolean;
   showAddContact: boolean;
@@ -24,6 +25,7 @@ interface SendRecipientStepProps {
   onAddRecipientContact: (address?: string) => void;
   onUseClipboard: () => void;
   onSelectRecent: (address: string) => void;
+  onDismissRecent: (address: string) => void;
   onClearRecent: () => void;
   onScanQr: () => void;
   onScanNearby: () => void;
@@ -42,6 +44,7 @@ export function SendRecipientStep({
   recipient,
   helper,
   clipboardRecipient,
+  contactRecipients,
   recentRecipients,
   isOfflineMode,
   showAddContact,
@@ -51,6 +54,7 @@ export function SendRecipientStep({
   onAddRecipientContact,
   onUseClipboard,
   onSelectRecent,
+  onDismissRecent,
   onClearRecent,
   onScanQr,
   onScanNearby,
@@ -178,11 +182,49 @@ export function SendRecipientStep({
         </Animated.View>
       ) : null}
 
+      {contactRecipients.length > 0 ? (
+        <View style={styles.recentBlock}>
+          <View style={styles.recentHeader}>
+            <Text variant="bodyBold" color={colors.text.secondary} numberOfLines={1}>
+              Contacts
+            </Text>
+          </View>
+          <View style={styles.recentList}>
+            {contactRecipients.map((item) => (
+              <View key={item.address} style={styles.recentRow}>
+                <Pressable
+                  style={({ pressed }) => [styles.recentSelectArea, pressed && styles.pressed]}
+                  onPress={() => onSelectRecent(item.address)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${shortenWalletAddress(item.address)}`}
+                >
+                  <View style={styles.recentText}>
+                    <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
+                      {item.name ?? shortenWalletAddress(item.address)}
+                    </Text>
+                    <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+                      {shortenWalletAddress(item.address)}
+                    </Text>
+                  </View>
+                </Pressable>
+                {item.useCount > 0 ? (
+                  <View style={styles.usagePill}>
+                    <Text variant="small" color={colors.text.primary} style={styles.usagePillText}>
+                      {item.useCount}x
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
       {recentRecipients.length > 0 ? (
         <View style={styles.recentBlock}>
           <View style={styles.recentHeader}>
             <Text variant="bodyBold" color={colors.text.secondary} numberOfLines={1}>
-              Contacts & Recent
+              Recent
             </Text>
             {showClearRecent ? (
               <Pressable
@@ -209,38 +251,35 @@ export function SendRecipientStep({
                 >
                   <View style={styles.recentText}>
                     <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
-                      {item.name ?? shortenWalletAddress(item.address)}
+                      {shortenWalletAddress(item.address)}
                     </Text>
                     <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
-                      {item.name != null
-                        ? shortenWalletAddress(item.address)
-                        : item.useCount > 0
-                          ? `Used ${item.useCount}x`
-                          : 'Saved contact'}
+                      {item.useCount > 0 ? `Used ${item.useCount}x` : 'Recent wallet'}
                     </Text>
                   </View>
                 </Pressable>
-                {!item.isContact ? (
-                  <Pressable
-                    style={({ pressed }) => [styles.saveContactButton, pressed && styles.pressed]}
-                    onPress={() => onAddRecipientContact(item.address)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Save ${shortenWalletAddress(item.address)} as contact`}
-                    hitSlop={6}
-                  >
-                    <PuffyAddContactIcon
-                      size={24}
-                      color={colors.brand.glossAccent}
-                      shadowColor={colors.text.primary}
-                    />
-                  </Pressable>
-                ) : item.name != null && item.useCount > 0 ? (
-                  <View style={styles.usagePill}>
-                    <Text variant="small" color={colors.text.primary} style={styles.usagePillText}>
-                      {item.useCount}x
-                    </Text>
-                  </View>
-                ) : null}
+                <Pressable
+                  style={({ pressed }) => [styles.saveContactButton, pressed && styles.pressed]}
+                  onPress={() => onAddRecipientContact(item.address)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Save ${shortenWalletAddress(item.address)} as contact`}
+                  hitSlop={6}
+                >
+                  <PuffyAddContactIcon
+                    size={24}
+                    color={colors.brand.glossAccent}
+                    shadowColor={colors.text.primary}
+                  />
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.dismissRecentButton, pressed && styles.pressed]}
+                  onPress={() => onDismissRecent(item.address)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${shortenWalletAddress(item.address)} from recent`}
+                  hitSlop={6}
+                >
+                  <Ionicons name="close" size={18} color={colors.text.secondary} />
+                </Pressable>
               </View>
             ))}
           </View>
@@ -413,6 +452,21 @@ const styles = StyleSheet.create({
   saveContactButton: {
     width: 42,
     height: 42,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.textBacking,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  dismissRecentButton: {
+    width: 36,
+    height: 36,
     borderRadius: radii.full,
     borderCurve: 'continuous',
     borderTopWidth: 1,

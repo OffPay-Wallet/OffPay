@@ -43,6 +43,7 @@ import {
   type AgenticChatAction,
   type AgenticChatMessage,
   type AgenticConversation,
+  type AgenticPrivateSendAction,
   useAgenticChatStore,
 } from '@/store/agenticChatStore';
 import { useAppStore } from '@/store/app';
@@ -59,7 +60,10 @@ import { AgenticActionDraftSheet } from './AgenticActionDraftSheet';
 import { isAgenticDraftSheetAction } from './AgenticActionCard';
 import { CHAT_DRAWER_MAX_WIDTH, PROMPT_DOCK_COLLAPSED_BASE_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
-import { PayrollChatController } from '@/components/features/payroll/PayrollChatController';
+import {
+  PayrollChatController,
+  type PayrollOutcomeAnnouncement,
+} from '@/components/features/payroll/PayrollChatController';
 import { PayrollColumnMapSheet } from '@/components/features/payroll/PayrollColumnMapSheet';
 import { PayrollPasteSheet } from '@/components/features/payroll/PayrollPasteSheet';
 import { usePayrollChatIntake } from '@/hooks/payroll/usePayrollChatIntake';
@@ -81,6 +85,7 @@ import { revealAssistantMessageText } from '@/hooks/agentic-chat/revealAssistant
 import { createAgenticId } from './helpers';
 
 import type { PayrollStageOutcome } from '@/hooks/payroll/usePayrollChatIntake';
+import type { PayrollRoutePolicy } from '@/lib/payroll/payroll-types';
 
 function payrollActionId(runId: string): string {
   return `payroll-action-${runId}`;
@@ -369,6 +374,8 @@ export function ChatScreen(): React.JSX.Element {
   // Outcome read-aloud. Speaks short, sanitized status lines after a send or
   // batch-send run resolves. Silent-fail and privacy-gated inside the hook.
   const speech = useAgenticSpeech();
+  const speakAgentSpeech = speech.speak;
+  const stopAgentSpeech = speech.stop;
   const voiceLanguageRef = useRef<string | null>(null);
 
   const { submit, busy: agentBusy } = useAgenticAgentSubmit({
@@ -441,6 +448,9 @@ export function ChatScreen(): React.JSX.Element {
     capabilities: capabilitiesQuery.capabilities,
     canUseNetwork,
   });
+  const pickPayrollFile = payrollIntake.pickFile;
+  const refreshPayrollRoutes = payrollIntake.refreshRoutes;
+  const updatePayrollRoutePolicy = payrollIntake.updateRoutePolicy;
   // Ref so the agent-submit callback (declared earlier) can trigger intake
   // without a declaration-order cycle.
   payrollIntakeRef.current = payrollIntake;
@@ -572,7 +582,7 @@ export function ChatScreen(): React.JSX.Element {
         walletId: activeWalletId,
         network: scope.network,
       });
-      await payrollIntake.refreshRoutes();
+      await refreshPayrollRoutes();
       showToast({
         title: 'Umbra setup complete',
         message: 'Batch send routes were refreshed.',
@@ -585,7 +595,7 @@ export function ChatScreen(): React.JSX.Element {
   }, [
     activeWalletId,
     mixerRegisterMutation,
-    payrollIntake,
+    refreshPayrollRoutes,
     scope.network,
     scope.walletAddress,
     showToast,
@@ -676,6 +686,8 @@ export function ChatScreen(): React.JSX.Element {
       showToast({ title: 'Voice', message, variant: 'error' });
     },
   });
+  const voiceState = voice.state;
+  const toggleVoice = voice.toggle;
 
   const handleBack = useCallback(() => {
     const target =
@@ -787,6 +799,63 @@ export function ChatScreen(): React.JSX.Element {
     if (!hasScrollableConversationContent) return;
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [hasScrollableConversationContent]);
+  const handleOpenChatHistory = useCallback(() => {
+    setChatDrawerOpen(true);
+  }, []);
+  const handleCloseChatHistory = useCallback(() => {
+    setChatDrawerOpen(false);
+  }, []);
+  const handleConfirmPrivateSend = useCallback(
+    (action: AgenticChatAction) => {
+      void confirmPrivateSend(action);
+    },
+    [confirmPrivateSend],
+  );
+  const handleChangePrivateSendRoute = useCallback(
+    (action: AgenticPrivateSendAction, route: AgenticPrivateSendAction['route']) => {
+      void changePrivateSendRoute(action, route);
+    },
+    [changePrivateSendRoute],
+  );
+  const handlePayrollRoutePolicyChange = useCallback(
+    (policy: PayrollRoutePolicy) => {
+      void updatePayrollRoutePolicy(policy);
+    },
+    [updatePayrollRoutePolicy],
+  );
+  const handleSpeakPayrollOutcome = useCallback(
+    (phrase: string) => {
+      void speakAgentSpeech(phrase, { payrollMode: true });
+    },
+    [speakAgentSpeech],
+  );
+  const handleAnnouncePayrollOutcome = useCallback(
+    (outcome: PayrollOutcomeAnnouncement) => {
+      void addPayrollAssistantMessage({
+        kind: 'outcome',
+        status: outcome.status,
+        totalCount: outcome.progress.total,
+        sentCount: outcome.progress.done,
+        failedCount: outcome.progress.failed,
+        blockedCount: outcome.progress.blocked,
+        claimsPending: outcome.claimsPending,
+        network: outcome.network,
+      });
+    },
+    [addPayrollAssistantMessage],
+  );
+  const handleUploadPayrollFile = useCallback(() => {
+    void pickPayrollFile().then((result) => {
+      if (result != null) announcePayrollStageOutcome(result);
+    });
+  }, [announcePayrollStageOutcome, pickPayrollFile]);
+  const handleOpenPayrollPaste = useCallback(() => {
+    setPayrollPasteOpen(true);
+  }, []);
+  const handleVoicePress = useCallback(() => {
+    if (voiceState === 'idle') stopAgentSpeech();
+    toggleVoice();
+  }, [stopAgentSpeech, toggleVoice, voiceState]);
 
   return (
     <View style={headerStyles.container}>
@@ -794,7 +863,7 @@ export function ChatScreen(): React.JSX.Element {
         topInset={insets.top}
         horizontalPadding={horizontalPadding}
         onBack={handleBack}
-        onOpenHistory={() => setChatDrawerOpen(true)}
+        onOpenHistory={handleOpenChatHistory}
       />
 
       <View style={headerStyles.chatBody}>
@@ -868,37 +937,18 @@ export function ChatScreen(): React.JSX.Element {
             <ChatMessageList
               messages={scopedMessages}
               actionsById={actionsById}
-              onConfirmPrivateSend={(action) => {
-                void confirmPrivateSend(action);
-              }}
+              onConfirmPrivateSend={handleConfirmPrivateSend}
               onCancelPrivateSend={cancelPrivateSend}
-              onChangePrivateSendRoute={(action, route) => {
-                void changePrivateSendRoute(action, route);
-              }}
+              onChangePrivateSendRoute={handleChangePrivateSendRoute}
               activePayrollRunId={payrollIntake.activeRunId}
               walletId={activeWalletId}
               payrollSummary={payrollIntake.summary}
               payrollSetupBusy={mixerRegisterMutation.isPending}
               onSetupPayrollUmbra={handleSetupUmbraForPayroll}
-              onRefreshPayrollRoutes={payrollIntake.refreshRoutes}
-              onPayrollRoutePolicyChange={(policy) => {
-                void payrollIntake.updateRoutePolicy(policy);
-              }}
-              onSpeakPayrollOutcome={(phrase) => {
-                void speech.speak(phrase, { payrollMode: true });
-              }}
-              onAnnouncePayrollOutcome={(outcome) => {
-                void addPayrollAssistantMessage({
-                  kind: 'outcome',
-                  status: outcome.status,
-                  totalCount: outcome.progress.total,
-                  sentCount: outcome.progress.done,
-                  failedCount: outcome.progress.failed,
-                  blockedCount: outcome.progress.blocked,
-                  claimsPending: outcome.claimsPending,
-                  network: outcome.network,
-                });
-              }}
+              onRefreshPayrollRoutes={refreshPayrollRoutes}
+              onPayrollRoutePolicyChange={handlePayrollRoutePolicyChange}
+              onSpeakPayrollOutcome={handleSpeakPayrollOutcome}
+              onAnnouncePayrollOutcome={handleAnnouncePayrollOutcome}
             />
           ) : null}
 
@@ -910,26 +960,11 @@ export function ChatScreen(): React.JSX.Element {
                 summary={payrollIntake.activeRunId != null ? payrollIntake.summary : null}
                 onSetupUmbra={handleSetupUmbraForPayroll}
                 onRefreshRoutes={
-                  payrollIntake.activeRunId != null ? payrollIntake.refreshRoutes : undefined
+                  payrollIntake.activeRunId != null ? refreshPayrollRoutes : undefined
                 }
-                onRoutePolicyChange={(policy) => {
-                  void payrollIntake.updateRoutePolicy(policy);
-                }}
-                onSpeakOutcome={(phrase) => {
-                  void speech.speak(phrase, { payrollMode: true });
-                }}
-                onAnnounceOutcome={(outcome) => {
-                  void addPayrollAssistantMessage({
-                    kind: 'outcome',
-                    status: outcome.status,
-                    totalCount: outcome.progress.total,
-                    sentCount: outcome.progress.done,
-                    failedCount: outcome.progress.failed,
-                    blockedCount: outcome.progress.blocked,
-                    claimsPending: outcome.claimsPending,
-                    network: outcome.network,
-                  });
-                }}
+                onRoutePolicyChange={handlePayrollRoutePolicyChange}
+                onSpeakOutcome={handleSpeakPayrollOutcome}
+                onAnnounceOutcome={handleAnnouncePayrollOutcome}
                 setupBusy={mixerRegisterMutation.isPending}
               />
             </View>
@@ -949,29 +984,22 @@ export function ChatScreen(): React.JSX.Element {
           onLayout={handlePromptDockLayout}
           onChangeText={setPrompt}
           onSubmit={handleSubmit}
-          onUpload={() => {
-            void payrollIntake.pickFile().then((result) => {
-              if (result != null) announcePayrollStageOutcome(result);
-            });
-          }}
-          onUploadLongPress={() => setPayrollPasteOpen(true)}
-          onPastePayroll={() => setPayrollPasteOpen(true)}
+          onUpload={handleUploadPayrollFile}
+          onUploadLongPress={handleOpenPayrollPaste}
+          onPastePayroll={handleOpenPayrollPaste}
           uploadBusy={payrollIntake.busy}
           voice={{
             state: voice.state,
             transcript: voice.transcript,
             level: voice.level,
-            onPress: () => {
-              if (voice.state === 'idle') speech.stop();
-              voice.toggle();
-            },
+            onPress: handleVoicePress,
             onAccept: voice.accept,
             onCancel: voice.cancel,
           }}
           speech={{
             state: speech.state,
             muted: speech.muted,
-            onStop: speech.stop,
+            onStop: stopAgentSpeech,
             onToggleMuted: speech.toggleMuted,
           }}
         />
@@ -982,13 +1010,9 @@ export function ChatScreen(): React.JSX.Element {
         bottomOffset={draftSheetBottomOffset}
         horizontalPadding={horizontalPadding}
         maxHeight={draftSheetMaxHeight}
-        onConfirm={(action) => {
-          void confirmPrivateSend(action);
-        }}
+        onConfirm={handleConfirmPrivateSend}
         onCancel={cancelPrivateSend}
-        onRouteChange={(action, route) => {
-          void changePrivateSendRoute(action, route);
-        }}
+        onRouteChange={handleChangePrivateSendRoute}
       />
 
       <PayrollPasteSheet
@@ -1029,7 +1053,7 @@ export function ChatScreen(): React.JSX.Element {
         width={Math.min(CHAT_DRAWER_MAX_WIDTH, Math.round(windowWidth * 0.88))}
         topInset={insets.top}
         bottomInset={insets.bottom}
-        onClose={() => setChatDrawerOpen(false)}
+        onClose={handleCloseChatHistory}
         onNewChat={handleNewChat}
         onOpenConversation={handleOpenConversation}
         onDeleteConversation={handleDeleteConversation}

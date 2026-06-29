@@ -94,7 +94,7 @@ function AgentStreamContent({ text }: { text: string }): React.JSX.Element {
   );
 }
 
-export function ChatMessageBubble({
+function ChatMessageBubbleComponent({
   message,
   action,
   onConfirmPrivateSend,
@@ -246,3 +246,44 @@ export function ChatMessageBubble({
     </Animated.View>
   );
 }
+
+function isPayrollAction(action: AgenticChatAction | undefined): boolean {
+  return action?.kind === 'payroll';
+}
+
+function areChatMessageBubblePropsEqual(
+  previous: ChatMessageBubbleProps,
+  next: ChatMessageBubbleProps,
+): boolean {
+  if (previous.message !== next.message || previous.action !== next.action) return false;
+
+  const action = next.action;
+  if (isAgenticTransactionAction(action)) {
+    return (
+      previous.onConfirmPrivateSend === next.onConfirmPrivateSend &&
+      previous.onCancelPrivateSend === next.onCancelPrivateSend &&
+      previous.onChangePrivateSendRoute === next.onChangePrivateSendRoute
+    );
+  }
+
+  if (isPayrollAction(action)) {
+    return (
+      previous.activePayrollRunId === next.activePayrollRunId &&
+      previous.walletId === next.walletId &&
+      previous.payrollSummary === next.payrollSummary &&
+      previous.payrollSetupBusy === next.payrollSetupBusy &&
+      previous.onSetupPayrollUmbra === next.onSetupPayrollUmbra &&
+      previous.onRefreshPayrollRoutes === next.onRefreshPayrollRoutes &&
+      previous.onPayrollRoutePolicyChange === next.onPayrollRoutePolicyChange &&
+      previous.onSpeakPayrollOutcome === next.onSpeakPayrollOutcome &&
+      previous.onAnnouncePayrollOutcome === next.onAnnouncePayrollOutcome
+    );
+  }
+
+  return true;
+}
+
+export const ChatMessageBubble = React.memo(
+  ChatMessageBubbleComponent,
+  areChatMessageBubblePropsEqual,
+);
