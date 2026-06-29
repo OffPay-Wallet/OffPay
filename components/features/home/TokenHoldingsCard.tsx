@@ -5,7 +5,6 @@
  *   - API token logos when available
  *   - 5-decimal token amounts
  *   - verified ticks from API/provider metadata
- *   - a market price line (symbol · unit price · 24h change) per token
  *   - an inline micro price chart (sparkline) sourced from the existing
  *     24H price-history hook, colored by the 24h change direction
  *   - real token valuation labels when price data is available
@@ -18,8 +17,6 @@ import { TokenSparkline } from '@/components/features/home/TokenSparkline';
 import {
   resolveBalanceLabel,
   resolveFiatValueLabel,
-  resolveUnitPriceAmount,
-  shouldShowPercentChange,
 } from '@/components/features/home/token-row-format';
 import { FiatMoneyText } from '@/components/ui/FiatMoneyText';
 import { SlotText } from '@/components/ui/SlotText';
@@ -30,7 +27,8 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 import { useOffpayTokenPriceHistory } from '@/hooks/useOffpayTokenPriceHistory';
-import { formatPercentChange, toneColor } from '@/lib/ui/token-change-format';
+import { formatFiatCurrency } from '@/lib/currency-rates';
+import { toneColor } from '@/lib/ui/token-change-format';
 
 import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
 import type { OffpayTokenHoldingView } from '@/lib/api/offpay-wallet-data';
@@ -64,6 +62,19 @@ interface TokenHoldingsCardProps {
 // Flat card treatment — single ambient shadow for lift on dark surfaces.
 // Inset shadows are invisible on Android and cause extra GPU blur passes.
 const HEADER_CONTAINER_SHADOW = '0 10px 22px rgba(0, 0, 0, 0.4)';
+
+function formatSignedTokenValueChange(value: number, currency: string): string {
+  const normalized = Object.is(value, -0) ? 0 : value;
+  if (!Number.isFinite(normalized)) return '--';
+
+  const absolute = Math.abs(normalized);
+  const sign = normalized > 0 ? '+' : normalized < 0 ? '-' : '';
+  if (absolute > 0 && absolute < 0.01) {
+    return `${sign}<${formatFiatCurrency(0.01, currency)}`;
+  }
+
+  return `${sign}${formatFiatCurrency(absolute, currency)}`;
+}
 
 // ---------------------------------------------------------------------------
 // Responsive sizing
@@ -138,10 +149,10 @@ const TokenRow = memo(function TokenRow({
   const showValuationSkeleton = valuationLoading && !privacyHidden;
   const amountLabel = resolveBalanceLabel(privacyHidden, holding.balance, holding.symbol);
   const fiatValueLabel = resolveFiatValueLabel(privacyHidden, valuation?.fiatValueLabel);
-  // Market price line data is public — never masked by privacy mode.
-  const unitPriceAmount = resolveUnitPriceAmount(
-    valuation?.unitPriceLabel ?? priceHistory.data?.unitPriceLabel,
-  );
+  const tokenValueChangeLabel =
+    !privacyHidden && change != null
+      ? formatSignedTokenValueChange(change.absolute * holding.balanceValue, currency)
+      : null;
 
   const { iconSize, tokenInfoBasis, sparklineMinWidth, sparklineHeight, valueColumnWidth } =
     rowMetrics(compact, dense);
@@ -204,40 +215,23 @@ const TokenRow = memo(function TokenRow({
             />
           ) : null}
         </View>
-        <View style={styles.priceLine}>
+        <View style={styles.balanceLine}>
           <Text
             variant="small"
             color={colors.text.secondary}
-            style={styles.symbolText}
+            style={[
+              styles.balanceText,
+              compact && styles.balanceTextCompact,
+              dense && styles.balanceTextDense,
+            ]}
             numberOfLines={1}
+            ellipsizeMode="tail"
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
             maxFontSizeMultiplier={1}
           >
-            {holding.symbol}
+            {amountLabel}
           </Text>
-          {unitPriceAmount != null ? (
-            <Text
-              color={colors.text.primary}
-              style={[styles.priceText, dense && styles.priceTextDense]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              adjustsFontSizeToFit
-              minimumFontScale={0.7}
-              maxFontSizeMultiplier={1}
-            >
-              {unitPriceAmount}
-            </Text>
-          ) : null}
-          {shouldShowPercentChange(change) ? (
-            <Text
-              variant="small"
-              color={toneColor(change.tone)}
-              style={styles.changePercent}
-              numberOfLines={1}
-              maxFontSizeMultiplier={1}
-            >
-              {formatPercentChange(change.percent)}
-            </Text>
-          ) : null}
         </View>
       </View>
 
@@ -288,22 +282,24 @@ const TokenRow = memo(function TokenRow({
                 maxFontSizeMultiplier={1}
               />
             </SlotText>
-            <Text
-              variant="small"
-              color={colors.text.secondary}
-              style={[
-                styles.balanceText,
-                compact && styles.balanceTextCompact,
-                dense && styles.balanceTextDense,
-              ]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              adjustsFontSizeToFit
-              minimumFontScale={0.62}
-              maxFontSizeMultiplier={1}
-            >
-              {amountLabel}
-            </Text>
+            {tokenValueChangeLabel != null ? (
+              <Text
+                variant="small"
+                color={toneColor(change?.tone ?? 'neutral')}
+                style={[
+                  styles.valueChangeText,
+                  compact && styles.valueChangeTextCompact,
+                  dense && styles.valueChangeTextDense,
+                ]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                maxFontSizeMultiplier={1}
+              >
+                {tokenValueChangeLabel}
+              </Text>
+            ) : null}
           </>
         )}
       </View>
@@ -669,31 +665,10 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
 
-  /* Market price line */
-  priceLine: {
+  balanceLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
     minWidth: 0,
-  },
-  symbolText: {
-    fontFamily: fontFamily.uiMedium,
-    flexShrink: 0,
-  },
-  priceText: {
-    fontFamily: fontFamily.money,
-    fontSize: 13,
-    lineHeight: 17,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  priceTextDense: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  changePercent: {
-    fontFamily: fontFamily.uiSemiBold,
-    flexShrink: 0,
   },
 
   skeletonSubline: {
@@ -726,17 +701,32 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   balanceText: {
-    fontFamily: fontFamily.moneyLight,
+    fontFamily: fontFamily.uiMedium,
     minWidth: 0,
+    flexShrink: 1,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  balanceTextCompact: {
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  balanceTextDense: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  valueChangeText: {
+    fontFamily: fontFamily.uiSemiBold,
     fontSize: 12,
     lineHeight: 16,
     alignSelf: 'flex-end',
+    minWidth: 0,
   },
-  balanceTextCompact: {
+  valueChangeTextCompact: {
     fontSize: 11,
     lineHeight: 15,
   },
-  balanceTextDense: {
+  valueChangeTextDense: {
     fontSize: 10,
     lineHeight: 14,
   },

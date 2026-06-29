@@ -10,8 +10,8 @@ const EMAIL_TEST_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 // "$5000", or "12 SOL". General chat ("you have 5000 USDC") is rewritten
 // rather than blocked, so the assistant can still speak naturally without
 // reciting exact payroll figures aloud.
-const TOKEN_AMOUNT_PATTERN = /\b\d[\d,]*(?:\.\d+)?\s?(?:USDC|USDT|SOL)\b/gi;
-const TOKEN_AMOUNT_TEST_PATTERN = /\b\d[\d,]*(?:\.\d+)?\s?(?:USDC|USDT|SOL)\b/i;
+const TOKEN_AMOUNT_PATTERN = /\b\d[\d,]*(?:\.\d+)?\s?(?:dUSDC|dUSDT|USDC|USDT|SOL)\b/gi;
+const TOKEN_AMOUNT_TEST_PATTERN = /\b\d[\d,]*(?:\.\d+)?\s?(?:dUSDC|dUSDT|USDC|USDT|SOL)\b/i;
 const CURRENCY_AMOUNT_PATTERN = /(?:\$|USD\s?)\d[\d,]*(?:\.\d+)?\b/gi;
 const CURRENCY_AMOUNT_TEST_PATTERN = /(?:\$|USD\s?)\d[\d,]*(?:\.\d+)?\b/i;
 
@@ -22,6 +22,7 @@ export interface CloudTtsSanitizeOptions {
    * any flow where speaking exact totals aloud is undesirable.
    */
   payrollMode?: boolean;
+  suppressAmounts?: boolean;
 }
 
 export function sanitizeTextForCloudTts(
@@ -33,7 +34,7 @@ export function sanitizeTextForCloudTts(
     .replace(SOLANA_OR_TX_PATTERN, '[wallet reference]')
     .replace(PRECISE_AMOUNT_PATTERN, '[exact amount]');
 
-  if (options.payrollMode === true) {
+  if (options.payrollMode === true || options.suppressAmounts === true) {
     sanitized = sanitized
       .replace(CURRENCY_AMOUNT_PATTERN, '[amount]')
       .replace(TOKEN_AMOUNT_PATTERN, '[amount]');
@@ -56,7 +57,7 @@ export function canUseCloudTtsForText(
     return false;
   }
   if (
-    options.payrollMode === true &&
+    (options.payrollMode === true || options.suppressAmounts === true) &&
     (TOKEN_AMOUNT_TEST_PATTERN.test(sanitized) || CURRENCY_AMOUNT_TEST_PATTERN.test(sanitized))
   ) {
     return false;

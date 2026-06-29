@@ -190,7 +190,7 @@ export function corsHeaders(request: Request, env: AiProxyEnv): HeadersInit {
     'access-control-allow-origin': allowOrigin,
     'access-control-allow-methods': 'GET,POST,OPTIONS',
     'access-control-allow-headers':
-      'content-type,accept,x-offpay-language-hint,x-offpay-request-id,x-offpay-ai-session',
+      'content-type,accept,x-offpay-language-hint,x-offpay-request-id,x-offpay-ai-session,x-offpay-ai-turn-id',
     'access-control-max-age': '86400',
     vary: 'Origin',
   };

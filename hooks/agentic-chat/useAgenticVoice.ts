@@ -33,6 +33,8 @@ import { transcribeAgentVoice } from '@/lib/agentic-payments/ai-proxy-client';
 import { isAbortError } from '@/lib/perf/abort';
 import { beginAppLockSuppression } from '@/lib/wallet/app-lock-suppression';
 
+import { normalizeVoiceTranscript } from './voiceTranscript';
+
 export type AgenticVoiceState = 'idle' | 'recording' | 'transcribing' | 'review';
 
 export interface UseAgenticVoiceParams {
@@ -85,60 +87,6 @@ function normalizeMetering(metering: number | undefined): number {
   if (metering == null || Number.isNaN(metering)) return 0;
   const clamped = Math.max(METERING_FLOOR_DB, Math.min(0, metering));
   return (clamped - METERING_FLOOR_DB) / -METERING_FLOOR_DB;
-}
-
-// ---- Transcript post-processing --------------------------------------------
-
-/**
- * Known abbreviations that STT engines commonly spell out letter-by-letter.
- * Keys are the spaced-out form (case-insensitive), values are the canonical
- * replacement. Order matters — longer matches first to avoid partial hits.
- */
-const SPELLED_OUT_FIXES: [RegExp, string][] = [
-  // Crypto tokens / currencies
-  [/\bU\s+S\s+D\s+C\b/gi, 'USDC'],
-  [/\bU\s+S\s+D\s+T\b/gi, 'USDT'],
-  [/\bS\s+O\s+L\b/gi, 'SOL'],
-  [/\bU\s+S\s+D\b/gi, 'USD'],
-  [/\bE\s+T\s+H\b/gi, 'ETH'],
-  [/\bB\s+T\s+C\b/gi, 'BTC'],
-  [/\bN\s+F\s+T\b/gi, 'NFT'],
-  // General
-  [/\bO\s+T\s+P\b/gi, 'OTP'],
-  [/\bU\s+P\s+I\b/gi, 'UPI'],
-  [/\bU\s+R\s+L\b/gi, 'URL'],
-  [/\bQ\s+R\b/gi, 'QR'],
-];
-
-/**
- * Common STT mis-hearings for crypto terms.
- */
-const WORD_FIXES: [RegExp, string][] = [
-  // "soul" / "sole" → SOL (when preceded by a number or "send")
-  [/\b(\d+)\s+(?:soul|sole|saul)\b/gi, '$1 SOL'],
-  [/\b(send|transfer)\s+(\d+)\s+(?:soul|sole|saul)\b/gi, '$1 $2 SOL'],
-  // "you ess dee see" → USDC
-  [/\byou\s+ess\s+dee\s+see\b/gi, 'USDC'],
-  // "solana" is fine as-is, just ensure consistent casing
-  [/\bsolana\b/gi, 'Solana'],
-];
-
-/**
- * Post-process a transcript to fix common STT issues:
- * 1. Collapse spelled-out abbreviations (S O L → SOL)
- * 2. Fix common crypto mis-hearings
- * 3. Normalize whitespace
- */
-function normalizeVoiceTranscript(raw: string): string {
-  let text = raw;
-  for (const [pattern, replacement] of SPELLED_OUT_FIXES) {
-    text = text.replace(pattern, replacement);
-  }
-  for (const [pattern, replacement] of WORD_FIXES) {
-    text = text.replace(pattern, replacement);
-  }
-  // Collapse multiple spaces into one.
-  return text.replace(/\s{2,}/g, ' ').trim();
 }
 
 async function restorePlaybackAudioMode(): Promise<void> {

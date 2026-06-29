@@ -1,6 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef } from 'react';
 
+import {
+  prefetchAiChatCredits,
+  useAiChatCreditsBackgroundSync,
+} from '@/hooks/agentic-chat/useAiChatCredits';
 import { prefetchOffpayCapabilities } from '@/lib/api/offpay-capabilities-query';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -11,6 +15,7 @@ import {
 import { bootstrapOffpayRequestSecret } from '@/lib/bootstrap/offpay-bootstrap';
 import { unsupportedOffpayAttestationAdapter } from '@/lib/bootstrap/attestation';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
+import { getAgenticConversationScopeKey } from '@/store/agenticChatStore';
 import { useOffpayAuthStore } from '@/store/offpayAuthStore';
 import { useOffpayLaunchStore } from '@/store/offpayLaunchStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -43,6 +48,11 @@ export function OffpayBootstrapProvider({
     }
     return `${network}:${walletId}:${walletAddress}`;
   }, [canUseNetwork, network, walletAddress, walletId]);
+  const aiChatCreditScopeKey = useMemo(() => {
+    if (!canUseNetwork || network == null || walletAddress == null) return null;
+    return getAgenticConversationScopeKey({ walletAddress, network });
+  }, [canUseNetwork, network, walletAddress]);
+  useAiChatCreditsBackgroundSync(aiChatCreditScopeKey);
 
   useEffect(() => {
     if (identity == null) return undefined;
@@ -88,6 +98,19 @@ export function OffpayBootstrapProvider({
       requestOwner: 'bootstrap.capabilities',
     });
   }, [canUseNetwork, network, queryClient]);
+
+  useEffect(() => {
+    if (aiChatCreditScopeKey == null) return;
+
+    const controller = new AbortController();
+    void prefetchAiChatCredits(aiChatCreditScopeKey, { signal: controller.signal }).catch(
+      () => undefined,
+    );
+
+    return () => {
+      controller.abort('bootstrap ai chat credit scope changed');
+    };
+  }, [aiChatCreditScopeKey]);
 
   useEffect(() => {
     if (!canUseNetwork || network == null || walletId == null || walletAddress == null) {

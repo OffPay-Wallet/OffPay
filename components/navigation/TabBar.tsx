@@ -297,9 +297,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const recordTabSwitch = useTabHistoryStore((s) => s.recordTabSwitch);
   const [offlineSwapNoticeVisible, setOfflineSwapNoticeVisible] = useState(false);
   const [fabMenuInteractive, setFabMenuInteractive] = useState(false);
-  const [optimisticActiveOriginalIndex, setOptimisticActiveOriginalIndex] = useState<number | null>(
-    null,
-  );
   const lastVisibleTabIndexRef = useRef(state.index);
   const fabExpandedRef = useRef(false);
   const fabTouchHandledRef = useRef(false);
@@ -318,7 +315,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const visualActiveOriginalIndex = tabBarHidden
     ? lastVisibleTabIndexRef.current
-    : (optimisticActiveOriginalIndex ?? committedActiveIndex);
+    : committedActiveIndex;
+  // Keep selected visuals tied to the navigator's committed state. Moving the
+  // pill optimistically on press-in lets the bar outrun lazy screen commits.
   const visualActivePrimaryIndex = primaryRoutes.findIndex(
     (entry) => entry.originalIndex === visualActiveOriginalIndex,
   );
@@ -350,13 +349,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     if (tabBarHidden) return;
     lastVisibleTabIndexRef.current = committedActiveIndex;
   }, [committedActiveIndex, tabBarHidden]);
-
-  useEffect(() => {
-    if (optimisticActiveOriginalIndex == null) return;
-    if (tabBarHidden || optimisticActiveOriginalIndex === committedActiveIndex) {
-      setOptimisticActiveOriginalIndex(null);
-    }
-  }, [committedActiveIndex, optimisticActiveOriginalIndex, tabBarHidden]);
 
   useEffect(() => {
     if (tabBarHidden && fabExpandedRef.current) {
@@ -502,19 +494,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   );
 
   const primePrimaryTabFeedback = useCallback(
-    (primaryIndex: number, originalIndex: number) => {
-      setOptimisticActiveOriginalIndex((current) =>
-        current === originalIndex ? current : originalIndex,
-      );
-      activePrimaryIndexValue.value = primaryIndex;
-      activePillTranslateX.value = withSpring(
-        primaryIndex * tabSlotWidth + pillInsetX,
-        TAB_PILL_SLIDE_SPRING,
-      );
+    () => {
       activePillFeedback.value = TAB_PILL_PRESS_SCALE;
       activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
     },
-    [activePillFeedback, activePillTranslateX, activePrimaryIndexValue, pillInsetX, tabSlotWidth],
+    [activePillFeedback],
   );
 
   const recordTabSwitchAfterNavigation = useCallback(
@@ -557,9 +541,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     });
 
     if (event.defaultPrevented) {
-      setOptimisticActiveOriginalIndex(null);
-      activePrimaryIndexValue.value = visualActivePrimaryIndex;
-      activePillTranslateX.value = withSpring(activePillX, TAB_PILL_SLIDE_SPRING);
       return;
     }
 
@@ -569,8 +550,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         recordTabSwitchAfterNavigation(committedActiveIndex, currentRoute.name);
       }
       navigation.navigate(route.name, route.params);
-    } else {
-      setOptimisticActiveOriginalIndex(null);
     }
   }
 
@@ -696,7 +675,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
                 onPressIn={() => {
-                  primePrimaryTabFeedback(primaryIndex, originalIndex);
+                  primePrimaryTabFeedback();
                 }}
                 onPress={() => handleTabPress(route, originalIndex)}
                 onLongPress={() => handlePrimaryTabLongPress(route)}

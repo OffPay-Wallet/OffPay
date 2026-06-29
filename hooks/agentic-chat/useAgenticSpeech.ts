@@ -30,6 +30,8 @@ export interface UseAgenticSpeechParams {
 export interface SpeakOutcomeOptions {
   /** Suppress plain token/currency amounts too (use for all payroll outcomes). */
   payrollMode?: boolean;
+  /** Suppress plain token/currency amounts in general agent replies. */
+  suppressAmounts?: boolean;
   languageHint?: string;
 }
 
@@ -107,7 +109,12 @@ export function useAgenticSpeech(params: UseAgenticSpeechParams = {}): UseAgenti
       // Privacy gate: refuse anything that still carries an address, exact
       // amount, or (in payroll mode) a plain token/currency amount. The text
       // status is already visible, so we simply stay silent.
-      if (!canUseCloudTtsForText(phrase, { payrollMode: options.payrollMode })) {
+      if (
+        !canUseCloudTtsForText(phrase, {
+          payrollMode: options.payrollMode,
+          suppressAmounts: options.suppressAmounts,
+        })
+      ) {
         return;
       }
 
@@ -127,6 +134,7 @@ export function useAgenticSpeech(params: UseAgenticSpeechParams = {}): UseAgenti
             signal: controller.signal,
             timeoutMs: SPEECH_TIMEOUT_MS,
             payrollMode: options.payrollMode,
+            suppressAmounts: options.suppressAmounts,
           },
         );
 

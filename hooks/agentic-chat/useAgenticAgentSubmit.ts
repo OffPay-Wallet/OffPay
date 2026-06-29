@@ -188,6 +188,9 @@ export function useAgenticAgentSubmit({
       const controller = new AbortController();
       abortRef.current = controller;
       setBusy(true);
+      // One visible prompt, typed or accepted from voice, gets one turn id.
+      // Hidden agent/tool continuations reuse it so they count as one credit.
+      const userTurnId = createAgenticId('ai-turn');
 
       const rawRequestMessages: AgentMessage[] = [...scopedMessages, userMessage]
         .filter((message) => message.text.trim().length > 0 && message.pending !== true)
@@ -227,6 +230,7 @@ export function useAgenticAgentSubmit({
         scopeKey,
         conversationId,
         assistantMessageId: assistantMessage.id,
+        userTurnId,
         sanitizedMessages: sanitizedRequest.messages,
         redactions: sanitizedRequest.redactions,
         userTextForTools,
@@ -293,6 +297,7 @@ interface RunAgentLoopParams {
   scopeKey: string;
   conversationId: string;
   assistantMessageId: string;
+  userTurnId: string;
   sanitizedMessages: AgentMessage[];
   redactions: Parameters<typeof runAgenticTools>[1]['redactions'];
   userTextForTools: string;
@@ -375,7 +380,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
           tokenSymbols: buildSafeTokenSymbols(params.balance),
         },
       },
-      { signal: params.controller.signal },
+      { signal: params.controller.signal, userTurnId: params.userTurnId },
     );
 
     if (params.controller.signal.aborted) return;

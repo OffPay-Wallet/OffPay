@@ -35,6 +35,7 @@ import { useAgenticAgentSubmit } from '@/hooks/agentic-chat/useAgenticAgentSubmi
 import { useAgenticChatScope } from '@/hooks/agentic-chat/useAgenticChatScope';
 import { useAgenticConfirmSend } from '@/hooks/agentic-chat/useAgenticConfirmSend';
 import { useAgenticPendingSweep } from '@/hooks/agentic-chat/useAgenticPendingSweep';
+import { useAiChatCredits } from '@/hooks/agentic-chat/useAiChatCredits';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { getAvailableAgenticChatCtaIds } from '@/lib/agentic-payments/agent-tools';
 import { buildAgentWalletBalanceResponse } from '@/lib/agentic-payments/safe-context';
@@ -86,6 +87,13 @@ import { createAgenticId } from './helpers';
 
 import type { PayrollStageOutcome } from '@/hooks/payroll/usePayrollChatIntake';
 import type { PayrollRoutePolicy } from '@/lib/payroll/payroll-types';
+import type { AiChatCreditStatus } from '@/lib/agentic-payments/types';
+
+interface ChatCreditIndicator {
+  label: string;
+  tone: 'ready' | 'low' | 'empty' | 'loading' | 'error';
+  resetLabel?: string | null;
+}
 
 function payrollActionId(runId: string): string {
   return `payroll-action-${runId}`;
@@ -100,8 +108,57 @@ function isCompletePortfolioValuation(
   );
 }
 
+function buildCreditIndicator(
+  credits: AiChatCreditStatus | null,
+  loading: boolean,
+  error: string | null,
+  nowMs: number,
+): ChatCreditIndicator | null {
+  if (credits == null) {
+    if (loading) {
+      return { label: AI_CREDITS_UNKNOWN_LABEL, tone: 'loading' };
+    }
+    if (error != null) {
+      return { label: AI_CREDITS_UNKNOWN_LABEL, tone: 'error' };
+    }
+    return null;
+  }
+
+  const resetElapsed = credits.remaining <= 0 && credits.resetAtMs <= nowMs;
+  const remaining = resetElapsed ? credits.limit : credits.remaining;
+  const tone: ChatCreditIndicator['tone'] =
+    remaining <= 0 ? 'empty' : remaining <= 1 ? 'low' : 'ready';
+
+  return {
+    label: `${remaining}/${credits.limit}`,
+    tone,
+    resetLabel: remaining <= 0 ? formatCompactCreditResetLabel(credits.resetAtMs, nowMs) : null,
+  };
+}
+
+function formatCreditResetLabel(resetAtMs: number, nowMs: number): string {
+  const remainingMs = Math.max(0, resetAtMs - nowMs);
+  if (remainingMs <= 1_000) return 'now';
+
+  const minutes = Math.ceil(remainingMs / 60_000);
+  if (minutes < 60) return `in ${minutes}m`;
+
+  const hours = Math.ceil(minutes / 60);
+  return `in ${hours}h`;
+}
+
+function formatCompactCreditResetLabel(resetAtMs: number, nowMs: number): string {
+  return formatCreditResetLabel(resetAtMs, nowMs).replace(/^in\s+/, '');
+}
+
+function formatHeaderCreditLabel(creditIndicator: ChatCreditIndicator | null): string {
+  if (creditIndicator == null) return AI_CREDITS_UNKNOWN_LABEL;
+  return creditIndicator.label;
+}
+
 const EMPTY_CHAT_MESSAGES: readonly AgenticChatMessage[] = [];
 const EMPTY_CHAT_ACTIONS: readonly AgenticChatAction[] = [];
+const AI_CREDITS_UNKNOWN_LABEL = '--/5';
 
 export function ChatScreen(): React.JSX.Element {
   const router = useRouter();
@@ -124,6 +181,7 @@ export function ChatScreen(): React.JSX.Element {
   });
   const { scope, scopeKey } = useAgenticChatScope();
   useAgenticPendingSweep(scope);
+  const aiCredits = useAiChatCredits(scopeKey);
 
   const setActiveConversation = useAgenticChatStore((s) => s.setActiveConversation);
   const deleteConversation = useAgenticChatStore((s) => s.deleteConversation);
@@ -153,6 +211,7 @@ export function ChatScreen(): React.JSX.Element {
   const [payrollReplyPendingRunIds, setPayrollReplyPendingRunIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [creditClockMs, setCreditClockMs] = useState(Date.now());
   // Declared early so the agent-submit callback can reach payroll intake
   // without a declaration-order cycle; assigned once intake is created.
   const payrollIntakeRef = useRef<ReturnType<typeof usePayrollChatIntake> | null>(null);
@@ -161,6 +220,8 @@ export function ChatScreen(): React.JSX.Element {
   );
   const announcedPayrollRunIdsRef = useRef<Set<string>>(new Set());
   const payrollReplyControllersRef = useRef<Set<AbortController>>(new Set());
+  const previousCreditRemainingRef = useRef<number | null>(null);
+  const emptyCreditToastKeyRef = useRef<string | null>(null);
   const inputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
   /** True when the last submitted message originated from voice input. */
@@ -177,6 +238,65 @@ export function ChatScreen(): React.JSX.Element {
   // The composer is an overlay so the empty-state layout stays stable. Use the
   // measured dock height so multiline input and voice states never cover replies.
   const bottomPadding = keyboardOffset + reservedPromptDockHeight + spacing['2xl'];
+  const creditsExhausted =
+    aiCredits.credits != null &&
+    aiCredits.credits.remaining <= 0 &&
+    aiCredits.credits.resetAtMs > creditClockMs;
+  const creditIndicator = useMemo(
+    () =>
+      buildCreditIndicator(aiCredits.credits, aiCredits.loading, aiCredits.error, creditClockMs),
+    [aiCredits.credits, aiCredits.error, aiCredits.loading, creditClockMs],
+  );
+
+  useEffect(() => {
+    if (aiCredits.credits == null || aiCredits.credits.remaining > 0) return;
+
+    const interval = setInterval(() => {
+      setCreditClockMs(Date.now());
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [aiCredits.credits]);
+
+  const showCreditsBlockedToast = useCallback(() => {
+    const resetLabel =
+      aiCredits.credits == null
+        ? 'Try again after the credit window resets.'
+        : `Resets ${formatCreditResetLabel(aiCredits.credits.resetAtMs, Date.now())}.`;
+    showToast({
+      title: 'Yuga credits used',
+      message: resetLabel,
+      variant: 'warning',
+      notificationId: `ai-chat-credits-empty-${aiCredits.credits?.resetAtMs ?? 'unknown'}`,
+    });
+  }, [aiCredits.credits, showToast]);
+
+  useEffect(() => {
+    if (!creditsExhausted || aiCredits.credits == null) return;
+    const toastKey = `${aiCredits.credits.resetAtMs}`;
+    if (emptyCreditToastKeyRef.current === toastKey) return;
+    emptyCreditToastKeyRef.current = toastKey;
+    showCreditsBlockedToast();
+  }, [aiCredits.credits, creditsExhausted, showCreditsBlockedToast]);
+
+  useEffect(() => {
+    const currentRemaining = aiCredits.credits?.remaining ?? null;
+    const previousRemaining = previousCreditRemainingRef.current;
+    previousCreditRemainingRef.current = currentRemaining;
+
+    if (
+      previousRemaining === 0 &&
+      aiCredits.credits != null &&
+      aiCredits.credits.remaining >= aiCredits.credits.limit
+    ) {
+      emptyCreditToastKeyRef.current = null;
+      showToast({
+        title: 'Yuga credits reset',
+        message: `${aiCredits.credits.limit}/${aiCredits.credits.limit} credits are available.`,
+        variant: 'success',
+        notificationId: `ai-chat-credits-reset-${scopeKey}`,
+      });
+    }
+  }, [aiCredits.credits, scopeKey, showToast]);
 
   const activeConversationId = useAgenticChatStore(
     (s) => s.activeConversationIdByScope[scopeKey] ?? null,
@@ -420,7 +540,7 @@ export function ChatScreen(): React.JSX.Element {
           language ? `[lang: ${language}]` : '',
         );
       }
-      void speech.speak(text, { languageHint: language });
+      void speech.speak(text, { languageHint: language, suppressAmounts: true });
     },
   });
 
@@ -668,21 +788,37 @@ export function ChatScreen(): React.JSX.Element {
   const handleSubmit = useCallback(() => {
     const trimmed = prompt.trim();
     if (trimmed.length === 0 || agentBusy) return;
+    if (creditsExhausted) {
+      showCreditsBlockedToast();
+      return;
+    }
     voiceInputRef.current = false;
+    voiceLanguageRef.current = null;
     setPrompt('');
     submit(trimmed);
-  }, [agentBusy, prompt, submit]);
+  }, [agentBusy, creditsExhausted, prompt, showCreditsBlockedToast, submit]);
 
   const voice = useAgenticVoice({
-    onTranscript: (transcript, _detectedLanguage) => {
+    onTranscript: (transcript, detectedLanguage) => {
       if (agentBusy) {
         // Don't trample an in-flight turn; seed the input for the user.
+        voiceInputRef.current = false;
+        voiceLanguageRef.current = null;
         setPrompt(transcript);
         inputRef.current?.focus();
         return;
       }
+      if (creditsExhausted) {
+        voiceInputRef.current = false;
+        voiceLanguageRef.current = null;
+        setPrompt(transcript);
+        inputRef.current?.focus();
+        showCreditsBlockedToast();
+        return;
+      }
       voiceInputRef.current = true;
-      submit(transcript);
+      voiceLanguageRef.current = detectedLanguage ?? null;
+      submit(transcript, detectedLanguage);
     },
     onError: (message) => {
       showToast({ title: 'Voice', message, variant: 'error' });
@@ -765,7 +901,7 @@ export function ChatScreen(): React.JSX.Element {
     showToast,
   ]);
 
-  const canSubmit = prompt.trim().length > 0 && !agentBusy;
+  const canSubmit = prompt.trim().length > 0 && !agentBusy && !creditsExhausted;
   const draftSheetBottomOffset = draftSheetOpen
     ? Math.max(insets.bottom, spacing.lg)
     : keyboardOffset + reservedPromptDockHeight + spacing.sm;
@@ -785,11 +921,16 @@ export function ChatScreen(): React.JSX.Element {
   const handleCtaPrompt = useCallback(
     (nextPrompt: string) => {
       if (agentBusy) return;
+      if (creditsExhausted) {
+        showCreditsBlockedToast();
+        return;
+      }
       voiceInputRef.current = false;
+      voiceLanguageRef.current = null;
       setPrompt('');
       submit(nextPrompt);
     },
-    [agentBusy, submit],
+    [agentBusy, creditsExhausted, showCreditsBlockedToast, submit],
   );
   const handlePromptDockLayout = useCallback((event: LayoutChangeEvent) => {
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
@@ -909,6 +1050,25 @@ export function ChatScreen(): React.JSX.Element {
               >
                 {displayName}
               </Text>
+              <Text
+                selectable
+                color={
+                  creditIndicator?.tone === 'empty' ? colors.semantic.error : colors.text.secondary
+                }
+                style={[
+                  headerStyles.welcomeCredits,
+                  creditIndicator?.tone === 'low' && headerStyles.welcomeCreditsLow,
+                  creditIndicator?.tone === 'empty' && headerStyles.welcomeCreditsEmpty,
+                ]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                maxFontSizeMultiplier={1.05}
+              >
+                {formatHeaderCreditLabel(creditIndicator)} credits left
+                {creditIndicator?.resetLabel != null
+                  ? ` · resets ${creditIndicator.resetLabel}`
+                  : ''}
+              </Text>
             </View>
           </View>
 
@@ -925,7 +1085,7 @@ export function ChatScreen(): React.JSX.Element {
               <ChatCtaCards
                 ctaIds={availableCtaIds}
                 compact={compact}
-                disabled={agentBusy || payrollIntake.busy}
+                disabled={agentBusy || payrollIntake.busy || creditsExhausted}
                 onSelect={handleCtaPrompt}
               />
             </View>

@@ -95,6 +95,19 @@ export const headerStyles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 32,
   },
+  welcomeCredits: {
+    marginTop: 2,
+    fontFamily: fontFamily.ui,
+    fontSize: 13,
+    lineHeight: 17,
+    fontVariant: ['tabular-nums'],
+  },
+  welcomeCreditsLow: {
+    color: colors.semantic.warning,
+  },
+  welcomeCreditsEmpty: {
+    color: colors.semantic.error,
+  },
   intro: {
     marginTop: spacing.xl,
     marginBottom: spacing.xl,

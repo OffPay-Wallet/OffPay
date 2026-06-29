@@ -27,7 +27,8 @@ function loadVoiceClient(): {
   const fileSystem = require('expo-file-system') as ExpoFileSystemMock;
   fileSystem.__INTERNAL_RESET?.();
 
-  const client = require('@/lib/agentic-payments/ai-proxy-client') as typeof import('@/lib/agentic-payments/ai-proxy-client');
+  const client =
+    require('@/lib/agentic-payments/ai-proxy-client') as typeof import('@/lib/agentic-payments/ai-proxy-client');
   return {
     fileSystem,
     transcribeAgentVoice: client.transcribeAgentVoice,
@@ -76,6 +77,10 @@ describe('transcribeAgentVoice native file uploads', () => {
         }),
       }),
     );
+    const uploadOptions = fileSystem.__INTERNAL_UPLOAD_MOCK.mock.calls[0]?.[2] as
+      | { headers?: Record<string, string> }
+      | undefined;
+    expect(uploadOptions?.headers).not.toHaveProperty('x-offpay-ai-turn-id');
   });
 
   it('normalizes native upload error responses', async () => {

@@ -4,7 +4,7 @@
  * setup-invite-gate.js
  *
  * One-time setup script for the OffPay invite-gate MongoDB collections.
- * Creates `invite_codes` and `invite_access` collections with required indexes.
+ * Creates `invite_codes`, `invite_access`, and `ai_chat_usage` collections with required indexes.
  *
  * Usage:
  *   MONGODB_URI='mongodb+srv://...' node scripts/setup-invite-gate.js
@@ -135,11 +135,27 @@ async function main() {
     console.log('  ✓ idx_email_device_status (email + device_id_hash + status)');
 
     // -----------------------------------------------------------------------
+    // ai_chat_usage collection
+    // -----------------------------------------------------------------------
+    console.log('\nSetting up ai_chat_usage collection...');
+
+    const aiChatUsage = db.collection('ai_chat_usage');
+
+    await aiChatUsage.createIndex(
+      { subject_type: 1, subject_key: 1 },
+      { unique: true, name: 'idx_subject_unique' },
+    );
+    console.log('  ✓ idx_subject_unique (unique on subject_type + subject_key)');
+
+    await aiChatUsage.createIndex({ reset_at: 1 }, { name: 'idx_reset_at' });
+    console.log('  ✓ idx_reset_at (reset_at)');
+
+    // -----------------------------------------------------------------------
     // Summary
     // -----------------------------------------------------------------------
     console.log('\n✅ Invite gate setup complete.');
     console.log(`   Database: ${DATABASE}`);
-    console.log('   Collections: invite_codes, invite_access');
+    console.log('   Collections: invite_codes, invite_access, ai_chat_usage');
     console.log('\nNext steps:');
     console.log('  1. Generate invite codes:');
     console.log(

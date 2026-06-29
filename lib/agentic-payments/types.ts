@@ -166,11 +166,25 @@ export type AgentChatDoneEvent = {
   responseId: string;
 };
 
+export type AiChatCreditSubjectType = 'wallet' | 'fallback';
+
+export type AiChatCreditStatus = {
+  kind: 'ai_chat_credits';
+  limit: number;
+  used: number;
+  remaining: number;
+  resetAtMs: number;
+  windowMs: number;
+  subjectType: AiChatCreditSubjectType;
+  retryAfterMs?: number;
+};
+
 export type AgentProxyErrorEvent = {
   kind: 'error';
   code: string;
   message: string;
   retryAfterMs?: number;
+  credits?: AiChatCreditStatus;
 };
 
 export type AgentChatEvent =

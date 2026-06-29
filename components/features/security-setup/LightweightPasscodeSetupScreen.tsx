@@ -3,7 +3,6 @@ import { BackHandler, StyleSheet, Text as RNText, useWindowDimensions, View } fr
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CreateWalletScreenLayout } from '@/components/features/wallet-setup/CreateWalletScreenLayout';
 import { GlassActionButton } from '@/components/ui/GlassActionButton';
 import { LightweightKeypadButton } from '@/components/ui/LightweightKeypadButton';
 import { colors } from '@/constants/colors';
@@ -26,6 +25,58 @@ type PasscodeMode = 'create' | 'confirm' | 'unlockExisting';
 interface PasscodeSetupScreenProps {
   intent: SecuritySetupIntent;
   source: WalletFlowInviteSource;
+}
+
+interface PasscodeSetupDraft {
+  key: string;
+  mode: PasscodeMode;
+  entry: string;
+  firstPasscode: string;
+  setupTouched: boolean;
+  initialSettingsApplied: boolean;
+}
+
+let activeSetupDraft: PasscodeSetupDraft | null = null;
+
+function draftKeyFor(intent: SecuritySetupIntent, source: WalletFlowInviteSource): string {
+  return `${intent}:${source}`;
+}
+
+function readSetupDraft(
+  key: string,
+  cachedSettings: ReturnType<typeof getCachedSecuritySettings>,
+): PasscodeSetupDraft {
+  if (activeSetupDraft?.key === key) return activeSetupDraft;
+
+  activeSetupDraft = {
+    key,
+    mode: cachedSettings?.hasPasscode === true ? 'unlockExisting' : 'create',
+    entry: '',
+    firstPasscode: '',
+    setupTouched: false,
+    initialSettingsApplied: cachedSettings != null,
+  };
+  return activeSetupDraft;
+}
+
+function patchSetupDraft(key: string, patch: Partial<Omit<PasscodeSetupDraft, 'key'>>): void {
+  if (activeSetupDraft?.key !== key) {
+    activeSetupDraft = {
+      key,
+      mode: 'create',
+      entry: '',
+      firstPasscode: '',
+      setupTouched: false,
+      initialSettingsApplied: false,
+    };
+  }
+  activeSetupDraft = { ...activeSetupDraft, ...patch };
+}
+
+function clearSetupDraft(key: string): void {
+  if (activeSetupDraft?.key === key) {
+    activeSetupDraft = null;
+  }
 }
 
 function SimpleDot({ filled, size }: { filled: boolean; size: number }): React.JSX.Element {
@@ -66,6 +117,12 @@ export function PasscodeSetupScreen({
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
   const cachedSettings = getCachedSecuritySettings();
+  const draftKey = draftKeyFor(intent, source);
+  const initialDraftRef = useRef<PasscodeSetupDraft | null>(null);
+  if (initialDraftRef.current?.key !== draftKey) {
+    initialDraftRef.current = readSetupDraft(draftKey, cachedSettings);
+  }
+  const initialDraft = initialDraftRef.current;
   const passcodeLayout = useMemo(
     () =>
       getPasscodeResponsiveLayout({
@@ -80,37 +137,27 @@ export function PasscodeSetupScreen({
   );
   const keypadGap = passcodeLayout.keypadGap;
 
-  const [mode, setMode] = useState<PasscodeMode>(() =>
-    cachedSettings?.hasPasscode === true ? 'unlockExisting' : 'create',
-  );
-  const [entry, setEntry] = useState('');
+  const [mode, setMode] = useState<PasscodeMode>(() => initialDraft.mode);
+  const [entry, setEntry] = useState(() => initialDraft.entry);
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // Accept keypad input immediately. The security-settings read is async
-  // and, on a cold cache (e.g. first-launch onboarding), resolves a few
-  // hundred ms after mount — long enough that an eager first tap would be
-  // dropped, making the entry appear to reset. We no longer gate input on
-  // it; the authoritative mode is resolved when an entry completes (see
-  // handleCompletedEntry).
-  const [settingsReady, setSettingsReady] = useState(true);
   const [processingEntry, setProcessingEntry] = useState(false);
 
-  const modeRef = useRef<PasscodeMode>(
-    cachedSettings?.hasPasscode === true ? 'unlockExisting' : 'create',
-  );
-  const entryRef = useRef('');
-  const firstPasscodeRef = useRef('');
-  const setupTouchedRef = useRef(false);
+  const modeRef = useRef<PasscodeMode>(initialDraft.mode);
+  const entryRef = useRef(initialDraft.entry);
+  const firstPasscodeRef = useRef(initialDraft.firstPasscode);
+  const setupTouchedRef = useRef(initialDraft.setupTouched);
   const completingEntryRef = useRef(false);
-  const initialSettingsAppliedRef = useRef(cachedSettings != null);
+  const initialSettingsAppliedRef = useRef(initialDraft.initialSettingsApplied);
 
   useEffect(() => {
     if (source !== 'accounts') return;
+    clearSetupDraft(draftKey);
     router.replace({
       pathname: walletRouteForIntent(intent),
       params: { source: 'accounts' },
     });
-  }, [intent, source]);
+  }, [draftKey, intent, source]);
 
   const keyFrameStyle = useMemo(
     () => ({
@@ -127,13 +174,33 @@ export function PasscodeSetupScreen({
 
   const setModeValue = useCallback((nextMode: PasscodeMode): void => {
     modeRef.current = nextMode;
+    patchSetupDraft(draftKey, { mode: nextMode });
     setMode(nextMode);
-  }, []);
+  }, [draftKey]);
 
   const setEntryValue = useCallback((nextEntry: string): void => {
     entryRef.current = nextEntry;
+    patchSetupDraft(draftKey, { entry: nextEntry });
     setEntry(nextEntry);
-  }, []);
+  }, [draftKey]);
+
+  const setFirstPasscodeValue = useCallback(
+    (nextPasscode: string): void => {
+      firstPasscodeRef.current = nextPasscode;
+      patchSetupDraft(draftKey, { firstPasscode: nextPasscode });
+    },
+    [draftKey],
+  );
+
+  const markSetupTouched = useCallback((): void => {
+    setupTouchedRef.current = true;
+    patchSetupDraft(draftKey, { setupTouched: true });
+  }, [draftKey]);
+
+  const markInitialSettingsApplied = useCallback((): void => {
+    initialSettingsAppliedRef.current = true;
+    patchSetupDraft(draftKey, { initialSettingsApplied: true });
+  }, [draftKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,8 +215,7 @@ export function PasscodeSetupScreen({
         ) {
           setModeValue(settings.hasPasscode ? 'unlockExisting' : 'create');
         }
-        initialSettingsAppliedRef.current = true;
-        setSettingsReady(true);
+        markInitialSettingsApplied();
       })
       .catch(() => {
         if (cancelled) return;
@@ -161,18 +227,17 @@ export function PasscodeSetupScreen({
         ) {
           setModeValue('create');
         }
-        initialSettingsAppliedRef.current = true;
-        setSettingsReady(true);
+        markInitialSettingsApplied();
       });
     return () => {
       cancelled = true;
     };
-  }, [setEntryValue, setModeValue]);
+  }, [markInitialSettingsApplied, setModeValue]);
 
   useEffect(() => {
-    if (!settingsReady || mode !== 'unlockExisting') return;
+    if (mode !== 'unlockExisting') return;
     void preloadPasscodeMaterial();
-  }, [mode, settingsReady]);
+  }, [mode]);
 
   useEffect(() => {
     if (toast == null) return;
@@ -188,11 +253,12 @@ export function PasscodeSetupScreen({
       setProcessingEntry(false);
       setModeValue('create');
       setEntryValue('');
-      firstPasscodeRef.current = '';
+      setFirstPasscodeValue('');
       setToast(null);
       return;
     }
 
+    clearSetupDraft(draftKey);
     if (intent === 'privy-wallet') {
       router.replace({
         pathname: '/onboarding',
@@ -206,11 +272,21 @@ export function PasscodeSetupScreen({
       return;
     }
 
+    clearSetupDraft(draftKey);
     router.replace({
       pathname: '/onboarding',
       params: { source },
     });
-  }, [intent, processingEntry, saving, setEntryValue, setModeValue, source]);
+  }, [
+    draftKey,
+    intent,
+    processingEntry,
+    saving,
+    setEntryValue,
+    setFirstPasscodeValue,
+    setModeValue,
+    source,
+  ]);
 
   useEffect(() => {
     if (mode !== 'confirm') return;
@@ -246,12 +322,10 @@ export function PasscodeSetupScreen({
           } catch {
             setModeValue('create');
           } finally {
-            initialSettingsAppliedRef.current = true;
-            setSettingsReady(true);
+            markInitialSettingsApplied();
           }
         } else if (!initialSettingsAppliedRef.current) {
-          initialSettingsAppliedRef.current = true;
-          setSettingsReady(true);
+          markInitialSettingsApplied();
         }
 
         const activeMode = modeRef.current;
@@ -261,6 +335,7 @@ export function PasscodeSetupScreen({
           try {
             const ok = await verifyPasscode(nextEntry);
             if (ok) {
+              clearSetupDraft(draftKey);
               nextRoute(intent, source);
             } else {
               setToast('Incorrect wallet password.');
@@ -276,7 +351,7 @@ export function PasscodeSetupScreen({
         }
 
         if (activeMode === 'create') {
-          firstPasscodeRef.current = nextEntry;
+          setFirstPasscodeValue(nextEntry);
           setEntryValue('');
           setModeValue('confirm');
           setToast(null);
@@ -293,6 +368,7 @@ export function PasscodeSetupScreen({
         try {
           await setPasscode(nextEntry);
           await setWalletLocked(false);
+          clearSetupDraft(draftKey);
           nextRoute(intent, source);
         } catch {
           setToast('Could not save the wallet password.');
@@ -305,7 +381,15 @@ export function PasscodeSetupScreen({
         setProcessingEntry(false);
       }
     },
-    [intent, setEntryValue, setModeValue, source],
+    [
+      draftKey,
+      intent,
+      markInitialSettingsApplied,
+      setEntryValue,
+      setFirstPasscodeValue,
+      setModeValue,
+      source,
+    ],
   );
 
   const handleDigit = useCallback(
@@ -315,29 +399,29 @@ export function PasscodeSetupScreen({
       const currentEntry = entryRef.current;
       if (currentEntry.length >= 6) return;
 
-      setupTouchedRef.current = true;
+      markSetupTouched();
       const nextEntry = `${currentEntry}${digit}`;
       setEntryValue(nextEntry);
       if (nextEntry.length === 6) {
         void handleCompletedEntry(nextEntry);
       }
     },
-    [handleCompletedEntry, processingEntry, saving, setEntryValue, source],
+    [handleCompletedEntry, markSetupTouched, processingEntry, saving, setEntryValue, source],
   );
 
   const handleDelete = useCallback((): void => {
     if (source === 'accounts') return;
     if (saving || processingEntry || completingEntryRef.current) return;
-    setupTouchedRef.current = true;
+    markSetupTouched();
     setEntryValue(entryRef.current.slice(0, -1));
-  }, [processingEntry, saving, setEntryValue, source]);
+  }, [markSetupTouched, processingEntry, saving, setEntryValue, source]);
 
   const handleClear = useCallback((): void => {
     if (source === 'accounts') return;
     if (saving || processingEntry || completingEntryRef.current) return;
-    setupTouchedRef.current = true;
+    markSetupTouched();
     setEntryValue('');
-  }, [processingEntry, saving, setEntryValue, source]);
+  }, [markSetupTouched, processingEntry, saving, setEntryValue, source]);
 
   const content = useMemo(() => {
     if (mode === 'unlockExisting') {
@@ -388,9 +472,17 @@ export function PasscodeSetupScreen({
   }
 
   return (
-    <CreateWalletScreenLayout
-      header={<View />}
-      center={
+    <View
+      style={[
+        styles.screen,
+        {
+          paddingTop: insets.top + passcodeLayout.verticalPadding,
+          paddingBottom: Math.max(insets.bottom + spacing.sm, spacing.lg),
+          paddingHorizontal: passcodeLayout.horizontalPadding,
+        },
+      ]}
+    >
+      <View style={styles.body}>
         <View
           style={[
             styles.centerBlock,
@@ -441,7 +533,7 @@ export function PasscodeSetupScreen({
                         key={key}
                         frameStyle={keyFrameStyle}
                         onPress={handleClear}
-                        disabled={entry.length === 0 || !settingsReady}
+                        disabled={entry.length === 0 || saving || processingEntry}
                         muted={entry.length === 0}
                         activateOnPressIn
                         accessibilityRole="button"
@@ -458,7 +550,7 @@ export function PasscodeSetupScreen({
                         key={key}
                         frameStyle={keyFrameStyle}
                         onPress={handleDelete}
-                        disabled={entry.length === 0 || !settingsReady}
+                        disabled={entry.length === 0 || saving || processingEntry}
                         muted={entry.length === 0}
                         activateOnPressIn
                         accessibilityRole="button"
@@ -474,7 +566,7 @@ export function PasscodeSetupScreen({
                       key={key}
                       frameStyle={keyFrameStyle}
                       onPress={digitHandlers[key as keyof typeof digitHandlers]}
-                      disabled={!settingsReady}
+                      disabled={saving || processingEntry}
                       activateOnPressIn
                       accessibilityRole="keyboardkey"
                       accessibilityLabel={`Digit ${key}`}
@@ -483,31 +575,30 @@ export function PasscodeSetupScreen({
                     </LightweightKeypadButton>
                   );
                 })}
-              </View>
+            </View>
             ))}
           </View>
         </View>
-      }
-      footer={
-        <View style={styles.footer}>
-          <View style={styles.toastSlot}>
-            {toast != null ? (
-              <View style={styles.toast}>
-                <RNText style={styles.toastText}>{toast}</RNText>
-              </View>
-            ) : null}
-          </View>
-          <GlassActionButton
-            label="Back"
-            onPress={handleBack}
-            variant="secondary"
-            size="compact"
-            disabled={saving || processingEntry}
-            accessibilityLabel={mode === 'confirm' ? 'Back to passcode setup' : 'Back'}
-          />
+      </View>
+
+      <View style={[styles.footer, { maxWidth: passcodeLayout.contentMaxWidth }]}>
+        <View style={styles.toastSlot}>
+          {toast != null ? (
+            <View style={styles.toast}>
+              <RNText style={styles.toastText}>{toast}</RNText>
+            </View>
+          ) : null}
         </View>
-      }
-    />
+        <GlassActionButton
+          label="Back"
+          onPress={handleBack}
+          variant="secondary"
+          size="compact"
+          disabled={saving || processingEntry}
+          accessibilityLabel={mode === 'confirm' ? 'Back to passcode setup' : 'Back'}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -515,6 +606,19 @@ const styles = StyleSheet.create({
   redirectScreen: {
     flex: 1,
     backgroundColor: colors.brand.glassTint,
+  },
+  screen: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: colors.brand.glassTint,
+    alignItems: 'center',
+  },
+  body: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   centerBlock: {
     width: '100%',
@@ -566,6 +670,8 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   footer: {
+    width: '100%',
+    alignSelf: 'center',
     gap: spacing.md,
   },
   toastSlot: {

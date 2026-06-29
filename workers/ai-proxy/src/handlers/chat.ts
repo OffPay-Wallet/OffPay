@@ -7,12 +7,15 @@ import {
   validateChatRequest,
   validateIntentChatRequest,
 } from '../schemas/requests';
+import { applyAiChatCreditHeaders } from '../chat-credits';
 import type { AgentChatRequest, AgentIntentResult, AgentTurn, AiProxyEnv } from '../types';
+import type { AiChatCreditStatus } from '../chat-credits';
 
 export async function handleChat(
   request: Request,
   env: AiProxyEnv,
   cors: HeadersInit,
+  context: { credits?: AiChatCreditStatus } = {},
 ): Promise<Response> {
   const body = await readJson<AgentChatRequest>(request, maxChatBytes(env));
   const mode = body.responseMode ?? 'agent_turn';
@@ -20,13 +23,23 @@ export async function handleChat(
   if (mode === 'intent_json') {
     validateIntentChatRequest(body);
     const safeBody = sanitizeChatRequestForProvider(body);
-    return jsonResponse({ intent: await generateIntent(safeBody, env) }, 200, cors);
+    return chatJsonResponse(
+      { intent: await generateIntent(safeBody, env) },
+      200,
+      cors,
+      context.credits,
+    );
   }
 
   if (mode === 'agent_turn') {
     validateAgentTurnRequest(body);
     const safeBody = sanitizeChatRequestForProvider(body);
-    return jsonResponse({ turn: await generateAgentTurn(safeBody, env) }, 200, cors);
+    return chatJsonResponse(
+      { turn: await generateAgentTurn(safeBody, env) },
+      200,
+      cors,
+      context.credits,
+    );
   }
 
   // Legacy free-text path. Kept for backward compatibility — intent → text.
@@ -34,7 +47,7 @@ export async function handleChat(
   const safeBody = sanitizeChatRequestForProvider(body);
   const intent = await generateIntent(safeBody, env);
   const text = renderIntentAsFreeText(intent);
-  return jsonResponse(
+  return chatJsonResponse(
     {
       responses: [
         { kind: 'chat_delta', text: sanitizeProviderText(text) },
@@ -43,6 +56,7 @@ export async function handleChat(
     },
     200,
     cors,
+    context.credits,
   );
 }
 
@@ -119,4 +133,24 @@ function jsonRequestFromBody(request: Request, body: unknown): Request {
     headers,
     body: JSON.stringify(body),
   });
+}
+
+function chatJsonResponse(
+  body: Record<string, unknown>,
+  status: number,
+  cors: HeadersInit,
+  credits?: AiChatCreditStatus,
+): Response {
+  const response = jsonResponse(
+    credits == null
+      ? body
+      : {
+          ...body,
+          credits,
+        },
+    status,
+    cors,
+  );
+  applyAiChatCreditHeaders(response.headers, credits);
+  return response;
 }

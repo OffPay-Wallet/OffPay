@@ -158,6 +158,10 @@ export type AiProxyEnv = {
   AI_PROXY_TTS_ENABLED?: string;
   AI_PROXY_RATE_LIMIT_WINDOW_MS?: string;
   AI_PROXY_RATE_LIMIT_MAX?: string;
+  OFFPAY_API_AI_CREDITS?: {
+    getStatus(payload: unknown): Promise<unknown>;
+    consume(payload: unknown): Promise<unknown>;
+  };
   /**
    * Shared secret used to verify the OffPay AI session token. Issued by
    * the OffPay backend (or pre-shared via Wrangler) and held by the

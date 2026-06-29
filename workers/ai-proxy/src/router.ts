@@ -6,15 +6,25 @@ import {
   errorStatus,
   isOriginAllowed,
   jsonResponse,
+  maxChatBytes,
   normalizeError,
+  readJson,
 } from './http';
 import { assertAiProxyRateLimit } from './rate-limit';
+import {
+  aiChatCreditLimitResponse,
+  applyAiChatCreditHeaders,
+  consumeAiChatCredit,
+  getAiChatCreditStatus,
+} from './chat-credits';
 import { verifyOffpayAiSessionToken } from './auth/session-token';
 import type { AiProxyEnv } from './types';
+import type { AiChatCreditStatus } from './chat-credits';
 
 interface SessionTokenGateResult {
   ok: boolean;
   walletSubject?: string;
+  deviceId?: string;
   reason?: string;
 }
 
@@ -37,13 +47,43 @@ export default {
         );
       }
 
-      if (request.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/ai/health')) {
+      if (
+        request.method === 'GET' &&
+        (url.pathname === '/health' || url.pathname === '/api/ai/health')
+      ) {
         return handleHealth(env, cors);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/ai/credits') {
+        const tokenGate = await verifySessionToken(request, env);
+        if (!tokenGate.ok) {
+          return jsonResponse(
+            {
+              kind: 'error',
+              code: 'SESSION_TOKEN_INVALID',
+              message: 'Yuga session token is invalid or expired.',
+            },
+            401,
+            cors,
+          );
+        }
+
+        const credits = await getAiChatCreditStatus(request, env, {
+          walletSubject: tokenGate.walletSubject,
+          deviceId: tokenGate.deviceId,
+        });
+        const response = jsonResponse({ credits }, 200, cors);
+        applyAiChatCreditHeaders(response.headers, credits);
+        return response;
       }
 
       if (request.method !== 'POST') {
         return jsonResponse(
-          { kind: 'error', code: 'METHOD_NOT_ALLOWED', message: 'Use POST for AI proxy operations.' },
+          {
+            kind: 'error',
+            code: 'METHOD_NOT_ALLOWED',
+            message: 'Use POST for AI proxy operations.',
+          },
           405,
           cors,
         );
@@ -56,7 +96,11 @@ export default {
       const tokenGate = await verifySessionToken(request, env);
       if (!tokenGate.ok) {
         return jsonResponse(
-          { kind: 'error', code: 'SESSION_TOKEN_INVALID', message: 'Yuga session token is invalid or expired.' },
+          {
+            kind: 'error',
+            code: 'SESSION_TOKEN_INVALID',
+            message: 'Yuga session token is invalid or expired.',
+          },
           401,
           cors,
         );
@@ -65,7 +109,14 @@ export default {
       assertAiProxyRateLimit(request, env, { walletSubject: tokenGate.walletSubject });
 
       if (url.pathname === '/api/ai/chat') {
-        return await handleChat(request, env, cors);
+        const creditResult = await consumeAiChatCredit(request, env, {
+          walletSubject: tokenGate.walletSubject,
+          deviceId: tokenGate.deviceId,
+        });
+        if (!creditResult.allowed) {
+          return aiChatCreditLimitResponse(creditResult.status, cors);
+        }
+        return await handleChat(request, env, cors, { credits: creditResult.status });
       }
 
       if (url.pathname === '/api/ai/voice/transcribe') {
@@ -77,7 +128,27 @@ export default {
       }
 
       if (url.pathname === '/api/ai') {
-        return await handleKindDispatch(request, env, cors, handleChat, handleVoiceSpeech);
+        const body = await readJson<{ kind?: string }>(request.clone(), maxChatBytes(env));
+        let credits: AiChatCreditStatus | undefined;
+        if (body.kind === 'chat') {
+          const creditResult = await consumeAiChatCredit(request, env, {
+            walletSubject: tokenGate.walletSubject,
+            deviceId: tokenGate.deviceId,
+          });
+          if (!creditResult.allowed) {
+            return aiChatCreditLimitResponse(creditResult.status, cors);
+          }
+          credits = creditResult.status;
+        }
+
+        return await handleKindDispatch(
+          request,
+          env,
+          cors,
+          (chatRequest, chatEnv, chatCors) =>
+            handleChat(chatRequest, chatEnv, chatCors, { credits }),
+          handleVoiceSpeech,
+        );
       }
 
       return jsonResponse(
@@ -117,5 +188,5 @@ async function verifySessionToken(
   if (!result.ok) {
     return required ? { ok: false, reason: result.reason } : { ok: true };
   }
-  return { ok: true, walletSubject: result.walletAddress };
+  return { ok: true, walletSubject: result.walletAddress, deviceId: result.deviceId };
 }

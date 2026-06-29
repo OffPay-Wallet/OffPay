@@ -686,7 +686,13 @@ export const BalanceCard = memo(function BalanceCard({
                       </>
                     ) : null}
                   </Animated.View>
-                  <Animated.View style={[styles.chartFrame, privateDetailsStyle]}>
+                  <Animated.View
+                    style={[
+                      styles.chartFrame,
+                      { marginHorizontal: -cardHPadding },
+                      privateDetailsStyle,
+                    ]}
+                  >
                     <HoldingsValueChangeChart
                       samples={valueChange?.samples ?? []}
                       tone={valueChangeTone}
@@ -1117,7 +1123,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   chartFrame: {
-    width: '100%',
+    alignSelf: 'stretch',
     minWidth: 0,
     overflow: 'hidden',
   },

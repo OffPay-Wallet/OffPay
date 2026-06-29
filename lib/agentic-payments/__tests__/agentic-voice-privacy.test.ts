@@ -41,4 +41,20 @@ describe('voice privacy', () => {
       expect(canUseCloudTtsForText('Paying 5000 USDC', { payrollMode: true })).toBe(true);
     });
   });
+
+  describe('agent tool replies', () => {
+    it('suppresses plain portfolio and token amounts when requested', () => {
+      expect(
+        sanitizeTextForCloudTts('Your portfolio is worth $1,292.76. You have 2.5 USDC.', {
+          suppressAmounts: true,
+        }),
+      ).toBe('Your portfolio is worth [amount]. You have [amount].');
+    });
+
+    it('allows cloud TTS after general agent reply amounts are suppressed', () => {
+      expect(
+        canUseCloudTtsForText('Your Umbra vault has 2.5 dUSDC.', { suppressAmounts: true }),
+      ).toBe(true);
+    });
+  });
 });

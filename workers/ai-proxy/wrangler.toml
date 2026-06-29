@@ -16,6 +16,11 @@ region = "gcp:asia-south1"
 [observability]
 enabled = true
 
+[[services]]
+binding = "OFFPAY_API_AI_CREDITS"
+service = "offpay-api"
+entrypoint = "AiCreditsEntrypoint"
+
 [vars]
 AI_PROXY_PRIVACY_MODE = "strict"
 AI_PROXY_GEMINI_PRIVACY_CONFIRMED = "true"

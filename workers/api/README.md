@@ -22,6 +22,7 @@ Feature surfaces:
 
 - Upstash-compatible REST KV still backs rate limits, bootstrap nonces, offline nonce-pool locks/idempotency, quote state, trigger state, recurring state, and privacy-swap session state.
 - Cloudflare R2 backs encrypted pending backup objects through the `PENDING_BACKUP_BUCKET` binding.
+- MongoDB Atlas backs invite access and hourly AI chat credits through `invite_codes`, `invite_access`, and `ai_chat_usage`.
 
 ## Cloudflare Setup
 
@@ -68,6 +69,9 @@ npx wrangler secret put KV_REST_API_TOKEN
 npx wrangler secret put OFFPAY_BOOTSTRAP_SECRET
 npx wrangler secret put OFFPAY_BACKUP_HMAC_SECRET
 npx wrangler secret put OFFPAY_DEVNET_FAUCET_SECRET_KEY
+npx wrangler secret put MONGODB_URI
+npx wrangler secret put MONGODB_DATABASE
+npx wrangler secret put OFFPAY_INVITE_CODE_PEPPER
 ```
 
 Prototype Android bootstrap does not require Google Play Integrity or a Google service account.
@@ -107,6 +111,12 @@ the 0.25 SOL transfer, transaction fees, and recipient associated-token-account 
 does not already have those token accounts.
 
 `workers/api/.dev.vars` is ignored by git. Use `workers/api/.dev.vars.example` as the local template.
+
+Run the Mongo setup once against the same database used by invite access:
+
+```sh
+MONGODB_URI='mongodb+srv://...' MONGODB_DATABASE='offpay' npm run invite:setup
+```
 
 ## Health
 

@@ -6,6 +6,7 @@ import type {
   AgentProxyErrorEvent,
   AgentTurn,
   AgentTurnRequest,
+  AiChatCreditStatus,
   VoiceSpeechRequest,
   VoiceSpeechResult,
   VoiceTranscriptionResult,
@@ -17,6 +18,7 @@ import {
 } from '@/lib/agentic-payments/session-token';
 import { sanitizeTextForCloudTts } from '@/lib/agentic-payments/voice-privacy';
 import { mark, measure } from '@/lib/perf/perf-marks';
+import { useAiChatCreditsStore } from '@/store/aiChatCreditsStore';
 import { File as ExpoFile, UploadType } from 'expo-file-system';
 
 const DEFAULT_CHAT_TIMEOUT_MS = 25_000;
@@ -81,13 +83,21 @@ export class AgenticPaymentsProxyError extends Error {
   readonly code: string;
   readonly status: number;
   readonly retryAfterMs?: number;
+  readonly credits?: AiChatCreditStatus;
 
-  constructor(params: { code: string; message: string; status: number; retryAfterMs?: number }) {
+  constructor(params: {
+    code: string;
+    message: string;
+    status: number;
+    retryAfterMs?: number;
+    credits?: AiChatCreditStatus;
+  }) {
     super(params.message);
     this.name = 'AgenticPaymentsProxyError';
     this.code = params.code;
     this.status = params.status;
     this.retryAfterMs = params.retryAfterMs;
+    this.credits = params.credits;
   }
 }
 
@@ -97,7 +107,7 @@ export function isAgenticPaymentsProxyConfigured(): boolean {
 
 export async function sendAgentChat(
   request: AgentChatRequest,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; userTurnId?: string } = {},
 ): Promise<AgentChatEvent[]> {
   const response = await proxyFetch('/api/ai/chat', {
     method: 'POST',
@@ -111,15 +121,17 @@ export async function sendAgentChat(
     }),
     signal: options.signal,
     timeoutMs: options.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS,
+    userTurnId: options.userTurnId,
   });
 
-  const body = (await response.json()) as { responses?: AgentChatEvent[] };
+  const body = (await response.json()) as { responses?: AgentChatEvent[]; credits?: unknown };
+  recordAiChatCredits(body.credits);
   return Array.isArray(body.responses) ? body.responses : [];
 }
 
 export async function sendAgentIntent(
   request: AgentIntentRequest,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; userTurnId?: string } = {},
 ): Promise<AgentIntentResult> {
   const response = await proxyFetch('/api/ai/chat', {
     method: 'POST',
@@ -134,9 +146,11 @@ export async function sendAgentIntent(
     }),
     signal: options.signal,
     timeoutMs: options.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS,
+    userTurnId: options.userTurnId,
   });
 
-  const body = (await response.json()) as { intent?: AgentIntentResult };
+  const body = (await response.json()) as { intent?: AgentIntentResult; credits?: unknown };
+  recordAiChatCredits(body.credits);
   if (body.intent?.kind === 'intent_result') return body.intent;
 
   throw new AgenticPaymentsProxyError({
@@ -148,7 +162,7 @@ export async function sendAgentIntent(
 
 export async function sendAgentTurn(
   request: AgentTurnRequest,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; userTurnId?: string } = {},
 ): Promise<AgentTurn> {
   const response = await proxyFetch('/api/ai/chat', {
     method: 'POST',
@@ -163,9 +177,11 @@ export async function sendAgentTurn(
     }),
     signal: options.signal,
     timeoutMs: options.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS,
+    userTurnId: options.userTurnId,
   });
 
-  const body = (await response.json()) as { turn?: AgentTurn };
+  const body = (await response.json()) as { turn?: AgentTurn; credits?: unknown };
+  recordAiChatCredits(body.credits);
   if (
     body.turn != null &&
     (body.turn.kind === 'agent_text' || body.turn.kind === 'agent_tool_calls')
@@ -178,6 +194,31 @@ export async function sendAgentTurn(
     message: 'Yuga returned an invalid agent turn response.',
     status: 502,
   });
+}
+
+export async function fetchAgentChatCredits(
+  options: { signal?: AbortSignal; timeoutMs?: number; scopeKey?: string | null } = {},
+): Promise<AiChatCreditStatus> {
+  const response = await proxyFetch('/api/ai/credits', {
+    method: 'GET',
+    headers: {
+      accept: 'application/json',
+    },
+    signal: options.signal,
+    timeoutMs: options.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS,
+  });
+
+  const body = (await response.json()) as { credits?: unknown };
+  const credits = parseAiChatCredits(body.credits);
+  if (credits == null) {
+    throw new AgenticPaymentsProxyError({
+      code: 'INVALID_CREDITS_RESPONSE',
+      message: 'Yuga returned an invalid credit response.',
+      status: 502,
+    });
+  }
+  useAiChatCreditsStore.getState().setCredits(credits, options.scopeKey);
+  return credits;
 }
 
 export async function streamAgentChat(
@@ -311,11 +352,19 @@ async function parseVoiceTranscriptionUploadResult(params: {
 
 export async function speakAgentText(
   request: VoiceSpeechRequest,
-  options: { signal?: AbortSignal; timeoutMs?: number; payrollMode?: boolean } = {},
+  options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    payrollMode?: boolean;
+    suppressAmounts?: boolean;
+  } = {},
 ): Promise<VoiceSpeechResult> {
   const safeRequest: VoiceSpeechRequest = {
     ...request,
-    text: sanitizeTextForCloudTts(request.text, { payrollMode: options.payrollMode }),
+    text: sanitizeTextForCloudTts(request.text, {
+      payrollMode: options.payrollMode,
+      suppressAmounts: options.suppressAmounts,
+    }),
   };
   const response = await proxyFetch('/api/ai/voice/speech', {
     method: 'POST',
@@ -333,7 +382,7 @@ export async function speakAgentText(
 
 async function proxyFetch(
   path: string,
-  init: RequestInit & { timeoutMs: number },
+  init: RequestInit & { timeoutMs: number; userTurnId?: string },
 ): Promise<Response> {
   if (!isAgenticPaymentsProxyConfigured()) {
     throw new AgenticPaymentsProxyError({
@@ -343,7 +392,7 @@ async function proxyFetch(
     });
   }
 
-  const headers = await attachSessionTokenHeader(init.headers);
+  const headers = await buildProxyHeaders(init.headers, init.userTurnId);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort('ai proxy timeout'), init.timeoutMs);
@@ -490,6 +539,17 @@ async function attachSessionTokenHeader(
   }
 }
 
+async function buildProxyHeaders(
+  headers: HeadersInit | undefined,
+  userTurnId?: string,
+): Promise<HeadersInit | undefined> {
+  const withSession = await attachSessionTokenHeader(headers);
+  if (userTurnId == null || userTurnId.trim().length === 0) return withSession;
+  const merged = new Headers(withSession);
+  merged.set('x-offpay-ai-turn-id', userTurnId.trim());
+  return merged;
+}
+
 function headersInitToRecord(headers: HeadersInit | undefined): Record<string, string> {
   const merged = new Headers(headers);
   const record: Record<string, string> = {};
@@ -504,11 +564,14 @@ async function errorFromResponse(response: Response): Promise<AgenticPaymentsPro
 
   try {
     const body = (await response.json()) as Partial<AgentProxyErrorEvent>;
+    const credits = parseAiChatCredits(body.credits);
+    recordAiChatCredits(credits);
     return new AgenticPaymentsProxyError({
       code: typeof body.code === 'string' ? body.code : 'AI_PROXY_ERROR',
       message: typeof body.message === 'string' ? body.message : 'Yuga request failed.',
       status: response.status,
       retryAfterMs: body.retryAfterMs ?? retryAfterMs,
+      ...(credits == null ? {} : { credits }),
     });
   } catch {
     return new AgenticPaymentsProxyError({
@@ -531,11 +594,14 @@ function errorFromUploadResult(params: {
 
   try {
     const body = JSON.parse(params.body) as Partial<AgentProxyErrorEvent>;
+    const credits = parseAiChatCredits(body.credits);
+    recordAiChatCredits(credits);
     return new AgenticPaymentsProxyError({
       code: typeof body.code === 'string' ? body.code : 'AI_PROXY_ERROR',
       message: typeof body.message === 'string' ? body.message : 'Yuga request failed.',
       status: params.status,
       retryAfterMs: body.retryAfterMs ?? retryAfterMs,
+      ...(credits == null ? {} : { credits }),
     });
   } catch {
     return new AgenticPaymentsProxyError({
@@ -598,4 +664,43 @@ function retryAfterHeaderToMs(value: string | null): number | undefined {
 
   const dateMs = Date.parse(value);
   return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : undefined;
+}
+
+function recordAiChatCredits(value: unknown): void {
+  const credits = parseAiChatCredits(value);
+  if (credits == null) return;
+  useAiChatCreditsStore.getState().setCredits(credits);
+}
+
+function parseAiChatCredits(value: unknown): AiChatCreditStatus | null {
+  if (typeof value !== 'object' || value == null) return null;
+  const credits = value as Partial<AiChatCreditStatus>;
+  if (credits.kind !== 'ai_chat_credits') return null;
+
+  const limit = positiveInt(credits.limit);
+  const used = positiveInt(credits.used);
+  const remaining = positiveInt(credits.remaining);
+  const resetAtMs = positiveInt(credits.resetAtMs);
+  const windowMs = positiveInt(credits.windowMs);
+  if (limit == null || used == null || remaining == null || resetAtMs == null || windowMs == null) {
+    return null;
+  }
+
+  return {
+    kind: 'ai_chat_credits',
+    limit,
+    used,
+    remaining,
+    resetAtMs,
+    windowMs,
+    subjectType: credits.subjectType === 'wallet' ? 'wallet' : 'fallback',
+    ...(credits.retryAfterMs == null
+      ? {}
+      : { retryAfterMs: positiveInt(credits.retryAfterMs) ?? undefined }),
+  };
+}
+
+function positiveInt(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
 }

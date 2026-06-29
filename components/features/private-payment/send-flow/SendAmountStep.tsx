@@ -1,5 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import Animated, {
@@ -40,6 +46,7 @@ const DROPDOWN_MORPH_CLOSE_DURATION_MS = 230;
 const DROPDOWN_MORPH_FADE_DURATION_MS = 160;
 const DROPDOWN_MORPH_TRANSLATE_Y = 6;
 const DROPDOWN_MORPH_SCALE_X = 0.985;
+const DROPDOWN_MORPH_WIDTH_START_SCALE = 0.72;
 const DROPDOWN_MORPH_START_RADIUS = 16;
 const KEYPAD_PRESS_IN_MS = 40;
 const KEYPAD_PRESS_OUT_MS = 120;
@@ -51,6 +58,12 @@ const MAX_AMOUNT_WHOLE_DIGITS = 10;
 const TOKEN_INPUT_EXTRA_HORIZONTAL_GAP = 6;
 const AMOUNT_BREATHING_ROOM_HEIGHT_THRESHOLD = 820;
 const TOKEN_DROPDOWN_ROW_HEIGHT = 48;
+const TOKEN_DROPDOWN_TRIGGER_EXPANSION = 56;
+const TOKEN_DROPDOWN_MAX_CARD_FRACTION = 0.72;
+const TOKEN_DROPDOWN_SYMBOL_CHAR_WIDTH = 9.4;
+const TOKEN_DROPDOWN_BALANCE_CHAR_WIDTH = 7.2;
+const ROUTE_DROPDOWN_LABEL_CHAR_WIDTH = 8.8;
+const ROUTE_DROPDOWN_DESCRIPTION_CHAR_WIDTH = 6.9;
 
 type AmountMotionDirection = 'up' | 'down';
 
@@ -236,11 +249,15 @@ function dropdownMorphEnter(values: EntryAnimationsValues): LayoutAnimation {
     typeof values.targetBorderRadius === 'number'
       ? values.targetBorderRadius
       : DROPDOWN_MORPH_START_RADIUS;
+  const targetWidth = typeof values.targetWidth === 'number' ? values.targetWidth : null;
 
   return {
     initialValues: {
       opacity: 0,
       height: 0,
+      ...(targetWidth != null
+        ? { width: Math.max(1, targetWidth * DROPDOWN_MORPH_WIDTH_START_SCALE) }
+        : {}),
       borderRadius: DROPDOWN_MORPH_START_RADIUS,
       transform: [{ translateY: -DROPDOWN_MORPH_TRANSLATE_Y }, { scaleX: DROPDOWN_MORPH_SCALE_X }],
     },
@@ -253,6 +270,14 @@ function dropdownMorphEnter(values: EntryAnimationsValues): LayoutAnimation {
         duration: DROPDOWN_MORPH_OPEN_DURATION_MS,
         easing: DROPDOWN_MORPH_EASING,
       }),
+      ...(targetWidth != null
+        ? {
+            width: withTiming(targetWidth, {
+              duration: DROPDOWN_MORPH_OPEN_DURATION_MS,
+              easing: DROPDOWN_MORPH_EASING,
+            }),
+          }
+        : {}),
       borderRadius: withTiming(targetRadius, {
         duration: DROPDOWN_MORPH_OPEN_DURATION_MS,
         easing: DROPDOWN_MORPH_EASING,
@@ -281,11 +306,13 @@ function dropdownMorphExit(values: ExitAnimationsValues): LayoutAnimation {
     typeof values.currentBorderRadius === 'number'
       ? values.currentBorderRadius
       : DROPDOWN_MORPH_START_RADIUS;
+  const currentWidth = typeof values.currentWidth === 'number' ? values.currentWidth : null;
 
   return {
     initialValues: {
       opacity: 1,
       height: values.currentHeight,
+      ...(currentWidth != null ? { width: currentWidth } : {}),
       borderRadius: currentRadius,
       transform: [{ translateY: 0 }, { scaleX: 1 }],
     },
@@ -298,6 +325,14 @@ function dropdownMorphExit(values: ExitAnimationsValues): LayoutAnimation {
         duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
         easing: DROPDOWN_MORPH_EASING,
       }),
+      ...(currentWidth != null
+        ? {
+            width: withTiming(Math.max(1, currentWidth * DROPDOWN_MORPH_WIDTH_START_SCALE), {
+              duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
+              easing: DROPDOWN_MORPH_EASING,
+            }),
+          }
+        : {}),
       borderRadius: withTiming(DROPDOWN_MORPH_START_RADIUS, {
         duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
         easing: DROPDOWN_MORPH_EASING,
@@ -552,6 +587,9 @@ function AmountTokenDropdown({
   const iconSize = dense ? 34 : compact ? 36 : 40;
   const optionIconSize = dense ? 28 : 32;
   const menuMaxHeight = dense ? 168 : compact ? 192 : 216;
+  const [tokenButtonWidth, setTokenButtonWidth] = useState(0);
+  const [routeButtonWidth, setRouteButtonWidth] = useState(0);
+  const [selectorCardWidth, setSelectorCardWidth] = useState(0);
   const tokenDropdownContentHeight =
     tokenOptions.length * TOKEN_DROPDOWN_ROW_HEIGHT +
     Math.max(0, tokenOptions.length - 1) * spacing.xs +
@@ -577,6 +615,63 @@ function AmountTokenDropdown({
     ),
     [onSelectToken, optionIconSize, token?.mint],
   );
+  const handleTokenButtonLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextWidth = Math.round(event.nativeEvent.layout.width);
+    setTokenButtonWidth((currentWidth) =>
+      Math.abs(currentWidth - nextWidth) <= 1 ? currentWidth : nextWidth,
+    );
+  }, []);
+  const handleRouteButtonLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextWidth = Math.round(event.nativeEvent.layout.width);
+    setRouteButtonWidth((currentWidth) =>
+      Math.abs(currentWidth - nextWidth) <= 1 ? currentWidth : nextWidth,
+    );
+  }, []);
+  const handleSelectorCardLayout = useCallback((event: LayoutChangeEvent): void => {
+    const nextWidth = Math.round(event.nativeEvent.layout.width);
+    setSelectorCardWidth((currentWidth) =>
+      Math.abs(currentWidth - nextWidth) <= 1 ? currentWidth : nextWidth,
+    );
+  }, []);
+  const tokenDropdownMenuWidth = useMemo(() => {
+    const selectedCheckWidth = 18 + spacing.sm;
+    const optionOuterPadding = spacing.xs * 2 + spacing.sm * 2;
+    const longestOptionTextWidth = tokenOptions.reduce((widest, option) => {
+      const symbolWidth = option.symbol.length * TOKEN_DROPDOWN_SYMBOL_CHAR_WIDTH;
+      const balanceWidth =
+        formatTokenBalance(option.balance, 5).length * TOKEN_DROPDOWN_BALANCE_CHAR_WIDTH;
+      return Math.max(widest, symbolWidth, balanceWidth);
+    }, 0);
+    const contentWidth =
+      optionIconSize + spacing.sm + longestOptionTextWidth + selectedCheckWidth + optionOuterPadding;
+    const preferredWidth = Math.ceil(
+      Math.max(tokenButtonWidth + TOKEN_DROPDOWN_TRIGGER_EXPANSION, contentWidth),
+    );
+    const maxWidth =
+      selectorCardWidth > 0
+        ? Math.min(
+            selectorCardWidth - horizontalPadding * 2,
+            selectorCardWidth * TOKEN_DROPDOWN_MAX_CARD_FRACTION,
+          )
+        : preferredWidth;
+    return Math.max(tokenButtonWidth, Math.min(preferredWidth, Math.max(maxWidth, tokenButtonWidth)));
+  }, [horizontalPadding, optionIconSize, selectorCardWidth, tokenButtonWidth, tokenOptions]);
+  const routeDropdownMenuWidth = useMemo(() => {
+    const selectedCheckWidth = 18 + spacing.sm;
+    const optionOuterPadding = spacing.sm * 2 + spacing.md * 2;
+    const longestOptionTextWidth = routeOptions.reduce((widest, route) => {
+      const description =
+        route.disabled === true ? (route.disabledReason ?? route.description) : route.description;
+      const labelWidth = route.label.length * ROUTE_DROPDOWN_LABEL_CHAR_WIDTH;
+      const descriptionWidth = description.length * ROUTE_DROPDOWN_DESCRIPTION_CHAR_WIDTH;
+      return Math.max(widest, labelWidth, descriptionWidth);
+    }, 0);
+    const preferredWidth = Math.ceil(
+      Math.max(routeButtonWidth, longestOptionTextWidth + optionOuterPadding + selectedCheckWidth),
+    );
+    const maxWidth = selectorCardWidth > 0 ? selectorCardWidth - horizontalPadding * 2 : preferredWidth;
+    return Math.max(routeButtonWidth, Math.min(preferredWidth, Math.max(maxWidth, routeButtonWidth)));
+  }, [horizontalPadding, routeButtonWidth, routeOptions, selectorCardWidth]);
 
   return (
     <View style={styles.tokenDropdownHost}>
@@ -590,9 +685,11 @@ function AmountTokenDropdown({
             paddingVertical: verticalPadding,
           },
         ]}
+        onLayout={handleSelectorCardLayout}
       >
         <Pressable
           style={({ pressed }) => [styles.tokenDropdownButton, pressed && styles.pressed]}
+          onLayout={handleTokenButtonLayout}
           onPress={onToggle}
           accessibilityRole="button"
           accessibilityLabel={
@@ -639,6 +736,7 @@ function AmountTokenDropdown({
           <View style={styles.tokenDropdownMetaColumn}>
             <Pressable
               style={({ pressed }) => [styles.routeDropdownButton, pressed && styles.pressed]}
+              onLayout={handleRouteButtonLayout}
               onPress={onToggleRoute}
               accessibilityRole="button"
               accessibilityLabel={`Choose route, selected ${selectedRouteOption.label}`}
@@ -667,7 +765,14 @@ function AmountTokenDropdown({
         <Animated.View
           entering={dropdownMorphEnter}
           exiting={dropdownMorphExit}
-          style={[styles.tokenDropdownMenu, { height: tokenDropdownMenuHeight }]}
+          style={[
+            styles.tokenDropdownMenu,
+            {
+              height: tokenDropdownMenuHeight,
+              left: horizontalPadding,
+              width: tokenDropdownMenuWidth,
+            },
+          ]}
         >
           <FlashList<SendTokenOption>
             style={styles.tokenDropdownList}
@@ -688,7 +793,13 @@ function AmountTokenDropdown({
         <Animated.View
           entering={dropdownMorphEnter}
           exiting={dropdownMorphExit}
-          style={styles.routeDropdownMenu}
+          style={[
+            styles.routeDropdownMenu,
+            {
+              right: horizontalPadding,
+              width: routeDropdownMenuWidth,
+            },
+          ]}
         >
           <View style={styles.routeDropdownMenuContent}>
             {routeOptions.map((route) => {
@@ -1378,8 +1489,6 @@ const styles = StyleSheet.create({
   tokenDropdownMenu: {
     position: 'absolute',
     top: '100%',
-    left: 0,
-    right: 0,
     marginTop: spacing.xs,
     borderRadius: radii.xl,
     borderCurve: 'continuous',
@@ -1474,10 +1583,8 @@ const styles = StyleSheet.create({
   routeDropdownMenu: {
     position: 'absolute',
     top: '100%',
-    left: 0,
-    right: 0,
     marginTop: spacing.xs,
-    borderRadius: radii.xl,
+    borderRadius: radii.full,
     borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
@@ -1487,12 +1594,12 @@ const styles = StyleSheet.create({
     zIndex: 28,
   },
   routeDropdownMenuContent: {
-    padding: spacing.xs,
+    padding: spacing.sm,
     gap: spacing.xs,
   },
   routeDropdownOption: {
     minHeight: 46,
-    borderRadius: radii.lg,
+    borderRadius: radii.full,
     borderCurve: 'continuous',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,

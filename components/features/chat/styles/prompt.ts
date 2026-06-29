@@ -66,6 +66,7 @@ export const promptStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    minHeight: 36,
   },
   promptAccessory: {
     width: 36,
