@@ -38,6 +38,8 @@ const WALLET_BALANCE_TOOL_NAMES = new Set<AgenticToolName>([
 
 const WALLET_ACTIVITY_TOOL_NAMES = new Set<AgenticToolName>(['get_wallet_history']);
 
+const CONTACT_TOOL_NAMES = new Set<AgenticToolName>(['list_local_contacts']);
+
 const NORMAL_SEND_TOOL_NAMES = new Set<AgenticToolName>([
   'resolve_recipient',
   'get_normal_transfer_fee',
@@ -104,6 +106,7 @@ function isModelToolAvailable(
   params: AgenticToolAvailabilityParams,
 ): boolean {
   if (name === 'get_client_capabilities') return true;
+  if (CONTACT_TOOL_NAMES.has(name)) return true;
   if (WALLET_BALANCE_TOOL_NAMES.has(name)) return canUseWalletBalanceTools(params);
   if (WALLET_ACTIVITY_TOOL_NAMES.has(name)) return canUseWalletActivityTools(params);
   if (PRIVATE_READINESS_TOOL_NAMES.has(name)) return hasWalletNetworkScope(params);

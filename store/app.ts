@@ -8,7 +8,7 @@ import type { WalletFlowInviteSource } from '@/lib/invite/wallet-flow-invite';
 
 /**
  * App-level global state.
- * Persisted via expo-secure-store for instant hydration on app launch.
+ * Persisted via MMKV; the root layout hydrates it after MMKV encryption is ready.
  *
  * Add application-wide state here (e.g., onboarding status, theme preference).
  */
@@ -76,6 +76,11 @@ export const useAppStore = create<AppState>()(
     {
       name: 'app-store',
       storage: createJSONStorage(() => mmkvStorage),
+      skipHydration: true,
     },
   ),
 );
+
+export async function hydrateAppStore(): Promise<void> {
+  await useAppStore.persist.rehydrate();
+}

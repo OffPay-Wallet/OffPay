@@ -49,7 +49,47 @@ function normalizeSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
 
-function buildLogoMapFromMetadata(entries: readonly OfflineTokenMetadata[]): TokenLogoMap {
+function readMappedLogo(value: string | undefined): string | null {
+  const logo = value?.trim();
+  return logo != null && logo.length > 0 ? logo : null;
+}
+
+export function applyUmbraTokenLogoAliases(
+  network: OffpayNetwork | null,
+  byMint: Map<string, string>,
+  bySymbol: Map<string, string>,
+): void {
+  if (network == null) return;
+
+  for (const token of getUmbraSupportedTokens(network)) {
+    const tokenSymbol = normalizeSymbol(token.symbol);
+    if (
+      readMappedLogo(byMint.get(token.mint)) != null &&
+      readMappedLogo(bySymbol.get(tokenSymbol)) != null
+    ) {
+      continue;
+    }
+
+    const aliasLogo =
+      token.aliases
+        ?.map((alias) => readMappedLogo(bySymbol.get(normalizeSymbol(alias))))
+        .find((logo): logo is string => logo != null) ?? null;
+
+    if (aliasLogo == null) continue;
+
+    if (readMappedLogo(byMint.get(token.mint)) == null) {
+      byMint.set(token.mint, aliasLogo);
+    }
+    if (readMappedLogo(bySymbol.get(tokenSymbol)) == null) {
+      bySymbol.set(tokenSymbol, aliasLogo);
+    }
+  }
+}
+
+function buildLogoMapFromMetadata(
+  entries: readonly OfflineTokenMetadata[],
+  network: OffpayNetwork | null,
+): TokenLogoMap {
   const byMint = new Map<string, string>();
   const bySymbol = new Map<string, string>();
 
@@ -60,6 +100,8 @@ function buildLogoMapFromMetadata(entries: readonly OfflineTokenMetadata[]): Tok
     byMint.set(token.mint, logo);
     bySymbol.set(normalizeSymbol(token.symbol), logo);
   }
+
+  applyUmbraTokenLogoAliases(network, byMint, bySymbol);
 
   return { byMint, bySymbol };
 }
@@ -116,8 +158,8 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     [network],
   );
   const cachedPersistedLogoMap = useMemo(
-    () => buildLogoMapFromMetadata(cachedPersistedLogoEntries),
-    [cachedPersistedLogoEntries],
+    () => buildLogoMapFromMetadata(cachedPersistedLogoEntries, network),
+    [cachedPersistedLogoEntries, network],
   );
   const cachedLogosCoverBalanceTokens = useMemo(() => {
     if (network == null || balanceData == null || balanceData.tokens.length === 0) {
@@ -221,6 +263,8 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
       bySymbol.set(normalizeSymbol(token.symbol), logo);
     }
 
+    applyUmbraTokenLogoAliases(network, byMint, bySymbol);
+
     return { byMint, bySymbol };
-  }, [balanceData?.tokens, persistedLogoQuery.data, query.data]);
+  }, [balanceData?.tokens, network, persistedLogoQuery.data, query.data]);
 }

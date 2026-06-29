@@ -17,6 +17,7 @@ export type AgenticToolName =
   | 'get_client_capabilities'
   | 'get_wallet_balance'
   | 'get_wallet_history'
+  | 'list_local_contacts'
   | 'resolve_recipient'
   | 'get_normal_transfer_fee'
   | 'get_swap_tokens'
@@ -64,6 +65,7 @@ export type AgenticSwapRoute = 'normal';
 export type AgenticToolCategory =
   | 'capability'
   | 'wallet_read'
+  | 'contacts'
   | 'recipient_resolution'
   | 'fee_quote'
   | 'payment_draft'

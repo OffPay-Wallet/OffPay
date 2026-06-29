@@ -4,7 +4,8 @@
 # referenced by app.config.ts or Metro.
 
 # VCS / local tool state
-.git/
+# EAS's Git archive cleanup checks the directory path itself.
+.git
 .github/
 .expo/
 .cursor/

@@ -14,6 +14,7 @@ export interface AgenticKnownWallet {
   name: string;
   address: string;
   active?: boolean;
+  source?: 'wallet' | 'contact';
 }
 
 export interface NormalizedPrivateSendToolInput {

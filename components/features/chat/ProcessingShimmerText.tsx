@@ -1,9 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text as RNText, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
   interpolate,
+  interpolateColor,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -25,6 +26,13 @@ const SHIMMER_SWEEP_MS = 1150;
 const SHIMMER_MIN_BAND_WIDTH = 42;
 const SHIMMER_BAND_WIDTH_RATIO = 0.42;
 const SHIMMER_END_OVERFLOW_RATIO = 0.18;
+const SHIMMER_TEXT_COLORS = [
+  colors.text.secondary,
+  colors.text.primary,
+  colors.brand.whiteStream,
+  colors.text.primary,
+  colors.text.secondary,
+] as const;
 
 export function ProcessingShimmerText({
   text,
@@ -73,6 +81,18 @@ export function ProcessingShimmerText({
     };
   });
 
+  const baseTextStyle = useAnimatedStyle(() => {
+    const pulse = reduceMotion ? 0 : sweep.value;
+    return {
+      color: interpolateColor(
+        pulse,
+        [0, 0.36, 0.5, 0.64, 1],
+        SHIMMER_TEXT_COLORS,
+      ),
+      opacity: reduceMotion ? 1 : interpolate(pulse, [0, 0.5, 1], [0.82, 1, 0.88]),
+    };
+  });
+
   const shimmerTextStyle = useAnimatedStyle(() => {
     const width = labelWidth.value;
     const bandWidth = Math.min(
@@ -98,9 +118,9 @@ export function ProcessingShimmerText({
         labelWidth.value = event.nativeEvent.layout.width;
       }}
     >
-      <RNText style={style} numberOfLines={numberOfLines}>
+      <Animated.Text style={[style, baseTextStyle]} numberOfLines={numberOfLines}>
         {text}
-      </RNText>
+      </Animated.Text>
       {!reduceMotion ? (
         <Animated.View
           pointerEvents="none"

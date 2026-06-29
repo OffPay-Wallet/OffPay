@@ -38,6 +38,17 @@ export const AGENTIC_TOOL_METADATA = {
       'Never ask for signatures when a recent safe summary is enough.',
     ],
   },
+  list_local_contacts: {
+    category: 'contacts',
+    networkScope: bothNetworks,
+    pendingLabel: 'Checking saved contacts',
+    parallelSafe: true,
+    modelInstructions: [
+      'Use when the user asks to list, show, or choose from saved contacts.',
+      'The tool returns contact names only. Never claim addresses are visible to you.',
+      'For sends, pass the exact returned contact name as recipient so the app resolves it locally.',
+    ],
+  },
   resolve_recipient: {
     category: 'recipient_resolution',
     networkScope: bothNetworks,

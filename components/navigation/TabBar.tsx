@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { usePathname } from 'expo-router';
 import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
@@ -153,27 +152,6 @@ const TAB_LABELS: Record<string, string> = {
 // in-app navigation; they just don't take up a slot here.
 const HIDDEN_ROUTES = new Set(['swap', 'scanner', 'chat']);
 
-function getRouteNameFromPathname(pathname: string): string | null {
-  const pathOnly = pathname.split(/[?#]/)[0] ?? '';
-  const normalized = pathOnly.replace(/\/+$/, '');
-  if (
-    normalized.length === 0 ||
-    normalized === '/' ||
-    normalized === '/index' ||
-    normalized === '/(tabs)' ||
-    normalized === '/(tabs)/index'
-  ) {
-    return 'index';
-  }
-
-  const firstRouteSegment = normalized
-    .split('/')
-    .filter(Boolean)
-    .filter((segment) => !(segment.startsWith('(') && segment.endsWith(')')))[0];
-
-  return firstRouteSegment === 'index' ? 'index' : (firstRouteSegment ?? null);
-}
-
 interface QuickAction {
   id: string;
   label: string;
@@ -306,19 +284,10 @@ function PrimaryTabContent({
 
 export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const pathname = usePathname();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const { effectiveWalletMode } = useWalletModeState();
   const isOffline = effectiveWalletMode === 'offline';
-  const pathnameRouteName = useMemo(() => getRouteNameFromPathname(pathname), [pathname]);
-  const pathnameRouteIndex = useMemo(
-    () =>
-      pathnameRouteName == null
-        ? -1
-        : state.routes.findIndex((route) => route.name === pathnameRouteName),
-    [pathnameRouteName, state.routes],
-  );
-  const committedActiveIndex = pathnameRouteIndex >= 0 ? pathnameRouteIndex : state.index;
+  const committedActiveIndex = state.index;
   const activeRouteName = state.routes[committedActiveIndex]?.name ?? '';
   const routeHidesTabBar = HIDDEN_ROUTES.has(activeRouteName);
   const isOverlayActive = useOverlayVisibilityStore((s) => s.isOverlayActive);
@@ -328,6 +297,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const recordTabSwitch = useTabHistoryStore((s) => s.recordTabSwitch);
   const [offlineSwapNoticeVisible, setOfflineSwapNoticeVisible] = useState(false);
   const [fabMenuInteractive, setFabMenuInteractive] = useState(false);
+  const [optimisticActiveOriginalIndex, setOptimisticActiveOriginalIndex] = useState<number | null>(
+    null,
+  );
   const lastVisibleTabIndexRef = useRef(state.index);
   const fabExpandedRef = useRef(false);
   const fabTouchHandledRef = useRef(false);
@@ -346,7 +318,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const visualActiveOriginalIndex = tabBarHidden
     ? lastVisibleTabIndexRef.current
-    : committedActiveIndex;
+    : (optimisticActiveOriginalIndex ?? committedActiveIndex);
   const visualActivePrimaryIndex = primaryRoutes.findIndex(
     (entry) => entry.originalIndex === visualActiveOriginalIndex,
   );
@@ -378,6 +350,13 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     if (tabBarHidden) return;
     lastVisibleTabIndexRef.current = committedActiveIndex;
   }, [committedActiveIndex, tabBarHidden]);
+
+  useEffect(() => {
+    if (optimisticActiveOriginalIndex == null) return;
+    if (tabBarHidden || optimisticActiveOriginalIndex === committedActiveIndex) {
+      setOptimisticActiveOriginalIndex(null);
+    }
+  }, [committedActiveIndex, optimisticActiveOriginalIndex, tabBarHidden]);
 
   useEffect(() => {
     if (tabBarHidden && fabExpandedRef.current) {
@@ -523,7 +502,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   );
 
   const primePrimaryTabFeedback = useCallback(
-    (primaryIndex: number) => {
+    (primaryIndex: number, originalIndex: number) => {
+      setOptimisticActiveOriginalIndex((current) =>
+        current === originalIndex ? current : originalIndex,
+      );
       activePrimaryIndexValue.value = primaryIndex;
       activePillTranslateX.value = withSpring(
         primaryIndex * tabSlotWidth + pillInsetX,
@@ -575,6 +557,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     });
 
     if (event.defaultPrevented) {
+      setOptimisticActiveOriginalIndex(null);
       activePrimaryIndexValue.value = visualActivePrimaryIndex;
       activePillTranslateX.value = withSpring(activePillX, TAB_PILL_SLIDE_SPRING);
       return;
@@ -586,6 +569,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         recordTabSwitchAfterNavigation(committedActiveIndex, currentRoute.name);
       }
       navigation.navigate(route.name, route.params);
+    } else {
+      setOptimisticActiveOriginalIndex(null);
     }
   }
 
@@ -711,7 +696,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
                   pressed && !visuallyFocused && styles.tabItemPressed,
                 ]}
                 onPressIn={() => {
-                  primePrimaryTabFeedback(primaryIndex);
+                  primePrimaryTabFeedback(primaryIndex, originalIndex);
                 }}
                 onPress={() => handleTabPress(route, originalIndex)}
                 onLongPress={() => handlePrimaryTabLongPress(route)}

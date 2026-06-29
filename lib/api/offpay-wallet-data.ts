@@ -505,11 +505,34 @@ function normalizeTransactionTokenMint(mint: string | null | undefined): string 
   return isNativeSolMint(trimmed) ? NATIVE_SOL_MINT : trimmed;
 }
 
+function getKnownTransactionTokenMetadata(
+  network: OffpayNetwork | null | undefined,
+  mint: string | null | undefined,
+): Pick<TransactionTokenMetadata, 'symbol' | 'name'> | null {
+  const normalizedMint = normalizeTransactionTokenMint(mint);
+  if (normalizedMint == null) return null;
+  if (normalizedMint === NATIVE_SOL_MINT)
+    return { symbol: NATIVE_SOL_SYMBOL, name: NATIVE_SOL_NAME };
+  if (network == null) return null;
+
+  const umbraToken = getUmbraTokenByMint(network, normalizedMint);
+  if (umbraToken == null) return null;
+
+  return {
+    symbol: umbraToken.symbol,
+    name: umbraToken.name,
+  };
+}
+
 function resolveTransactionTokenSymbol(
   symbol: string | null | undefined,
   mint: string | null | undefined,
   fallback: string | null = null,
+  network?: OffpayNetwork | null,
 ): string | null {
+  const knownToken = getKnownTransactionTokenMetadata(network, mint);
+  if (knownToken?.symbol != null) return knownToken.symbol;
+
   const trimmedSymbol = symbol?.trim();
   if (trimmedSymbol != null && trimmedSymbol.length > 0) {
     return normalizeTokenSymbol(trimmedSymbol);
@@ -521,11 +544,74 @@ function resolveTransactionTokenSymbol(
 function resolveTransactionTokenName(
   name: string | null | undefined,
   symbol: string | null,
+  mint?: string | null,
+  network?: OffpayNetwork | null,
 ): string | null {
+  const knownToken = getKnownTransactionTokenMetadata(network, mint);
+  if (knownToken?.name != null) return knownToken.name;
+
   const trimmedName = name?.trim();
   if (trimmedName != null && trimmedName.length > 0) return trimmedName;
   if (symbol === NATIVE_SOL_SYMBOL) return NATIVE_SOL_NAME;
   return symbol;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replaceTrailingTokenLabel(
+  label: string | null,
+  nextSymbol: string,
+  previousLabels: readonly string[],
+): string | null {
+  if (label == null) return null;
+
+  for (const previousLabel of previousLabels) {
+    const previous = previousLabel.trim();
+    if (previous.length === 0 || previous.toUpperCase() === nextSymbol.toUpperCase()) {
+      continue;
+    }
+
+    const replaced: string = label.replace(
+      new RegExp(`\\s${escapeRegExp(previous)}$`, 'i'),
+      ` ${nextSymbol}`,
+    );
+    if (replaced !== label) return replaced;
+  }
+
+  return label;
+}
+
+function applyKnownTokenMetadataToDisplayView(
+  view: OffpayRecentActivityView,
+  network?: OffpayNetwork | null,
+): OffpayRecentActivityView {
+  const knownToken = getKnownTransactionTokenMetadata(network, view.tokenMint);
+  if (knownToken == null || knownToken.symbol == null) return view;
+
+  const shortenedMint = view.tokenMint == null ? null : shortenWalletAddress(view.tokenMint);
+  const previousLabels = [
+    view.tokenSymbol,
+    view.tokenName,
+    shortenedMint,
+    shortenedMint?.toUpperCase(),
+  ].flatMap((value) => {
+    const trimmed = value?.trim();
+    return trimmed == null || trimmed.length === 0 ? [] : [trimmed];
+  });
+
+  return {
+    ...view,
+    amountLabel: replaceTrailingTokenLabel(view.amountLabel, knownToken.symbol, previousLabels),
+    secondaryAmountLabel: replaceTrailingTokenLabel(
+      view.secondaryAmountLabel,
+      knownToken.symbol,
+      previousLabels,
+    ),
+    tokenSymbol: knownToken.symbol,
+    tokenName: knownToken.name,
+  };
 }
 
 function hasRawWalletTransactionAmountSignal(
@@ -811,7 +897,7 @@ function parseWalletActivityAmounts(event: WalletActivityEvent): ParsedTokenAmou
     {
       rawAmount: event.direction === 'receive' ? `+${Math.abs(parsed)}` : `-${Math.abs(parsed)}`,
       amount: formatTokenAmount(String(Math.abs(parsed))),
-      symbol: normalizeTokenSymbol(symbol),
+      symbol,
     },
   ];
 }
@@ -844,6 +930,7 @@ function formatRawTokenAmount(
 
 function parseWalletTransactionAmounts(
   transaction: WalletTransactionsResponse['transactions'][number],
+  network?: OffpayNetwork | null,
 ): ParsedTokenAmount[] {
   const descriptionAmounts = parseTokenAmounts(transaction.description);
   if (descriptionAmounts.length > 0) return descriptionAmounts;
@@ -852,7 +939,12 @@ function parseWalletTransactionAmounts(
     transaction.amount?.trim() ||
     formatRawTokenAmount(transaction.rawAmount, transaction.tokenDecimals) ||
     null;
-  const symbol = resolveTransactionTokenSymbol(transaction.tokenSymbol, transaction.tokenMint);
+  const symbol = resolveTransactionTokenSymbol(
+    transaction.tokenSymbol,
+    transaction.tokenMint,
+    null,
+    network,
+  );
   if (rawAmount == null || rawAmount.length === 0 || symbol == null || symbol.length === 0) {
     return [];
   }
@@ -865,7 +957,7 @@ function parseWalletTransactionAmounts(
     {
       rawAmount: direction === 'receive' ? `+${Math.abs(parsed)}` : `-${Math.abs(parsed)}`,
       amount: formatTokenAmount(String(Math.abs(parsed))),
-      symbol: normalizeTokenSymbol(symbol),
+      symbol,
     },
   ];
 }
@@ -995,8 +1087,8 @@ function getLocalReceiptTokenMetadata(
   receipt: OffpayLocalReceiptViewInput,
 ): TransactionTokenMetadata {
   const mint = normalizeTransactionTokenMint(receipt.tokenMint);
-  const symbol = resolveTransactionTokenSymbol(receipt.tokenSymbol, mint);
-  const name = resolveTransactionTokenName(receipt.tokenName, symbol);
+  const symbol = resolveTransactionTokenSymbol(receipt.tokenSymbol, mint, null, receipt.network);
+  const name = resolveTransactionTokenName(receipt.tokenName, symbol, mint, receipt.network);
   const logo = receipt.tokenLogo?.trim() || null;
 
   return {
@@ -1153,14 +1245,21 @@ function buildAmountDisplay(
 function getWalletTransactionTokenMetadata(
   transaction: WalletTransactionsResponse['transactions'][number],
   amounts: ParsedTokenAmount[],
+  network?: OffpayNetwork | null,
 ): TransactionTokenMetadata {
   const fallbackSymbol = amounts[0]?.symbol ?? null;
   const tokenSymbol = resolveTransactionTokenSymbol(
     transaction.tokenSymbol,
     transaction.tokenMint,
     fallbackSymbol,
+    network,
   );
-  const tokenName = resolveTransactionTokenName(transaction.tokenName, tokenSymbol);
+  const tokenName = resolveTransactionTokenName(
+    transaction.tokenName,
+    tokenSymbol,
+    transaction.tokenMint,
+    network,
+  );
   const tokenMint =
     normalizeTransactionTokenMint(transaction.tokenMint) ??
     (tokenSymbol === NATIVE_SOL_SYMBOL ? NATIVE_SOL_MINT : null);
@@ -1275,12 +1374,13 @@ function getBackendWalletTransactionDisplayView(
 ): OffpayRecentActivityView | null {
   const display: WalletTransactionView | null | undefined = transaction.display;
   if (display == null) return null;
+  const normalizedDisplay = applyKnownTokenMetadataToDisplayView(display, network);
 
   return {
-    ...display,
-    detailTimestampMs: display.detailTimestampMs ?? transaction.timestamp * 1000,
-    detailNetwork: display.detailNetwork ?? network ?? null,
-    detailSignature: display.detailSignature ?? transaction.signature,
+    ...normalizedDisplay,
+    detailTimestampMs: normalizedDisplay.detailTimestampMs ?? transaction.timestamp * 1000,
+    detailNetwork: normalizedDisplay.detailNetwork ?? network ?? null,
+    detailSignature: normalizedDisplay.detailSignature ?? transaction.signature,
   };
 }
 
@@ -1294,14 +1394,14 @@ export function mapWalletTransactionForRecentActivity(
     return mergeLocalReceiptData(backendView, localReceipt);
   }
 
-  const amounts = parseWalletTransactionAmounts(transaction);
+  const amounts = parseWalletTransactionAmounts(transaction, network);
   const counterparties = getWalletTransactionCounterparties(transaction);
   const type = normalizeWalletTransactionDisplayType(transaction, amounts, counterparties);
   const amountDisplay = buildAmountDisplay(
     type,
     transaction.status,
     amounts,
-    getWalletTransactionTokenMetadata(transaction, amounts),
+    getWalletTransactionTokenMetadata(transaction, amounts, network),
   );
   const swapSubtitle = type === 'swap' ? buildSwapSubtitle(amounts) : null;
 
@@ -1511,14 +1611,14 @@ export function mapWalletTransactionForHistory(
     return mergeLocalReceiptData(backendView, localReceipt);
   }
 
-  const amounts = parseWalletTransactionAmounts(transaction);
+  const amounts = parseWalletTransactionAmounts(transaction, network);
   const counterparties = getWalletTransactionCounterparties(transaction);
   const type = normalizeWalletTransactionDisplayType(transaction, amounts, counterparties);
   const amountDisplay = buildAmountDisplay(
     type,
     transaction.status,
     amounts,
-    getWalletTransactionTokenMetadata(transaction, amounts),
+    getWalletTransactionTokenMetadata(transaction, amounts, network),
   );
   const swapSubtitle = type === 'swap' ? buildSwapSubtitle(amounts) : null;
 
@@ -1724,7 +1824,11 @@ export function buildWalletRecentActivityItems(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
-  const backendViews = sortTransactionViewsMostRecent(params.transactionViews ?? []);
+  const backendViews = sortTransactionViewsMostRecent(
+    (params.transactionViews ?? []).map((view) =>
+      applyKnownTokenMetadataToDisplayView(view, params.network),
+    ),
+  );
   const backendViewSignatures = buildBackendViewSignatureSet(backendViews);
   const displayableTransactions = getDisplayableWalletTransactions(
     params.transactions,
@@ -1792,7 +1896,11 @@ export function buildWalletHistoryGroups(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
-  const backendViews = sortTransactionViewsMostRecent(params.transactionViews ?? []);
+  const backendViews = sortTransactionViewsMostRecent(
+    (params.transactionViews ?? []).map((view) =>
+      applyKnownTokenMetadataToDisplayView(view, params.network),
+    ),
+  );
   const backendViewSignatures = buildBackendViewSignatureSet(backendViews);
   const displayableTransactions = getDisplayableWalletTransactions(
     params.transactions,

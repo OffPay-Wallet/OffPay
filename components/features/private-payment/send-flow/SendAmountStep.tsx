@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import Animated, {
   Easing,
   FadeIn,
@@ -49,6 +50,7 @@ const AMOUNT_FADE_EASING = Easing.out(Easing.quad);
 const MAX_AMOUNT_WHOLE_DIGITS = 10;
 const TOKEN_INPUT_EXTRA_HORIZONTAL_GAP = 6;
 const AMOUNT_BREATHING_ROOM_HEIGHT_THRESHOLD = 820;
+const TOKEN_DROPDOWN_ROW_HEIGHT = 48;
 
 type AmountMotionDirection = 'up' | 'down';
 
@@ -461,6 +463,72 @@ interface AmountTokenDropdownProps {
   onSelectRoute: (route: PrivatePaymentRoute) => void;
 }
 
+interface AmountTokenDropdownRowProps {
+  option: SendTokenOption;
+  selected: boolean;
+  optionIconSize: number;
+  onSelectToken: (token: SendTokenOption) => void;
+}
+
+const AmountTokenDropdownRow = memo(function AmountTokenDropdownRow({
+  option,
+  selected,
+  optionIconSize,
+  onSelectToken,
+}: AmountTokenDropdownRowProps): React.JSX.Element {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.tokenDropdownOption,
+        selected && styles.tokenDropdownOptionSelected,
+        pressed && styles.pressed,
+      ]}
+      onPress={() => onSelectToken(option)}
+      accessibilityRole="button"
+      accessibilityLabel={`Select ${option.symbol}`}
+      accessibilityState={{ selected }}
+    >
+      <TokenIcon
+        symbol={option.symbol}
+        name={option.name}
+        logoUri={option.logo}
+        size={optionIconSize}
+        recyclingKey={option.mint}
+      />
+      <View style={styles.tokenDropdownOptionText}>
+        <Text
+          variant="bodyBold"
+          color={colors.text.primary}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1}
+        >
+          {option.symbol}
+        </Text>
+        <Text
+          variant="small"
+          color={colors.text.secondary}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1}
+        >
+          {formatTokenBalance(option.balance, 5)}
+        </Text>
+      </View>
+      {selected ? (
+        <Ionicons
+          name="checkmark-circle"
+          size={18}
+          color={colors.text.primary}
+          style={styles.tokenDropdownOptionCheck}
+        />
+      ) : null}
+    </Pressable>
+  );
+});
+
+function TokenDropdownOptionSeparator(): React.JSX.Element {
+  return <View style={styles.tokenDropdownOptionSeparator} />;
+}
+
 function AmountTokenDropdown({
   token,
   tokenOptions,
@@ -484,11 +552,31 @@ function AmountTokenDropdown({
   const iconSize = dense ? 34 : compact ? 36 : 40;
   const optionIconSize = dense ? 28 : 32;
   const menuMaxHeight = dense ? 168 : compact ? 192 : 216;
+  const tokenDropdownContentHeight =
+    tokenOptions.length * TOKEN_DROPDOWN_ROW_HEIGHT +
+    Math.max(0, tokenOptions.length - 1) * spacing.xs +
+    spacing.xs * 2;
+  const tokenDropdownMenuHeight = Math.min(
+    menuMaxHeight,
+    Math.max(TOKEN_DROPDOWN_ROW_HEIGHT + spacing.xs * 2, tokenDropdownContentHeight),
+  );
   const selectedRouteOption =
     selectedRoute == null
       ? null
       : (routeOptions.find((route) => route.id === selectedRoute) ?? null);
   const routeDropdownVisible = routeOptions.length > 1 && selectedRouteOption != null;
+  const tokenKeyExtractor = useCallback((option: SendTokenOption) => option.mint, []);
+  const renderTokenOption = useCallback(
+    ({ item: option }: ListRenderItemInfo<SendTokenOption>) => (
+      <AmountTokenDropdownRow
+        option={option}
+        selected={option.mint === token?.mint}
+        optionIconSize={optionIconSize}
+        onSelectToken={onSelectToken}
+      />
+    ),
+    [onSelectToken, optionIconSize, token?.mint],
+  );
 
   return (
     <View style={styles.tokenDropdownHost}>
@@ -579,65 +667,20 @@ function AmountTokenDropdown({
         <Animated.View
           entering={dropdownMorphEnter}
           exiting={dropdownMorphExit}
-          style={[styles.tokenDropdownMenu, { maxHeight: menuMaxHeight }]}
+          style={[styles.tokenDropdownMenu, { height: tokenDropdownMenuHeight }]}
         >
-          <ScrollView
+          <FlashList<SendTokenOption>
+            style={styles.tokenDropdownList}
+            data={tokenOptions}
+            renderItem={renderTokenOption}
+            keyExtractor={tokenKeyExtractor}
+            ItemSeparatorComponent={TokenDropdownOptionSeparator}
             nestedScrollEnabled
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.tokenDropdownMenuContent}
-          >
-            {tokenOptions.map((option) => {
-              const selected = option.mint === token?.mint;
-              return (
-                <Pressable
-                  key={option.mint}
-                  style={({ pressed }) => [
-                    styles.tokenDropdownOption,
-                    selected && styles.tokenDropdownOptionSelected,
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => onSelectToken(option)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Select ${option.symbol}`}
-                  accessibilityState={{ selected }}
-                >
-                  <TokenIcon
-                    symbol={option.symbol}
-                    name={option.name}
-                    logoUri={option.logo}
-                    size={optionIconSize}
-                    recyclingKey={option.mint}
-                  />
-                  <View style={styles.tokenDropdownOptionText}>
-                    <Text
-                      variant="bodyBold"
-                      color={colors.text.primary}
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={1}
-                    >
-                      {option.symbol}
-                    </Text>
-                    <Text
-                      variant="small"
-                      color={colors.text.secondary}
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={1}
-                    >
-                      {formatTokenBalance(option.balance, 5)}
-                    </Text>
-                  </View>
-                  {selected ? (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={18}
-                      color={colors.text.primary}
-                      style={styles.tokenDropdownOptionCheck}
-                    />
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+            drawDistance={TOKEN_DROPDOWN_ROW_HEIGHT * 3}
+          />
         </Animated.View>
       ) : null}
 
@@ -1349,7 +1392,12 @@ const styles = StyleSheet.create({
   },
   tokenDropdownMenuContent: {
     padding: spacing.xs,
-    gap: spacing.xs,
+  },
+  tokenDropdownList: {
+    flex: 1,
+  },
+  tokenDropdownOptionSeparator: {
+    height: spacing.xs,
   },
   tokenDropdownOption: {
     minHeight: 48,

@@ -113,6 +113,7 @@ describe('agentic tool availability', () => {
 
     expect(toolNames).toContain('get_wallet_balance');
     expect(toolNames).toContain('get_wallet_history');
+    expect(toolNames).toContain('list_local_contacts');
     expect(toolNames).toContain('draft_normal_send');
     expect(toolNames).toContain('draft_private_send');
     expect(toolNames).toContain('draft_umbra_vault_action');

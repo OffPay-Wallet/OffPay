@@ -10,7 +10,7 @@ const MAX_TOOL_CARDS = 3;
 const MAX_ITEMS_PER_CARD = 5;
 const MAX_ROWS_PER_CARD = 5;
 
-const BACKGROUND_TOOL_NAMES = new Set(['resolve_recipient']);
+const BACKGROUND_TOOL_NAMES = new Set(['resolve_recipient', 'list_local_contacts']);
 
 const DRAFT_TOOL_NAMES = new Set([
   'draft_normal_send',
@@ -33,6 +33,7 @@ const TOOL_TITLES: Record<string, string> = {
   get_client_capabilities: 'Available tools',
   get_wallet_balance: 'Portfolio',
   get_wallet_history: 'Recent activity',
+  list_local_contacts: 'Saved contacts',
   get_normal_transfer_fee: 'Transfer fee',
   get_swap_tokens: 'Swap tokens',
   get_swap_price: 'Token price',

@@ -35,6 +35,8 @@ const KNOWN_PROGRAM_IDS = new Set([
 const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const MAINNET_USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const DEVNET_DUSDC_MINT = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
+const DEVNET_DUSDT_MINT = 'DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6';
 
 const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
 const WALLET_BALANCE_CACHE_STALE_TTL_MS = 30_000;
@@ -447,6 +449,8 @@ const CANONICAL_STABLECOIN_METADATA: Record<
   },
   devnet: {
     [DEVNET_USDC_MINT]: { name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+    [DEVNET_DUSDC_MINT]: { name: 'dUSDC', symbol: 'dUSDC', decimals: 6 },
+    [DEVNET_DUSDT_MINT]: { name: 'dUSDT', symbol: 'dUSDT', decimals: 6 },
   },
 };
 
@@ -3026,9 +3030,14 @@ function parseDisplayTokenAmounts(description: string | null | undefined): Parse
 
 function resolveDisplayTokenSymbol(
   transaction: WalletTransactionRecord,
+  network: Network,
   fallback: string | null = null,
 ): string | null {
+  const mint = normalizeDisplayTokenMint(transaction.tokenMint);
+  const canonical = mint == null ? undefined : CANONICAL_STABLECOIN_METADATA[network][mint];
+
   return (
+    canonical?.symbol ??
     normalizeDisplayTokenSymbol(transaction.tokenSymbol) ??
     (isNativeSolMint(transaction.tokenMint) ? 'SOL' : fallback)
   );
@@ -3037,13 +3046,17 @@ function resolveDisplayTokenSymbol(
 function resolveDisplayTokenMetadata(
   transaction: WalletTransactionRecord,
   amounts: readonly ParsedDisplayAmount[],
+  network: Network,
 ): DisplayTokenMetadata {
   const fallbackSymbol = amounts[0]?.symbol ?? null;
-  const symbol = resolveDisplayTokenSymbol(transaction, fallbackSymbol);
+  const symbol = resolveDisplayTokenSymbol(transaction, network, fallbackSymbol);
   const mint =
     normalizeDisplayTokenMint(transaction.tokenMint) ?? (symbol === 'SOL' ? SOL_MINT : null);
+  const canonical = mint == null ? undefined : CANONICAL_STABLECOIN_METADATA[network][mint];
   const tokenName =
-    sanitizeText(transaction.tokenName, 80) ?? (symbol === 'SOL' ? 'Solana' : symbol);
+    canonical?.name ??
+    sanitizeText(transaction.tokenName, 80) ??
+    (symbol === 'SOL' ? 'Solana' : symbol);
   const tokenLogo = isHttpUrl(transaction.tokenLogo) ? transaction.tokenLogo : null;
 
   return {
@@ -3134,6 +3147,7 @@ function getDisplayType(
 
 function parseWalletTransactionDisplayAmounts(
   transaction: WalletTransactionRecord,
+  network: Network,
 ): ParsedDisplayAmount[] {
   const descriptionAmounts = parseDisplayTokenAmounts(transaction.description);
   if (descriptionAmounts.length > 0) return descriptionAmounts;
@@ -3141,7 +3155,7 @@ function parseWalletTransactionDisplayAmounts(
   const amount =
     transaction.amount?.trim() ??
     formatRawTokenDisplayAmount(transaction.rawAmount, transaction.tokenDecimals);
-  const symbol = resolveDisplayTokenSymbol(transaction);
+  const symbol = resolveDisplayTokenSymbol(transaction, network);
   if (!amount || !symbol) return [];
 
   const parsed = Number(amount.replace(/,/g, ''));
@@ -3307,9 +3321,9 @@ function buildWalletTransactionView(
   transaction: WalletTransactionRecord,
   network: Network,
 ): WalletTransactionView {
-  const amounts = parseWalletTransactionDisplayAmounts(transaction);
+  const amounts = parseWalletTransactionDisplayAmounts(transaction, network);
   const type = getDisplayType(transaction, amounts);
-  const token = resolveDisplayTokenMetadata(transaction, amounts);
+  const token = resolveDisplayTokenMetadata(transaction, amounts, network);
   const amountFields = buildDisplayAmountFields(type, transaction, amounts, token);
   const swapSubtitle = type === 'swap' ? buildDisplaySwapSubtitle(amounts) : null;
   const account = findDisplayCounterparty(type, transaction.counterparties);

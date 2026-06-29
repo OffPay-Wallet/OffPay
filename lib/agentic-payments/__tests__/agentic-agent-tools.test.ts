@@ -139,6 +139,9 @@ describe('runAgenticTools', () => {
     const balanceSchema = AGENTIC_TOOL_SCHEMAS.find(
       (schema) => schema.name === 'get_wallet_balance',
     );
+    const contactsSchema = AGENTIC_TOOL_SCHEMAS.find(
+      (schema) => schema.name === 'list_local_contacts',
+    );
     const swapSchema = AGENTIC_TOOL_SCHEMAS.find((schema) => schema.name === 'prepare_swap_quote');
 
     expect(balanceSchema?.xOffpay).toMatchObject({
@@ -147,6 +150,12 @@ describe('runAgenticTools', () => {
       pendingLabel: 'Checking wallet balance',
     });
     expect(balanceSchema?.description).toContain('available on devnet and mainnet');
+    expect(contactsSchema?.xOffpay).toMatchObject({
+      category: 'contacts',
+      networkScope: 'devnet_and_mainnet',
+      pendingLabel: 'Checking saved contacts',
+    });
+    expect(contactsSchema?.description).toContain('contact names only');
     expect(swapSchema?.xOffpay).toMatchObject({
       category: 'swap',
       networkScope: 'mainnet_only',
@@ -179,6 +188,7 @@ describe('runAgenticTools', () => {
       expect.arrayContaining([
         'get_wallet_balance',
         'get_wallet_history',
+        'list_local_contacts',
         'draft_normal_send',
         'draft_private_send',
         'draft_umbra_vault_action',
@@ -229,6 +239,28 @@ describe('runAgenticTools', () => {
     expect(JSON.stringify(result)).not.toContain(usdcMint);
     expect(JSON.stringify(result)).not.toContain(walletAddress);
     expect(result.tokens.some((token) => token.symbol === 'USDC')).toBe(true);
+  });
+
+  it('lists saved contacts by name without returning addresses', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-contacts', name: 'list_local_contacts', args: {} }],
+      {
+        ...baseContext,
+        knownWallets: [
+          { ...baseContext.knownWallets[0]!, source: 'wallet' },
+          { name: 'Karan', address: contactRecipient, active: false, source: 'contact' },
+        ],
+      },
+    );
+
+    expect(run.results[0].result).toMatchObject({
+      status: 'ok',
+      count: 1,
+      contacts: [expect.objectContaining({ name: 'Karan' })],
+      addressAvailableLocally: true,
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(contactRecipient);
+    expect(JSON.stringify(run.results[0].result)).not.toContain(walletAddress);
   });
 
   it('returns a status code only when balances are still loading', async () => {

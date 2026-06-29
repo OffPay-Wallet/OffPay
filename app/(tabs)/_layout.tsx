@@ -15,7 +15,7 @@ export default function TabLayout(): React.JSX.Element {
       headerShown: false,
       sceneStyle: styles.scene,
       lazy: true,
-      freezeOnBlur: true,
+      freezeOnBlur: false,
       tabBarStyle: styles.tabBarContainer,
       animation: 'fade',
       transitionSpec: {
@@ -30,7 +30,11 @@ export default function TabLayout(): React.JSX.Element {
   );
 
   return (
-    <Tabs tabBar={(props) => <TabBar {...props} />} screenOptions={screenOptions}>
+    <Tabs
+      detachInactiveScreens={false}
+      tabBar={(props) => <TabBar {...props} />}
+      screenOptions={screenOptions}
+    >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="swap" />
       <Tabs.Screen name="scanner" />

@@ -32,6 +32,7 @@ type WalletDisplayTransactionView = NonNullable<
 const signature =
   '5r9jzD8fHa9eG4vAMcYQYV5spwG9R4VuYH9zJm7DYd6m8uDj7b4hyY3TwY2Nv4R8ydh7v7FGM5h7EJYvVx3sN4fQ';
 const nativeSolMint = 'So11111111111111111111111111111111111111112';
+const devnetDusdcMint = '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7';
 
 function buildTransaction(
   overrides: Partial<WalletTransactionsResponse['transactions'][number]> = {},
@@ -265,6 +266,53 @@ describe('offpay-wallet-data', () => {
       logo: null,
       verified: true,
       spam: false,
+    });
+  });
+
+  it('repairs stale devnet Umbra display rows with canonical symbols', () => {
+    const rows = buildWalletRecentActivityItems({
+      transactions: [],
+      transactionViews: [
+        buildDisplayView({
+          amountLabel: '-2 4OG4...NDX7',
+          tokenMint: devnetDusdcMint,
+          tokenSymbol: '4OG4...NDX7',
+          tokenName: '4oG4...NDx7',
+        }),
+      ],
+      network: 'devnet',
+    });
+
+    expect(rows[0]).toMatchObject({
+      amountLabel: '-2 dUSDC',
+      tokenMint: devnetDusdcMint,
+      tokenSymbol: 'dUSDC',
+      tokenName: 'dUSDC',
+    });
+  });
+
+  it('maps raw devnet Umbra transactions to canonical symbols when provider metadata is missing', () => {
+    const view = mapWalletTransactionForRecentActivity(
+      buildTransaction({
+        description: null,
+        amount: null,
+        rawAmount: '2000000',
+        tokenMint: devnetDusdcMint,
+        tokenSymbol: null,
+        tokenName: null,
+        tokenDecimals: 6,
+        direction: 'send',
+        recipient: 'DyUimCm3YGkCeMPfB9GpziBBXaLHq4FQnNi9wDHwRTba',
+      }),
+      null,
+      'devnet',
+    );
+
+    expect(view).toMatchObject({
+      amountLabel: '-2 dUSDC',
+      tokenMint: devnetDusdcMint,
+      tokenSymbol: 'dUSDC',
+      tokenName: 'dUSDC',
     });
   });
 

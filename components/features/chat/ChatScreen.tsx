@@ -281,11 +281,13 @@ export function ChatScreen(): React.JSX.Element {
         name: wallet.name,
         address: wallet.publicKey,
         active: wallet.publicKey === scope.walletAddress,
+        source: 'wallet' as const,
       })),
       ...contacts.map((contact) => ({
         name: contact.name,
         address: contact.address,
         active: contact.address === scope.walletAddress,
+        source: 'contact' as const,
       })),
     ],
     [contacts, scope.walletAddress, wallets],

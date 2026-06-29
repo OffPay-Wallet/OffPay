@@ -138,6 +138,23 @@ describe('buildAgenticToolResultCards', () => {
     expect(cards).toHaveLength(0);
   });
 
+  it('keeps local contact listing in the background', () => {
+    const cards = buildAgenticToolResultCards([
+      {
+        toolCallId: 'call-contacts',
+        name: 'list_local_contacts',
+        result: {
+          status: 'ok',
+          count: 1,
+          contacts: [{ name: 'Karan' }],
+          addressAvailableLocally: true,
+        },
+      },
+    ]);
+
+    expect(cards).toHaveLength(0);
+  });
+
   it('keeps error cards for failed tools', () => {
     const cards = buildAgenticToolResultCards([
       {

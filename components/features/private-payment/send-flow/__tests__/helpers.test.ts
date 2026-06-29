@@ -105,4 +105,19 @@ describe('send flow helpers', () => {
       }),
     ).toBe('https://api.example/cached-dusdt.png');
   });
+
+  it('uses cached alias logos for Umbra devnet tokens', () => {
+    expect(
+      resolveCachedTokenLogo({
+        mint: 'DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6',
+        symbol: 'dUSDT',
+        apiLogo: null,
+        aliases: ['USDT'],
+        logos: {
+          byMint: new Map(),
+          bySymbol: new Map([['USDT', 'https://api.example/usdt.png']]),
+        },
+      }),
+    ).toBe('https://api.example/usdt.png');
+  });
 });

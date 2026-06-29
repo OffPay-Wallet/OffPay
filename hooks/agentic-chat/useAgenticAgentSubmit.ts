@@ -330,6 +330,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     importMethod: params.walletImportMethod,
     walletAddress: params.scope.walletAddress,
   });
+  const localContactCount = countKnownContacts(params.knownWallets);
   const toolSchemas = getAvailableAgenticModelToolSchemas({
     network: params.scope.network,
     walletAddress: params.scope.walletAddress,
@@ -352,6 +353,8 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
           locale: params.replyLanguage,
           network: params.scope.network ?? undefined,
           walletMode: params.walletMode,
+          contactsAvailable: localContactCount > 0,
+          contactCount: localContactCount,
           capabilities: {
             networkAvailable: params.canUseNetwork,
             walletBalance: isOffpayFeatureAvailable(params.capabilities ?? null, 'wallet.balance'),
@@ -594,6 +597,10 @@ function buildSafeTokenSymbols(balance: WalletBalanceResponse | null | undefined
     if (symbol.length > 0 && symbol !== token.mint) symbols.add(symbol);
   }
   return [...symbols].slice(0, 24);
+}
+
+function countKnownContacts(knownWallets: readonly AgenticKnownWallet[]): number {
+  return knownWallets.filter((wallet) => wallet.source === 'contact').length;
 }
 
 export type { WalletAccount };

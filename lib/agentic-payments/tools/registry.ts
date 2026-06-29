@@ -11,6 +11,7 @@ import { getSwapTokensTool } from './get-swap-tokens';
 import { getUmbraBalancesTool } from './get-umbra-balances';
 import { getWalletBalanceTool } from './get-wallet-balance';
 import { getWalletHistoryTool } from './get-wallet-history';
+import { listLocalContactsTool } from './list-local-contacts';
 import { listWalletTokensTool } from './list-wallet-tokens';
 import { prepareSwapQuoteTool } from './prepare-swap-quote';
 import { resolveRecipientTool } from './resolve-recipient';
@@ -79,6 +80,7 @@ const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   getClientCapabilitiesTool,
   getWalletBalanceTool,
   getWalletHistoryTool,
+  listLocalContactsTool,
   resolveRecipientTool,
   getNormalTransferFeeTool,
   getSwapTokensTool,

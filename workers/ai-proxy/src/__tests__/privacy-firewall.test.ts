@@ -147,4 +147,25 @@ describe('AI Worker privacy firewall', () => {
     expect(serialized).not.toContain('8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz');
     expect(serialized).not.toContain('4GdHZyr7wXQjDHFx3jGg7f9E2SbfcMrkMWCHnKyvh5kx');
   });
+
+  it('preserves contact availability hints without forwarding local contact data', () => {
+    const request = sanitizeChatRequestForProvider({
+      responseMode: 'agent_turn',
+      messages: [{ role: 'user', content: 'list contacts' }],
+      context: {
+        contactsAvailable: true,
+        contactCount: 3,
+        supportedActions: ['list_local_contacts'],
+        wallets: [{ name: 'Karan', address: '8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz' }],
+      } as never,
+    });
+
+    expect(request.context).toMatchObject({
+      contactsAvailable: true,
+      contactCount: 3,
+      supportedActions: ['list_local_contacts'],
+    });
+    expect(JSON.stringify(request)).not.toContain('Karan');
+    expect(JSON.stringify(request)).not.toContain('8WDiYT4k6KXwPAeQagTrbaZLLzB7WLntYaj18Ne2XMz');
+  });
 });

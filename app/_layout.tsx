@@ -56,7 +56,7 @@ import {
   resolveStoredProfileImageUri,
 } from '@/lib/profile/profile-image';
 import { AppProviders } from '@/providers';
-import { useAppStore } from '@/store/app';
+import { hydrateAppStore, useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
 import { hydrateCriticalPreferencesFallback, usePreferencesStore } from '@/store/preferencesStore';
 import { waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
@@ -160,6 +160,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const rootNavigationState = useRootNavigationState();
   const [hasHiddenSplash, setHasHiddenSplash] = useState(false);
   const [rootLayoutReady, setRootLayoutReady] = useState(false);
+  const [appStoreHydrated, setAppStoreHydrated] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [mmkvReady, setMmkvReady] = useState(false);
   const rootReveal = useDerivedValue(
@@ -181,9 +182,10 @@ export default function RootLayout(): React.JSX.Element | null {
   }, []);
 
   // Wait for MMKV encryption to be applied before reading persisted
-  // preferences. `preferencesStore` uses manual hydration so the
-  // default mainnet value never leaks into network hooks before the
-  // previous session's persisted network is readable.
+  // app-state/preferences. These stores use manual hydration so
+  // default onboarding or network values never leak into routing or
+  // data hooks before the previous session's persisted values are
+  // readable.
   // On physical devices, SecureStore → MMKV encryption key resolution
   // can take longer than on emulators. Without this gate, hasOnboarded
   // can read stale/unencrypted data and route the user incorrectly.
@@ -201,12 +203,22 @@ export default function RootLayout(): React.JSX.Element | null {
           setMmkvReady(true);
         }
 
+        await hydrateAppStore();
+
+        if (!cancelled) {
+          setAppStoreHydrated(true);
+        }
+
         if (!usePreferencesStore.persist.hasHydrated()) {
           await usePreferencesStore.persist.rehydrate();
         }
       } catch {
         // Keep boot moving; the SecureStore mirror below can still
         // recover the critical network preference if MMKV is degraded.
+        if (!cancelled) {
+          setMmkvReady(true);
+          setAppStoreHydrated(true);
+        }
       } finally {
         if (!cancelled) {
           await hydrateCriticalPreferencesFallback();
@@ -285,7 +297,7 @@ export default function RootLayout(): React.JSX.Element | null {
   const [hasRepairedOnboardingFlag, setHasRepairedOnboardingFlag] = useState(false);
 
   useEffect(() => {
-    if (!mmkvReady || !walletHydrated || hasRepairedOnboardingFlag) return;
+    if (!mmkvReady || !appStoreHydrated || !walletHydrated || hasRepairedOnboardingFlag) return;
 
     if (!hasOnboarded && hasRecoverableCompletedWallet) {
       setHasOnboarded(true);
@@ -294,6 +306,7 @@ export default function RootLayout(): React.JSX.Element | null {
     setHasRepairedOnboardingFlag(true);
   }, [
     hasRecoverableCompletedWallet,
+    appStoreHydrated,
     mmkvReady,
     walletHydrated,
     hasOnboarded,
@@ -343,6 +356,7 @@ export default function RootLayout(): React.JSX.Element | null {
   useEffect(() => {
     if (!rootLayoutReady) return;
     if (!mmkvReady) return;
+    if (!appStoreHydrated) return;
     if (hasCompletedOnboarding && !preferencesHydrated) return;
     if (!hasRepairedOnboardingFlag) return;
     if (rootNavigationState.key.length === 0) return;
@@ -393,6 +407,7 @@ export default function RootLayout(): React.JSX.Element | null {
     }
   }, [
     appLockChecking,
+    appStoreHydrated,
     hasCompletedOnboarding,
     hasRepairedOnboardingFlag,
     inAppLock,
@@ -423,6 +438,7 @@ export default function RootLayout(): React.JSX.Element | null {
     if (hasHiddenSplash) return;
     if (!rootLayoutReady) return;
     if (!mmkvReady) return;
+    if (!appStoreHydrated) return;
     if (hasCompletedOnboarding && !preferencesHydrated) return;
     if (!hasRepairedOnboardingFlag) return;
     if (rootNavigationState.key.length === 0) return;
@@ -437,6 +453,7 @@ export default function RootLayout(): React.JSX.Element | null {
     });
   }, [
     appLockChecking,
+    appStoreHydrated,
     hasCompletedOnboarding,
     hasHiddenSplash,
     hasRepairedOnboardingFlag,
@@ -449,6 +466,10 @@ export default function RootLayout(): React.JSX.Element | null {
     mmkvReady,
     walletHydrated,
   ]);
+
+  if (!appStoreHydrated) {
+    return null;
+  }
 
   if (!preferencesHydrated && hasCompletedOnboarding) {
     return null;

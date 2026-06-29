@@ -35,6 +35,8 @@ export type AgentSafeContext = {
   network?: OffpayNetwork;
   walletMode?: 'online' | 'offline';
   locale?: string;
+  contactsAvailable?: boolean;
+  contactCount?: number;
   capabilities?: {
     networkAvailable: boolean;
     walletBalance: boolean;
@@ -100,6 +102,8 @@ export type AiIntentContext = {
   network?: OffpayNetwork;
   walletMode?: 'online' | 'offline';
   locale?: string;
+  contactsAvailable?: boolean;
+  contactCount?: number;
   capabilities?: {
     networkAvailable: boolean;
     normalSend: boolean;

@@ -103,12 +103,18 @@ export function resolveCachedTokenLogo(params: {
   symbol: string;
   apiLogo: string | null;
   logos: TokenLogoLookup;
+  aliases?: readonly string[];
 }): string | null {
   const cachedLogo =
     params.logos.byMint?.get(params.mint) ??
     params.logos.bySymbol?.get(normalizeTokenSymbol(params.symbol)) ??
     null;
   if (cachedLogo != null) return cachedLogo;
+
+  for (const alias of params.aliases ?? []) {
+    const aliasLogo = params.logos.bySymbol?.get(normalizeTokenSymbol(alias)) ?? null;
+    if (aliasLogo != null) return aliasLogo;
+  }
 
   const apiLogo = params.apiLogo?.trim();
   if (apiLogo) return apiLogo;
@@ -182,6 +188,7 @@ export function getStablecoinOptions(
           symbol: displaySymbol,
           apiLogo: token.logo,
           logos,
+          aliases: umbraToken?.aliases,
         }),
         balance: token.balance,
         decimals: normalizeTokenDecimals(

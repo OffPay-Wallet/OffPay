@@ -59,6 +59,8 @@ export type AiIntentContext = {
   network?: 'mainnet' | 'devnet';
   walletMode?: 'online' | 'offline';
   locale?: string;
+  contactsAvailable?: boolean;
+  contactCount?: number;
   capabilities?: {
     networkAvailable?: boolean;
     walletBalance?: boolean;

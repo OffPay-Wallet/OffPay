@@ -106,6 +106,7 @@ describe('buildAgentSafeContext (privacy-narrowed)', () => {
       'get_client_capabilities',
       'get_wallet_balance',
       'get_wallet_history',
+      'list_local_contacts',
       'resolve_recipient',
       'get_normal_transfer_fee',
       'get_swap_tokens',

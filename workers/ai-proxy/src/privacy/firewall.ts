@@ -223,6 +223,11 @@ function sanitizeIntentContext(value: AgentChatRequest['context']): AgentChatReq
     network: value.network,
     walletMode: value.walletMode,
     locale: value.locale,
+    contactsAvailable: typeof value.contactsAvailable === 'boolean' ? value.contactsAvailable : undefined,
+    contactCount:
+      typeof value.contactCount === 'number' && Number.isFinite(value.contactCount)
+        ? Math.max(0, Math.floor(value.contactCount))
+        : undefined,
     capabilities: value.capabilities,
     tokenSymbols: Array.isArray(value.tokenSymbols)
       ? value.tokenSymbols
