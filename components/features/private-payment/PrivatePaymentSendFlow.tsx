@@ -130,6 +130,7 @@ import {
   classifySendFailure,
   getMutationErrorMessage,
   getRecipientStepDisabledReason,
+  getSendFlowBlockingSigningReason,
   getStablecoinOptions,
   isAmountWithinBalance,
   isMagicBlockPrivateToken,
@@ -483,6 +484,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const magicBlockPrivatePaymentRouteMessage = privySignerLoadingInBackground
     ? null
     : magicBlockPrivatePaymentDisabledReason;
+  const formSigningBlocker = getSendFlowBlockingSigningReason(signingBlocker);
   const canUseUmbraNativeProver = isRnZkProverNativeModuleAvailable();
   const umbraPrivateP2pCapability = getOffpayFeatureCapability(
     capabilities,
@@ -1662,7 +1664,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     if (isNetworkSwitching) return 'Switching network…';
     if (walletAddress == null || walletId == null) return 'Unlock a wallet before sending.';
     if (network == null) return unsupportedReason ?? 'This network is not supported.';
-    if (signingBlocker != null) return signingBlocker;
+    if (formSigningBlocker != null) return formSigningBlocker;
     if (effectiveWalletMode === 'offline') {
       if (offlineReadySlots <= 0) {
         return 'Offline payment slots are not ready on this device.';
@@ -1681,7 +1683,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     isNetworkSwitching,
     network,
     offlineReadySlots,
-    signingBlocker,
+    formSigningBlocker,
     stablecoins.length,
     unsupportedReason,
     walletAddress,

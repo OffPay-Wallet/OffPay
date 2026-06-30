@@ -1,8 +1,13 @@
 import {
   classifySendFailure,
   getRecipientStepDisabledReason,
+  getSendFlowBlockingSigningReason,
   resolveCachedTokenLogo,
 } from '@/components/features/private-payment/send-flow/helpers';
+import {
+  LOCAL_SIGNING_REQUIRED_MESSAGE,
+  PRIVY_SIGNING_NOT_READY_MESSAGE,
+} from '@/lib/wallet/wallet-capabilities';
 import type { SendTokenOption } from '@/components/features/private-payment/send-flow/types';
 
 const sendToken: SendTokenOption = {
@@ -51,6 +56,16 @@ describe('send flow helpers', () => {
         selectedToken: sendToken,
       }),
     ).toBe('Unsupported cluster.');
+  });
+
+  it('does not block amount review while Privy signer registration is still loading', () => {
+    expect(getSendFlowBlockingSigningReason(PRIVY_SIGNING_NOT_READY_MESSAGE)).toBeNull();
+  });
+
+  it('keeps non-transient signing blockers active', () => {
+    expect(getSendFlowBlockingSigningReason(LOCAL_SIGNING_REQUIRED_MESSAGE)).toBe(
+      LOCAL_SIGNING_REQUIRED_MESSAGE,
+    );
   });
 
   it('classifies explicit user rejection as cancelled', () => {

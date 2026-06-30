@@ -7,17 +7,26 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "environment": "development"
+      "environment": "development",
+      "env": {
+        "EXPO_ROUTER_DISABLE_NATIVE_TABS_MD": "1"
+      }
     },
     "preview": {
       "distribution": "internal",
       "environment": "preview",
+      "env": {
+        "EXPO_ROUTER_DISABLE_NATIVE_TABS_MD": "1"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
       "environment": "production",
+      "env": {
+        "EXPO_ROUTER_DISABLE_NATIVE_TABS_MD": "1"
+      },
       "android": {
         "buildType": "app-bundle"
       }

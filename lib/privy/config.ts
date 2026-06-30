@@ -2,15 +2,18 @@
  * Privy SDK configuration.
  *
  * Reads the public app ID + client ID from `EXPO_PUBLIC_PRIVY_*` env vars
- * (set in `.env`) and exposes a small typed accessor so the rest of the
- * app can opt out of the Privy provider when keys are missing — useful
- * for early local builds where Privy hasn't been provisioned yet.
+ * (set in `.env`) and exposes typed accessors. Missing values are allowed
+ * in dev/test only; production-like builds must mount the Privy provider
+ * so embedded-wallet signing cannot silently disappear.
  *
  * Reference: https://docs.privy.io/basics/react-native/setup
  */
 
 const RAW_APP_ID = process.env.EXPO_PUBLIC_PRIVY_APP_ID?.trim();
 const RAW_CLIENT_ID = process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID?.trim();
+
+export const MISSING_PRIVY_ENVIRONMENT_MESSAGE =
+  'Privy is not configured. Set EXPO_PUBLIC_PRIVY_APP_ID and EXPO_PUBLIC_PRIVY_CLIENT_ID before shipping this build.';
 
 export interface PrivyEnvironment {
   appId: string;
@@ -20,7 +23,7 @@ export interface PrivyEnvironment {
 /**
  * Returns the Privy environment when both `EXPO_PUBLIC_PRIVY_APP_ID`
  * and `EXPO_PUBLIC_PRIVY_CLIENT_ID` are configured. Returns `null`
- * otherwise so the app can render without the provider tree.
+ * otherwise; callers decide whether that is acceptable for the runtime.
  */
 export function getPrivyEnvironment(): PrivyEnvironment | null {
   if (
@@ -42,19 +45,20 @@ export function getPrivyEnvironment(): PrivyEnvironment | null {
 export function getRequiredPrivyEnvironment(): PrivyEnvironment {
   const environment = getPrivyEnvironment();
   if (environment == null) {
-    throw new Error(
-      'Privy is not configured. Set EXPO_PUBLIC_PRIVY_APP_ID and EXPO_PUBLIC_PRIVY_CLIENT_ID in `.env` and restart the bundler.',
-    );
+    throw new Error(MISSING_PRIVY_ENVIRONMENT_MESSAGE);
   }
   return environment;
 }
 
+export function shouldRequirePrivyEnvironment(): boolean {
+  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+  const devRuntime = typeof __DEV__ !== 'undefined' && __DEV__;
+
+  return !devRuntime && nodeEnv !== 'test';
+}
+
 /**
- * Whether the app should mount the Privy provider tree at all.
- *
- * Wallet-store consumers don't need Privy by default — only the
- * onboarding social and passkey CTAs do — so the provider is gated on
- * having real env values rather than crashing on an empty App ID.
+ * Whether the app has enough config to mount the Privy provider tree.
  */
 export function isPrivyConfigured(): boolean {
   return getPrivyEnvironment() != null;

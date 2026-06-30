@@ -1,8 +1,10 @@
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
+import { isPrivyConfigured, MISSING_PRIVY_ENVIRONMENT_MESSAGE } from '@/lib/privy/config';
 import { hasExternalWalletSigner } from '@/lib/wallet/external-wallet-signing';
 
 export const LOCAL_SIGNING_REQUIRED_MESSAGE =
   'This action needs a local signing wallet. Import a recovery phrase or private-key wallet to continue.';
+export const PRIVY_SIGNING_NOT_CONFIGURED_MESSAGE = MISSING_PRIVY_ENVIRONMENT_MESSAGE;
 export const PRIVY_SIGNING_NOT_READY_MESSAGE =
   'Privy wallet signing is still loading. Sign in again or wait a moment and retry.';
 
@@ -35,6 +37,10 @@ export function getWalletSigningBlocker(
   if (walletCanSignWithApp({ importMethod, walletAddress })) return null;
 
   if (importMethod === 'privy-embedded') {
+    if (!isPrivyConfigured()) {
+      return PRIVY_SIGNING_NOT_CONFIGURED_MESSAGE;
+    }
+
     return featureLabel === 'This action'
       ? PRIVY_SIGNING_NOT_READY_MESSAGE
       : `${featureLabel} needs the Privy wallet signer. Sign in again or wait a moment and retry.`;

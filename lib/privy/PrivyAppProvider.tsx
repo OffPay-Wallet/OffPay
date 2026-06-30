@@ -1,11 +1,9 @@
 /**
  * Privy provider wrapper.
  *
- * Renders the Privy SDK provider when the env is configured, falls
- * back to the children alone when Privy is not yet provisioned. This
- * keeps the OffPay app bootable in environments where the Privy keys
- * are missing (CI, fresh clones, screenshot/test builds) without
- * crashing on a hard `appId` requirement.
+ * Renders the Privy SDK provider when the env is configured. Missing
+ * env is tolerated in dev/test environments only; production-like
+ * builds fail fast so embedded-wallet signing cannot silently break.
  *
  * The Privy provider auto-creates a Solana embedded wallet on the
  * first login for users who don't already have one. We never
@@ -16,7 +14,11 @@
 import { PrivyProvider } from '@privy-io/expo';
 import type { ReactNode } from 'react';
 
-import { getPrivyEnvironment } from './config';
+import {
+  getPrivyEnvironment,
+  MISSING_PRIVY_ENVIRONMENT_MESSAGE,
+  shouldRequirePrivyEnvironment,
+} from './config';
 import { PrivySolanaSigningBridge } from './PrivySolanaSigningBridge';
 
 interface PrivyAppProviderProps {
@@ -27,10 +29,12 @@ export function PrivyAppProvider({ children }: PrivyAppProviderProps): React.JSX
   const environment = getPrivyEnvironment();
 
   if (environment == null) {
+    if (shouldRequirePrivyEnvironment()) {
+      throw new Error(MISSING_PRIVY_ENVIRONMENT_MESSAGE);
+    }
+
     if (__DEV__) {
-      console.warn(
-        '[Privy] EXPO_PUBLIC_PRIVY_APP_ID / EXPO_PUBLIC_PRIVY_CLIENT_ID missing — social and passkey login are disabled.',
-      );
+      console.warn(`[Privy] ${MISSING_PRIVY_ENVIRONMENT_MESSAGE}`);
     }
     return <>{children}</>;
   }

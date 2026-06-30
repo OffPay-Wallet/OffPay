@@ -306,7 +306,7 @@ function dropdownMorphExit(values: ExitAnimationsValues): LayoutAnimation {
     typeof values.currentBorderRadius === 'number'
       ? values.currentBorderRadius
       : DROPDOWN_MORPH_START_RADIUS;
-  const currentWidth = typeof values.currentWidth === 'number' ? values.currentWidth : null;
+  const currentWidth = typeof values.currentWidth === 'number' ? values.currentWidth : undefined;
 
   return {
     initialValues: {
@@ -327,7 +327,7 @@ function dropdownMorphExit(values: ExitAnimationsValues): LayoutAnimation {
       }),
       ...(currentWidth != null
         ? {
-            width: withTiming(Math.max(1, currentWidth * DROPDOWN_MORPH_WIDTH_START_SCALE), {
+            width: withTiming(currentWidth, {
               duration: DROPDOWN_MORPH_CLOSE_DURATION_MS,
               easing: DROPDOWN_MORPH_EASING,
             }),
@@ -774,18 +774,20 @@ function AmountTokenDropdown({
             },
           ]}
         >
-          <FlashList<SendTokenOption>
-            style={styles.tokenDropdownList}
-            data={tokenOptions}
-            renderItem={renderTokenOption}
-            keyExtractor={tokenKeyExtractor}
-            ItemSeparatorComponent={TokenDropdownOptionSeparator}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.tokenDropdownMenuContent}
-            drawDistance={TOKEN_DROPDOWN_ROW_HEIGHT * 3}
-          />
+          <View style={[styles.tokenDropdownFixedContent, { width: tokenDropdownMenuWidth }]}>
+            <FlashList<SendTokenOption>
+              style={styles.tokenDropdownList}
+              data={tokenOptions}
+              renderItem={renderTokenOption}
+              keyExtractor={tokenKeyExtractor}
+              ItemSeparatorComponent={TokenDropdownOptionSeparator}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.tokenDropdownMenuContent}
+              drawDistance={TOKEN_DROPDOWN_ROW_HEIGHT * 3}
+            />
+          </View>
         </Animated.View>
       ) : null}
 
@@ -801,7 +803,7 @@ function AmountTokenDropdown({
             },
           ]}
         >
-          <View style={styles.routeDropdownMenuContent}>
+          <View style={[styles.routeDropdownMenuContent, { width: routeDropdownMenuWidth }]}>
             {routeOptions.map((route) => {
               const selected = route.id === selectedRoute;
               const disabled = route.disabled === true;
@@ -1501,6 +1503,9 @@ const styles = StyleSheet.create({
   },
   tokenDropdownMenuContent: {
     padding: spacing.xs,
+  },
+  tokenDropdownFixedContent: {
+    flex: 1,
   },
   tokenDropdownList: {
     flex: 1,
