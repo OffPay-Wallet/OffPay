@@ -55,6 +55,7 @@ import {
   pruneManagedProfileImages,
   resolveStoredProfileImageUri,
 } from '@/lib/profile/profile-image';
+import { getAppLockSuppressionRemainingMs } from '@/lib/wallet/app-lock-suppression';
 import { AppProviders } from '@/providers';
 import { hydrateAppStore, useAppStore } from '@/store/app';
 import { useWalletStore } from '@/store/walletStore';
@@ -278,8 +279,9 @@ export default function RootLayout(): React.JSX.Element | null {
   const shouldEnableLock = hasCompletedOnboarding && walletHydrated;
   const { locked, hasPasscode, checking } = useAppLockState(shouldEnableLock);
   const appLockChecking = shouldEnableLock && checking;
+  const appLockSuppressed = getAppLockSuppressionRemainingMs() > 0;
   const shouldShowAppLockRoute =
-    shouldEnableLock && hasPasscode && locked && walletPublicKey == null;
+    shouldEnableLock && hasPasscode && locked && walletPublicKey == null && !appLockSuppressed;
 
   const routeReadyForDisplay = hasCompletedOnboarding
     ? segments.length > 0 &&
@@ -407,6 +409,7 @@ export default function RootLayout(): React.JSX.Element | null {
     }
   }, [
     appLockChecking,
+    appLockSuppressed,
     appStoreHydrated,
     hasCompletedOnboarding,
     hasRepairedOnboardingFlag,

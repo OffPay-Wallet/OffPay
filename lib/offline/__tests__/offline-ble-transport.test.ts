@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 import {
   createOfflineBleFrames,
@@ -10,10 +11,14 @@ import {
   sendOfflineBlePaymentPayload,
   startOfflineBleReceiver,
 } from '@/lib/offline/offline-ble-transport';
+import { getAppLockSuppressionRemainingMs } from '@/lib/wallet/app-lock-suppression';
 
 const mockDiscoverCallbacks: Array<(peripheral: {
   id: string;
   name?: string | null;
+  advertising?: {
+    serviceUUIDs?: string[] | null;
+  };
   rssi?: number | null;
 }) => void> = [];
 const mockPeripheralWriteCallbacks: Array<(event: unknown) => void> = [];
@@ -24,10 +29,14 @@ const mockPeripheral = {
   rssi: -42,
 };
 
+function emitDefaultMockPeripheralDuringScan(): void {
+  mockDiscoverCallbacks.forEach((callback) => callback(mockPeripheral));
+}
+
 const mockBleManager = {
   start: jest.fn(async () => undefined),
   scan: jest.fn(async () => {
-    mockDiscoverCallbacks.forEach((callback) => callback(mockPeripheral));
+    emitDefaultMockPeripheralDuringScan();
   }),
   stopScan: jest.fn(async () => undefined),
   connect: jest.fn(async () => undefined),
@@ -98,16 +107,34 @@ function buildPayload(): OfflineBlePaymentPayload {
   };
 }
 
+function setPlatform(os: typeof Platform.OS, version: typeof Platform.Version): void {
+  Object.defineProperty(Platform, 'OS', {
+    configurable: true,
+    get: () => os,
+  });
+  Object.defineProperty(Platform, 'Version', {
+    configurable: true,
+    get: () => version,
+  });
+}
+
+type AndroidPermissionResults = Awaited<ReturnType<typeof PermissionsAndroid.requestMultiple>>;
+
 describe('offline-ble-transport', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
     mockDiscoverCallbacks.length = 0;
     mockPeripheralWriteCallbacks.length = 0;
+    mockBleManager.scan.mockImplementation(async () => {
+      emitDefaultMockPeripheralDuringScan();
+    });
+    setPlatform('ios', '16.0');
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it('advertises a compact discovery payload separate from the GATT service', async () => {
@@ -122,6 +149,93 @@ describe('offline-ble-transport', () => {
       localName: 'OffPay-karan',
       manufacturerData: '4f50',
     });
+
+    session.stop();
+  });
+
+  it('uses a compact Android advertisement after runtime permissions are granted', async () => {
+    setPlatform('android', 35);
+    jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValueOnce({
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN]: PermissionsAndroid.RESULTS.GRANTED,
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]: PermissionsAndroid.RESULTS.GRANTED,
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE]: PermissionsAndroid.RESULTS.GRANTED,
+    } as AndroidPermissionResults);
+
+    const session = await startOfflineBleReceiver({
+      walletAddress: '254NRecipientWalletFdXP',
+      displayName: 'karan',
+      onPayment: jest.fn(),
+    });
+
+    expect(mockMunimBluetooth.startAdvertising).toHaveBeenCalledWith({
+      serviceUUIDs: ['0000FD6F-0000-1000-8000-00805F9B34FB'],
+      manufacturerData: '4f50',
+    });
+
+    session.stop();
+  });
+
+  it('stops before native BLE startup when Android runtime permission is denied', async () => {
+    setPlatform('android', 35);
+    jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValueOnce({
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN]: PermissionsAndroid.RESULTS.DENIED,
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]: PermissionsAndroid.RESULTS.GRANTED,
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE]: PermissionsAndroid.RESULTS.GRANTED,
+    } as AndroidPermissionResults);
+
+    await expect(
+      startOfflineBleReceiver({
+        walletAddress: '254NRecipientWalletFdXP',
+        displayName: 'karan',
+        onPayment: jest.fn(),
+      }),
+    ).rejects.toThrow('Bluetooth permission is required for offline receive.');
+
+    expect(mockMunimBluetooth.requestBluetoothPermission).not.toHaveBeenCalled();
+    expect(mockMunimBluetooth.startAdvertising).not.toHaveBeenCalled();
+  });
+
+  it('cleans up receiver startup when native advertising throws', async () => {
+    mockMunimBluetooth.startAdvertising.mockImplementationOnce(() => {
+      throw new Error('Native advertiser failed.');
+    });
+
+    await expect(
+      startOfflineBleReceiver({
+        walletAddress: '254NRecipientWalletFdXP',
+        displayName: 'karan',
+        onPayment: jest.fn(),
+      }),
+    ).rejects.toThrow('Native advertiser failed.');
+
+    expect(mockMunimBluetooth.setServices).toHaveBeenCalled();
+    expect(mockMunimBluetooth.stopAdvertising).toHaveBeenCalled();
+    expect(mockPeripheralWriteCallbacks).toHaveLength(0);
+  });
+
+  it('keeps app-lock suppressed while receiver startup waits on native Bluetooth state', async () => {
+    let resolveBluetoothEnabled!: (enabled: boolean) => void;
+    mockMunimBluetooth.isBluetoothEnabled.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveBluetoothEnabled = resolve;
+        }),
+    );
+
+    const startupPromise = startOfflineBleReceiver({
+      walletAddress: '254NRecipientWalletFdXP',
+      displayName: 'karan',
+      onPayment: jest.fn(),
+    });
+
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(1_500);
+
+    expect(getAppLockSuppressionRemainingMs()).toBeGreaterThan(0);
+
+    expect(resolveBluetoothEnabled).toEqual(expect.any(Function));
+    resolveBluetoothEnabled(true);
+    const session = await startupPromise;
 
     session.stop();
   });
@@ -141,6 +255,38 @@ describe('offline-ble-transport', () => {
       }),
     );
     expect(mockBleManager.read).toHaveBeenCalled();
+    expect(mockBleManager.write).toHaveBeenCalled();
+  });
+
+  it('delivers to a receiver found by a compact Android service UUID advertisement', async () => {
+    setPlatform('android', 35);
+    jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValueOnce({
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN]: PermissionsAndroid.RESULTS.GRANTED,
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]: PermissionsAndroid.RESULTS.GRANTED,
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE]: PermissionsAndroid.RESULTS.GRANTED,
+    } as AndroidPermissionResults);
+    let scanCalls = 0;
+    mockBleManager.scan.mockImplementation(async () => {
+      scanCalls += 1;
+      if (scanCalls !== 5) return;
+      mockDiscoverCallbacks.forEach((callback) =>
+        callback({
+          id: 'AA:BB:CC:DD:EE:22',
+          name: null,
+          rssi: -44,
+          advertising: {
+            serviceUUIDs: ['FD6F'],
+          },
+        }),
+      );
+    });
+
+    const sendPromise = sendOfflineBlePaymentPayload(buildPayload());
+
+    await jest.advanceTimersByTimeAsync(30_000);
+    await sendPromise;
+
+    expect(mockBleManager.connect).toHaveBeenCalledWith('AA:BB:CC:DD:EE:22');
     expect(mockBleManager.write).toHaveBeenCalled();
   });
 

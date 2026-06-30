@@ -4,7 +4,6 @@ import { useLaunchOrchestrator } from '@/hooks/useLaunchOrchestrator';
 import { useFirstPaintReady } from '@/hooks/useFirstPaintReady';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
-import { useOfflineBleReceiver } from '@/hooks/useOfflineBleReceiver';
 import { useOfflinePaymentSlotsAutoSync } from '@/hooks/useOfflinePaymentSlots';
 import { useOffpayWalletActivityStream } from '@/hooks/useOffpayWalletActivityStream';
 import { useOffpayWalletWarmStart } from '@/hooks/useOffpayWalletWarmStart';
@@ -176,7 +175,7 @@ export function OffpayLaunchProvider({
   const username = useAppStore((state) => state.username);
   const walletHydrated = useWalletStore((state) => state.isHydrated);
   const hasStoredWallet = useWalletStore((state) => state.wallets.length > 0);
-  const { canUseNetwork, effectiveWalletMode } = useOffpayNetworkAccess();
+  const { canUseNetwork } = useOffpayNetworkAccess();
   // Single first-paint gate for everything that doesn't need to be
   // ready before the user can see the home screen. BLE receiver and
   // notification permission prewarm both subscribe to it so they
@@ -227,10 +226,6 @@ export function OffpayLaunchProvider({
 
   useLaunchOrchestrator({ adapters: launchAdapters });
   useSettlementEngine();
-  // BLE is only part of the offline payment surface. Keeping the
-  // receiver behind offline mode prevents Android Bluetooth prompts
-  // and "Bluetooth unavailable" warnings during normal online use.
-  useOfflineBleReceiver({ enabled: firstPaintReady && effectiveWalletMode === 'offline' });
   useOfflinePaymentSlotsAutoSync();
   useOffpayWalletWarmStart();
 

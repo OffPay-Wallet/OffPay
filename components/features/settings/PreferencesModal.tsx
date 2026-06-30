@@ -49,7 +49,6 @@ import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransition
 import { usePreferencesStore } from '@/store/preferencesStore';
 
 import type { SolanaNetworkId } from '@/constants/networks';
-import type { ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import type { WalletMode } from '@/store/preferencesStore';
 
 type Step = 'root' | 'walletMode' | 'offlinePayments' | 'network';
@@ -111,8 +110,6 @@ export function PreferencesModal({
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
   const [step, setStep] = useState<Step>('root');
-  const walletModeCommitIdRef = React.useRef(0);
-  const walletModeCommitRef = React.useRef<ScheduledUiWork | null>(null);
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
@@ -146,14 +143,6 @@ export function PreferencesModal({
   useEffect(() => {
     setOptimisticNetwork(network);
   }, [network]);
-
-  useEffect(() => {
-    return () => {
-      walletModeCommitIdRef.current += 1;
-      walletModeCommitRef.current?.cancel();
-      walletModeCommitRef.current = null;
-    };
-  }, []);
 
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
@@ -322,21 +311,7 @@ export function PreferencesModal({
       if (mode === optimisticWalletMode) return;
 
       setOptimisticWalletMode(mode);
-      walletModeCommitRef.current?.cancel();
-
-      const commitId = walletModeCommitIdRef.current + 1;
-      walletModeCommitIdRef.current = commitId;
-      walletModeCommitRef.current = scheduleUiWorkAfterFirstPaint(
-        () => {
-          if (walletModeCommitIdRef.current !== commitId) return;
-          setWalletMode(mode);
-          walletModeCommitRef.current = null;
-        },
-        {
-          timeoutMs: 1200,
-          fallbackDelayMs: 160,
-        },
-      );
+      setWalletMode(mode);
     },
     [optimisticWalletMode, setWalletMode],
   );

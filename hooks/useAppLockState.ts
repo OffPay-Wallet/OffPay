@@ -107,6 +107,13 @@ export function useAppLockState(enabled: boolean): AppLockState {
       return;
     }
 
+    if (getAppLockSuppressionRemainingMs() > 0 && useWalletStore.getState().publicKey != null) {
+      hasUnlockedThisSessionRef.current = true;
+      setChecking(false);
+      setLockedState(false);
+      return;
+    }
+
     try {
       const settings = await getSecuritySettings();
       if (requestId !== loadRequestIdRef.current || mutationId !== lockMutationIdRef.current) {

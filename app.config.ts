@@ -155,6 +155,7 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
             'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',
         },
       ],
+      './plugins/withAndroidProguardRules',
       // Required by `@privy-io/expo` so the SDK can open the OAuth
       // flow in a Custom Tab on Android. The plugin wires up the
       // intent filter on the Android manifest side.

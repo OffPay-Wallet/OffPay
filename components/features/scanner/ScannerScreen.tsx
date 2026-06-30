@@ -20,6 +20,7 @@ import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { parseOfflineQrPayload } from '@/lib/offline/offline-payments';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import { scheduleUiWorkAfterFirstPaint, type ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
+import { beginAppLockSuppression } from '@/lib/wallet/app-lock-suppression';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 
 import type { BarcodeScanningResult, BarcodeSettings } from 'expo-camera';
@@ -309,6 +310,15 @@ export function ScannerScreen(): React.JSX.Element {
     setCameraActive(false);
   }, [cancelCameraActivation]);
 
+  const requestCameraPermissionWithAppLockSuppression = useCallback(async () => {
+    const releaseAppLockSuppression = beginAppLockSuppression();
+    try {
+      return await requestCameraPermission();
+    } finally {
+      releaseAppLockSuppression();
+    }
+  }, [requestCameraPermission]);
+
   useEffect(() => {
     if (cameraPermission?.granted === true) {
       return;
@@ -319,7 +329,7 @@ export function ScannerScreen(): React.JSX.Element {
     }
 
     autoRequestedPermissionRef.current = true;
-    void requestCameraPermission().then((permission) => {
+    void requestCameraPermissionWithAppLockSuppression().then((permission) => {
       if (permission.granted) {
         scheduleCameraActivation();
       }
@@ -327,7 +337,7 @@ export function ScannerScreen(): React.JSX.Element {
   }, [
     cameraPermission?.canAskAgain,
     cameraPermission?.granted,
-    requestCameraPermission,
+    requestCameraPermissionWithAppLockSuppression,
     scheduleCameraActivation,
   ]);
 
@@ -492,7 +502,7 @@ export function ScannerScreen(): React.JSX.Element {
 
   const handleOpenCamera = useCallback(async () => {
     if (cameraPermission?.granted !== true) {
-      const permission = await requestCameraPermission();
+      const permission = await requestCameraPermissionWithAppLockSuppression();
       if (!permission.granted) {
         showToast({
           title: 'Camera permission needed',
@@ -511,7 +521,7 @@ export function ScannerScreen(): React.JSX.Element {
   }, [
     cameraPermission?.granted,
     cancelNavigationAfterScan,
-    requestCameraPermission,
+    requestCameraPermissionWithAppLockSuppression,
     scheduleCameraActivation,
     showToast,
   ]);

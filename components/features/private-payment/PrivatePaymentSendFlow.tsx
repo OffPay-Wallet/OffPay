@@ -2011,17 +2011,26 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
             {
               recipientBleName: offlineRecipientBleName,
             },
-          ).catch((error: unknown) => {
-            if (!mountedRef.current) return;
-            showToast({
-              title: 'Bluetooth delivery pending',
-              message:
-                error instanceof Error
-                  ? error.message
-                  : 'The payment is queued and will settle when online.',
-              variant: 'warning',
+          )
+            .then(() => {
+              if (!mountedRef.current) return;
+              showToast({
+                title: 'Signed payment shared',
+                message: 'The receiver can confirm it offline.',
+                variant: 'success',
+              });
+            })
+            .catch((error: unknown) => {
+              if (!mountedRef.current) return;
+              showToast({
+                title: 'Bluetooth delivery pending',
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : 'The payment is queued and will settle when online.',
+                variant: 'warning',
+              });
             });
-          });
           const nextResult: SendResultView = {
             status: 'queued',
             id: result.txId,

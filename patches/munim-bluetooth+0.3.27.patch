@@ -1,7 +1,163 @@
 diff --git a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
+index a581ec4..f31826b 100755
 --- a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
 +++ b/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetooth/HybridMunimBluetooth.kt
-@@ -700,6 +700,18 @@ class HybridMunimBluetooth :
+@@ -186,7 +186,13 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+     override fun stopAdvertising() {
+         advertiseJob?.cancel()
+         advertiseCallback?.let { callback ->
+-            advertiser?.stopAdvertising(callback)
++            try {
++                advertiser?.stopAdvertising(callback)
++            } catch (error: SecurityException) {
++                Log.w(TAG, "Unable to stop BLE advertising: missing Bluetooth permission", error)
++            } catch (error: IllegalStateException) {
++                Log.w(TAG, "Unable to stop BLE advertising", error)
++            }
+         }
+         advertiseCallback = null
+         advertiser = null
+@@ -208,33 +214,44 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+         val manager = bluetoothManager ?: return
+         val context = NitroModules.applicationContext ?: return
+
+-        gattServer?.close()
+-        gattServer = manager.openGattServer(context, buildGattServerCallback())
+-        gattServer?.clearServices()
+-
+-        for (serviceData in services) {
+-            val service = BluetoothGattService(
+-                UUID.fromString(serviceData.uuid),
+-                BluetoothGattService.SERVICE_TYPE_PRIMARY
+-            )
+-
+-            for (characteristicData in serviceData.characteristics) {
+-                val characteristic = BluetoothGattCharacteristic(
+-                    UUID.fromString(characteristicData.uuid),
+-                    propertiesFromArray(characteristicData.properties),
+-                    BluetoothGattCharacteristic.PERMISSION_READ or
+-                        BluetoothGattCharacteristic.PERMISSION_WRITE
++        try {
++            gattServer?.close()
++            gattServer = manager.openGattServer(context, buildGattServerCallback())
++            gattServer?.clearServices()
++
++            for (serviceData in services) {
++                val service = BluetoothGattService(
++                    UUID.fromString(serviceData.uuid),
++                    BluetoothGattService.SERVICE_TYPE_PRIMARY
+                 )
+-                characteristicData.value?.let { value ->
+-                    characteristic.value = hexStringToByteArray(value) ?: value.toByteArray()
++
++                for (characteristicData in serviceData.characteristics) {
++                    val characteristic = BluetoothGattCharacteristic(
++                        UUID.fromString(characteristicData.uuid),
++                        propertiesFromArray(characteristicData.properties),
++                        BluetoothGattCharacteristic.PERMISSION_READ or
++                            BluetoothGattCharacteristic.PERMISSION_WRITE
++                    )
++                    characteristicData.value?.let { value ->
++                        characteristic.value = hexStringToByteArray(value) ?: value.toByteArray()
++                    }
++                    service.addCharacteristic(characteristic)
+                 }
+-                service.addCharacteristic(characteristic)
++
++                gattServer?.addService(service)
+             }
+
+-            gattServer?.addService(service)
++            gattServerReady = true
++        } catch (error: SecurityException) {
++            Log.e(TAG, "Unable to set GATT services: missing Bluetooth permission", error)
++            gattServerReady = false
++        } catch (error: IllegalArgumentException) {
++            Log.e(TAG, "Unable to set GATT services: invalid service data", error)
++            gattServerReady = false
++        } catch (error: IllegalStateException) {
++            Log.e(TAG, "Unable to set GATT services", error)
++            gattServerReady = false
+         }
+-
+-        gattServerReady = true
+     }
+
+     override fun isBluetoothEnabled(): Promise<Boolean> {
+@@ -627,7 +644,13 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+
+         advertiseJob?.cancel()
+         advertiseCallback?.let { callback ->
+-            advertiser?.stopAdvertising(callback)
++            try {
++                advertiser?.stopAdvertising(callback)
++            } catch (error: SecurityException) {
++                Log.w(TAG, "Unable to restart BLE advertising: missing Bluetooth permission", error)
++            } catch (error: IllegalStateException) {
++                Log.w(TAG, "Unable to restart BLE advertising", error)
++            }
+         }
+
+         advertiseJob = bluetoothScope.launch {
+@@ -642,30 +665,38 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+                 return@launch
+             }
+
+-            val dataBuilder = AdvertiseData.Builder()
+-            currentAdvertisingData?.let { processAdvertisingData(it, dataBuilder) }
+-            currentServiceUUIDs.forEach { uuid ->
+-                dataBuilder.addServiceUuid(ParcelUuid.fromString(uuid))
+-            }
++            try {
++                val dataBuilder = AdvertiseData.Builder()
++                currentAdvertisingData?.let { processAdvertisingData(it, dataBuilder) }
++                currentServiceUUIDs.forEach { uuid ->
++                    dataBuilder.addServiceUuid(ParcelUuid.fromString(uuid))
++                }
+
+-            val settings = AdvertiseSettings.Builder()
+-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+-                .setConnectable(true)
+-                .setTimeout(0)
+-                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+-                .build()
++                val settings = AdvertiseSettings.Builder()
++                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
++                    .setConnectable(true)
++                    .setTimeout(0)
++                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
++                    .build()
+
+-            advertiseCallback = object : AdvertiseCallback() {
+-                override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+-                    Log.i(TAG, "Advertising started successfully")
+-                }
++                advertiseCallback = object : AdvertiseCallback() {
++                    override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
++                        Log.i(TAG, "Advertising started successfully")
++                    }
+
+-                override fun onStartFailure(errorCode: Int) {
+-                    Log.e(TAG, "Advertising failed: $errorCode")
++                    override fun onStartFailure(errorCode: Int) {
++                        Log.e(TAG, "Advertising failed: $errorCode")
++                    }
+                 }
+-            }
+
+-            activeAdvertiser.startAdvertising(settings, dataBuilder.build(), advertiseCallback)
++                activeAdvertiser.startAdvertising(settings, dataBuilder.build(), advertiseCallback)
++            } catch (error: SecurityException) {
++                Log.e(TAG, "Unable to start BLE advertising: missing Bluetooth permission", error)
++            } catch (error: IllegalArgumentException) {
++                Log.e(TAG, "Unable to start BLE advertising: invalid advertising data", error)
++            } catch (error: IllegalStateException) {
++                Log.e(TAG, "Unable to start BLE advertising", error)
++            }
+         }
+     }
+
+@@ -699,6 +730,18 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
                  if (responseNeeded) {
                      gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
                  }
@@ -20,3 +176,45 @@ diff --git a/node_modules/munim-bluetooth/android/src/main/java/com/munimbluetoo
              }
          }
      }
+@@ -1100,19 +1143,30 @@ class HybridMunimBluetooth : HybridMunimBluetoothSpec() {
+         val manager = bluetoothManager ?: return
+         val context = NitroModules.applicationContext ?: return
+
+-        gattServer?.close()
+-        gattServer = manager.openGattServer(context, object : BluetoothGattServerCallback() {})
+-        gattServer?.clearServices()
++        try {
++            gattServer?.close()
++            gattServer = manager.openGattServer(context, object : BluetoothGattServerCallback() {})
++            gattServer?.clearServices()
++
++            serviceUUIDs.forEach { uuid ->
++                val service = BluetoothGattService(
++                    UUID.fromString(uuid),
++                    BluetoothGattService.SERVICE_TYPE_PRIMARY
++                )
++                gattServer?.addService(service)
++            }
+
+-        serviceUUIDs.forEach { uuid ->
+-            val service = BluetoothGattService(
+-                UUID.fromString(uuid),
+-                BluetoothGattService.SERVICE_TYPE_PRIMARY
+-            )
+-            gattServer?.addService(service)
++            gattServerReady = true
++        } catch (error: SecurityException) {
++            Log.e(TAG, "Unable to set advertising GATT services: missing Bluetooth permission", error)
++            gattServerReady = false
++        } catch (error: IllegalArgumentException) {
++            Log.e(TAG, "Unable to set advertising GATT services: invalid service UUID", error)
++            gattServerReady = false
++        } catch (error: IllegalStateException) {
++            Log.e(TAG, "Unable to set advertising GATT services", error)
++            gattServerReady = false
+         }
+-
+-        gattServerReady = true
+     }
+
+     private fun restoreAdapterName() {

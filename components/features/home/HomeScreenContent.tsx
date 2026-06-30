@@ -55,7 +55,6 @@ import { useOfflinePaymentSlots } from '@/hooks/useOfflinePaymentSlots';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
 import { formatFiatCurrency } from '@/lib/currency-rates';
 import { formatLamportsAsExactSol } from '@/lib/crypto/solana-amounts';
-import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { getViewportProfile } from '@/lib/ui/responsive-layout';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import { hydrateWalletDisplayCacheIntoQueryClient } from '@/lib/wallet/wallet-display-cache';
@@ -85,7 +84,6 @@ import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard';
 import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
 import type { OffpayRecentActivityView } from '@/lib/api/offpay-wallet-data';
-import type { ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import type { WalletMode } from '@/store/preferencesStore';
 
 // ---------------------------------------------------------------------------
@@ -187,7 +185,6 @@ export function HomeScreenContent(): React.JSX.Element {
     pendingSlots: number;
   } | null>(null);
   const homeRefreshInFlightRef = useRef(false);
-  const walletModeCommitRef = useRef<ScheduledUiWork | null>(null);
   const {
     effectiveWalletMode,
     canUseNetwork,
@@ -230,6 +227,7 @@ export function HomeScreenContent(): React.JSX.Element {
   });
   const offlinePaymentSlots = useOfflinePaymentSlots({
     enabled: homeDataReady,
+    recoverExistingSlots: true,
     targetSlotCount: promptRentEstimateTargetSlotCount,
     statusEnabled: homeDataReady,
     rentEstimateEnabled: slotPromptVisible && homeDataReady,
@@ -353,27 +351,9 @@ export function HomeScreenContent(): React.JSX.Element {
   );
   const setPreferredWalletModeAfterPaint = useCallback(
     (mode: WalletMode): void => {
-      walletModeCommitRef.current?.cancel();
-      walletModeCommitRef.current = scheduleUiWorkAfterFirstPaint(
-        () => {
-          setPreferredWalletMode(mode);
-          walletModeCommitRef.current = null;
-        },
-        {
-          timeoutMs: 1200,
-          fallbackDelayMs: 160,
-        },
-      );
+      setPreferredWalletMode(mode);
     },
     [setPreferredWalletMode],
-  );
-
-  useEffect(
-    () => () => {
-      walletModeCommitRef.current?.cancel();
-      walletModeCommitRef.current = null;
-    },
-    [],
   );
 
   const offlineToggleContextRef = useRef<{
@@ -656,9 +636,21 @@ export function HomeScreenContent(): React.JSX.Element {
               variant: 'info',
               notificationId: context.notificationId,
             });
+            return;
           }
+
+          if (context.promptKey != null) {
+            slotPromptAutoShownRef.current = context.promptKey;
+          }
+          setSlotPromptVisible(true);
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (context.promptKey != null) {
+            slotPromptAutoShownRef.current = context.promptKey;
+          }
+          setSlotPromptVisible(true);
+        });
+      return;
     }
 
     if (context.promptKey != null) {

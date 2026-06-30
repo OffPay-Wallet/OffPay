@@ -37,6 +37,7 @@ interface ReclaimOfflinePaymentSlotsInput {
 interface UseOfflinePaymentSlotsOptions {
   deferCapabilitiesUntilAfterInteractions?: boolean;
   enabled?: boolean;
+  recoverExistingSlots?: boolean;
   statusEnabled?: boolean;
   rentEstimateEnabled?: boolean;
   targetSlotCount?: number;
@@ -83,6 +84,7 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
   const targetSlotCount = options?.targetSlotCount ?? storedTargetSlotCount;
   const hasExplicitTargetSlotCount = options?.targetSlotCount != null;
   const enabledByCaller = options?.enabled ?? true;
+  const recoverExistingSlots = options?.recoverExistingSlots ?? false;
   const statusEnabledByCaller = options?.statusEnabled ?? enabledByCaller;
   const rentEstimateEnabledByCaller = options?.rentEstimateEnabled ?? enabledByCaller;
   const capabilitiesQuery = useOffpayCapabilities({
@@ -121,7 +123,10 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
     (localSnapshotQuery.data?.counts.preparing ?? 0) +
     (localSnapshotQuery.data?.counts.settling ?? 0);
   const shouldReadProviderStatus =
-    offlinePaymentsEnabled || hasExplicitTargetSlotCount || pendingLocalSlotCount > 0;
+    offlinePaymentsEnabled ||
+    recoverExistingSlots ||
+    hasExplicitTargetSlotCount ||
+    pendingLocalSlotCount > 0;
   const shouldReadRentEstimate = hasExplicitTargetSlotCount;
   const canReadStatus =
     shouldReadProviderStatus &&
@@ -267,15 +272,13 @@ export function useOfflinePaymentSlots(options?: UseOfflinePaymentSlotsOptions) 
 }
 
 export function useOfflinePaymentSlotsAutoSync(): void {
-  const offlinePaymentsEnabled = usePreferencesStore((state) => state.offlinePaymentsEnabled);
-
   // This hook never prepares slots automatically. Keep launch passive:
-  // local snapshots are cheap, while provider status and rent estimate
-  // reads are wallet-scoped authenticated requests for external-wallet
-  // users. Rent is only needed in visible slot-preparation UI.
+  // provider status recovers already-prepared slots after reinstall/cache
+  // loss, while rent is only needed in visible slot-preparation UI.
   useOfflinePaymentSlots({
-    enabled: offlinePaymentsEnabled,
-    statusEnabled: false,
+    enabled: true,
+    recoverExistingSlots: true,
+    statusEnabled: true,
     rentEstimateEnabled: false,
   });
 }

@@ -29,6 +29,7 @@ const OFFPAY_BLE_MANUFACTURER_MARKER_BYTES = [0x4f, 0x50];
 const OFFPAY_BLE_MANUFACTURER_MARKER_MASK = [0xff, 0xff];
 const OFFPAY_BLE_MAX_PENDING_FRAME_HEX_CHARS = 32_768;
 const OFFPAY_BLE_NAME_PREFIX = 'OffPay-';
+const OFFPAY_BLE_MAX_VERIFICATION_CANDIDATES = 16;
 
 interface BleManagerModule {
   start(options?: { showAlert?: boolean }): Promise<void>;
@@ -89,6 +90,12 @@ interface PeripheralBleModule {
   addEventListener(eventName: string, callback: (data: unknown) => void): () => void;
 }
 
+interface OfflineBleAdvertisingOptions {
+  serviceUUIDs: string[];
+  localName?: string;
+  manufacturerData?: string;
+}
+
 export interface OfflineBleReceiverSession {
   stop: () => void;
 }
@@ -109,13 +116,24 @@ export interface OfflineBleDiscoveredReceiver {
 interface DiscoveredPeripheral {
   id: string;
   name?: string | null;
+  localName?: string | null;
+  serviceUUIDs?: string[] | null;
   rssi?: number | null;
   advertising?: {
     localName?: string | null;
+    completeLocalName?: string | null;
     serviceUUIDs?: string[] | null;
+    serviceData?: Array<{ uuid?: string | null }> | Record<string, unknown> | null;
     isConnectable?: boolean | null;
   };
+  advertisingData?: {
+    completeLocalName?: string | null;
+    serviceUUIDs?: string[] | null;
+    serviceData?: Array<{ uuid?: string | null }> | Record<string, unknown> | null;
+  } | null;
 }
+
+type PeripheralServiceData = NonNullable<DiscoveredPeripheral['advertising']>['serviceData'];
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -133,7 +151,20 @@ function createTimeout<T>(promise: Promise<T>, ms: number, message: string): Pro
 }
 
 function normalizeUuid(value: string): string {
-  return value.trim().toLowerCase();
+  const normalized = value.trim().toLowerCase();
+  if (/^[0-9a-f]{4}$/.test(normalized)) {
+    return `0000${normalized}-0000-1000-8000-00805f9b34fb`;
+  }
+  if (/^[0-9a-f]{8}$/.test(normalized)) {
+    return `${normalized}-0000-1000-8000-00805f9b34fb`;
+  }
+  if (/^[0-9a-f]{32}$/.test(normalized)) {
+    return `${normalized.slice(0, 8)}-${normalized.slice(8, 12)}-${normalized.slice(
+      12,
+      16,
+    )}-${normalized.slice(16, 20)}-${normalized.slice(20)}`;
+  }
+  return normalized;
 }
 
 function bytesToUtf8(bytes: number[]): string {
@@ -147,8 +178,60 @@ function createReceiverBleName(walletAddress: string, displayName?: string | nul
     : `${OFFPAY_BLE_NAME_PREFIX}${username}`;
 }
 
+function createReceiverAdvertisingOptions(
+  walletAddress: string,
+  displayName?: string | null,
+): OfflineBleAdvertisingOptions {
+  const localName = createReceiverBleName(walletAddress, displayName);
+  if (Platform.OS === 'android') {
+    return {
+      serviceUUIDs: [OFFPAY_BLE_ADVERTISING_SERVICE_UUID],
+      manufacturerData: OFFPAY_BLE_MANUFACTURER_MARKER_HEX,
+    };
+  }
+
+  return {
+    serviceUUIDs: [OFFPAY_BLE_ADVERTISING_SERVICE_UUID],
+    localName,
+    manufacturerData: OFFPAY_BLE_MANUFACTURER_MARKER_HEX,
+  };
+}
+
+function normalizeOfflineBleStartupError(error: unknown): Error {
+  return error instanceof Error ? error : new Error('Offline BLE receiver failed to start.');
+}
+
+function readServiceDataUuids(serviceData: PeripheralServiceData | null | undefined): string[] {
+  if (serviceData == null) return [];
+  if (Array.isArray(serviceData)) {
+    return serviceData.flatMap((entry) => {
+      const uuid = entry.uuid?.trim();
+      return uuid == null || uuid.length === 0 ? [] : [uuid];
+    });
+  }
+
+  return Object.keys(serviceData);
+}
+
+function getPeripheralServiceUuids(peripheral: DiscoveredPeripheral): string[] {
+  return [
+    ...(peripheral.serviceUUIDs ?? []),
+    ...(peripheral.advertising?.serviceUUIDs ?? []),
+    ...(peripheral.advertisingData?.serviceUUIDs ?? []),
+    ...readServiceDataUuids(peripheral.advertising?.serviceData ?? null),
+    ...readServiceDataUuids(peripheral.advertisingData?.serviceData ?? null),
+  ].filter((uuid) => uuid.trim().length > 0);
+}
+
 function getPeripheralName(peripheral: DiscoveredPeripheral): string | null {
-  return peripheral.advertising?.localName?.trim() || peripheral.name?.trim() || null;
+  return (
+    peripheral.advertising?.localName?.trim() ||
+    peripheral.advertising?.completeLocalName?.trim() ||
+    peripheral.advertisingData?.completeLocalName?.trim() ||
+    peripheral.localName?.trim() ||
+    peripheral.name?.trim() ||
+    null
+  );
 }
 
 function getDiscoveredUsername(peripheralName: string | null): string | null {
@@ -175,7 +258,7 @@ function peripheralLooksLikeOffpay(peripheral: DiscoveredPeripheral): boolean {
   const name = getPeripheralName(peripheral);
   if (name?.startsWith('OffPay-')) return true;
 
-  return (peripheral.advertising?.serviceUUIDs ?? []).some((uuid) => {
+  return getPeripheralServiceUuids(peripheral).some((uuid) => {
     const normalized = normalizeUuid(uuid);
     return (
       normalized === normalizeUuid(OFFPAY_BLE_ADVERTISING_SERVICE_UUID) ||
@@ -192,12 +275,22 @@ function mergePeripheral(
   peripherals.set(peripheral.id, {
     ...current,
     ...peripheral,
+    localName: peripheral.localName ?? current?.localName,
     name: peripheral.name ?? current?.name,
     rssi: peripheral.rssi ?? current?.rssi,
+    serviceUUIDs: peripheral.serviceUUIDs ?? current?.serviceUUIDs,
     advertising: {
       ...current?.advertising,
       ...peripheral.advertising,
       serviceUUIDs: peripheral.advertising?.serviceUUIDs ?? current?.advertising?.serviceUUIDs,
+      serviceData: peripheral.advertising?.serviceData ?? current?.advertising?.serviceData,
+    },
+    advertisingData: {
+      ...current?.advertisingData,
+      ...peripheral.advertisingData,
+      serviceUUIDs:
+        peripheral.advertisingData?.serviceUUIDs ?? current?.advertisingData?.serviceUUIDs,
+      serviceData: peripheral.advertisingData?.serviceData ?? current?.advertisingData?.serviceData,
     },
   });
 }
@@ -319,6 +412,8 @@ export async function startOfflineBleReceiver(params: {
   onPayment: (event: OfflineBleReceivedPayment) => void | Promise<void>;
   onError?: (error: Error) => void;
 }): Promise<OfflineBleReceiverSession> {
+  const releaseReceiverStartupSuppression = beginAppLockSuppression(30_000);
+  try {
   const permissionsGranted = await requestAndroidBlePermissions();
   if (!permissionsGranted) throw new Error('Bluetooth permission is required for offline receive.');
 
@@ -394,29 +489,34 @@ export async function startOfflineBleReceiver(params: {
     }
   });
 
-  ble.setServices([
-    {
-      uuid: OFFPAY_BLE_SERVICE_UUID,
-      characteristics: [
-        {
-          uuid: OFFPAY_BLE_IDENTITY_CHARACTERISTIC_UUID,
-          properties: ['read'],
-          value: utf8ToHex(params.walletAddress),
-        },
-        {
-          uuid: OFFPAY_BLE_PAYLOAD_CHARACTERISTIC_UUID,
-          properties: ['write', 'writeWithoutResponse'],
-        },
-      ],
-    },
-  ]);
+  try {
+    ble.setServices([
+      {
+        uuid: OFFPAY_BLE_SERVICE_UUID,
+        characteristics: [
+          {
+            uuid: OFFPAY_BLE_IDENTITY_CHARACTERISTIC_UUID,
+            properties: ['read'],
+            value: utf8ToHex(params.walletAddress),
+          },
+          {
+            uuid: OFFPAY_BLE_PAYLOAD_CHARACTERISTIC_UUID,
+            properties: ['write', 'writeWithoutResponse'],
+          },
+        ],
+      },
+    ]);
 
-  const localName = createReceiverBleName(params.walletAddress, params.displayName);
-  ble.startAdvertising({
-    serviceUUIDs: [OFFPAY_BLE_ADVERTISING_SERVICE_UUID],
-    localName,
-    manufacturerData: OFFPAY_BLE_MANUFACTURER_MARKER_HEX,
-  });
+    ble.startAdvertising(createReceiverAdvertisingOptions(params.walletAddress, params.displayName));
+  } catch (error) {
+    unsubscribe();
+    try {
+      ble.stopAdvertising();
+    } catch {
+      // Native teardown is best-effort after a failed startup attempt.
+    }
+    throw normalizeOfflineBleStartupError(error);
+  }
 
   return {
     stop: () => {
@@ -428,9 +528,12 @@ export async function startOfflineBleReceiver(params: {
       }
     },
   };
+  } finally {
+    releaseReceiverStartupSuppression();
+  }
 }
 
-export async function discoverOfflineBleReceivers(options?: {
+async function discoverOfflineBleReceiversUnsafe(options?: {
   seconds?: number;
   maxDurationMs?: number;
   onUpdate?: (receivers: OfflineBleDiscoveredReceiver[]) => void;
@@ -479,7 +582,7 @@ export async function discoverOfflineBleReceivers(options?: {
         const peripheral = discovered.get(id);
         return peripheral == null ? [] : [peripheral];
       }),
-    ).slice(0, 8);
+    ).slice(0, OFFPAY_BLE_MAX_VERIFICATION_CANDIDATES);
 
     for (const peripheral of candidates) {
       attemptedIds.add(peripheral.id);
@@ -612,6 +715,21 @@ export async function discoverOfflineBleReceivers(options?: {
     true,
   );
   return verifyCandidates();
+}
+
+export async function discoverOfflineBleReceivers(options?: {
+  seconds?: number;
+  maxDurationMs?: number;
+  onUpdate?: (receivers: OfflineBleDiscoveredReceiver[]) => void;
+}): Promise<OfflineBleDiscoveredReceiver[]> {
+  const releaseAppLockSuppression = beginAppLockSuppression(
+    Math.max(30_000, (options?.maxDurationMs ?? 0) + 5_000),
+  );
+  try {
+    return await discoverOfflineBleReceiversUnsafe(options);
+  } finally {
+    releaseAppLockSuppression();
+  }
 }
 
 async function findRecipientPeripheral(params: {
@@ -777,7 +895,7 @@ async function findRecipientPeripheral(params: {
   );
 }
 
-export async function sendOfflineBlePaymentPayload(
+async function sendOfflineBlePaymentPayloadUnsafe(
   payload: OfflineBlePaymentPayload,
   options?: { recipientBleName?: string | null },
 ): Promise<void> {
@@ -806,5 +924,17 @@ export async function sendOfflineBlePaymentPayload(
     }
   } finally {
     await ble.disconnect(peripheralId).catch(() => undefined);
+  }
+}
+
+export async function sendOfflineBlePaymentPayload(
+  payload: OfflineBlePaymentPayload,
+  options?: { recipientBleName?: string | null },
+): Promise<void> {
+  const releaseAppLockSuppression = beginAppLockSuppression(30_000);
+  try {
+    await sendOfflineBlePaymentPayloadUnsafe(payload, options);
+  } finally {
+    releaseAppLockSuppression();
   }
 }

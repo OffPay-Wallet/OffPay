@@ -27,6 +27,8 @@ import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
 import { useUmbraExecution } from '@/hooks/useUmbraExecution';
 import { useUmbraVaultRegistrationStatus } from '@/hooks/useUmbraVaultRegistrationStatus';
 import { useScreenAbortSignal } from '@/hooks/useScreenAbortSignal';
+import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
+import { useOfflineBleReceiver } from '@/hooks/useOfflineBleReceiver';
 import { buildOffpayReceiveRequestQr } from '@/lib/offline/offline-payments';
 import {
   getOffpayFeatureCapability,
@@ -176,6 +178,7 @@ export function ReceiveTokenFlow(): React.JSX.Element {
   const accountName = useWalletStore((state) => state.accountName);
   const username = useAppStore((state) => state.username);
   const { network, unsupportedReason } = useOffpayNetwork();
+  const { effectiveWalletMode } = useOffpayNetworkAccess();
   const getScreenSignal = useScreenAbortSignal();
   const { canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
@@ -450,6 +453,13 @@ export function ReceiveTokenFlow(): React.JSX.Element {
     qrMaxSize,
   );
   const networkLabel = formatNetworkLabel(network);
+  useOfflineBleReceiver({
+    enabled:
+      effectiveWalletMode === 'offline' &&
+      receiveMode === 'standard' &&
+      walletAddress != null &&
+      network != null,
+  });
   const title =
     selectedTokenLabel == null ? 'Receive Address' : `Receive ${selectedTokenLabel.symbol}`;
   const walletDisplayName =
