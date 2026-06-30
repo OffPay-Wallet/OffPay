@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import { SvgUri } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
 import { Text } from '@/components/ui/Text';
+import { measure, mark } from '@/lib/perf/perf-marks';
 import { usePreferencesStore } from '@/store/preferencesStore';
 
 function getTokenFallbackLabel(symbol?: string | null, name?: string | null): string {
@@ -17,6 +17,22 @@ function getTokenFallbackLabel(symbol?: string | null, name?: string | null): st
 function isSvgLogoUri(uri: string): boolean {
   const cleanUri = uri.split('?')[0]?.toLowerCase() ?? uri.toLowerCase();
   return cleanUri.endsWith('.svg') || uri.toLowerCase().includes('image/svg+xml');
+}
+
+function isRemoteHttpLogoUri(uri: string | null | undefined): boolean {
+  const normalized = uri?.trim().toLowerCase();
+  return normalized?.startsWith('http://') === true || normalized?.startsWith('https://') === true;
+}
+
+function isOfflineSafeLogoUri(uri: string | null | undefined): boolean {
+  const normalized = uri?.trim().toLowerCase();
+  if (normalized == null || normalized.length === 0) return false;
+  return (
+    normalized.startsWith('file://') ||
+    normalized.startsWith('content://') ||
+    normalized.startsWith('asset://') ||
+    normalized.startsWith('data:image/')
+  );
 }
 
 function getTokenFallbackPalette(symbol?: string | null): {
@@ -77,15 +93,84 @@ export function TokenIcon({
   recyclingKey,
 }: TokenIconProps): React.JSX.Element {
   const walletMode = usePreferencesStore((state) => state.walletMode);
+  const apiLogoUri = logoUri?.trim() ? logoUri.trim() : null;
+  const apiLogoIsSvg = apiLogoUri != null && isSvgLogoUri(apiLogoUri);
+  const apiLogoIsRemoteHttp = isRemoteHttpLogoUri(apiLogoUri);
+  const apiLogoIsOfflineSafe = isOfflineSafeLogoUri(apiLogoUri);
+  const [offlineRemoteCacheReady, setOfflineRemoteCacheReady] = useState(false);
+  const remoteBlockedOffline =
+    walletMode === 'offline' &&
+    apiLogoUri != null &&
+    !apiLogoIsOfflineSafe &&
+    (!apiLogoIsRemoteHttp || !offlineRemoteCacheReady);
   const normalizedLogoUri =
-    walletMode === 'offline' ? null : logoUri?.trim() ? logoUri.trim() : null;
-  const useSvgLogo = normalizedLogoUri != null && isSvgLogoUri(normalizedLogoUri);
+    apiLogoUri != null && !apiLogoIsSvg && !remoteBlockedOffline ? apiLogoUri : null;
   const [remoteFailed, setRemoteFailed] = useState(false);
   const fallbackPalette = useMemo(() => getTokenFallbackPalette(symbol), [symbol]);
 
   useEffect(() => {
     setRemoteFailed(false);
   }, [normalizedLogoUri]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setOfflineRemoteCacheReady(false);
+
+    if (walletMode !== 'offline' || apiLogoUri == null || apiLogoIsSvg || !apiLogoIsRemoteHttp) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const startedAt = mark();
+    void Image.getCachePathAsync(apiLogoUri)
+      .then((cachePath) => {
+        if (cancelled) return;
+        const cacheHit = cachePath != null;
+        setOfflineRemoteCacheReady(cacheHit);
+        measure('tokenLogo.cacheHit', startedAt, {
+          hit: cacheHit,
+          source: 'expo-image',
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOfflineRemoteCacheReady(false);
+        measure('tokenLogo.cacheHit', startedAt, {
+          hit: false,
+          source: 'expo-image',
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiLogoIsRemoteHttp, apiLogoIsSvg, apiLogoUri, walletMode]);
+
+  useEffect(() => {
+    if (normalizedLogoUri != null && !remoteFailed) return;
+    measure('tokenLogo.renderFallback', mark(), {
+      symbol: symbol?.trim().toUpperCase() ?? null,
+      offline: walletMode === 'offline',
+      reason: remoteFailed
+        ? 'remote-error'
+        : apiLogoUri == null
+          ? 'missing'
+          : apiLogoIsSvg
+            ? 'svg'
+            : remoteBlockedOffline
+              ? 'offline-blocked'
+              : 'remote-error',
+    });
+  }, [
+    apiLogoIsSvg,
+    apiLogoUri,
+    normalizedLogoUri,
+    remoteBlockedOffline,
+    remoteFailed,
+    symbol,
+    walletMode,
+  ]);
 
   return (
     <View
@@ -120,17 +205,7 @@ export function TokenIcon({
         </Text>
       </View>
 
-      {normalizedLogoUri != null && !remoteFailed && useSvgLogo ? (
-        <SvgUri
-          uri={normalizedLogoUri}
-          width={size}
-          height={size}
-          style={styles.fill}
-          onError={() => setRemoteFailed(true)}
-        />
-      ) : null}
-
-      {normalizedLogoUri != null && !remoteFailed && !useSvgLogo ? (
+      {normalizedLogoUri != null && !remoteFailed ? (
         <Animated.View
           key={recyclingKey ?? normalizedLogoUri}
           entering={FadeIn.duration(90)}

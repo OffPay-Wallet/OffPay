@@ -5,6 +5,12 @@ import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { getWalletTransactions } from '@/lib/api/offpay-api-client';
 import {
+  fetchOffpaySwapTokensForLogos,
+  offpaySwapTokensQueryKey,
+  TOKEN_LOGO_CACHE_GC_MS,
+  TOKEN_LOGO_CACHE_STALE_MS,
+} from '@/hooks/useOffpayTokenLogoMap';
+import {
   WALLET_DASHBOARD_WARM_STALE_TIME_MS,
   prefetchOffpayWalletDashboard,
 } from '@/lib/api/offpay-dashboard-cache';
@@ -13,6 +19,7 @@ import {
   offpayWalletTransactionsQueryKey,
   WALLET_DEEP_HISTORY_PAGE_SIZE,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import {
   hydrateWalletDisplayCacheIntoQueryClient,
@@ -197,7 +204,8 @@ async function prefetchWalletDataInBackground(params: {
       });
 
   const historyPromise = prefetchDeepWalletHistoryInBackground(params);
-  const [dashboard] = await Promise.all([dashboardPromise, historyPromise]);
+  const tokenLogoPromise = prefetchTokenLogoCatalogInBackground(params).catch(() => undefined);
+  const [dashboard] = await Promise.all([dashboardPromise, historyPromise, tokenLogoPromise]);
 
   if (dashboard != null) {
     useOffpayLaunchStore.getState().setPortfolioPreloaded(Date.now());
@@ -216,6 +224,36 @@ async function prefetchWalletDataInBackground(params: {
   // Foreground hooks subscribe to the dashboard-hydrated query cache and
   // only fall back to direct reads when the Home coordinator opens that gate.
   return dashboard;
+}
+
+async function prefetchTokenLogoCatalogInBackground(params: {
+  queryClient: ReturnType<typeof useQueryClient>;
+  network: NonNullable<ReturnType<typeof useOffpayNetwork>['network']>;
+}): Promise<void> {
+  const queryKey = offpaySwapTokensQueryKey(params.network);
+  const alreadyFetching = params.queryClient.isFetching({ queryKey }) > 0;
+  if (alreadyFetching) return;
+
+  const startedAt = mark();
+  try {
+    await params.queryClient.prefetchQuery({
+      queryKey,
+      queryFn: ({ signal }) =>
+        fetchOffpaySwapTokensForLogos(params.network, signal, 'wallet.warmStart.tokenLogos'),
+      staleTime: TOKEN_LOGO_CACHE_STALE_MS,
+      gcTime: TOKEN_LOGO_CACHE_GC_MS,
+    });
+    measure('tokenLogo.authPrefetch', startedAt, {
+      network: params.network,
+      status: 'ok',
+    });
+  } catch (error) {
+    measure('tokenLogo.authPrefetch', startedAt, {
+      network: params.network,
+      status: 'error',
+    });
+    throw error;
+  }
 }
 
 async function prefetchDeepWalletHistoryInBackground(params: {

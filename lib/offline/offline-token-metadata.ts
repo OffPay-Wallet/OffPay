@@ -137,6 +137,31 @@ function getBuiltInEntries(network: OffpayNetwork): OfflineTokenMetadata[] {
   return mergeMetadataEntries(defaultEntries, umbraEntries);
 }
 
+function isSvgLogoUri(uri: string): boolean {
+  const normalized = uri.trim().toLowerCase();
+  const cleanPath = normalized.split(/[?#]/, 1)[0] ?? normalized;
+  return cleanPath.endsWith('.svg') || normalized.includes('image/svg+xml');
+}
+
+function choosePreferredMetadataLogo(
+  current: string | null | undefined,
+  next: string | null | undefined,
+): string | null {
+  const currentLogo = current?.trim();
+  const nextLogo = next?.trim();
+
+  if (!currentLogo) return nextLogo && nextLogo.length > 0 ? nextLogo : null;
+  if (!nextLogo) return currentLogo;
+
+  const currentIsSvg = isSvgLogoUri(currentLogo);
+  const nextIsSvg = isSvgLogoUri(nextLogo);
+
+  if (currentIsSvg && !nextIsSvg) return nextLogo;
+  if (!currentIsSvg && nextIsSvg) return currentLogo;
+
+  return nextLogo;
+}
+
 function baseSnapshot(network: OffpayNetwork): OfflineTokenMetadataSnapshot {
   return {
     version: TOKEN_METADATA_VERSION,
@@ -212,7 +237,7 @@ function mergeMetadataEntries(
       mint: entry.mint,
       symbol: entry.symbol.length > 0 ? entry.symbol : current.symbol,
       name: entry.name.length > 0 ? entry.name : current.name,
-      logo: entry.logo ?? current.logo ?? null,
+      logo: choosePreferredMetadataLogo(current.logo, entry.logo),
       decimals: entry.updatedAt >= current.updatedAt ? entry.decimals : current.decimals,
       verified: current.verified || entry.verified,
       updatedAt: Math.max(current.updatedAt, entry.updatedAt),
@@ -373,6 +398,7 @@ export async function observeOfflineSupportedStablecoins(
       mint: token.mint,
       symbol: token.symbol,
       name: token.name ?? token.symbol,
+      logo: null,
       decimals: token.decimals,
       verified: true,
       updatedAt: Date.now(),
@@ -407,10 +433,12 @@ export async function getOfflineTokenMetadata(
     return getBuiltInNativeSolEntry(network);
   }
   if (upper === 'USDC' || upper === 'USDT') {
-    const builtIn = getBuiltInEntries(network).find((entry) => entry.symbol === upper);
-    if (builtIn != null) return builtIn;
     const snapshot = await loadSnapshot(network);
-    return snapshot.tokens.find((entry) => entry.symbol === upper) ?? null;
+    return (
+      snapshot.tokens.find((entry) => entry.symbol === upper) ??
+      getBuiltInEntries(network).find((entry) => entry.symbol === upper) ??
+      null
+    );
   }
 
   if (!isValidSolanaAddress(normalized)) {
@@ -552,6 +580,7 @@ export async function cacheOfflineTokenContext(
           mint: context.mint,
           symbol: context.symbol,
           name: context.name,
+          logo: null,
           decimals: context.decimals,
           verified: true,
           updatedAt: context.fetchedAt,

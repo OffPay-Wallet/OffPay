@@ -2,6 +2,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef } from 'react';
 
 import { prefetchAiChatCredits } from '@/hooks/agentic-chat/useAiChatCredits';
+import {
+  fetchOffpaySwapTokensForLogos,
+  offpaySwapTokensQueryKey,
+  TOKEN_LOGO_CACHE_GC_MS,
+  TOKEN_LOGO_CACHE_STALE_MS,
+} from '@/hooks/useOffpayTokenLogoMap';
 import { prefetchOffpayCapabilities } from '@/lib/api/offpay-capabilities-query';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -11,6 +17,7 @@ import {
 } from '@/lib/api/offpay-api-client';
 import { bootstrapOffpayRequestSecret } from '@/lib/bootstrap/offpay-bootstrap';
 import { unsupportedOffpayAttestationAdapter } from '@/lib/bootstrap/attestation';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { getAgenticConversationScopeKey } from '@/store/agenticChatStore';
 import { useOffpayAuthStore } from '@/store/offpayAuthStore';
@@ -34,10 +41,12 @@ export function OffpayBootstrapProvider({
   const walletId = useWalletStore((state) => state.activeWalletId);
   const walletAddress = useWalletStore((state) => state.publicKey);
   const resetAuthState = useOffpayAuthStore((state) => state.reset);
+  const authStatus = useOffpayAuthStore((state) => state.status);
   const setReady = useOffpayAuthStore((state) => state.setReady);
   const setProvisioning = useOffpayAuthStore((state) => state.setProvisioning);
   const setError = useOffpayAuthStore((state) => state.setError);
   const previousIdentityRef = useRef<string | null>(null);
+  const tokenLogoPrefetchKeyRef = useRef<string | null>(null);
 
   const identity = useMemo(() => {
     if (!canUseNetwork || network == null || walletId == null || walletAddress == null) {
@@ -94,6 +103,41 @@ export function OffpayBootstrapProvider({
       requestOwner: 'bootstrap.capabilities',
     });
   }, [canUseNetwork, network, queryClient]);
+
+  useEffect(() => {
+    if (authStatus !== 'ready' || !canUseNetwork || network == null || walletAddress == null) {
+      return;
+    }
+
+    const prefetchKey = `${network}:${walletAddress}`;
+    if (tokenLogoPrefetchKeyRef.current === prefetchKey) return;
+    tokenLogoPrefetchKeyRef.current = prefetchKey;
+
+    const startedAt = mark();
+    void queryClient
+      .prefetchQuery({
+        queryKey: offpaySwapTokensQueryKey(network),
+        queryFn: ({ signal }) =>
+          fetchOffpaySwapTokensForLogos(network, signal, 'bootstrap.tokenLogos'),
+        staleTime: TOKEN_LOGO_CACHE_STALE_MS,
+        gcTime: TOKEN_LOGO_CACHE_GC_MS,
+      })
+      .then(() => {
+        measure('tokenLogo.bootstrapPrefetch', startedAt, {
+          network,
+          status: 'ok',
+        });
+      })
+      .catch(() => {
+        if (tokenLogoPrefetchKeyRef.current === prefetchKey) {
+          tokenLogoPrefetchKeyRef.current = null;
+        }
+        measure('tokenLogo.bootstrapPrefetch', startedAt, {
+          network,
+          status: 'error',
+        });
+      });
+  }, [authStatus, canUseNetwork, network, queryClient, walletAddress]);
 
   useEffect(() => {
     if (aiChatCreditScopeKey == null) return;

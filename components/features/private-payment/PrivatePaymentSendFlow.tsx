@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -544,6 +551,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     [amount, selectedToken],
   );
   const [feeEstimateAmountRaw, setFeeEstimateAmountRaw] = useState<string | null>(null);
+  const clearFeeEstimateAmount = useCallback(() => {
+    startTransition(() => {
+      setFeeEstimateAmountRaw(null);
+    });
+  }, []);
 
   const balanceRaw = useMemo(
     () =>
@@ -624,20 +636,19 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     });
   }, [effectiveRecipientAddress, network, queryClient, selectedToken?.mint, walletAddress]);
   const resetCurrentFeeEstimate = useCallback(() => {
-    setFeeEstimateAmountRaw(null);
+    clearFeeEstimateAmount();
     cancelCurrentFeeEstimateQueries();
-  }, [cancelCurrentFeeEstimateQueries]);
+  }, [cancelCurrentFeeEstimateQueries, clearFeeEstimateAmount]);
   useEffect(() => {
     if (!feeEstimateInputsReady || !amountReadyForFeeEstimate) {
-      setFeeEstimateAmountRaw(null);
-      if (!amountReadyForFeeEstimate) {
-        cancelCurrentFeeEstimateQueries();
-      }
+      clearFeeEstimateAmount();
       return undefined;
     }
 
     const timeout = setTimeout(() => {
-      setFeeEstimateAmountRaw(amountRaw);
+      startTransition(() => {
+        setFeeEstimateAmountRaw(amountRaw);
+      });
     }, FEE_ESTIMATE_INPUT_DEBOUNCE_MS);
 
     return () => {
@@ -646,7 +657,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   }, [
     amountRaw,
     amountReadyForFeeEstimate,
-    cancelCurrentFeeEstimateQueries,
+    clearFeeEstimateAmount,
     feeEstimateInputsReady,
   ]);
   const routeRecipientBleName =
@@ -1414,7 +1425,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       setSelectedPrivateRoute(route);
       if (!feeEstimateInputsReady || !amountReadyForFeeEstimate) return;
 
-      setFeeEstimateAmountRaw(amountRaw);
+      startTransition(() => {
+        setFeeEstimateAmountRaw(amountRaw);
+      });
       prefetchFeeEstimatesForAmount(amountRaw, route);
     },
     [amountRaw, amountReadyForFeeEstimate, feeEstimateInputsReady, prefetchFeeEstimatesForAmount],
@@ -1426,22 +1439,18 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         0,
         MAX_AMOUNT_INPUT_CHARACTERS,
       );
-      if (nextAmount !== amount) {
-        resetCurrentFeeEstimate();
-      }
+      clearFeeEstimateAmount();
       setAmount(nextAmount);
     },
-    [amount, resetCurrentFeeEstimate, selectedToken?.decimals],
+    [clearFeeEstimateAmount, selectedToken?.decimals],
   );
 
   const handleMaxAmount = useCallback(() => {
     if (selectedToken == null) return;
     const nextAmount = sanitizeDecimalInput(selectedToken.balance, selectedToken.decimals);
-    if (nextAmount !== amount) {
-      resetCurrentFeeEstimate();
-    }
+    clearFeeEstimateAmount();
     setAmount(nextAmount);
-  }, [amount, resetCurrentFeeEstimate, selectedToken]);
+  }, [clearFeeEstimateAmount, selectedToken]);
 
   const handleContinueRecipient = useCallback(async () => {
     Keyboard.dismiss();
@@ -1793,7 +1802,9 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   const handleContinueAmount = useCallback(() => {
     if (!baseCanSubmit) return;
     Keyboard.dismiss();
-    setFeeEstimateAmountRaw(amountRaw);
+    startTransition(() => {
+      setFeeEstimateAmountRaw(amountRaw);
+    });
     prefetchFeeEstimatesForAmount(amountRaw);
     transitionToStep('summary', 'forward');
   }, [amountRaw, baseCanSubmit, prefetchFeeEstimatesForAmount, transitionToStep]);

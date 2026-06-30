@@ -1,6 +1,7 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryCache, QueryClient } from '@tanstack/react-query';
 
 import { isOfflineNetworkBlockedError } from '@/lib/api/network-access-policy';
+import { mark, measure } from '@/lib/perf/perf-marks';
 
 interface OffpayApiErrorLike {
   name: string;
@@ -94,6 +95,25 @@ function getRetryDelay(attemptIndex: number, error: unknown): number {
  * - refetchOnWindowFocus: false — disabled since mobile apps handle focus differently
  */
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      if (!isOfflineNetworkBlockedError(error)) return;
+
+      const blocked = error as {
+        method?: string | null;
+        owner?: string | null;
+        route?: string | null;
+        url?: string | null;
+      };
+      measure('offlineNetwork.blockedQuery', mark(), {
+        method: blocked.method ?? null,
+        owner: blocked.owner ?? null,
+        queryKey: JSON.stringify(query.queryKey),
+        route: blocked.route ?? null,
+        url: blocked.url ?? null,
+      });
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60, // 1 minute

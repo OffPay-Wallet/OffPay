@@ -6,6 +6,7 @@ import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import { getSwapTokens } from '@/lib/api/offpay-api-client';
+import { mark, measure } from '@/lib/perf/perf-marks';
 import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
@@ -42,6 +43,7 @@ interface UseOffpayTokenLogoMapOptions {
   capabilities?: CapabilitiesResponse['capabilities'] | null;
   deferCapabilitiesUntilAfterInteractions?: boolean;
   enabled?: boolean;
+  fetchWhenBalanceLogosMissing?: boolean;
   fetchSwapTokenCatalog?: boolean;
 }
 
@@ -54,6 +56,43 @@ function readMappedLogo(value: string | undefined): string | null {
   return logo != null && logo.length > 0 ? logo : null;
 }
 
+function isSvgLogoUri(uri: string): boolean {
+  const normalized = uri.trim().toLowerCase();
+  const cleanPath = normalized.split(/[?#]/, 1)[0] ?? normalized;
+  return cleanPath.endsWith('.svg') || normalized.includes('image/svg+xml');
+}
+
+export function choosePreferredTokenLogo(
+  current: string | null | undefined,
+  next: string | null | undefined,
+): string | null {
+  const currentLogo = current?.trim();
+  const nextLogo = next?.trim();
+
+  if (!currentLogo) return nextLogo && nextLogo.length > 0 ? nextLogo : null;
+  if (!nextLogo) return currentLogo;
+
+  const currentIsSvg = isSvgLogoUri(currentLogo);
+  const nextIsSvg = isSvgLogoUri(nextLogo);
+
+  if (currentIsSvg && !nextIsSvg) return nextLogo;
+  if (!currentIsSvg && nextIsSvg) return currentLogo;
+
+  return nextLogo;
+}
+
+function setPreferredTokenLogo(map: Map<string, string>, key: string, logo: string): void {
+  const preferred = choosePreferredTokenLogo(map.get(key), logo);
+  if (preferred != null) {
+    map.set(key, preferred);
+  }
+}
+
+function readPreferredMappedLogo(value: string | undefined): string | null {
+  const logo = readMappedLogo(value);
+  return logo != null && !isSvgLogoUri(logo) ? logo : null;
+}
+
 export function applyUmbraTokenLogoAliases(
   network: OffpayNetwork | null,
   byMint: Map<string, string>,
@@ -64,25 +103,22 @@ export function applyUmbraTokenLogoAliases(
   for (const token of getUmbraSupportedTokens(network)) {
     const tokenSymbol = normalizeSymbol(token.symbol);
     if (
-      readMappedLogo(byMint.get(token.mint)) != null &&
-      readMappedLogo(bySymbol.get(tokenSymbol)) != null
+      readPreferredMappedLogo(byMint.get(token.mint)) != null &&
+      readPreferredMappedLogo(bySymbol.get(tokenSymbol)) != null
     ) {
       continue;
     }
 
     const aliasLogo =
-      token.aliases
-        ?.map((alias) => readMappedLogo(bySymbol.get(normalizeSymbol(alias))))
-        .find((logo): logo is string => logo != null) ?? null;
+      token.aliases?.reduce<string | null>((preferredLogo, alias) => {
+        const logo = readMappedLogo(bySymbol.get(normalizeSymbol(alias)));
+        return choosePreferredTokenLogo(preferredLogo, logo);
+      }, null) ?? null;
 
     if (aliasLogo == null) continue;
 
-    if (readMappedLogo(byMint.get(token.mint)) == null) {
-      byMint.set(token.mint, aliasLogo);
-    }
-    if (readMappedLogo(bySymbol.get(tokenSymbol)) == null) {
-      bySymbol.set(tokenSymbol, aliasLogo);
-    }
+    setPreferredTokenLogo(byMint, token.mint, aliasLogo);
+    setPreferredTokenLogo(bySymbol, tokenSymbol, aliasLogo);
   }
 }
 
@@ -97,8 +133,8 @@ function buildLogoMapFromMetadata(
     const logo = token.logo?.trim();
     if (!logo) continue;
 
-    byMint.set(token.mint, logo);
-    bySymbol.set(normalizeSymbol(token.symbol), logo);
+    setPreferredTokenLogo(byMint, token.mint, logo);
+    setPreferredTokenLogo(bySymbol, normalizeSymbol(token.symbol), logo);
   }
 
   applyUmbraTokenLogoAliases(network, byMint, bySymbol);
@@ -106,16 +142,19 @@ function buildLogoMapFromMetadata(
   return { byMint, bySymbol };
 }
 
-function hasMappedLogo(
+function hasPreferredMappedLogo(
   logoMap: TokenLogoMap,
   mint: string,
   symbols: readonly (string | null | undefined)[],
 ): boolean {
-  if (logoMap.byMint.get(mint)?.trim()) return true;
+  if (readPreferredMappedLogo(logoMap.byMint.get(mint)) != null) return true;
 
   for (const symbol of symbols) {
     const normalized = symbol?.trim();
-    if (normalized && logoMap.bySymbol.get(normalizeSymbol(normalized))?.trim()) {
+    if (
+      normalized &&
+      readPreferredMappedLogo(logoMap.bySymbol.get(normalizeSymbol(normalized))) != null
+    ) {
       return true;
     }
   }
@@ -126,8 +165,15 @@ function hasMappedLogo(
 export async function fetchOffpaySwapTokensForLogos(
   network: OffpayNetwork,
   signal?: AbortSignal,
+  requestOwner = 'tokenLogos.catalog',
 ): Promise<SwapTokensResponse> {
-  const response = await getSwapTokens(network, { signal });
+  const startedAt = mark();
+  const response = await getSwapTokens(network, { signal, requestOwner });
+  measure('tokenLogo.catalogFetch', startedAt, {
+    network,
+    owner: requestOwner,
+    tokens: response.tokens.length,
+  });
   void observeOfflineTokenMetadataFromSwapTokens(network, response.tokens);
   return response;
 }
@@ -137,6 +183,7 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
   const { canUseNetwork, isNetworkAccessSuspended } = useOffpayNetworkAccess();
   const allowPendingCapabilities = options?.allowPendingCapabilities ?? false;
   const enabledByCaller = options?.enabled ?? true;
+  const fetchWhenBalanceLogosMissing = options?.fetchWhenBalanceLogosMissing ?? false;
   const fetchSwapTokenCatalog = options?.fetchSwapTokenCatalog ?? true;
   const hasExternalBalanceData = options != null && 'balanceData' in options;
   const hasExternalCapabilities = options != null && 'capabilities' in options;
@@ -167,10 +214,11 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     }
 
     return balanceData.tokens.every((token) => {
-      if (token.logo?.trim()) return true;
+      const tokenLogo = token.logo?.trim();
+      if (tokenLogo && !isSvgLogoUri(tokenLogo)) return true;
 
       const umbraToken = getUmbraTokenByMint(network, token.mint);
-      return hasMappedLogo(cachedPersistedLogoMap, token.mint, [
+      return hasPreferredMappedLogo(cachedPersistedLogoMap, token.mint, [
         token.symbol,
         umbraToken?.symbol,
         ...(umbraToken?.aliases ?? []),
@@ -183,7 +231,10 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     if (tokens.length === 0) return false;
 
     return tokens.every((token) =>
-      hasMappedLogo(cachedPersistedLogoMap, token.mint, [token.symbol, ...(token.aliases ?? [])]),
+      hasPreferredMappedLogo(cachedPersistedLogoMap, token.mint, [
+        token.symbol,
+        ...(token.aliases ?? []),
+      ]),
     );
   }, [allowPendingCapabilities, cachedPersistedLogoMap, network]);
   const hasBalanceLogoTargets = balanceData != null && balanceData.tokens.length > 0;
@@ -195,10 +246,13 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
     capabilities == null && allowPendingCapabilities
       ? true
       : isOffpayFeatureAvailable(capabilities, 'swap.tokens') && capability.available;
+  const shouldFetchSwapTokenCatalog =
+    fetchSwapTokenCatalog ||
+    (fetchWhenBalanceLogosMissing && hasBalanceLogoTargets && !cachedLogosCoverBalanceTokens);
   const enabled =
     network != null &&
     enabledByCaller &&
-    fetchSwapTokenCatalog &&
+    shouldFetchSwapTokenCatalog &&
     !cachedLogosCoverRequestedTargets &&
     canUseNetwork &&
     canFetchCatalogWithCapabilities;
@@ -243,24 +297,24 @@ export function useOffpayTokenLogoMap(options?: UseOffpayTokenLogoMapOptions): T
       const logo = token.logo?.trim();
       if (!logo) continue;
 
-      byMint.set(token.mint, logo);
-      bySymbol.set(normalizeSymbol(token.symbol), logo);
+      setPreferredTokenLogo(byMint, token.mint, logo);
+      setPreferredTokenLogo(bySymbol, normalizeSymbol(token.symbol), logo);
     }
 
     for (const token of query.data?.tokens ?? []) {
       const logo = token.logo?.trim();
       if (!logo) continue;
 
-      byMint.set(token.mint, logo);
-      bySymbol.set(normalizeSymbol(token.symbol), logo);
+      setPreferredTokenLogo(byMint, token.mint, logo);
+      setPreferredTokenLogo(bySymbol, normalizeSymbol(token.symbol), logo);
     }
 
     for (const token of balanceData?.tokens ?? []) {
       const logo = token.logo?.trim();
       if (!logo) continue;
 
-      byMint.set(token.mint, logo);
-      bySymbol.set(normalizeSymbol(token.symbol), logo);
+      setPreferredTokenLogo(byMint, token.mint, logo);
+      setPreferredTokenLogo(bySymbol, normalizeSymbol(token.symbol), logo);
     }
 
     applyUmbraTokenLogoAliases(network, byMint, bySymbol);

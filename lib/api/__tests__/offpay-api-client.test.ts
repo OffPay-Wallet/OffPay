@@ -79,6 +79,8 @@ const {
 } = require('@/lib/api/offpay-api-client') as typeof import('@/lib/api/offpay-api-client');
 const { fetchAlchemyTokenUsdPricesBatch } =
   require('@/lib/api/alchemy-prices-api') as typeof import('@/lib/api/alchemy-prices-api');
+const { OfflineNetworkBlockedError } =
+  require('@/lib/api/network-access-policy') as typeof import('@/lib/api/network-access-policy');
 
 function buildResponse(body: unknown, status = 200): Response {
   return {
@@ -162,6 +164,28 @@ describe('offpay-api-client', () => {
       code: 'UPSTREAM_UNAVAILABLE',
       message: 'Network request failed. Check your connection and try again.',
       retryable: true,
+    });
+  });
+
+  it('preserves offline fetch-guard errors with route and owner metadata', async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockRejectedValueOnce(
+      new OfflineNetworkBlockedError(undefined, {
+        method: 'GET',
+        owner: 'wallet.balance.test',
+        route: '/api/wallet/balance',
+        url: 'https://api.example/api/wallet/balance',
+      }),
+    );
+
+    await expect(
+      getWalletBalance('Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw', 'devnet', {
+        requestOwner: 'wallet.balance.test',
+      }),
+    ).rejects.toMatchObject({
+      name: 'OfflineNetworkBlockedError',
+      owner: 'wallet.balance.test',
+      route: '/api/wallet/balance',
     });
   });
 

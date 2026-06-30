@@ -56,6 +56,9 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
         'android.permission.BLUETOOTH_CONNECT',
         'android.permission.BLUETOOTH_ADVERTISE',
         'android.permission.ACCESS_FINE_LOCATION',
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.FOREGROUND_SERVICE',
+        'android.permission.FOREGROUND_SERVICE_LOCATION',
         // Microphone for the Yuga voice assistant (Sarvam STT).
         'android.permission.RECORD_AUDIO',
         // Required by Privy passkey enrollment so Android Credential
@@ -149,12 +152,13 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
       [
         'react-native-ble-manager',
         {
-          isBackgroundEnabled: false,
+          isBleRequired: false,
           neverForLocation: false,
           bluetoothAlwaysPermission:
             'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',
         },
       ],
+      './plugins/withAndroidBleManifest',
       './plugins/withAndroidProguardRules',
       // Required by `@privy-io/expo` so the SDK can open the OAuth
       // flow in a Custom Tab on Android. The plugin wires up the

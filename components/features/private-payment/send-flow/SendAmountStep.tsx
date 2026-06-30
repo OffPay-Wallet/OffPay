@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -38,9 +38,9 @@ import type { PrivatePaymentRoute, PrivatePaymentRouteOption, SendTokenOption } 
 
 const MIN_AMOUNT_FONT_SIZE = 12;
 const AMOUNT_DISPLAY_BREATHING_ROOM = 48;
-const AMOUNT_SMOOTH_DURATION_MS = 260;
-const AMOUNT_SMOOTH_DISTANCE = 10;
-const AMOUNT_FEEDBACK_DURATION_MS = 180;
+const AMOUNT_SMOOTH_DURATION_MS = 80;
+const AMOUNT_SMOOTH_DISTANCE = 2;
+const AMOUNT_FEEDBACK_DURATION_MS = 120;
 const DROPDOWN_MORPH_OPEN_DURATION_MS = 280;
 const DROPDOWN_MORPH_CLOSE_DURATION_MS = 230;
 const DROPDOWN_MORPH_FADE_DURATION_MS = 160;
@@ -384,7 +384,11 @@ interface AmountNumpadKeyProps {
   onPress: (value: NumpadKeyValue) => void;
 }
 
-function AmountNumpadKey({ value, keyFontSize, onPress }: AmountNumpadKeyProps): React.JSX.Element {
+const AmountNumpadKey = memo(function AmountNumpadKey({
+  value,
+  keyFontSize,
+  onPress,
+}: AmountNumpadKeyProps): React.JSX.Element {
   const pressProgress = useSharedValue(0);
   const isBackspace = value === 'backspace';
   const pressFillStyle = useAnimatedStyle(() => ({
@@ -445,7 +449,7 @@ function AmountNumpadKey({ value, keyFontSize, onPress }: AmountNumpadKeyProps):
       )}
     </Pressable>
   );
-}
+});
 
 interface AmountPresetKeyProps {
   label: string;
@@ -688,9 +692,10 @@ function AmountTokenDropdown({
         onLayout={handleSelectorCardLayout}
       >
         <Pressable
-          style={({ pressed }) => [styles.tokenDropdownButton, pressed && styles.pressed]}
+          style={styles.tokenDropdownButton}
           onLayout={handleTokenButtonLayout}
           onPress={onToggle}
+          hitSlop={4}
           accessibilityRole="button"
           accessibilityLabel={
             symbol.length > 0 ? `Choose token, selected ${symbol}` : 'Choose token'
@@ -735,9 +740,10 @@ function AmountTokenDropdown({
         {routeDropdownVisible ? (
           <View style={styles.tokenDropdownMetaColumn}>
             <Pressable
-              style={({ pressed }) => [styles.routeDropdownButton, pressed && styles.pressed]}
+              style={styles.routeDropdownButton}
               onLayout={handleRouteButtonLayout}
               onPress={onToggleRoute}
+              hitSlop={4}
               accessibilityRole="button"
               accessibilityLabel={`Choose route, selected ${selectedRouteOption.label}`}
               accessibilityState={{ expanded: routeOpen }}
@@ -858,7 +864,7 @@ function AmountTokenDropdown({
   );
 }
 
-export function SendAmountStep({
+export const SendAmountStep = memo(function SendAmountStep({
   token,
   tokenOptions,
   recipientAddress,
@@ -884,6 +890,7 @@ export function SendAmountStep({
   const [amountMotionDirection, setAmountMotionDirection] = useState<AmountMotionDirection>('up');
   const [tokenDropdownOpen, setTokenDropdownOpen] = useState(false);
   const [routeDropdownOpen, setRouteDropdownOpen] = useState(false);
+  const amountRef = useRef(amount);
   const amountMotionProgress = useSharedValue(1);
   const amountMotionDirectionValue = useSharedValue(1);
   const displayAmount = useMemo(() => formatDisplayAmount(amount), [amount]);
@@ -994,6 +1001,10 @@ export function SendAmountStep({
     [amountMetaLabel],
   );
   const showAmountFeedbackError = helper != null && amount.trim().length > 0;
+  const metaLabelKey = showAmountFeedbackError ? 'amount-feedback-error' : 'amount-meta';
+  useEffect(() => {
+    amountRef.current = amount;
+  }, [amount]);
   useEffect(() => {
     if (reduceMotion) {
       amountMotionProgress.value = 1;
@@ -1031,26 +1042,30 @@ export function SendAmountStep({
 
   const handleNumpadPress = useCallback(
     (key: NumpadKeyValue): void => {
-      const nextAmount = appendNumpadKey(amount, key, token?.decimals ?? 6);
-      if (nextAmount === amount) return;
+      const currentAmount = amountRef.current;
+      const nextAmount = appendNumpadKey(currentAmount, key, token?.decimals ?? 6);
+      if (nextAmount === currentAmount) return;
+      amountRef.current = nextAmount;
       setTokenDropdownOpen(false);
       setRouteDropdownOpen(false);
       setAmountMotionDirection(
-        key === 'backspace' ? 'down' : getAmountMotionDirection(amount, nextAmount),
+        key === 'backspace' ? 'down' : getAmountMotionDirection(currentAmount, nextAmount),
       );
       onAmountChange(nextAmount);
     },
-    [amount, onAmountChange, token?.decimals],
+    [onAmountChange, token?.decimals],
   );
 
   const handlePresetPress = useCallback(
     (preset: AmountPresetValue): void => {
+      const currentAmount = amountRef.current;
       setTokenDropdownOpen(false);
       setRouteDropdownOpen(false);
       if (preset === 'max') {
         setAmountMotionDirection(
-          token == null ? 'up' : getAmountMotionDirection(amount, token.balance),
+          token == null ? 'up' : getAmountMotionDirection(currentAmount, token.balance),
         );
+        if (token != null) amountRef.current = token.balance;
         onMax();
         return;
       }
@@ -1058,11 +1073,12 @@ export function SendAmountStep({
       if (token == null) return;
 
       const nextAmount = formatPresetAmount(token.balance, preset, token.decimals);
-      if (nextAmount === amount) return;
-      setAmountMotionDirection(getAmountMotionDirection(amount, nextAmount));
+      if (nextAmount === currentAmount) return;
+      amountRef.current = nextAmount;
+      setAmountMotionDirection(getAmountMotionDirection(currentAmount, nextAmount));
       onAmountChange(nextAmount);
     },
-    [amount, onAmountChange, onMax, token],
+    [onAmountChange, onMax, token],
   );
 
   const handleToggleTokenDropdown = useCallback((): void => {
@@ -1095,7 +1111,6 @@ export function SendAmountStep({
   return (
     <Animated.View
       entering={FadeIn.duration(220)}
-      layout={LinearTransition.duration(220)}
       style={[styles.step, { gap: stepGap }]}
     >
       <View
@@ -1172,7 +1187,7 @@ export function SendAmountStep({
           </Animated.View>
         </View>
         <Animated.View
-          key={showAmountFeedbackError ? `feedback-${helper}` : `meta-${amountMetaLabel}`}
+          key={metaLabelKey}
           entering={reduceMotion ? undefined : feedbackEnter}
           exiting={reduceMotion ? undefined : feedbackExit}
           style={styles.metaLabel}
@@ -1360,7 +1375,7 @@ export function SendAmountStep({
       </View>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   step: {

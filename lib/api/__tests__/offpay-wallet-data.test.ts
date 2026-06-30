@@ -237,7 +237,7 @@ describe('offpay-wallet-data', () => {
     expect(holdings[1]?.balance).toBe('2,000');
   });
 
-  it('does not inject static Umbra token logos when the API cache has no logo', () => {
+  it('keeps Umbra token logos empty when API cache has no logo', () => {
     const balance: WalletBalanceResponse = {
       address: 'CBbAfDh79oEhNn2ZouMi97Ek3y1vQYKuH5VbZqx3okMk',
       network: 'devnet',

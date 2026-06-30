@@ -12,6 +12,10 @@ import { signMessageForWallet } from '@/lib/crypto/solana-transaction-signing';
 import { getCachedOrSign, invalidateSignCacheForWallet } from '@/lib/crypto/sign-cache';
 import Constants from 'expo-constants';
 import {
+  isOfflineNetworkBlockedError,
+  rememberOfflineFetchMetadata,
+} from '@/lib/api/network-access-policy';
+import {
   clearOffpayBootstrapCredentials,
   getOffpayBootstrapVersion,
   getOffpayRequestSecret,
@@ -199,6 +203,7 @@ interface OffpayRequestOptions {
   accept?: string;
   headers?: Record<string, string>;
   walletId?: string;
+  requestOwner?: string;
   retryAuthRecovery?: boolean;
   retrySignature?: boolean;
   forceWalletSignature?: boolean;
@@ -299,6 +304,7 @@ function isTimeoutMessage(message: string): boolean {
 
 function normalizeFetchError(error: unknown, signal?: AbortSignal): never {
   if (error instanceof OffpayApiError) throw error;
+  if (isOfflineNetworkBlockedError(error)) throw error;
 
   const abortReason = getAbortReasonMessage(signal);
   if (abortReason != null) {
@@ -372,6 +378,19 @@ function getPublicRequestNetwork(query?: QueryParams): OffpayNetwork | null {
 
 function buildUrl(pathAndQuery: string): string {
   return `${OFFPAY_API_ORIGIN}${pathAndQuery}`;
+}
+
+function rememberOffpayRequestMetadata(params: {
+  method: OffpayApiMethod;
+  owner?: string | null;
+  path: `/${string}`;
+  url: string;
+}): () => void {
+  return rememberOfflineFetchMetadata(params.url, {
+    method: params.method,
+    owner: params.owner ?? null,
+    route: params.path,
+  });
 }
 
 function buildIdempotencyKey(prefix: string, values: readonly string[]): string {
@@ -673,7 +692,16 @@ export async function offpayPublicRequest<T>(options: PublicRequestOptions): Pro
   let serverTrace: OffpayServerTrace = EMPTY_SERVER_TRACE;
 
   try {
-    const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
+    const url = buildUrl(pathAndQuery);
+    const forgetFetchMetadata = rememberOffpayRequestMetadata({
+      method,
+      owner: options.requestOwner,
+      path: options.path,
+      url,
+    });
+    const response = await fetchWithNormalizedErrors(url, init, handle.signal).finally(
+      forgetFetchMetadata,
+    );
     responseStatus = response.status;
     serverTrace = readOffpayServerTrace(response);
     const payload = await parseJsonResponse(response);
@@ -730,7 +758,16 @@ export async function offpayPublicFetch(options: PublicRequestOptions): Promise<
   let serverTrace: OffpayServerTrace = EMPTY_SERVER_TRACE;
 
   try {
-    const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
+    const url = buildUrl(pathAndQuery);
+    const forgetFetchMetadata = rememberOffpayRequestMetadata({
+      method,
+      owner: options.requestOwner,
+      path: options.path,
+      url,
+    });
+    const response = await fetchWithNormalizedErrors(url, init, handle.signal).finally(
+      forgetFetchMetadata,
+    );
     responseStatus = response.status;
     serverTrace = readOffpayServerTrace(response);
     if (!response.ok) {
@@ -1026,7 +1063,16 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
 
     const fetchStartedAt = mark();
     try {
-      const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
+      const url = buildUrl(pathAndQuery);
+      const forgetFetchMetadata = rememberOffpayRequestMetadata({
+        method,
+        owner: options.requestOwner,
+        path: options.path,
+        url,
+      });
+      const response = await fetchWithNormalizedErrors(url, init, handle.signal).finally(
+        forgetFetchMetadata,
+      );
       responseStatus = response.status;
       const payload = await parseJsonResponse(response);
       if (!response.ok) throwForErrorEnvelope(response.status, payload);
@@ -1039,6 +1085,7 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
         route: options.path,
         network: options.network,
         status: responseStatus,
+        owner: options.requestOwner ?? null,
       });
     }
   } catch (error) {
@@ -1086,6 +1133,7 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
       route: options.path,
       network: options.network,
       status: responseStatus,
+      owner: options.requestOwner ?? null,
     });
   }
 }
@@ -1152,7 +1200,16 @@ export async function offpayAuthenticatedFetch(
 
     const fetchStartedAt = mark();
     try {
-      const response = await fetchWithNormalizedErrors(buildUrl(pathAndQuery), init, handle.signal);
+      const url = buildUrl(pathAndQuery);
+      const forgetFetchMetadata = rememberOffpayRequestMetadata({
+        method,
+        owner: options.requestOwner,
+        path: options.path,
+        url,
+      });
+      const response = await fetchWithNormalizedErrors(url, init, handle.signal).finally(
+        forgetFetchMetadata,
+      );
       responseStatus = response.status;
       if (!response.ok) {
         const payload = await parseJsonResponse(response);
@@ -1167,6 +1224,7 @@ export async function offpayAuthenticatedFetch(
         route: options.path,
         network: options.network,
         status: responseStatus,
+        owner: options.requestOwner ?? null,
       });
     }
   } catch (error) {
@@ -1210,6 +1268,7 @@ export async function offpayAuthenticatedFetch(
       route: options.path,
       network: options.network,
       status: responseStatus,
+      owner: options.requestOwner ?? null,
     });
   }
 }
@@ -1543,13 +1602,14 @@ export function deletePendingBackup(
 
 export async function getSwapTokens(
   network: OffpayNetwork,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; requestOwner?: string },
 ): Promise<SwapTokensResponse> {
   return offpayPublicRequest<SwapTokensResponse>({
     path: '/api/swap/tokens',
     query: { network },
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
   });
 }
 

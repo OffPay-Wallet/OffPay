@@ -9,12 +9,21 @@
  *
  * Uses OffPay backend wallet and activity surfaces.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from 'react';
 import { Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useIsFocused } from 'expo-router/react-navigation';
 import { useQueryClient } from '@tanstack/react-query';
+import { Image } from 'expo-image';
 
 import { BalanceCard } from '@/components/features/home/BalanceCard';
 import {
@@ -78,6 +87,7 @@ import { useSettlementEngineStore } from '@/store/settlementEngineStore';
 import { useWalletStore } from '@/store/walletStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useOfflinePaymentStore } from '@/store/offlinePaymentStore';
+import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransitionStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 
@@ -96,12 +106,48 @@ const EMPTY_DISABLED_ACTION_IDS: readonly string[] = [];
 const OFFLINE_DISABLED_ACTION_IDS: readonly string[] = ['swap'];
 const HOME_REFRESH_SPINNER_MIN_MS = 360;
 const EMPTY_TOKEN_VALUATIONS: Readonly<Record<string, TokenValuationView>> = {};
+const MAX_HOME_LOGO_PREFETCH_URIS = 8;
 
 interface HomeBalanceModeState {
   scopeKey: string;
   mode: HomeBalanceMode;
   shieldedPaneMounted: boolean;
 }
+
+type BalanceCardProps = ComponentProps<typeof BalanceCard>;
+type TokenHoldingsCardProps = ComponentProps<typeof TokenHoldingsCard>;
+type RecentActivityCardProps = ComponentProps<typeof RecentActivityCard>;
+
+const HomeBalanceSection = memo(function HomeBalanceSection({
+  sectionGap,
+  ...props
+}: BalanceCardProps & { sectionGap: number }): React.JSX.Element {
+  return (
+    <View style={[styles.balanceSection, { marginBottom: sectionGap }]}>
+      <BalanceCard {...props} />
+    </View>
+  );
+});
+
+const HomeHoldingsSection = memo(function HomeHoldingsSection(
+  props: TokenHoldingsCardProps,
+): React.JSX.Element {
+  return (
+    <View>
+      <TokenHoldingsCard {...props} />
+    </View>
+  );
+});
+
+const HomeRecentActivitySection = memo(function HomeRecentActivitySection(
+  props: RecentActivityCardProps,
+): React.JSX.Element {
+  return (
+    <View>
+      <RecentActivityCard {...props} />
+    </View>
+  );
+});
 
 function getQueryErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -141,6 +187,33 @@ function buildOfflineSlotsLabel(params: {
   return params.snapshotLoaded ? 'Setup needed' : 'Checking slots';
 }
 
+function isSvgLogoUri(uri: string): boolean {
+  const normalized = uri.trim().toLowerCase();
+  const cleanPath = normalized.split(/[?#]/, 1)[0] ?? normalized;
+  return cleanPath.endsWith('.svg') || normalized.includes('image/svg+xml');
+}
+
+function isRemoteHttpLogoUri(uri: string | null | undefined): boolean {
+  const normalized = uri?.trim().toLowerCase();
+  return normalized?.startsWith('http://') === true || normalized?.startsWith('https://') === true;
+}
+
+function addPrefetchableLogoUri(uris: Set<string>, logoUri: string | null | undefined): void {
+  if (uris.size >= MAX_HOME_LOGO_PREFETCH_URIS) return;
+
+  const normalized = logoUri?.trim();
+  if (
+    normalized == null ||
+    normalized.length === 0 ||
+    !isRemoteHttpLogoUri(normalized) ||
+    isSvgLogoUri(normalized)
+  ) {
+    return;
+  }
+
+  uris.add(normalized);
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -152,6 +225,9 @@ export function HomeScreenContent(): React.JSX.Element {
   const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const { showToast } = useAppToast();
+  const suspendNetworkAccess = useOffpayNetworkTransitionStore(
+    (state) => state.suspendNetworkAccess,
+  );
   const publicKey = useWalletStore((s) => s.publicKey);
   const currency = usePreferencesStore((s) => s.currency);
   const setCurrency = usePreferencesStore((s) => s.setCurrency);
@@ -249,10 +325,11 @@ export function HomeScreenContent(): React.JSX.Element {
     enabled: homeDataReady,
   });
   const tokenLogoMap = useOffpayTokenLogoMap({
-    allowPendingCapabilities: shieldedLogoCatalogNeeded,
+    allowPendingCapabilities: shieldedLogoCatalogNeeded || balanceQuery.data != null,
     enabled: homeDataReady,
     balanceData: balanceQuery.data,
     capabilities: capabilitiesQuery.capabilities,
+    fetchWhenBalanceLogosMissing: true,
     fetchSwapTokenCatalog: homeSnapshot.idleFetchEnabled || shieldedLogoCatalogNeeded,
   });
   const settlementStatus = useSettlementEngineStore((state) => state.status);
@@ -332,6 +409,48 @@ export function HomeScreenContent(): React.JSX.Element {
     transactionsQuery.transactionViews,
     transactionsQuery.transactions,
   ]);
+
+  useEffect(() => {
+    if (!homeDataReady || !canUseNetwork) return;
+
+    const prefetchUris = new Set<string>();
+    for (const holding of previewHoldings) {
+      addPrefetchableLogoUri(prefetchUris, holding.logo);
+    }
+
+    for (const tx of recentActivity) {
+      addPrefetchableLogoUri(prefetchUris, tx.tokenLogo);
+      if (tx.tokenMint != null) {
+        addPrefetchableLogoUri(prefetchUris, tokenLogoMap.byMint.get(tx.tokenMint));
+      }
+      if (tx.tokenSymbol != null) {
+        addPrefetchableLogoUri(
+          prefetchUris,
+          tokenLogoMap.bySymbol.get(tx.tokenSymbol.trim().toUpperCase()),
+        );
+      }
+    }
+
+    if (prefetchUris.size === 0) return;
+
+    const uris = Array.from(prefetchUris);
+    const startedAt = mark();
+    void Image.prefetch(uris, 'memory-disk')
+      .then((success) => {
+        measure('tokenLogo.prefetch', startedAt, {
+          count: uris.length,
+          success,
+          surface: 'home',
+        });
+      })
+      .catch(() => {
+        measure('tokenLogo.prefetch', startedAt, {
+          count: uris.length,
+          success: false,
+          surface: 'home',
+        });
+      });
+  }, [canUseNetwork, homeDataReady, previewHoldings, recentActivity, tokenLogoMap]);
   const portfolioValueLabel =
     portfolioValuationDisplayReady && portfolioValuationData != null
       ? formatFiatCurrency(portfolioValuationData.total, portfolioValuationData.currency)
@@ -355,6 +474,12 @@ export function HomeScreenContent(): React.JSX.Element {
     },
     [setPreferredWalletMode],
   );
+  const enterOfflineMode = useCallback((): void => {
+    suspendNetworkAccess({ timeoutMs: 1600, fallbackDelayMs: 800 });
+    void queryClient.cancelQueries({ queryKey: ['offpay'] }).finally(() => {
+      setPreferredWalletModeAfterPaint('offline');
+    });
+  }, [queryClient, setPreferredWalletModeAfterPaint, suspendNetworkAccess]);
 
   const offlineToggleContextRef = useRef<{
     promptKey: string | null;
@@ -367,6 +492,7 @@ export function HomeScreenContent(): React.JSX.Element {
     refetchStatus: () => Promise<{
       data?: { counts: { ready: number; preparing: number; settling: number } };
     }>;
+    enterOfflineMode: () => void;
     setPreferredWalletMode: (mode: WalletMode) => void;
     showToast: typeof showToast;
     notificationId?: string;
@@ -384,6 +510,7 @@ export function HomeScreenContent(): React.JSX.Element {
     preparePending: offlinePaymentSlots.prepareMutation.isPending,
     isOnlineReachable,
     refetchStatus: offlinePaymentSlots.statusQuery.refetch,
+    enterOfflineMode,
     setPreferredWalletMode: setPreferredWalletModeAfterPaint,
     showToast,
     notificationId: slotStatusNotificationId,
@@ -602,7 +729,7 @@ export function HomeScreenContent(): React.JSX.Element {
     const readySlots = context.offlineReadySlots;
 
     if (readySlots > 0) {
-      context.setPreferredWalletMode('offline');
+      context.enterOfflineMode();
       return;
     }
 
@@ -624,7 +751,7 @@ export function HomeScreenContent(): React.JSX.Element {
           const refreshedPendingSlots = countOfflineSetupPendingSlots(refreshed.data?.counts);
           if (refreshedReadySlots > 0) {
             setSlotPromptVisible(false);
-            context.setPreferredWalletMode('offline');
+            context.enterOfflineMode();
             return;
           }
 
@@ -691,7 +818,7 @@ export function HomeScreenContent(): React.JSX.Element {
             slotPromptAutoShownRef.current = promptKey;
           }
           if (readySlots > 0) {
-            setPreferredWalletModeAfterPaint('offline');
+            enterOfflineMode();
             slotPrepareShouldEnterOfflineRef.current = false;
           }
           const rentSol =
@@ -735,7 +862,7 @@ export function HomeScreenContent(): React.JSX.Element {
     publicKey,
     setOfflinePaymentPoolSize,
     setOfflinePaymentsEnabled,
-    setPreferredWalletModeAfterPaint,
+    enterOfflineMode,
     showToast,
     slotStatusNotificationId,
   ]);
@@ -755,13 +882,17 @@ export function HomeScreenContent(): React.JSX.Element {
       slotPromptAutoShownRef.current = context.promptKey;
     }
     setSlotPromptVisible(false);
-    setPreferredWalletModeAfterPaint('offline');
+    if (context != null) {
+      context.enterOfflineMode();
+    } else {
+      enterOfflineMode();
+    }
     showToast({
       title: 'Offline sends unavailable',
       message: 'Prepare slots online before sending offline.',
       variant: 'warning',
     });
-  }, [setPreferredWalletModeAfterPaint, showToast]);
+  }, [enterOfflineMode, showToast]);
 
   const handleTogglePrivacy = useCallback((): void => {
     setPrivacyHidden((current) => !current);
@@ -786,7 +917,7 @@ export function HomeScreenContent(): React.JSX.Element {
 
     if (slotPrepareShouldEnterOfflineRef.current) {
       slotPrepareShouldEnterOfflineRef.current = false;
-      setPreferredWalletModeAfterPaint('offline');
+      enterOfflineMode();
     }
 
     showToast({
@@ -796,10 +927,10 @@ export function HomeScreenContent(): React.JSX.Element {
       notificationId: slotStatusNotificationId,
     });
   }, [
+    enterOfflineMode,
     offlineReadySlots,
     offlineSetupPendingSlots,
     offlineSlotTarget,
-    setPreferredWalletModeAfterPaint,
     showToast,
     slotStatusNotificationId,
     slotStatusKey,
@@ -1137,66 +1268,59 @@ export function HomeScreenContent(): React.JSX.Element {
           accessibilityElementsHidden={shieldedPaneActive}
           importantForAccessibility={shieldedPaneActive ? 'no-hide-descendants' : 'auto'}
         >
-          <View style={[styles.balanceSection, { marginBottom: sectionGap }]}>
-            <BalanceCard
-              offlineSlotsLabel={offlineSlotsLabel}
-              portfolioValueLabel={portfolioValueLabel}
-              portfolioValueLoading={
-                portfolioValueLabel == null &&
-                (criticalSnapshotPending ||
-                  valuationValuesLoading ||
-                  portfolioValuationQuery.isLoading ||
-                  balanceQuery.isLoading ||
-                  balanceQuery.isCapabilitiesPending)
-              }
-              holdingsValueChange={holdingsValueChangeQuery.data}
-              holdingsValueChangeLoading={holdingsValueChangeLoading}
-              holdingsValueChangeTimeframe={holdingsValueChangeTimeframe}
-              onHoldingsValueChangeTimeframeChange={setHoldingsValueChangeTimeframe}
-              selectedCurrency={currency}
-              onCurrencyChange={setCurrency}
-              onRefresh={handleRefreshHomeData}
-              refreshing={homeRefreshPending}
-              privacyHidden={privacyHidden}
-              onTogglePrivacy={handleTogglePrivacy}
-              balanceTicker="Total balance"
-              balanceLabel={balanceLabel}
-              onAction={handleAction}
-              disabledActionIds={
-                isOffline ? OFFLINE_DISABLED_ACTION_IDS : EMPTY_DISABLED_ACTION_IDS
-              }
-            />
-          </View>
+          <HomeBalanceSection
+            sectionGap={sectionGap}
+            offlineSlotsLabel={offlineSlotsLabel}
+            portfolioValueLabel={portfolioValueLabel}
+            portfolioValueLoading={
+              portfolioValueLabel == null &&
+              (criticalSnapshotPending ||
+                valuationValuesLoading ||
+                portfolioValuationQuery.isLoading ||
+                balanceQuery.isLoading ||
+                balanceQuery.isCapabilitiesPending)
+            }
+            holdingsValueChange={holdingsValueChangeQuery.data}
+            holdingsValueChangeLoading={holdingsValueChangeLoading}
+            holdingsValueChangeTimeframe={holdingsValueChangeTimeframe}
+            onHoldingsValueChangeTimeframeChange={setHoldingsValueChangeTimeframe}
+            selectedCurrency={currency}
+            onCurrencyChange={setCurrency}
+            onRefresh={handleRefreshHomeData}
+            refreshing={homeRefreshPending}
+            privacyHidden={privacyHidden}
+            onTogglePrivacy={handleTogglePrivacy}
+            balanceTicker="Total balance"
+            balanceLabel={balanceLabel}
+            onAction={handleAction}
+            disabledActionIds={isOffline ? OFFLINE_DISABLED_ACTION_IDS : EMPTY_DISABLED_ACTION_IDS}
+          />
 
-          <View>
-            <TokenHoldingsCard
-              holdings={previewHoldings}
-              currency={currency}
-              onTokenPress={handleTokenPress}
-              onViewAll={handleViewAllHoldings}
-              emptyTitle={holdingsEmptyTitle}
-              emptySubtitle={holdingsEmptySubtitle}
-              hiddenSpamTokenCount={countSpamTokens(balanceQuery.data)}
-              privacyHidden={privacyHidden}
-              valuations={tokenValuations}
-              valuationsLoading={valuationValuesLoading}
-              loading={holdingsLoading}
-            />
-          </View>
+          <HomeHoldingsSection
+            holdings={previewHoldings}
+            currency={currency}
+            onTokenPress={handleTokenPress}
+            onViewAll={handleViewAllHoldings}
+            emptyTitle={holdingsEmptyTitle}
+            emptySubtitle={holdingsEmptySubtitle}
+            hiddenSpamTokenCount={countSpamTokens(balanceQuery.data)}
+            privacyHidden={privacyHidden}
+            valuations={tokenValuations}
+            valuationsLoading={valuationValuesLoading}
+            loading={holdingsLoading}
+          />
 
-          <View>
-            <RecentActivityCard
-              transactions={recentActivity}
-              onTransactionPress={handleActivityPress}
-              onViewAll={handleViewAllActivity}
-              statusLabel={streamStatusLabel}
-              emptyTitle={activityEmptyTitle}
-              emptySubtitle={activityEmptySubtitle}
-              privacyHidden={privacyHidden}
-              loading={activityLoading}
-              tokenLogos={tokenLogoMap}
-            />
-          </View>
+          <HomeRecentActivitySection
+            transactions={recentActivity}
+            onTransactionPress={handleActivityPress}
+            onViewAll={handleViewAllActivity}
+            statusLabel={streamStatusLabel}
+            emptyTitle={activityEmptyTitle}
+            emptySubtitle={activityEmptySubtitle}
+            privacyHidden={privacyHidden}
+            loading={activityLoading}
+            tokenLogos={tokenLogoMap}
+          />
         </View>
       </ScrollView>
 

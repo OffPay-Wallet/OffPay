@@ -21,16 +21,19 @@ describe('offline-token-metadata', () => {
     await expect(getOfflineTokenMetadata('mainnet', 'SOL')).resolves.toMatchObject({
       symbol: 'SOL',
       decimals: 9,
+      logo: null,
     });
     await expect(getOfflineTokenMetadata('devnet', 'USDC')).resolves.toMatchObject({
       symbol: 'USDC',
       decimals: 6,
       mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      logo: null,
     });
     await expect(getOfflineTokenMetadata('mainnet', 'USDT')).resolves.toMatchObject({
       symbol: 'USDT',
       decimals: 6,
       mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+      logo: null,
     });
     await expect(
       getOfflineTokenMetadata('devnet', '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7'),
@@ -97,6 +100,53 @@ describe('offline-token-metadata', () => {
       decimals: 5,
       verified: true,
       logo: 'https://example.com/bonk-swap.png',
+    });
+  });
+
+  it('keeps API raster metadata ahead of SVG metadata regardless of source order', async () => {
+    await observeOfflineTokenMetadataFromSwapTokens('mainnet', [
+      {
+        mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        name: 'USD Coin',
+        symbol: 'USDC',
+        logo: 'https://example.com/usdc.svg',
+        decimals: 6,
+        verified: true,
+      },
+    ]);
+
+    await expect(getOfflineTokenMetadata('mainnet', 'USDC')).resolves.toMatchObject({
+      logo: 'https://example.com/usdc.svg',
+    });
+
+    await observeOfflineTokenMetadataFromSwapTokens('mainnet', [
+      {
+        mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        name: 'USD Coin',
+        symbol: 'USDC',
+        logo: 'https://example.com/usdc.png',
+        decimals: 6,
+        verified: true,
+      },
+    ]);
+
+    await expect(getOfflineTokenMetadata('mainnet', 'USDC')).resolves.toMatchObject({
+      logo: 'https://example.com/usdc.png',
+    });
+
+    await observeOfflineTokenMetadataFromSwapTokens('mainnet', [
+      {
+        mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        name: 'USD Coin',
+        symbol: 'USDC',
+        logo: 'https://example.com/usdc-later.svg',
+        decimals: 6,
+        verified: true,
+      },
+    ]);
+
+    await expect(getOfflineTokenMetadata('mainnet', 'USDC')).resolves.toMatchObject({
+      logo: 'https://example.com/usdc.png',
     });
   });
 

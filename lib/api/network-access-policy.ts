@@ -7,6 +7,13 @@ import { usePreferencesStore } from '@/store/preferencesStore';
 const OFFLINE_NETWORK_ERROR_NAME = 'OfflineNetworkBlockedError';
 
 type FetchLike = typeof fetch;
+export interface OfflineNetworkBlockedMetadata {
+  method?: string | null;
+  owner?: string | null;
+  queryKey?: string | null;
+  route?: string | null;
+  url?: string | null;
+}
 
 let fetchGuardInstalled = false;
 let originalFetch: FetchLike | null = null;
@@ -15,13 +22,28 @@ let netInfoUnsubscribe: (() => void) | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
 let lastReachableOnline = true;
 let focusRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+const fetchMetadataByUrl = new Map<string, OfflineNetworkBlockedMetadata>();
 
 const FOCUS_RESTORE_DELAY_MS = 500;
 
 export class OfflineNetworkBlockedError extends Error {
-  constructor(message = 'Offline mode is active. Internet requests are disabled.') {
+  readonly method: string | null;
+  readonly owner: string | null;
+  readonly queryKey: string | null;
+  readonly route: string | null;
+  readonly url: string | null;
+
+  constructor(
+    message = 'Offline mode is active. Internet requests are disabled.',
+    options?: OfflineNetworkBlockedMetadata,
+  ) {
     super(message);
     this.name = OFFLINE_NETWORK_ERROR_NAME;
+    this.method = options?.method ?? null;
+    this.owner = options?.owner ?? null;
+    this.queryKey = options?.queryKey ?? null;
+    this.route = options?.route ?? null;
+    this.url = options?.url ?? null;
   }
 }
 
@@ -36,6 +58,23 @@ export function isOfflineNetworkBlockedError(error: unknown): boolean {
 
 export function isManualOfflineModeActive(): boolean {
   return usePreferencesStore.getState().walletMode === 'offline';
+}
+
+export function rememberOfflineFetchMetadata(
+  url: string,
+  metadata: OfflineNetworkBlockedMetadata,
+): () => void {
+  const entry = {
+    ...metadata,
+    url,
+  };
+  fetchMetadataByUrl.set(url, entry);
+
+  return () => {
+    if (fetchMetadataByUrl.get(url) === entry) {
+      fetchMetadataByUrl.delete(url);
+    }
+  };
 }
 
 function getFetchUrl(input: Parameters<FetchLike>[0]): string | null {
@@ -55,18 +94,18 @@ function isLoopbackHost(hostname: string): boolean {
   );
 }
 
-function shouldBlockFetch(input: Parameters<FetchLike>[0]): boolean {
-  if (!isManualOfflineModeActive()) return false;
+function getBlockedFetchUrl(input: Parameters<FetchLike>[0]): string | null {
+  if (!isManualOfflineModeActive()) return null;
 
   const rawUrl = getFetchUrl(input);
-  if (rawUrl == null) return false;
+  if (rawUrl == null) return null;
 
   try {
     const url = new URL(rawUrl);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    return !isLoopbackHost(url.hostname);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return isLoopbackHost(url.hostname) ? null : rawUrl;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -75,8 +114,18 @@ function installFetchGuard(): void {
 
   originalFetch = globalThis.fetch.bind(globalThis) as FetchLike;
   globalThis.fetch = ((input, init) => {
-    if (shouldBlockFetch(input as Parameters<FetchLike>[0])) {
-      return Promise.reject(new OfflineNetworkBlockedError());
+    const blockedUrl = getBlockedFetchUrl(input as Parameters<FetchLike>[0]);
+    if (blockedUrl != null) {
+      const metadata = fetchMetadataByUrl.get(blockedUrl);
+      return Promise.reject(
+        new OfflineNetworkBlockedError(undefined, {
+          method: metadata?.method ?? init?.method ?? null,
+          owner: metadata?.owner ?? null,
+          queryKey: metadata?.queryKey ?? null,
+          route: metadata?.route ?? null,
+          url: blockedUrl,
+        }),
+      );
     }
 
     return originalFetch!(input as RequestInfo, init);
