@@ -22,7 +22,7 @@ import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import { scheduleUiWorkAfterFirstPaint, type ScheduledUiWork } from '@/lib/perf/ui-work-scheduler';
 import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 
-import type { BarcodeScanningResult } from 'expo-camera';
+import type { BarcodeScanningResult, BarcodeSettings } from 'expo-camera';
 
 interface ScannedPaymentRequest {
   recipient: string;
@@ -44,7 +44,11 @@ interface ScanAlertState {
 
 const QR_ABSENCE_CLEAR_MS = 1400;
 const CAMERA_STOP_DELAY_MS = 180;
+const QR_DUPLICATE_SUPPRESS_MS = 700;
+const QR_PAYLOAD_MAX_CHARS = 8192;
+const QR_ALERT_KEY_MAX_RAW_LENGTH = 96;
 const SCANNER_CONTENT_MAX_WIDTH = 430;
+const QR_BARCODE_SCANNER_SETTINGS: BarcodeSettings = { barcodeTypes: ['qr'] };
 
 function HeaderIconButton({
   children,
@@ -75,7 +79,11 @@ function getErrorMessage(error: unknown): string {
 }
 
 function buildScanAlertKey(rawValue: string, title: string, message: string): string {
-  return `${rawValue}:${title}:${message}`;
+  const rawKey =
+    rawValue.length > QR_ALERT_KEY_MAX_RAW_LENGTH
+      ? `${rawValue.slice(0, QR_ALERT_KEY_MAX_RAW_LENGTH)}:${rawValue.length}`
+      : rawValue;
+  return `${rawKey}:${title}:${message}`;
 }
 
 function scanAlertColor(variant: ScanAlertState['variant']): string {
@@ -88,6 +96,9 @@ function parsePaymentQr(rawValue: string): ScannedPaymentRequest {
   const raw = rawValue.trim();
   if (raw.length === 0) {
     throw new Error('QR payload is empty.');
+  }
+  if (raw.length > QR_PAYLOAD_MAX_CHARS) {
+    throw new Error('QR payload is too large.');
   }
 
   if (isValidSolanaAddress(raw)) {
@@ -119,6 +130,39 @@ function parsePaymentQr(rawValue: string): ScannedPaymentRequest {
   }
 
   throw new Error('This QR is not a wallet payment request.');
+}
+
+function scheduleAfterNextFrame(task: () => void): ScheduledUiWork {
+  let cancelled = false;
+  const frameGlobal = globalThis as typeof globalThis & {
+    requestAnimationFrame?: typeof requestAnimationFrame;
+    cancelAnimationFrame?: typeof cancelAnimationFrame;
+  };
+  const requestFrame =
+    typeof frameGlobal.requestAnimationFrame === 'function'
+      ? frameGlobal.requestAnimationFrame.bind(frameGlobal)
+      : (callback: FrameRequestCallback) =>
+          setTimeout(() => callback(Date.now()), 0) as unknown as number;
+  const cancelFrame =
+    typeof frameGlobal.cancelAnimationFrame === 'function'
+      ? frameGlobal.cancelAnimationFrame.bind(frameGlobal)
+      : (handle: number) => clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
+  let frameHandle: number | null = requestFrame(() => {
+    frameHandle = null;
+    if (!cancelled) {
+      task();
+    }
+  });
+
+  return {
+    cancel: () => {
+      cancelled = true;
+      if (frameHandle != null) {
+        cancelFrame(frameHandle);
+        frameHandle = null;
+      }
+    },
+  };
 }
 
 /**
@@ -188,6 +232,9 @@ export function ScannerScreen(): React.JSX.Element {
   const scanAlertClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraActivationTaskRef = useRef<ScheduledUiWork | null>(null);
   const cameraStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasScannedRef = useRef(false);
+  const navigationAfterScanTaskRef = useRef<ScheduledUiWork | null>(null);
+  const lastScanAttemptRef = useRef<{ rawValue: string; handledAt: number } | null>(null);
   const fallbackMint = typeof params.mint === 'string' ? params.mint : '';
   const compact = width < 390 || height < 760 || fontScale > 1.08;
   const dense = width < 340 || fontScale > 1.18;
@@ -207,6 +254,11 @@ export function ScannerScreen(): React.JSX.Element {
   const cancelCameraActivation = useCallback(() => {
     cameraActivationTaskRef.current?.cancel?.();
     cameraActivationTaskRef.current = null;
+  }, []);
+
+  const cancelNavigationAfterScan = useCallback(() => {
+    navigationAfterScanTaskRef.current?.cancel?.();
+    navigationAfterScanTaskRef.current = null;
   }, []);
 
   const scheduleCameraActivation = useCallback(() => {
@@ -239,6 +291,24 @@ export function ScannerScreen(): React.JSX.Element {
     }, CAMERA_STOP_DELAY_MS);
   }, [cancelCameraActivation]);
 
+  const stopCameraImmediately = useCallback(() => {
+    cancelCameraActivation();
+    if (cameraStopTimerRef.current != null) {
+      clearTimeout(cameraStopTimerRef.current);
+      cameraStopTimerRef.current = null;
+    }
+    if (scanAlertClearTimerRef.current != null) {
+      clearTimeout(scanAlertClearTimerRef.current);
+      scanAlertClearTimerRef.current = null;
+    }
+
+    hasScannedRef.current = true;
+    lastScanAttemptRef.current = null;
+    setHasScanned(true);
+    setScanAlert(null);
+    setCameraActive(false);
+  }, [cancelCameraActivation]);
+
   useEffect(() => {
     if (cameraPermission?.granted === true) {
       return;
@@ -264,16 +334,20 @@ export function ScannerScreen(): React.JSX.Element {
   useEffect(
     () => () => {
       cancelCameraActivation();
+      cancelNavigationAfterScan();
       if (cameraStopTimerRef.current != null) {
         clearTimeout(cameraStopTimerRef.current);
         cameraStopTimerRef.current = null;
       }
     },
-    [cancelCameraActivation],
+    [cancelCameraActivation, cancelNavigationAfterScan],
   );
 
   useFocusEffect(
     useCallback(() => {
+      hasScannedRef.current = false;
+      lastScanAttemptRef.current = null;
+      cancelNavigationAfterScan();
       setHasScanned(false);
       setScanAlert(null);
       if (cameraPermission?.granted === true) {
@@ -281,13 +355,19 @@ export function ScannerScreen(): React.JSX.Element {
       }
 
       return () => {
+        cancelNavigationAfterScan();
         stopCameraAfterTransition();
         if (scanAlertClearTimerRef.current != null) {
           clearTimeout(scanAlertClearTimerRef.current);
           scanAlertClearTimerRef.current = null;
         }
       };
-    }, [cameraPermission?.granted, scheduleCameraActivation, stopCameraAfterTransition]),
+    }, [
+      cameraPermission?.granted,
+      cancelNavigationAfterScan,
+      scheduleCameraActivation,
+      stopCameraAfterTransition,
+    ]),
   );
 
   const helperText = useMemo(() => {
@@ -299,12 +379,17 @@ export function ScannerScreen(): React.JSX.Element {
   }, [cameraPermission?.canAskAgain, cameraPermission?.granted, network, unsupportedReason]);
 
   const handleBack = useCallback(() => {
+    cancelNavigationAfterScan();
+    stopCameraImmediately();
     const target =
       previousRoute !== 'index' && previousRoute !== 'scanner'
         ? TAB_ROUTE_HREFS[previousRoute]
         : TAB_ROUTE_HREFS.index;
-    router.navigate(target);
-  }, [previousRoute, router]);
+    navigationAfterScanTaskRef.current = scheduleAfterNextFrame(() => {
+      navigationAfterScanTaskRef.current = null;
+      router.navigate(target);
+    });
+  }, [cancelNavigationAfterScan, previousRoute, router, stopCameraImmediately]);
 
   const clearScanAlert = useCallback(() => {
     if (scanAlertClearTimerRef.current != null) {
@@ -352,8 +437,17 @@ export function ScannerScreen(): React.JSX.Element {
 
   const handleCameraQr = useCallback(
     (result: BarcodeScanningResult) => {
-      if (hasScanned) return;
+      if (hasScannedRef.current) return;
       const rawValue = result.data.trim();
+      const now = Date.now();
+      const lastScanAttempt = lastScanAttemptRef.current;
+      if (
+        lastScanAttempt?.rawValue === rawValue &&
+        now - lastScanAttempt.handledAt < QR_DUPLICATE_SUPPRESS_MS
+      ) {
+        return;
+      }
+      lastScanAttemptRef.current = { rawValue, handledAt: now };
 
       try {
         const request = parsePaymentQr(rawValue);
@@ -368,9 +462,14 @@ export function ScannerScreen(): React.JSX.Element {
         }
 
         clearScanAlert();
+        hasScannedRef.current = true;
         setHasScanned(true);
         const sendRoute = buildSendRoute({ request, fallbackMint });
-        router.navigate(sendRoute);
+        cancelNavigationAfterScan();
+        navigationAfterScanTaskRef.current = scheduleAfterNextFrame(() => {
+          navigationAfterScanTaskRef.current = null;
+          router.navigate(sendRoute);
+        });
       } catch (error) {
         const message = getErrorMessage(error);
         holdScanAlert({
@@ -381,7 +480,14 @@ export function ScannerScreen(): React.JSX.Element {
         });
       }
     },
-    [clearScanAlert, fallbackMint, getRequestScanAlert, hasScanned, holdScanAlert, router],
+    [
+      cancelNavigationAfterScan,
+      clearScanAlert,
+      fallbackMint,
+      getRequestScanAlert,
+      holdScanAlert,
+      router,
+    ],
   );
 
   const handleOpenCamera = useCallback(async () => {
@@ -397,9 +503,18 @@ export function ScannerScreen(): React.JSX.Element {
       }
     }
 
+    hasScannedRef.current = false;
+    lastScanAttemptRef.current = null;
+    cancelNavigationAfterScan();
     setHasScanned(false);
     scheduleCameraActivation();
-  }, [cameraPermission?.granted, requestCameraPermission, scheduleCameraActivation, showToast]);
+  }, [
+    cameraPermission?.granted,
+    cancelNavigationAfterScan,
+    requestCameraPermission,
+    scheduleCameraActivation,
+    showToast,
+  ]);
 
   return (
     <View style={styles.container}>
@@ -413,7 +528,7 @@ export function ScannerScreen(): React.JSX.Element {
           <CameraView
             style={styles.camera}
             facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            barcodeScannerSettings={QR_BARCODE_SCANNER_SETTINGS}
             onBarcodeScanned={hasScanned ? undefined : handleCameraQr}
           />
           <View

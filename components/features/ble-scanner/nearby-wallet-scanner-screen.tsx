@@ -78,8 +78,10 @@ export function NearbyWalletScannerScreen(): React.JSX.Element {
     receivers.length > 0
       ? `${receivers.length} nearby ${receivers.length === 1 ? 'wallet' : 'wallets'} detected`
       : scanning
-        ? 'Scanning for nearby OffPay wallets'
-        : (error ?? 'Open Receive on the other device');
+        ? 'Scanning nearby OffPay wallets'
+        : error != null
+          ? 'No nearby wallets. Keep Receive open.'
+          : 'Open Receive on the other device';
   const scanButtonLabel = receivers.length > 0 ? 'Scan Again' : 'Scan';
   const scanAccessibilityLabel = scanning ? 'Scanning for nearby wallets' : scanButtonLabel;
   const selectedReceiver =
@@ -223,12 +225,12 @@ export function NearbyWalletScannerScreen(): React.JSX.Element {
                 <WalletAvatar size={44} solidFill />
                 <View style={styles.receiverText}>
                   <Text
-                    variant="button"
+                    variant="bodyBold"
                     color={colors.text.primary}
                     numberOfLines={1}
                     adjustsFontSizeToFit
-                    minimumFontScale={0.82}
-                    maxFontSizeMultiplier={1}
+                    minimumFontScale={0.88}
+                    maxFontSizeMultiplier={1.05}
                     style={styles.receiverName}
                   >
                     {selectedDisplayLabel ?? (scanning ? 'Searching...' : 'No wallet found')}
@@ -237,11 +239,13 @@ export function NearbyWalletScannerScreen(): React.JSX.Element {
                     variant="small"
                     color={colors.text.secondary}
                     numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
+                    ellipsizeMode="tail"
                     maxFontSizeMultiplier={1}
-                    style={styles.receiverMeta}
-                    selectable={selectedReceiver != null}
+                    style={[
+                      styles.receiverMeta,
+                      selectedReceiver == null && styles.receiverMetaEmpty,
+                    ]}
+                    selectable={selectedReceiver != null || error != null}
                   >
                     {selectedReceiver == null
                       ? scannerSubtitle
@@ -386,6 +390,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: SCANNER_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
+    minHeight: 84,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -395,7 +400,8 @@ const styles = StyleSheet.create({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     backgroundColor: colors.glass.strongFill,
-    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     gap: spacing.md,
     boxShadow: SCANNER_PANEL_SHADOW,
   },
@@ -403,7 +409,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
+    gap: spacing.sm,
+    minHeight: 56,
   },
   receiverIdentity: {
     flexDirection: 'row',
@@ -415,13 +422,18 @@ const styles = StyleSheet.create({
   receiverText: {
     flex: 1,
     minWidth: 0,
+    justifyContent: 'center',
     gap: 2,
   },
   receiverName: {
-    lineHeight: 20,
+    lineHeight: 22,
   },
   receiverMeta: {
     lineHeight: 16,
+  },
+  receiverMetaEmpty: {
+    fontSize: 11,
+    lineHeight: 14,
   },
   sendButton: {
     minWidth: 88,
@@ -446,7 +458,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   rescanButton: {
-    minWidth: 108,
+    width: 104,
+    flexShrink: 0,
     minHeight: layout.minTouchTarget,
     borderRadius: radii.full,
     borderCurve: 'continuous',
@@ -458,7 +471,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.textBacking,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
   },
   scanAgainButton: {
     minHeight: layout.minTouchTarget,
