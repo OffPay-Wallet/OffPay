@@ -76,7 +76,11 @@ These are non-secret Worker variables. The defaults are already in `wrangler.tom
 
 The built-in rate limit is a free per-isolate guard keyed mostly by Cloudflare's connecting IP. It reduces accidental/provider-key abuse without adding storage latency, but production should still move this to KV or Durable Objects once the app-attestation verifier is wired.
 
-Hourly chat credits are enforced by the `offpay-api` Worker through the `OFFPAY_API_AI_CREDITS` service binding. The AI proxy does not hold MongoDB secrets. Run `npm run invite:setup` with the API Worker's existing `MONGODB_URI` and `MONGODB_DATABASE` to create the `ai_chat_usage` indexes.
+Hourly chat credits are enforced by the `offpay-api` Worker through the `OFFPAY_API_AI_CREDITS`
+service binding. The AI proxy does not hold MongoDB secrets. Chat requests are charged before the
+provider call and released through the same binding if validation/provider/proxy errors prevent a
+successful answer, so provider timeouts do not waste credits. Run `npm run invite:setup` with the
+API Worker's existing `MONGODB_URI` and `MONGODB_DATABASE` to create the `ai_chat_usage` indexes.
 
 ## Local Env
 

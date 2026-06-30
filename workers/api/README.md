@@ -118,6 +118,15 @@ Run the Mongo setup once against the same database used by invite access:
 MONGODB_URI='mongodb+srv://...' MONGODB_DATABASE='offpay' npm run invite:setup
 ```
 
+Hourly AI chat credits are tracked in `ai_chat_usage`. Each document stores the active
+rate-limit window (`window_started_at`, `reset_at`, `window_ms`) plus audit timestamps such as
+`last_status_checked_at`, `last_consumed_at`, `last_released_at`, `last_release_reason`,
+`last_blocked_at`, `last_reset_at`, and `last_reset_reason`. Provider/proxy failures release a
+newly charged turn by removing its `turnId` from `consumed_turn_ids` and decrementing `used`, so
+timeouts do not waste chat credits. The API Worker cron runs every minute and resets expired
+windows in Mongo, so the reset lifecycle does not depend on the client app being open. Request-time
+status/consume calls also validate and refresh the same window as a backstop.
+
 ## Health
 
 `GET /api/health` returns:

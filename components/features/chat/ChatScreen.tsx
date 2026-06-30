@@ -124,15 +124,19 @@ function buildCreditIndicator(
     return null;
   }
 
-  const resetElapsed = credits.remaining <= 0 && credits.resetAtMs <= nowMs;
-  const remaining = resetElapsed ? credits.limit : credits.remaining;
+  const remaining = credits.remaining;
   const tone: ChatCreditIndicator['tone'] =
     remaining <= 0 ? 'empty' : remaining <= 1 ? 'low' : 'ready';
 
   return {
     label: `${remaining}/${credits.limit}`,
     tone,
-    resetLabel: remaining <= 0 ? formatCompactCreditResetLabel(credits.resetAtMs, nowMs) : null,
+    resetLabel:
+      remaining <= 0
+        ? credits.resetAtMs <= nowMs && loading
+          ? 'syncing reset'
+          : `resets ${formatCompactCreditResetLabel(credits.resetAtMs, nowMs)}`
+        : null,
   };
 }
 
@@ -156,9 +160,15 @@ function formatHeaderCreditLabel(creditIndicator: ChatCreditIndicator | null): s
   return creditIndicator.label;
 }
 
+function areCreditsExhausted(credits: AiChatCreditStatus | null, nowMs = Date.now()): boolean {
+  return credits != null && credits.remaining <= 0 && credits.resetAtMs > nowMs;
+}
+
 const EMPTY_CHAT_MESSAGES: readonly AgenticChatMessage[] = [];
 const EMPTY_CHAT_ACTIONS: readonly AgenticChatAction[] = [];
 const AI_CREDITS_UNKNOWN_LABEL = '--/5';
+const CREDIT_CLOCK_TICK_MS = 30_000;
+const CREDIT_RESET_CLOCK_SKEW_MS = 250;
 
 export function ChatScreen(): React.JSX.Element {
   const router = useRouter();
@@ -238,10 +248,7 @@ export function ChatScreen(): React.JSX.Element {
   // The composer is an overlay so the empty-state layout stays stable. Use the
   // measured dock height so multiline input and voice states never cover replies.
   const bottomPadding = keyboardOffset + reservedPromptDockHeight + spacing['2xl'];
-  const creditsExhausted =
-    aiCredits.credits != null &&
-    aiCredits.credits.remaining <= 0 &&
-    aiCredits.credits.resetAtMs > creditClockMs;
+  const creditsExhausted = areCreditsExhausted(aiCredits.credits, creditClockMs);
   const creditIndicator = useMemo(
     () =>
       buildCreditIndicator(aiCredits.credits, aiCredits.loading, aiCredits.error, creditClockMs),
@@ -251,10 +258,17 @@ export function ChatScreen(): React.JSX.Element {
   useEffect(() => {
     if (aiCredits.credits == null || aiCredits.credits.remaining > 0) return;
 
+    const resetClockTimeout = setTimeout(
+      () => setCreditClockMs(Date.now()),
+      Math.max(0, aiCredits.credits.resetAtMs - Date.now() + CREDIT_RESET_CLOCK_SKEW_MS),
+    );
     const interval = setInterval(() => {
       setCreditClockMs(Date.now());
-    }, 30_000);
-    return () => clearInterval(interval);
+    }, CREDIT_CLOCK_TICK_MS);
+    return () => {
+      clearTimeout(resetClockTimeout);
+      clearInterval(interval);
+    };
   }, [aiCredits.credits]);
 
   const showCreditsBlockedToast = useCallback(() => {
@@ -788,7 +802,7 @@ export function ChatScreen(): React.JSX.Element {
   const handleSubmit = useCallback(() => {
     const trimmed = prompt.trim();
     if (trimmed.length === 0 || agentBusy) return;
-    if (creditsExhausted) {
+    if (areCreditsExhausted(aiCredits.credits)) {
       showCreditsBlockedToast();
       return;
     }
@@ -796,7 +810,7 @@ export function ChatScreen(): React.JSX.Element {
     voiceLanguageRef.current = null;
     setPrompt('');
     submit(trimmed);
-  }, [agentBusy, creditsExhausted, prompt, showCreditsBlockedToast, submit]);
+  }, [agentBusy, aiCredits.credits, prompt, showCreditsBlockedToast, submit]);
 
   const voice = useAgenticVoice({
     onTranscript: (transcript, detectedLanguage) => {
@@ -808,7 +822,7 @@ export function ChatScreen(): React.JSX.Element {
         inputRef.current?.focus();
         return;
       }
-      if (creditsExhausted) {
+      if (areCreditsExhausted(aiCredits.credits)) {
         voiceInputRef.current = false;
         voiceLanguageRef.current = null;
         setPrompt(transcript);
@@ -921,7 +935,7 @@ export function ChatScreen(): React.JSX.Element {
   const handleCtaPrompt = useCallback(
     (nextPrompt: string) => {
       if (agentBusy) return;
-      if (creditsExhausted) {
+      if (areCreditsExhausted(aiCredits.credits)) {
         showCreditsBlockedToast();
         return;
       }
@@ -930,7 +944,7 @@ export function ChatScreen(): React.JSX.Element {
       setPrompt('');
       submit(nextPrompt);
     },
-    [agentBusy, creditsExhausted, showCreditsBlockedToast, submit],
+    [agentBusy, aiCredits.credits, showCreditsBlockedToast, submit],
   );
   const handlePromptDockLayout = useCallback((event: LayoutChangeEvent) => {
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
@@ -1065,9 +1079,7 @@ export function ChatScreen(): React.JSX.Element {
                 maxFontSizeMultiplier={1.05}
               >
                 {formatHeaderCreditLabel(creditIndicator)} credits left
-                {creditIndicator?.resetLabel != null
-                  ? ` · resets ${creditIndicator.resetLabel}`
-                  : ''}
+                {creditIndicator?.resetLabel != null ? ` · ${creditIndicator.resetLabel}` : ''}
               </Text>
             </View>
           </View>

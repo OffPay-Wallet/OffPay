@@ -7,27 +7,23 @@ interface AiChatCreditsState {
   credits: AiChatCreditStatus | null;
   loading: boolean;
   error: string | null;
-  lastUpdatedAt: number | null;
   setCredits: (credits: AiChatCreditStatus, scopeKey?: string | null) => void;
   setLoading: (loading: boolean, scopeKey?: string | null) => void;
   setError: (error: string | null, scopeKey?: string | null) => void;
-  resetExpiredCredits: (scopeKey?: string | null, now?: number) => boolean;
   clear: (scopeKey?: string | null) => void;
 }
 
-export const useAiChatCreditsStore = create<AiChatCreditsState>()((set, get) => ({
+export const useAiChatCreditsStore = create<AiChatCreditsState>()((set) => ({
   scopeKey: null,
   credits: null,
   loading: false,
   error: null,
-  lastUpdatedAt: null,
   setCredits: (credits, scopeKey) =>
     set((state) => ({
       scopeKey: scopeKey === undefined ? state.scopeKey : scopeKey,
       credits: normalizeCredits(credits),
       loading: false,
       error: null,
-      lastUpdatedAt: Date.now(),
     })),
   setLoading: (loading, scopeKey) =>
     set((state) => {
@@ -40,7 +36,6 @@ export const useAiChatCreditsStore = create<AiChatCreditsState>()((set, get) => 
         credits: null,
         loading,
         error: null,
-        lastUpdatedAt: null,
       };
     }),
   setError: (error, scopeKey) =>
@@ -48,29 +43,7 @@ export const useAiChatCreditsStore = create<AiChatCreditsState>()((set, get) => 
       scopeKey: scopeKey === undefined ? state.scopeKey : scopeKey,
       error,
       loading: false,
-      lastUpdatedAt: Date.now(),
     })),
-  resetExpiredCredits: (scopeKey, now = Date.now()) => {
-    const state = get();
-    if (scopeKey != null && state.scopeKey !== scopeKey) return false;
-
-    const current = state.credits;
-    if (current == null || current.used <= 0 || current.resetAtMs > now) return false;
-
-    set({
-      credits: {
-        ...current,
-        used: 0,
-        remaining: current.limit,
-        resetAtMs: now + current.windowMs,
-        retryAfterMs: undefined,
-      },
-      loading: false,
-      error: null,
-      lastUpdatedAt: now,
-    });
-    return true;
-  },
   clear: (scopeKey) =>
     set((state) => {
       if (scopeKey != null && state.scopeKey !== scopeKey) return {};
@@ -80,7 +53,6 @@ export const useAiChatCreditsStore = create<AiChatCreditsState>()((set, get) => 
         credits: null,
         loading: false,
         error: null,
-        lastUpdatedAt: null,
       };
     }),
 }));

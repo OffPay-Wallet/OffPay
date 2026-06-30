@@ -21,7 +21,7 @@ import { mark, measure } from '@/lib/perf/perf-marks';
 import { useAiChatCreditsStore } from '@/store/aiChatCreditsStore';
 import { File as ExpoFile, UploadType } from 'expo-file-system';
 
-const DEFAULT_CHAT_TIMEOUT_MS = 25_000;
+const DEFAULT_CHAT_TIMEOUT_MS = 40_000;
 const DEFAULT_VOICE_TIMEOUT_MS = 35_000;
 
 function splitCsv(value: string | undefined): string[] {

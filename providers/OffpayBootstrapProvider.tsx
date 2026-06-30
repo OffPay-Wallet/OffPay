@@ -1,10 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef } from 'react';
 
-import {
-  prefetchAiChatCredits,
-  useAiChatCreditsBackgroundSync,
-} from '@/hooks/agentic-chat/useAiChatCredits';
+import { prefetchAiChatCredits } from '@/hooks/agentic-chat/useAiChatCredits';
 import { prefetchOffpayCapabilities } from '@/lib/api/offpay-capabilities-query';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -52,7 +49,6 @@ export function OffpayBootstrapProvider({
     if (!canUseNetwork || network == null || walletAddress == null) return null;
     return getAgenticConversationScopeKey({ walletAddress, network });
   }, [canUseNetwork, network, walletAddress]);
-  useAiChatCreditsBackgroundSync(aiChatCreditScopeKey);
 
   useEffect(() => {
     if (identity == null) return undefined;

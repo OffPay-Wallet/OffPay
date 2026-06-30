@@ -20,13 +20,17 @@ function loadClient(): typeof import('@/lib/agentic-payments/ai-proxy-client') {
 
 function loadCreditPreloadModules(): {
   prefetchAiChatCredits: typeof import('@/hooks/agentic-chat/useAiChatCredits').prefetchAiChatCredits;
+  shouldRefreshAiChatCreditsFromBackend: typeof import('@/hooks/agentic-chat/useAiChatCredits').shouldRefreshAiChatCreditsFromBackend;
   useAiChatCreditsStore: typeof import('@/store/aiChatCreditsStore').useAiChatCreditsStore;
 } {
   jest.resetModules();
   process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_URL = 'https://ai.offpay.test';
   process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS = 'https://ai.offpay.test';
+  const creditsHook =
+    require('@/hooks/agentic-chat/useAiChatCredits') as typeof import('@/hooks/agentic-chat/useAiChatCredits');
   return {
-    prefetchAiChatCredits: require('@/hooks/agentic-chat/useAiChatCredits').prefetchAiChatCredits,
+    prefetchAiChatCredits: creditsHook.prefetchAiChatCredits,
+    shouldRefreshAiChatCreditsFromBackend: creditsHook.shouldRefreshAiChatCreditsFromBackend,
     useAiChatCreditsStore: require('@/store/aiChatCreditsStore').useAiChatCreditsStore,
   };
 }
@@ -120,31 +124,110 @@ describe('AI proxy credit request identity', () => {
     });
   });
 
-  it('locally resets partially used credits when the tracked window expires', () => {
-    const { useAiChatCreditsStore } = loadCreditPreloadModules();
-    const scopeKey = 'devnet:wallet:wallet-reset';
-    const resetAtMs = Date.now() + 1_000;
+  it('refetches credits from the backend even when local credits exist', async () => {
+    const fetchMock = jest.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
+        const used = fetchMock.mock.calls.length;
+        return new Response(
+          JSON.stringify({
+            credits: {
+              kind: 'ai_chat_credits',
+              limit: 5,
+              used,
+              remaining: 5 - used,
+              resetAtMs: Date.now() + 60 * 60 * 1000,
+              windowMs: 60 * 60 * 1000,
+              subjectType: 'wallet',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    ) as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+
+    const { prefetchAiChatCredits, useAiChatCreditsStore } = loadCreditPreloadModules();
+    const scopeKey = 'devnet:wallet:wallet-db-first';
+
+    await expect(prefetchAiChatCredits(scopeKey, { timeoutMs: 5_000 })).resolves.toMatchObject({
+      used: 1,
+      remaining: 4,
+    });
+    await expect(prefetchAiChatCredits(scopeKey, { timeoutMs: 5_000 })).resolves.toMatchObject({
+      used: 2,
+      remaining: 3,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(useAiChatCreditsStore.getState().credits).toMatchObject({
+      used: 2,
+      remaining: 3,
+      limit: 5,
+    });
+  });
+
+  it('keeps elapsed local credits stale until the backend confirms a reset', async () => {
+    const nowMs = Date.now();
+    const backendResetAtMs = nowMs + 60 * 60 * 1000;
+    const fetchMock = jest.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
+        return new Response(
+          JSON.stringify({
+            credits: {
+              kind: 'ai_chat_credits',
+              limit: 5,
+              used: 0,
+              remaining: 5,
+              resetAtMs: backendResetAtMs,
+              windowMs: 60 * 60 * 1000,
+              subjectType: 'wallet',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    ) as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+
+    const {
+      prefetchAiChatCredits,
+      shouldRefreshAiChatCreditsFromBackend,
+      useAiChatCreditsStore,
+    } = loadCreditPreloadModules();
+    const scopeKey = 'devnet:wallet:wallet-expired-db-window';
 
     useAiChatCreditsStore.getState().setCredits(
       {
         kind: 'ai_chat_credits',
         limit: 5,
-        used: 2,
-        remaining: 3,
-        resetAtMs,
+        used: 5,
+        remaining: 0,
+        resetAtMs: nowMs - 1_000,
         windowMs: 60 * 60 * 1000,
         subjectType: 'wallet',
       },
       scopeKey,
     );
 
-    expect(useAiChatCreditsStore.getState().resetExpiredCredits(scopeKey, resetAtMs + 1)).toBe(
-      true,
-    );
+    expect(useAiChatCreditsStore.getState().credits).toMatchObject({
+      used: 5,
+      remaining: 0,
+    });
+    expect(
+      shouldRefreshAiChatCreditsFromBackend(useAiChatCreditsStore.getState().credits, nowMs),
+    ).toBe(true);
+
+    await expect(prefetchAiChatCredits(scopeKey, { timeoutMs: 5_000 })).resolves.toMatchObject({
+      used: 0,
+      remaining: 5,
+      resetAtMs: backendResetAtMs,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(useAiChatCreditsStore.getState().credits).toMatchObject({
       used: 0,
       remaining: 5,
-      limit: 5,
+      resetAtMs: backendResetAtMs,
     });
   });
 });

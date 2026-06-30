@@ -16,10 +16,15 @@ import {
   applyAiChatCreditHeaders,
   consumeAiChatCredit,
   getAiChatCreditStatus,
+  releaseAiChatCredit,
 } from './chat-credits';
 import { verifyOffpayAiSessionToken } from './auth/session-token';
 import type { AiProxyEnv } from './types';
-import type { AiChatCreditStatus } from './chat-credits';
+import type {
+  AiChatCreditIdentity,
+  AiChatCreditReleaseReason,
+  AiChatCreditStatus,
+} from './chat-credits';
 
 interface SessionTokenGateResult {
   ok: boolean;
@@ -109,14 +114,10 @@ export default {
       assertAiProxyRateLimit(request, env, { walletSubject: tokenGate.walletSubject });
 
       if (url.pathname === '/api/ai/chat') {
-        const creditResult = await consumeAiChatCredit(request, env, {
+        return await handleCreditMeteredChat(request, env, cors, {
           walletSubject: tokenGate.walletSubject,
           deviceId: tokenGate.deviceId,
         });
-        if (!creditResult.allowed) {
-          return aiChatCreditLimitResponse(creditResult.status, cors);
-        }
-        return await handleChat(request, env, cors, { credits: creditResult.status });
       }
 
       if (url.pathname === '/api/ai/voice/transcribe') {
@@ -128,25 +129,15 @@ export default {
       }
 
       if (url.pathname === '/api/ai') {
-        const body = await readJson<{ kind?: string }>(request.clone(), maxChatBytes(env));
-        let credits: AiChatCreditStatus | undefined;
-        if (body.kind === 'chat') {
-          const creditResult = await consumeAiChatCredit(request, env, {
-            walletSubject: tokenGate.walletSubject,
-            deviceId: tokenGate.deviceId,
-          });
-          if (!creditResult.allowed) {
-            return aiChatCreditLimitResponse(creditResult.status, cors);
-          }
-          credits = creditResult.status;
-        }
-
         return await handleKindDispatch(
           request,
           env,
           cors,
           (chatRequest, chatEnv, chatCors) =>
-            handleChat(chatRequest, chatEnv, chatCors, { credits }),
+            handleCreditMeteredChat(chatRequest, chatEnv, chatCors, {
+              walletSubject: tokenGate.walletSubject,
+              deviceId: tokenGate.deviceId,
+            }),
           handleVoiceSpeech,
         );
       }
@@ -161,6 +152,72 @@ export default {
     }
   },
 };
+
+async function handleCreditMeteredChat(
+  request: Request,
+  env: AiProxyEnv,
+  cors: HeadersInit,
+  identity: AiChatCreditIdentity,
+): Promise<Response> {
+  const creditResult = await consumeAiChatCredit(request, env, identity);
+  if (!creditResult.allowed) {
+    return aiChatCreditLimitResponse(creditResult.status, cors);
+  }
+
+  try {
+    return await handleChat(request, env, cors, { credits: creditResult.status });
+  } catch (error) {
+    let credits: AiChatCreditStatus = creditResult.status;
+    let creditReleased = false;
+    if (creditResult.charged) {
+      try {
+        credits = await releaseAiChatCredit(
+          request,
+          env,
+          identity,
+          creditReleaseReasonForError(error),
+        );
+        creditReleased = true;
+      } catch (releaseError) {
+        console.warn('aiProxy.chatCredits.releaseFailed', {
+          message: releaseError instanceof Error ? releaseError.message : String(releaseError),
+        });
+      }
+    }
+
+    const normalizedError = normalizeError(error);
+    if (creditReleased) {
+      normalizedError.message = creditPreservedMessage(error, normalizedError.message);
+    }
+    const response = jsonResponse(
+      {
+        ...normalizedError,
+        credits,
+      },
+      errorStatus(error),
+      cors,
+    );
+    applyAiChatCreditHeaders(response.headers, credits);
+    return response;
+  }
+}
+
+function creditPreservedMessage(error: unknown, fallback: unknown): string {
+  if (errorStatus(error) === 504) {
+    return 'The AI provider timed out. Your credit was not used. Try again.';
+  }
+  const message = typeof fallback === 'string' ? fallback : 'Yuga could not complete that request.';
+  return `${message} Your credit was not used.`;
+}
+
+function creditReleaseReasonForError(error: unknown): AiChatCreditReleaseReason {
+  const status = errorStatus(error);
+  if (status === 504) return 'provider_timeout';
+  if (status === 401 || status === 403 || status === 429 || status >= 500) {
+    return 'provider_error';
+  }
+  return 'proxy_error';
+}
 
 async function verifySessionToken(
   request: Request,

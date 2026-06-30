@@ -23,7 +23,10 @@ export interface AiChatCreditIdentity {
 export interface AiChatCreditConsumptionResult {
   allowed: boolean;
   status: AiChatCreditStatus;
+  charged: boolean;
 }
+
+export type AiChatCreditReleaseReason = 'provider_timeout' | 'provider_error' | 'proxy_error';
 
 interface AiChatCreditServiceRequest {
   walletSubject?: string | null;
@@ -60,6 +63,26 @@ export async function consumeAiChatCredit(
     return normalizeConsumptionResult(await service.consume(payload));
   } catch (error) {
     throw serviceUnavailable(error, 'consume');
+  }
+}
+
+export async function releaseAiChatCredit(
+  request: Request,
+  env: AiProxyEnv,
+  identity: AiChatCreditIdentity,
+  reason: AiChatCreditReleaseReason,
+): Promise<AiChatCreditStatus> {
+  const payload = await buildCreditServiceRequest(request, identity, true);
+  const service = getCreditService(env);
+
+  if (service.release == null) {
+    throw new ProviderError('proxy', 503, 'Yuga credit release service is not configured.');
+  }
+
+  try {
+    return normalizeCreditStatus(await service.release(payload, reason));
+  } catch (error) {
+    throw serviceUnavailable(error, 'release');
   }
 }
 
@@ -145,7 +168,10 @@ function getCreditService(env: AiProxyEnv): NonNullable<AiProxyEnv['OFFPAY_API_A
   return env.OFFPAY_API_AI_CREDITS;
 }
 
-function serviceUnavailable(error: unknown, operation: 'status' | 'consume'): ProviderError {
+function serviceUnavailable(
+  error: unknown,
+  operation: 'status' | 'consume' | 'release',
+): ProviderError {
   console.warn(
     'aiProxy.chatCredits.serviceError',
     safeJson(
@@ -167,6 +193,7 @@ function normalizeConsumptionResult(value: unknown): AiChatCreditConsumptionResu
   return {
     allowed: result.allowed === true,
     status: normalizeCreditStatus(result.status),
+    charged: result.charged === true,
   };
 }
 

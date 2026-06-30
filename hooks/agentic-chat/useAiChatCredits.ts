@@ -9,6 +9,9 @@ import { useAiChatCreditsStore } from '@/store/aiChatCreditsStore';
 
 import type { AiChatCreditStatus } from '@/lib/agentic-payments/types';
 
+const CREDIT_RESET_REFRESH_SKEW_MS = 250;
+const CREDIT_RESET_FALLBACK_RETRY_MS = 15_000;
+
 interface PrefetchAiChatCreditsOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -21,12 +24,17 @@ export interface UseAiChatCreditsResult {
   refresh: () => Promise<void>;
 }
 
-const AI_CHAT_CREDITS_ACTIVE_SYNC_MS = 60_000;
-
 let inFlightCreditsFetch: {
   scopeKey: string;
   promise: Promise<AiChatCreditStatus>;
 } | null = null;
+
+export function shouldRefreshAiChatCreditsFromBackend(
+  credits: AiChatCreditStatus | null,
+  nowMs = Date.now(),
+): boolean {
+  return credits != null && credits.used > 0 && credits.resetAtMs <= nowMs;
+}
 
 export async function prefetchAiChatCredits(
   scopeKey: string,
@@ -112,13 +120,66 @@ export function useAiChatCredits(scopeKey: string): UseAiChatCreditsResult {
   useEffect(() => {
     if (credits == null || credits.used <= 0) return;
 
-    const delayMs = Math.max(0, credits.resetAtMs - Date.now() + 250);
-    const timeout = setTimeout(() => {
-      void refresh();
-    }, delayMs);
+    let disposed = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearTimeout(timeout);
-  }, [credits, refresh]);
+    const clearScheduledRefresh = () => {
+      if (timeout == null) return;
+      clearTimeout(timeout);
+      timeout = null;
+    };
+
+    const scheduleRefresh = (delayMs: number) => {
+      clearScheduledRefresh();
+      timeout = setTimeout(() => {
+        void refreshAndRetryIfNeeded();
+      }, delayMs);
+    };
+
+    const refreshAndRetryIfNeeded = async () => {
+      if (disposed) return;
+
+      await refresh();
+      if (disposed) return;
+
+      const current = useAiChatCreditsStore.getState();
+      const currentCredits = current.scopeKey === scopeKey ? current.credits : null;
+      if (shouldRefreshAiChatCreditsFromBackend(currentCredits)) {
+        scheduleRefresh(CREDIT_RESET_FALLBACK_RETRY_MS);
+      }
+    };
+
+    scheduleRefresh(Math.max(0, credits.resetAtMs - Date.now() + CREDIT_RESET_REFRESH_SKEW_MS));
+
+    return () => {
+      disposed = true;
+      clearScheduledRefresh();
+    };
+  }, [credits, refresh, scopeKey]);
+
+  useEffect(() => {
+    if (credits == null || credits.used <= 0) return;
+
+    const refreshIfBackendWindowElapsed = () => {
+      const current = useAiChatCreditsStore.getState();
+      const currentCredits = current.scopeKey === scopeKey ? current.credits : null;
+      if (shouldRefreshAiChatCreditsFromBackend(currentCredits)) {
+        void refresh();
+      }
+    };
+
+    refreshIfBackendWindowElapsed();
+
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        refreshIfBackendWindowElapsed();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [credits, refresh, scopeKey]);
 
   return {
     credits,
@@ -128,67 +189,6 @@ export function useAiChatCredits(scopeKey: string): UseAiChatCreditsResult {
   };
 }
 
-export function useAiChatCreditsBackgroundSync(scopeKey: string | null): void {
-  const credits = useAiChatCreditsStore((state) =>
-    scopeKey != null && state.scopeKey === scopeKey ? state.credits : null,
-  );
-
-  useEffect(() => {
-    if (scopeKey == null || !isAgenticPaymentsProxyConfigured()) return undefined;
-
-    let interval: ReturnType<typeof setInterval> | null = null;
-    let active = isAppStateActive(AppState.currentState);
-
-    const clearSyncInterval = () => {
-      if (interval == null) return;
-      clearInterval(interval);
-      interval = null;
-    };
-
-    const refresh = () => {
-      if (!active) return;
-      void prefetchAiChatCredits(scopeKey).catch(() => undefined);
-    };
-
-    const startActiveSync = () => {
-      clearSyncInterval();
-      refresh();
-      interval = setInterval(refresh, AI_CHAT_CREDITS_ACTIVE_SYNC_MS);
-    };
-
-    if (active) {
-      startActiveSync();
-    }
-
-    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      active = isAppStateActive(nextState);
-      if (active) {
-        startActiveSync();
-      } else {
-        clearSyncInterval();
-      }
-    });
-
-    return () => {
-      subscription.remove();
-      clearSyncInterval();
-    };
-  }, [scopeKey]);
-
-  useEffect(() => {
-    if (scopeKey == null || credits == null || credits.used <= 0) return undefined;
-
-    const delayMs = Math.max(0, credits.resetAtMs - Date.now() + 250);
-    const timeout = setTimeout(() => {
-      if (isAppStateActive(AppState.currentState)) {
-        void prefetchAiChatCredits(scopeKey).catch(() => undefined);
-      }
-    }, delayMs);
-
-    return () => clearTimeout(timeout);
-  }, [credits, scopeKey]);
-}
-
 function isAbortError(error: unknown): boolean {
   return (
     (error instanceof Error && error.name === 'AbortError') ||
@@ -196,8 +196,4 @@ function isAbortError(error: unknown): boolean {
       error instanceof DOMException &&
       error.name === 'AbortError')
   );
-}
-
-function isAppStateActive(state: AppStateStatus): boolean {
-  return state === 'active';
 }

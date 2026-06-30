@@ -161,6 +161,7 @@ export type AiProxyEnv = {
   OFFPAY_API_AI_CREDITS?: {
     getStatus(payload: unknown): Promise<unknown>;
     consume(payload: unknown): Promise<unknown>;
+    release?(payload: unknown, reason: string): Promise<unknown>;
   };
   /**
    * Shared secret used to verify the OffPay AI session token. Issued by

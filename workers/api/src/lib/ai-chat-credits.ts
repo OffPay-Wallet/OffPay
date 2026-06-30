@@ -24,16 +24,28 @@ export interface AiChatCreditRequest {
 export interface AiChatCreditConsumptionResult {
   allowed: boolean;
   status: AiChatCreditStatus;
+  charged: boolean;
 }
+
+export type AiChatCreditReleaseReason = 'provider_timeout' | 'provider_error' | 'proxy_error';
 
 interface AiChatUsageDocument {
   subject_type: AiChatCreditSubjectType;
   subject_key: string;
   limit: number;
+  window_ms: number;
   used: number;
   consumed_turn_ids: string[];
   window_started_at: Date;
   reset_at: Date;
+  reset_count?: number;
+  last_status_checked_at?: Date;
+  last_consumed_at?: Date;
+  last_released_at?: Date;
+  last_release_reason?: AiChatCreditReleaseReason;
+  last_blocked_at?: Date;
+  last_reset_at?: Date;
+  last_reset_reason?: AiChatCreditResetReason;
   created_at: Date;
   updated_at: Date;
 }
@@ -48,6 +60,15 @@ interface AiChatCreditConfig {
 interface AiChatCreditSubject {
   type: AiChatCreditSubjectType;
   key: string;
+}
+
+type AiChatCreditResetReason = 'request' | 'scheduled';
+
+export interface AiChatCreditResetSummary {
+  matchedCount: number;
+  modifiedCount: number;
+  resetAtMs: number;
+  nextResetAtMs: number;
 }
 
 type DatabaseRunner = <T>(config: AiChatCreditConfig, run: (db: Db) => Promise<T>) => Promise<T>;
@@ -69,8 +90,11 @@ export async function getAiChatCreditStatus(
   const now = new Date();
   const document = await databaseRunner(config, async (db) => {
     const collection = aiChatUsageCollection(db);
-    await ensureUsageDocument(collection, subject, config, now, { touchExisting: false });
-    await resetExpiredUsageWindow(collection, subject, config, now);
+    await ensureUsageDocument(collection, subject, config, now, {
+      touchExisting: false,
+      statusCheckedAt: now,
+    });
+    await resetExpiredUsageWindow(collection, subject, config, now, 'request');
     return collection.findOne({ subject_type: subject.type, subject_key: subject.key });
   });
 
@@ -88,8 +112,8 @@ export async function consumeAiChatCredit(
   return databaseRunner(config, async (db) => {
     const collection = aiChatUsageCollection(db);
     const now = new Date();
-    await ensureUsageDocument(collection, subject, config, now);
-    await resetExpiredUsageWindow(collection, subject, config, now);
+    await ensureUsageDocument(collection, subject, config, now, { statusCheckedAt: now });
+    await resetExpiredUsageWindow(collection, subject, config, now, 'request');
 
     const existing = await collection.findOne({
       subject_type: subject.type,
@@ -99,6 +123,7 @@ export async function consumeAiChatCredit(
       return {
         allowed: true,
         status: statusFromDocument(existing, config, subject.type, now),
+        charged: false,
       };
     }
 
@@ -115,6 +140,8 @@ export async function consumeAiChatCredit(
         $addToSet: { consumed_turn_ids: turnId },
         $set: {
           limit: config.limit,
+          window_ms: config.windowMs,
+          last_consumed_at: now,
           updated_at: now,
         },
       },
@@ -129,14 +156,124 @@ export async function consumeAiChatCredit(
       return {
         allowed: true,
         status: statusFromDocument(document, config, subject.type, now),
+        charged: update.modifiedCount === 1,
       };
     }
 
+    await collection.updateOne(
+      {
+        subject_type: subject.type,
+        subject_key: subject.key,
+      },
+      {
+        $set: {
+          limit: config.limit,
+          window_ms: config.windowMs,
+          last_blocked_at: now,
+          updated_at: now,
+        },
+      },
+    );
+
     return {
       allowed: false,
-      status: statusFromDocument(document, config, subject.type, now),
+      charged: false,
+      status: statusFromDocument(
+        await collection.findOne({
+          subject_type: subject.type,
+          subject_key: subject.key,
+        }),
+        config,
+        subject.type,
+        now,
+      ),
     };
   });
+}
+
+export async function releaseAiChatCredit(
+  bindings: Bindings,
+  request: AiChatCreditRequest,
+  reason: AiChatCreditReleaseReason,
+): Promise<AiChatCreditStatus> {
+  const config = getCreditConfig(bindings);
+  const subject = getCreditSubject(request);
+  const turnId = readTurnId(request.turnId);
+
+  return databaseRunner(config, async (db) => {
+    const collection = aiChatUsageCollection(db);
+    const now = new Date();
+    await collection.updateOne(
+      {
+        subject_type: subject.type,
+        subject_key: subject.key,
+        used: { $gt: 0 },
+        consumed_turn_ids: turnId,
+      },
+      {
+        $inc: { used: -1 },
+        $pull: { consumed_turn_ids: turnId },
+        $set: {
+          limit: config.limit,
+          window_ms: config.windowMs,
+          last_released_at: now,
+          last_release_reason: reason,
+          updated_at: now,
+        },
+      },
+    );
+
+    return statusFromDocument(
+      await collection.findOne({
+        subject_type: subject.type,
+        subject_key: subject.key,
+      }),
+      config,
+      subject.type,
+      now,
+    );
+  });
+}
+
+export async function resetExpiredAiChatCreditWindows(
+  bindings: Bindings,
+  now = new Date(),
+): Promise<AiChatCreditResetSummary> {
+  const config = getCreditConfig(bindings);
+  const nextResetAt = new Date(now.getTime() + config.windowMs);
+
+  const result = await databaseRunner(config, async (db) => {
+    const collection = aiChatUsageCollection(db);
+    return collection.updateMany(
+      {
+        reset_at: { $lte: now },
+        used: { $gt: 0 },
+      },
+      {
+        $set: {
+          limit: config.limit,
+          window_ms: config.windowMs,
+          used: 0,
+          consumed_turn_ids: [],
+          window_started_at: now,
+          reset_at: nextResetAt,
+          last_reset_at: now,
+          last_reset_reason: 'scheduled',
+          updated_at: now,
+        },
+        $inc: {
+          reset_count: 1,
+        },
+      },
+    );
+  });
+
+  return {
+    matchedCount: result.matchedCount,
+    modifiedCount: result.modifiedCount,
+    resetAtMs: now.getTime(),
+    nextResetAtMs: nextResetAt.getTime(),
+  };
 }
 
 export function setAiChatCreditDatabaseRunnerForTests(runner: DatabaseRunner): void {
@@ -222,10 +359,32 @@ async function ensureUsageDocument(
   subject: AiChatCreditSubject,
   config: AiChatCreditConfig,
   now: Date,
-  options: { touchExisting?: boolean } = {},
+  options: { statusCheckedAt?: Date; touchExisting?: boolean } = {},
 ): Promise<void> {
-  const setExisting =
-    options.touchExisting === false ? {} : { limit: config.limit, updated_at: now };
+  const setExisting: Partial<AiChatUsageDocument> =
+    options.touchExisting === false
+      ? {}
+      : { limit: config.limit, window_ms: config.windowMs, updated_at: now };
+  if (options.statusCheckedAt != null) {
+    setExisting.last_status_checked_at = options.statusCheckedAt;
+  }
+  const setOnInsert: Partial<AiChatUsageDocument> = {
+    subject_type: subject.type,
+    subject_key: subject.key,
+    limit: config.limit,
+    window_ms: config.windowMs,
+    used: 0,
+    consumed_turn_ids: [],
+    window_started_at: now,
+    reset_at: new Date(now.getTime() + config.windowMs),
+    reset_count: 0,
+    ...(options.statusCheckedAt == null ? {} : { last_status_checked_at: options.statusCheckedAt }),
+    created_at: now,
+    updated_at: now,
+  };
+  for (const key of Object.keys(setExisting) as Array<keyof AiChatUsageDocument>) {
+    delete setOnInsert[key];
+  }
 
   await collection.updateOne(
     {
@@ -233,16 +392,7 @@ async function ensureUsageDocument(
       subject_key: subject.key,
     },
     {
-      $setOnInsert: {
-        subject_type: subject.type,
-        subject_key: subject.key,
-        limit: config.limit,
-        used: 0,
-        consumed_turn_ids: [],
-        window_started_at: now,
-        reset_at: new Date(now.getTime() + config.windowMs),
-        created_at: now,
-      },
+      $setOnInsert: setOnInsert,
       ...(Object.keys(setExisting).length === 0 ? {} : { $set: setExisting }),
     },
     { upsert: true },
@@ -254,6 +404,7 @@ async function resetExpiredUsageWindow(
   subject: AiChatCreditSubject,
   config: AiChatCreditConfig,
   now: Date,
+  reason: AiChatCreditResetReason,
 ): Promise<void> {
   await collection.updateOne(
     {
@@ -264,11 +415,17 @@ async function resetExpiredUsageWindow(
     {
       $set: {
         limit: config.limit,
+        window_ms: config.windowMs,
         used: 0,
         consumed_turn_ids: [],
         window_started_at: now,
         reset_at: new Date(now.getTime() + config.windowMs),
+        last_reset_at: now,
+        last_reset_reason: reason,
         updated_at: now,
+      },
+      $inc: {
+        reset_count: 1,
       },
     },
   );
