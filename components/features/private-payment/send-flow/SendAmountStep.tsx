@@ -38,8 +38,7 @@ import type { PrivatePaymentRoute, PrivatePaymentRouteOption, SendTokenOption } 
 
 const MIN_AMOUNT_FONT_SIZE = 12;
 const AMOUNT_DISPLAY_BREATHING_ROOM = 48;
-const AMOUNT_SMOOTH_DURATION_MS = 80;
-const AMOUNT_SMOOTH_DISTANCE = 2;
+const AMOUNT_SLOT_ROLL_DURATION_MS = 180;
 const AMOUNT_FEEDBACK_DURATION_MS = 120;
 const DROPDOWN_MORPH_OPEN_DURATION_MS = 280;
 const DROPDOWN_MORPH_CLOSE_DURATION_MS = 230;
@@ -122,6 +121,13 @@ function estimateAmountTextWidth(value: string, fontSize: number): number {
     if (character === '-' || character === '+') return total + fontSize * 0.42;
     return total + fontSize * 0.64;
   }, 0);
+}
+
+function getAmountGlyphWidth(character: string, fontSize: number): number {
+  if (character === '.') return Math.ceil(fontSize * 0.34);
+  if (character === ',' || character === "'") return Math.ceil(fontSize * 0.26);
+  if (character === '-' || character === '+') return Math.ceil(fontSize * 0.42);
+  return Math.ceil(fontSize * 0.64);
 }
 
 function getScaledAmountTextStyle({
@@ -368,13 +374,13 @@ interface SendAmountStepProps {
   routeOptions: PrivatePaymentRouteOption[];
   /** Currently selected private route, or null when no choice applies. */
   selectedRoute: PrivatePaymentRoute | null;
-  onSelectRoute: (route: PrivatePaymentRoute) => void;
+  onSelectRoute: (route: PrivatePaymentRoute, amount: string) => void;
   onSelectToken: (token: SendTokenOption) => void;
   onAmountChange: (value: string) => void;
   onMax: () => void;
   onEditRecipient: () => void;
   canContinue: boolean;
-  onContinue: () => void;
+  onContinue: (amount: string) => void;
   showContinue: boolean;
 }
 
@@ -448,6 +454,157 @@ const AmountNumpadKey = memo(function AmountNumpadKey({
         </Text>
       )}
     </Pressable>
+  );
+});
+
+interface RollingAmountGlyphProps {
+  value: string;
+  direction: AmountMotionDirection;
+  height: number;
+  fontSize: number;
+  lineHeight: number;
+  reduceMotion: boolean;
+}
+
+const RollingAmountGlyph = memo(function RollingAmountGlyph({
+  value,
+  direction,
+  height,
+  fontSize,
+  lineHeight,
+  reduceMotion,
+}: RollingAmountGlyphProps): React.JSX.Element {
+  const progress = useSharedValue(1);
+  const directionValue = useSharedValue(direction === 'down' ? -1 : 1);
+  const currentValueRef = useRef(value);
+  const [previousValue, setPreviousValue] = useState(value);
+  const [currentValue, setCurrentValue] = useState(value);
+
+  useEffect(() => {
+    directionValue.value = direction === 'down' ? -1 : 1;
+    if (value === currentValueRef.current) return;
+
+    const lastValue = currentValueRef.current;
+    currentValueRef.current = value;
+    setPreviousValue(lastValue);
+    setCurrentValue(value);
+
+    if (reduceMotion) {
+      progress.value = 1;
+      return;
+    }
+
+    progress.value = 0;
+    progress.value = withTiming(1, {
+      duration: AMOUNT_SLOT_ROLL_DURATION_MS,
+      easing: AMOUNT_SMOOTH_EASING,
+    });
+  }, [direction, directionValue, progress, reduceMotion, value]);
+
+  const previousGlyphStyle = useAnimatedStyle(() => ({
+    opacity: 1 - progress.value,
+    transform: [
+      {
+        translateY: -progress.value * directionValue.value * height,
+      },
+    ],
+  }));
+  const currentGlyphStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [
+      {
+        translateY: (1 - progress.value) * directionValue.value * height,
+      },
+    ],
+  }));
+
+  return (
+    <View
+      style={[
+        styles.amountRollingSlot,
+        {
+          width: getAmountGlyphWidth(currentValue, fontSize),
+          height,
+        },
+      ]}
+      pointerEvents="none"
+    >
+      <Animated.Text
+        style={[
+          styles.amountValue,
+          styles.amountRollingGlyph,
+          {
+            color: colors.text.primary,
+            fontSize,
+            lineHeight,
+          },
+          previousGlyphStyle,
+        ]}
+        numberOfLines={1}
+        maxFontSizeMultiplier={1}
+      >
+        {previousValue}
+      </Animated.Text>
+      <Animated.Text
+        style={[
+          styles.amountValue,
+          styles.amountRollingGlyph,
+          {
+            color: colors.text.primary,
+            fontSize,
+            lineHeight,
+          },
+          currentGlyphStyle,
+        ]}
+        numberOfLines={1}
+        maxFontSizeMultiplier={1}
+      >
+        {currentValue}
+      </Animated.Text>
+    </View>
+  );
+});
+
+interface RollingAmountTextProps {
+  value: string;
+  direction: AmountMotionDirection;
+  height: number;
+  fontSize: number;
+  lineHeight: number;
+  reduceMotion: boolean;
+}
+
+const RollingAmountText = memo(function RollingAmountText({
+  value,
+  direction,
+  height,
+  fontSize,
+  lineHeight,
+  reduceMotion,
+}: RollingAmountTextProps): React.JSX.Element {
+  const characters = useMemo(() => Array.from(value), [value]);
+
+  return (
+    <Animated.View
+      style={[styles.amountTickerClip, { height }]}
+      accessibilityRole="text"
+      accessibilityLabel={`Amount ${value}`}
+      accessibilityLiveRegion="polite"
+    >
+      <View style={styles.amountRollingRow} pointerEvents="none">
+        {characters.map((character, index) => (
+          <RollingAmountGlyph
+            key={`amount-glyph-${index}`}
+            value={character}
+            direction={direction}
+            height={height}
+            fontSize={fontSize}
+            lineHeight={lineHeight}
+            reduceMotion={reduceMotion}
+          />
+        ))}
+      </View>
+    </Animated.View>
   );
 });
 
@@ -888,12 +1045,11 @@ export const SendAmountStep = memo(function SendAmountStep({
   const reduceMotion = useReducedMotion();
   const [amountRowWidth, setAmountRowWidth] = useState(0);
   const [amountMotionDirection, setAmountMotionDirection] = useState<AmountMotionDirection>('up');
+  const [draftAmount, setDraftAmount] = useState(amount);
   const [tokenDropdownOpen, setTokenDropdownOpen] = useState(false);
   const [routeDropdownOpen, setRouteDropdownOpen] = useState(false);
   const amountRef = useRef(amount);
-  const amountMotionProgress = useSharedValue(1);
-  const amountMotionDirectionValue = useSharedValue(1);
-  const displayAmount = useMemo(() => formatDisplayAmount(amount), [amount]);
+  const displayAmount = useMemo(() => formatDisplayAmount(draftAmount), [draftAmount]);
   const recipientLabel =
     recipientAddress != null ? shortenWalletAddress(recipientAddress) : recipientInput.trim();
   const tokenBalanceLabel = token != null ? formatTokenBalance(token.balance, 5) : '--';
@@ -1000,45 +1156,13 @@ export const SendAmountStep = memo(function SendAmountStep({
     () => parseFormattedFiatCurrency(amountMetaLabel),
     [amountMetaLabel],
   );
-  const showAmountFeedbackError = helper != null && amount.trim().length > 0;
+  const showAmountFeedbackError = helper != null && draftAmount.trim().length > 0;
   const metaLabelKey = showAmountFeedbackError ? 'amount-feedback-error' : 'amount-meta';
   useEffect(() => {
+    if (amount === amountRef.current) return;
     amountRef.current = amount;
+    setDraftAmount(amount);
   }, [amount]);
-  useEffect(() => {
-    if (reduceMotion) {
-      amountMotionProgress.value = 1;
-      return;
-    }
-
-    amountMotionDirectionValue.value = amountMotionDirection === 'down' ? -1 : 1;
-    amountMotionProgress.value = 0;
-    amountMotionProgress.value = withTiming(1, {
-      duration: AMOUNT_SMOOTH_DURATION_MS,
-      easing: AMOUNT_SMOOTH_EASING,
-    });
-  }, [
-    amountMotionDirection,
-    amountMotionDirectionValue,
-    amountMotionProgress,
-    displayAmount,
-    reduceMotion,
-  ]);
-  const amountAnimatedStyle = useAnimatedStyle(() => {
-    const progress = amountMotionProgress.value;
-    const direction = amountMotionDirectionValue.value;
-    return {
-      opacity: 0.84 + progress * 0.16,
-      transform: [
-        {
-          translateY: (1 - progress) * direction * AMOUNT_SMOOTH_DISTANCE,
-        },
-        {
-          scale: 0.99 + progress * 0.01,
-        },
-      ],
-    };
-  });
 
   const handleNumpadPress = useCallback(
     (key: NumpadKeyValue): void => {
@@ -1051,6 +1175,7 @@ export const SendAmountStep = memo(function SendAmountStep({
       setAmountMotionDirection(
         key === 'backspace' ? 'down' : getAmountMotionDirection(currentAmount, nextAmount),
       );
+      setDraftAmount(nextAmount);
       onAmountChange(nextAmount);
     },
     [onAmountChange, token?.decimals],
@@ -1065,7 +1190,10 @@ export const SendAmountStep = memo(function SendAmountStep({
         setAmountMotionDirection(
           token == null ? 'up' : getAmountMotionDirection(currentAmount, token.balance),
         );
-        if (token != null) amountRef.current = token.balance;
+        if (token != null) {
+          amountRef.current = token.balance;
+          setDraftAmount(token.balance);
+        }
         onMax();
         return;
       }
@@ -1076,6 +1204,7 @@ export const SendAmountStep = memo(function SendAmountStep({
       if (nextAmount === currentAmount) return;
       amountRef.current = nextAmount;
       setAmountMotionDirection(getAmountMotionDirection(currentAmount, nextAmount));
+      setDraftAmount(nextAmount);
       onAmountChange(nextAmount);
     },
     [onAmountChange, onMax, token],
@@ -1103,16 +1232,13 @@ export const SendAmountStep = memo(function SendAmountStep({
   const handleSelectDropdownRoute = useCallback(
     (nextRoute: PrivatePaymentRoute): void => {
       setRouteDropdownOpen(false);
-      onSelectRoute(nextRoute);
+      onSelectRoute(nextRoute, amountRef.current);
     },
     [onSelectRoute],
   );
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(220)}
-      style={[styles.step, { gap: stepGap }]}
-    >
+    <Animated.View entering={FadeIn.duration(220)} style={[styles.step, { gap: stepGap }]}>
       <View
         style={[
           styles.toRow,
@@ -1160,31 +1286,14 @@ export const SendAmountStep = memo(function SendAmountStep({
             setAmountRowWidth((current) => (current === nextWidth ? current : nextWidth));
           }}
         >
-          <Animated.View
-            style={[styles.amountTickerClip, { height: amountTickerHeight }]}
-            accessibilityRole="text"
-            accessibilityLabel={`Amount ${displayAmount}`}
-            accessibilityLiveRegion="polite"
-          >
-            <Animated.Text
-              style={[
-                styles.amountValue,
-                styles.amountTickerValue,
-                amountAnimatedStyle,
-                {
-                  color: colors.text.primary,
-                  fontSize: amountTextStyle.fontSize,
-                  lineHeight: amountTextStyle.lineHeight,
-                },
-              ]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.7}
-              maxFontSizeMultiplier={1}
-            >
-              {displayAmount}
-            </Animated.Text>
-          </Animated.View>
+          <RollingAmountText
+            value={displayAmount}
+            direction={amountMotionDirection}
+            height={amountTickerHeight}
+            fontSize={amountTextStyle.fontSize}
+            lineHeight={amountTextStyle.lineHeight}
+            reduceMotion={reduceMotion}
+          />
         </View>
         <Animated.View
           key={metaLabelKey}
@@ -1357,7 +1466,7 @@ export const SendAmountStep = memo(function SendAmountStep({
               !canContinue && styles.continueButtonDisabled,
               pressed && canContinue && styles.continueButtonPressed,
             ]}
-            onPress={onContinue}
+            onPress={() => onContinue(amountRef.current)}
             disabled={!canContinue}
             accessibilityRole="button"
             accessibilityLabel="Next"
@@ -1445,6 +1554,24 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   amountTickerValue: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+  },
+  amountRollingRow: {
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  amountRollingSlot: {
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  amountRollingGlyph: {
     position: 'absolute',
     left: 0,
     right: 0,

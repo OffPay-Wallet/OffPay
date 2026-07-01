@@ -33,11 +33,11 @@ import { classifyPrivyError, type ClassifiedPrivyError } from './errors';
  * matching the Android package + signing certificate. The file must
  * include both `delegate_permission/common.handle_all_urls` and
  * `delegate_permission/common.get_login_creds`; the latter is what
- * Android Credential Manager uses for passkeys. OffPay hosts the
- * file at `https://offpay.app/.well-known/assetlinks.json` so the
- * relying party is `https://offpay.app`.
+ * Android Credential Manager uses for passkeys. OffPay serves this
+ * file directly from `https://www.offpay.app/.well-known/assetlinks.json`;
+ * the bare domain redirects, so the relying party must use `www`.
  */
-const PRIVY_RELYING_PARTY = 'https://offpay.app';
+const PRIVY_RELYING_PARTY = 'https://www.offpay.app';
 const OAUTH_REDIRECT_PATH = '/oauth/callback';
 
 export type PrivyOnboardingProvider = 'google' | 'x' | 'passkey';

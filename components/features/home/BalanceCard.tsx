@@ -81,6 +81,10 @@ const PRIVACY_TOGGLE_TIMING = {
   duration: 220,
   easing: Easing.bezier(0.22, 1, 0.36, 1),
 } as const;
+const BALANCE_CHART_TRANSITION_TIMING = {
+  duration: 260,
+  easing: Easing.bezier(0.22, 1, 0.36, 1),
+} as const;
 
 // Static gradient overlay — all props are constants so this never
 // needs to re-render. Memoising prevents the native LinearGradient
@@ -338,6 +342,7 @@ export const BalanceCard = memo(function BalanceCard({
   const hiddenMaskFontSize = ultraCompact ? 30 : compact ? 34 : 38;
   const currencyPillWidth = ultraCompact ? 62 : compact ? 68 : 76;
   const chartHeight = ultraCompact ? 48 : compact ? 58 : 68;
+  const valueChangeRowHeight = 22;
   const currencySheetTopInset = Math.max(insets.top, spacing.md) + spacing.sm;
   const currencySheetMaxHeight = Math.max(0, windowHeight - currencySheetTopInset);
   const currencySheetPreferredHeight = Math.max(
@@ -368,10 +373,6 @@ export const BalanceCard = memo(function BalanceCard({
       { translateY: interpolate(privacyProgress.value, [0, 1], [0, 1]) },
       { scale: interpolate(privacyProgress.value, [0, 1], [1, 0.985]) },
     ],
-  }));
-  const privateDetailsStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(privacyProgress.value, [0, 1], [1, 0.2]),
-    transform: [{ translateY: interpolate(privacyProgress.value, [0, 1], [0, 3]) }],
   }));
   const displayedOfflineSlotsLabel =
     ultraCompact && offlineSlotsLabel != null
@@ -416,6 +417,35 @@ export const BalanceCard = memo(function BalanceCard({
       : valueChangeTone === 'negative'
         ? 'caret-down'
         : null;
+  const chartSamples = valueChange?.samples ?? [];
+  const hasRenderedSparkline = !privacyHidden && chartSamples.length >= 2;
+  const showChartValueChange = hasRenderedSparkline && (showValueChange || showValueChangeSkeleton);
+  const chartDetailsHeight = showChartValueChange ? valueChangeRowHeight + spacing.xs : 0;
+  const chartOverlayHeight = chartHeight + chartDetailsHeight;
+  const balanceChartLift = Math.round(chartOverlayHeight / 2);
+  const chartProgress = useDerivedValue(
+    () => withTiming(hasRenderedSparkline ? 1 : 0, BALANCE_CHART_TRANSITION_TIMING),
+    [hasRenderedSparkline],
+  );
+  const balanceChartMotionStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY: interpolate(chartProgress.value, [0, 1], [0, -balanceChartLift]),
+      },
+    ],
+  }));
+  const chartOverlayStyle = useAnimatedStyle(() => ({
+    opacity:
+      interpolate(privacyProgress.value, [0, 1], [1, 0.2]) *
+      interpolate(chartProgress.value, [0, 0.18, 1], [0, 0, 1]),
+    transform: [
+      {
+        translateY:
+          interpolate(privacyProgress.value, [0, 1], [0, 3]) +
+          interpolate(chartProgress.value, [0, 1], [10, 0]),
+      },
+    ],
+  }));
 
   return (
     <View style={[styles.outer, wideLayout && styles.outerWide]}>
@@ -615,7 +645,7 @@ export const BalanceCard = memo(function BalanceCard({
                 </Animated.View>
               ) : (
                 <>
-                  <View style={styles.valueCol}>
+                  <Animated.View style={[styles.valueCol, balanceChartMotionStyle]}>
                     <Animated.View style={[styles.balanceValueMotion, privateValueStyle]}>
                       <SlotText
                         value={displayedPortfolioValue}
@@ -637,69 +667,82 @@ export const BalanceCard = memo(function BalanceCard({
                         />
                       </SlotText>
                     </Animated.View>
-                  </View>
-                  <Animated.View style={[styles.valueChangeRow, privateDetailsStyle]}>
-                    {showValueChangeSkeleton ? (
-                      <>
-                        <SkeletonBlock width={compact ? 76 : 88} height={18} radius={radii.full} />
-                        <SkeletonBlock width={compact ? 54 : 62} height={20} radius={radii.full} />
-                      </>
-                    ) : showValueChange ? (
-                      <>
-                        <Text
-                          variant="bodyBold"
-                          color={valueChangeColor}
-                          style={[styles.valueChangeText, compact && styles.valueChangeTextCompact]}
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.72}
-                          maxFontSizeMultiplier={1}
-                        >
-                          {valueChange.changeAbsoluteLabel}
-                        </Text>
-                        <View
-                          style={[
-                            styles.valueChangePercentPill,
-                            valueChangeTone === 'positive' && styles.valueChangePercentPillPositive,
-                            valueChangeTone === 'negative' && styles.valueChangePercentPillNegative,
-                          ]}
-                        >
-                          {valueChangeIconName != null ? (
-                            <Ionicons
-                              name={valueChangeIconName}
-                              size={10}
-                              color={valueChangeColor}
-                            />
-                          ) : null}
-                          <Text
-                            variant="captionBold"
-                            color={valueChangeColor}
-                            style={styles.valueChangePercentText}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.76}
-                            maxFontSizeMultiplier={1}
-                          >
-                            {valueChange.changePercentLabel}
-                          </Text>
-                        </View>
-                      </>
-                    ) : null}
                   </Animated.View>
                   <Animated.View
-                    style={[
-                      styles.chartFrame,
-                      { marginHorizontal: -cardHPadding },
-                      privateDetailsStyle,
-                    ]}
+                    style={[styles.chartOverlay, { height: chartOverlayHeight }, chartOverlayStyle]}
                   >
-                    <HoldingsValueChangeChart
-                      samples={valueChange?.samples ?? []}
-                      tone={valueChangeTone}
-                      height={chartHeight}
-                      loading={holdingsValueChangeLoading}
-                      hidden={false}
-                    />
+                    {showChartValueChange ? (
+                      <View style={[styles.valueChangeRow, { height: valueChangeRowHeight }]}>
+                        {showValueChangeSkeleton ? (
+                          <>
+                            <SkeletonBlock
+                              width={compact ? 76 : 88}
+                              height={18}
+                              radius={radii.full}
+                            />
+                            <SkeletonBlock
+                              width={compact ? 54 : 62}
+                              height={20}
+                              radius={radii.full}
+                            />
+                          </>
+                        ) : showValueChange ? (
+                          <>
+                            <Text
+                              variant="bodyBold"
+                              color={valueChangeColor}
+                              style={[
+                                styles.valueChangeText,
+                                compact && styles.valueChangeTextCompact,
+                              ]}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.72}
+                              maxFontSizeMultiplier={1}
+                            >
+                              {valueChange.changeAbsoluteLabel}
+                            </Text>
+                            <View
+                              style={[
+                                styles.valueChangePercentPill,
+                                valueChangeTone === 'positive' &&
+                                  styles.valueChangePercentPillPositive,
+                                valueChangeTone === 'negative' &&
+                                  styles.valueChangePercentPillNegative,
+                              ]}
+                            >
+                              {valueChangeIconName != null ? (
+                                <Ionicons
+                                  name={valueChangeIconName}
+                                  size={10}
+                                  color={valueChangeColor}
+                                />
+                              ) : null}
+                              <Text
+                                variant="captionBold"
+                                color={valueChangeColor}
+                                style={styles.valueChangePercentText}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.76}
+                                maxFontSizeMultiplier={1}
+                              >
+                                {valueChange.changePercentLabel}
+                              </Text>
+                            </View>
+                          </>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    <View style={[styles.chartFrame, { marginHorizontal: -cardHPadding }]}>
+                      <HoldingsValueChangeChart
+                        samples={chartSamples}
+                        tone={valueChangeTone}
+                        height={chartHeight}
+                        loading={false}
+                        hidden={!hasRenderedSparkline}
+                      />
+                    </View>
                   </Animated.View>
                 </>
               )}
@@ -1060,6 +1103,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: spacing.xs,
+    position: 'relative',
   },
   metricRowHidden: {
     justifyContent: 'center',
@@ -1070,9 +1114,10 @@ const styles = StyleSheet.create({
     maxWidth: '92%',
     minWidth: 0,
     alignItems: 'center',
+    zIndex: 1,
   },
   valueChangeRow: {
-    minHeight: 22,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1126,6 +1171,15 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     minWidth: 0,
     overflow: 'hidden',
+    flexShrink: 0,
+  },
+  chartOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'flex-end',
+    minWidth: 0,
   },
   bottomRow: {
     flexShrink: 0,

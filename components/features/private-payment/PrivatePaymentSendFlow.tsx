@@ -1,11 +1,4 @@
-import React, {
-  startTransition,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -157,7 +150,6 @@ type FeePrefetchRouteScope = PrivatePaymentRoute | 'all';
 const MAX_AMOUNT_INPUT_CHARACTERS = 48;
 const SEND_CONTENT_MAX_WIDTH = 430;
 const UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS = 300_000;
-const FEE_ESTIMATE_INPUT_DEBOUNCE_MS = 220;
 const SEND_HEADER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const SEND_STEP_TRANSITION_DURATION_MS = 260;
@@ -193,6 +185,91 @@ interface SendResultView {
   symbol: string;
   recipient: string;
   network: NonNullable<ReturnType<typeof useOffpayNetwork>['network']>;
+}
+
+interface CommittedPrivatePaymentFeeEstimateParams {
+  walletAddress: string | null;
+  walletId: string | null;
+  recipient: string | null;
+  selectedToken: StablecoinOption | null;
+  rawAmount: string | null;
+  network: ReturnType<typeof useOffpayNetwork>['network'];
+  enabled: boolean;
+  normalRouteAvailable: boolean;
+  magicBlockRouteAvailable: boolean;
+  umbraRouteAvailable: boolean;
+}
+
+function useCommittedPrivatePaymentFeeEstimates({
+  walletAddress,
+  walletId,
+  recipient,
+  selectedToken,
+  rawAmount,
+  network,
+  enabled,
+  normalRouteAvailable,
+  magicBlockRouteAvailable,
+  umbraRouteAvailable,
+}: CommittedPrivatePaymentFeeEstimateParams) {
+  const normalFeeEstimate = useNormalTransferFeeEstimate({
+    walletAddress,
+    recipient,
+    mint: selectedToken?.mint ?? null,
+    rawAmount,
+    decimals: selectedToken?.decimals ?? null,
+    network,
+    enabled: enabled && normalRouteAvailable,
+  });
+  const displayAmount = useMemo(
+    () =>
+      selectedToken == null || rawAmount == null
+        ? null
+        : formatAtomicAmount(rawAmount, selectedToken.decimals, selectedToken.decimals),
+    [rawAmount, selectedToken],
+  );
+  const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
+    walletAddress,
+    recipient,
+    mint: selectedToken?.mint ?? null,
+    rawAmount,
+    network,
+    enabled:
+      enabled &&
+      magicBlockRouteAvailable &&
+      selectedToken != null &&
+      recipient != null &&
+      rawAmount != null &&
+      walletAddress != null &&
+      walletId != null &&
+      network != null,
+  });
+  const umbraFeeEstimate = useUmbraPrivateP2PFeeEstimate({
+    walletAddress,
+    walletId,
+    recipient,
+    token: selectedToken?.mint ?? null,
+    amount: displayAmount,
+    rawAmount,
+    network,
+    enabled:
+      enabled &&
+      umbraRouteAvailable &&
+      selectedToken != null &&
+      recipient != null &&
+      rawAmount != null &&
+      displayAmount != null &&
+      walletAddress != null &&
+      walletId != null &&
+      network != null,
+  });
+
+  return {
+    normalFeeEstimate,
+    magicBlockFeeEstimate,
+    umbraFeeEstimate,
+    feeEstimateDisplayAmount: displayAmount,
+  };
 }
 
 type PrivateSendSubmissionResult =
@@ -550,10 +627,12 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       selectedToken == null ? null : decimalInputToAtomicAmount(amount, selectedToken.decimals),
     [amount, selectedToken],
   );
-  const [feeEstimateAmountRaw, setFeeEstimateAmountRaw] = useState<string | null>(null);
-  const clearFeeEstimateAmount = useCallback(() => {
+  const [committedFeeEstimateAmountRaw, setCommittedFeeEstimateAmountRaw] = useState<string | null>(
+    null,
+  );
+  const clearCommittedFeeEstimateAmount = useCallback(() => {
     startTransition(() => {
-      setFeeEstimateAmountRaw(null);
+      setCommittedFeeEstimateAmountRaw(null);
     });
   }, []);
 
@@ -602,7 +681,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     getContactByAddress(contacts, clipboardRecipientAddress) == null;
   const showAddRecipientContact =
     recipientCandidate.kind === 'address' && typedRecipientContact == null;
-  const amountReadyForFeeEstimate = isPositiveRawAmount(amountRaw);
   const feeEstimateInputsReady =
     effectiveWalletMode !== 'offline' &&
     selectedToken != null &&
@@ -636,30 +714,13 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     });
   }, [effectiveRecipientAddress, network, queryClient, selectedToken?.mint, walletAddress]);
   const resetCurrentFeeEstimate = useCallback(() => {
-    clearFeeEstimateAmount();
+    clearCommittedFeeEstimateAmount();
     cancelCurrentFeeEstimateQueries();
-  }, [cancelCurrentFeeEstimateQueries, clearFeeEstimateAmount]);
-  useEffect(() => {
-    if (!feeEstimateInputsReady || !amountReadyForFeeEstimate) {
-      clearFeeEstimateAmount();
-      return undefined;
-    }
-
-    const timeout = setTimeout(() => {
-      startTransition(() => {
-        setFeeEstimateAmountRaw(amountRaw);
-      });
-    }, FEE_ESTIMATE_INPUT_DEBOUNCE_MS);
-
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [
-    amountRaw,
-    amountReadyForFeeEstimate,
-    clearFeeEstimateAmount,
-    feeEstimateInputsReady,
-  ]);
+  }, [cancelCurrentFeeEstimateQueries, clearCommittedFeeEstimateAmount]);
+  const stopFeeEstimatesForAmountEdit = useCallback(() => {
+    clearCommittedFeeEstimateAmount();
+    cancelCurrentFeeEstimateQueries();
+  }, [cancelCurrentFeeEstimateQueries, clearCommittedFeeEstimateAmount]);
   const routeRecipientBleName =
     typeof params.bleName === 'string' && params.bleName.trim().length > 0
       ? params.bleName.trim()
@@ -850,71 +911,43 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       walletId,
     ],
   );
+  const commitFeeEstimateAmount = useCallback(
+    (nextAmountRaw: string | null, routeScope: FeePrefetchRouteScope = 'all'): void => {
+      if (!feeEstimateInputsReady || !isPositiveRawAmount(nextAmountRaw)) {
+        clearCommittedFeeEstimateAmount();
+        return;
+      }
+
+      startTransition(() => {
+        setCommittedFeeEstimateAmountRaw(nextAmountRaw);
+      });
+      prefetchFeeEstimatesForAmount(nextAmountRaw, routeScope);
+    },
+    [clearCommittedFeeEstimateAmount, feeEstimateInputsReady, prefetchFeeEstimatesForAmount],
+  );
   const feeEstimateMatchesAmount =
-    feeEstimateAmountRaw != null && feeEstimateAmountRaw === amountRaw;
-  const currentFeeEstimateAmountRaw = feeEstimateMatchesAmount ? feeEstimateAmountRaw : null;
+    committedFeeEstimateAmountRaw != null && committedFeeEstimateAmountRaw === amountRaw;
+  const currentFeeEstimateAmountRaw = feeEstimateMatchesAmount
+    ? committedFeeEstimateAmountRaw
+    : null;
   const feeEstimateHooksEnabled = feeEstimateInputsReady && currentFeeEstimateAmountRaw != null;
 
-  // Live network-fee estimates use getFeeForMessage on the exact
-  // transaction message for every available route while the user types.
-  // The debounced amount snapshot avoids request storms and is cleared
-  // immediately when the amount is empty or zero.
-  const normalFeeEstimateEnabled = feeEstimateHooksEnabled && normalFeeRouteAvailable;
-  const normalFeeEstimate = useNormalTransferFeeEstimate({
-    walletAddress,
-    recipient: effectiveRecipientAddress,
-    mint: selectedToken?.mint ?? null,
-    rawAmount: currentFeeEstimateAmountRaw,
-    decimals: selectedToken?.decimals ?? null,
-    network,
-    enabled: normalFeeEstimateEnabled,
-  });
-  const feeEstimateDisplayAmount = useMemo(
-    () =>
-      selectedToken == null || currentFeeEstimateAmountRaw == null
-        ? null
-        : formatAtomicAmount(
-            currentFeeEstimateAmountRaw,
-            selectedToken.decimals,
-            selectedToken.decimals,
-          ),
-    [currentFeeEstimateAmountRaw, selectedToken],
-  );
-  const magicBlockFeeEstimate = useMagicBlockPrivatePaymentFeeEstimate({
-    walletAddress,
-    recipient: effectiveRecipientAddress,
-    mint: selectedToken?.mint ?? null,
-    rawAmount: currentFeeEstimateAmountRaw,
-    network,
-    enabled:
-      feeEstimateHooksEnabled &&
-      magicBlockFeeRouteAvailable &&
-      selectedToken != null &&
-      effectiveRecipientAddress != null &&
-      currentFeeEstimateAmountRaw != null &&
-      walletAddress != null &&
-      walletId != null &&
-      network != null,
-  });
-  const umbraFeeEstimate = useUmbraPrivateP2PFeeEstimate({
-    walletAddress,
-    walletId,
-    recipient: effectiveRecipientAddress,
-    token: selectedToken?.mint ?? null,
-    amount: feeEstimateDisplayAmount,
-    rawAmount: currentFeeEstimateAmountRaw,
-    network,
-    enabled:
-      feeEstimateHooksEnabled &&
-      umbraFeeRouteAvailable &&
-      selectedToken != null &&
-      effectiveRecipientAddress != null &&
-      currentFeeEstimateAmountRaw != null &&
-      feeEstimateDisplayAmount != null &&
-      walletAddress != null &&
-      walletId != null &&
-      network != null,
-  });
+  // Fee estimates are keyed by an explicit committed amount. Typing
+  // clears this snapshot so fee queries cannot compete with keypad
+  // presses or amount text animation.
+  const { normalFeeEstimate, magicBlockFeeEstimate, umbraFeeEstimate } =
+    useCommittedPrivatePaymentFeeEstimates({
+      walletAddress,
+      recipient: effectiveRecipientAddress,
+      selectedToken,
+      rawAmount: currentFeeEstimateAmountRaw,
+      network,
+      walletId,
+      enabled: feeEstimateHooksEnabled,
+      normalRouteAvailable: normalFeeRouteAvailable,
+      magicBlockRouteAvailable: magicBlockFeeRouteAvailable,
+      umbraRouteAvailable: umbraFeeRouteAvailable,
+    });
   const networkFeeLabel = useMemo(() => {
     if (effectiveWalletMode === 'offline') return 'Paid at settlement';
     if (effectivePaymentRoute === 'normal') {
@@ -1421,16 +1454,22 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
   );
 
   const handleSelectRoute = useCallback(
-    (route: PrivatePaymentRoute) => {
+    (route: PrivatePaymentRoute, amountValue = amount) => {
       setSelectedPrivateRoute(route);
-      if (!feeEstimateInputsReady || !amountReadyForFeeEstimate) return;
-
-      startTransition(() => {
-        setFeeEstimateAmountRaw(amountRaw);
-      });
-      prefetchFeeEstimatesForAmount(amountRaw, route);
+      const nextAmount = sanitizeDecimalInput(amountValue, selectedToken?.decimals ?? 6).slice(
+        0,
+        MAX_AMOUNT_INPUT_CHARACTERS,
+      );
+      if (nextAmount !== amount) {
+        setAmount(nextAmount);
+      }
+      const nextAmountRaw =
+        selectedToken == null
+          ? null
+          : decimalInputToAtomicAmount(nextAmount, selectedToken.decimals);
+      commitFeeEstimateAmount(nextAmountRaw, 'all');
     },
-    [amountRaw, amountReadyForFeeEstimate, feeEstimateInputsReady, prefetchFeeEstimatesForAmount],
+    [amount, commitFeeEstimateAmount, selectedToken],
   );
 
   const handleAmountChange = useCallback(
@@ -1439,18 +1478,18 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         0,
         MAX_AMOUNT_INPUT_CHARACTERS,
       );
-      clearFeeEstimateAmount();
+      stopFeeEstimatesForAmountEdit();
       setAmount(nextAmount);
     },
-    [clearFeeEstimateAmount, selectedToken?.decimals],
+    [selectedToken?.decimals, stopFeeEstimatesForAmountEdit],
   );
 
   const handleMaxAmount = useCallback(() => {
     if (selectedToken == null) return;
     const nextAmount = sanitizeDecimalInput(selectedToken.balance, selectedToken.decimals);
-    clearFeeEstimateAmount();
+    stopFeeEstimatesForAmountEdit();
     setAmount(nextAmount);
-  }, [clearFeeEstimateAmount, selectedToken]);
+  }, [selectedToken, stopFeeEstimatesForAmountEdit]);
 
   const handleContinueRecipient = useCallback(async () => {
     Keyboard.dismiss();
@@ -1799,15 +1838,50 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       : null;
   const canSubmit =
     baseCanSubmit && magicBlockPlanBlockedReason == null && umbraFeeBlockedReason == null;
-  const handleContinueAmount = useCallback(() => {
-    if (!baseCanSubmit) return;
-    Keyboard.dismiss();
-    startTransition(() => {
-      setFeeEstimateAmountRaw(amountRaw);
-    });
-    prefetchFeeEstimatesForAmount(amountRaw);
-    transitionToStep('summary', 'forward');
-  }, [amountRaw, baseCanSubmit, prefetchFeeEstimatesForAmount, transitionToStep]);
+  const handleContinueAmount = useCallback(
+    (amountValue = amount) => {
+      const nextAmount = sanitizeDecimalInput(amountValue, selectedToken?.decimals ?? 6).slice(
+        0,
+        MAX_AMOUNT_INPUT_CHARACTERS,
+      );
+      const nextAmountRaw =
+        selectedToken == null
+          ? null
+          : decimalInputToAtomicAmount(nextAmount, selectedToken.decimals);
+      const nextAmountValid = isAmountWithinBalance(nextAmountRaw, balanceRaw);
+      const canContinueWithAmount =
+        baseDisabledReason == null &&
+        selectedToken != null &&
+        effectiveRecipientAddress != null &&
+        nextAmountValid &&
+        nextAmountRaw != null &&
+        walletAddress != null &&
+        walletId != null &&
+        network != null &&
+        !sendingPending;
+      if (!canContinueWithAmount) return;
+
+      Keyboard.dismiss();
+      if (nextAmount !== amount) {
+        setAmount(nextAmount);
+      }
+      commitFeeEstimateAmount(nextAmountRaw, 'all');
+      transitionToStep('summary', 'forward');
+    },
+    [
+      amount,
+      balanceRaw,
+      baseDisabledReason,
+      commitFeeEstimateAmount,
+      effectiveRecipientAddress,
+      network,
+      selectedToken,
+      sendingPending,
+      transitionToStep,
+      walletAddress,
+      walletId,
+    ],
+  );
 
   // Phase for the draggable summary sheet. The sheet owns the whole
   // review → sending → success lifecycle in one card, so there is no
