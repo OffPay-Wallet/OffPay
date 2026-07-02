@@ -25,6 +25,11 @@ type ChatHandlerContext = {
   releaseCreditOnStreamError?: (error: unknown) => Promise<AiChatCreditStatus>;
 };
 
+type ChatProviderOptions = {
+  sessionAffinity?: string;
+  streamGroqFallback?: boolean;
+};
+
 const CHAT_RESPONSE_CACHE_TTL_SEC = 120;
 const CHAT_RESPONSE_CACHE_TURN_ID_PATTERN = /^[A-Za-z0-9:_-]{1,96}$/;
 
@@ -40,12 +45,13 @@ export async function handleChat(
   if (mode === 'intent_json') {
     validateIntentChatRequest(body);
     const safeBody = sanitizeChatRequestForProvider(body);
+    const providerOptions = await chatProviderOptions(request);
     const cacheKey = await chatResponseCacheKey(request, env, mode, safeBody);
     const cached = await getCachedChatResponse(cacheKey, env, isIntentChatResponse);
     if (cached != null) {
       return chatJsonResponse(cached, 200, cors, context.credits);
     }
-    const responseBody = { intent: await generateIntent(safeBody, env) };
+    const responseBody = { intent: await generateIntent(safeBody, env, providerOptions) };
     await setCachedChatResponse(cacheKey, env, responseBody);
     return chatJsonResponse(responseBody, 200, cors, context.credits);
   }
@@ -53,15 +59,16 @@ export async function handleChat(
   if (mode === 'agent_turn') {
     validateAgentTurnRequest(body);
     const safeBody = sanitizeChatRequestForProvider(body);
+    const providerOptions = await chatProviderOptions(request);
     if (body.stream === true || request.headers.get('accept')?.includes('text/event-stream')) {
-      return streamAgentTurnResponse(safeBody, env, cors, context);
+      return streamAgentTurnResponse(safeBody, env, cors, context, providerOptions);
     }
     const cacheKey = await chatResponseCacheKey(request, env, mode, safeBody);
     const cached = await getCachedChatResponse(cacheKey, env, isAgentTurnChatResponse);
     if (cached != null) {
       return chatJsonResponse(cached, 200, cors, context.credits);
     }
-    const responseBody = { turn: await generateAgentTurn(safeBody, env) };
+    const responseBody = { turn: await generateAgentTurn(safeBody, env, providerOptions) };
     await setCachedChatResponse(cacheKey, env, responseBody);
     return chatJsonResponse(responseBody, 200, cors, context.credits);
   }
@@ -69,7 +76,7 @@ export async function handleChat(
   // Legacy free-text path. Kept for backward compatibility — intent → text.
   validateChatRequest(body);
   const safeBody = sanitizeChatRequestForProvider(body);
-  const intent = await generateIntent(safeBody, env);
+  const intent = await generateIntent(safeBody, env, await chatProviderOptions(request));
   const text = renderIntentAsFreeText(intent);
   return chatJsonResponse(
     {
@@ -98,6 +105,7 @@ async function chatResponseCacheKey(
     mode,
     turnId,
     sessionHash: await sha256Hex(sessionToken),
+    cloudflareAiModel: env.CLOUDFLARE_AI_CHAT_MODEL?.trim() ?? null,
     model: env.GEMINI_CHAT_MODEL?.trim() ?? null,
     groqModel: env.GROQ_CHAT_MODEL?.trim() ?? null,
     body,
@@ -157,6 +165,7 @@ function streamAgentTurnResponse(
   env: AiProxyEnv,
   cors: HeadersInit,
   context: ChatHandlerContext,
+  providerOptions: ChatProviderOptions,
 ): Response {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
@@ -169,7 +178,10 @@ function streamAgentTurnResponse(
   void (async () => {
     try {
       await write(': offpay-ai-stream\n\n');
-      const turn = await generateAgentTurn(body, env, { streamGroqFallback: true });
+      const turn = await generateAgentTurn(body, env, {
+        ...providerOptions,
+        streamGroqFallback: true,
+      });
       if (turn.kind === 'agent_text') {
         await writeEvent({ kind: 'chat_delta', text: turn.text });
       } else {
@@ -254,22 +266,35 @@ export async function handleKindDispatch(
   );
 }
 
-async function generateIntent(body: AgentChatRequest, env: AiProxyEnv): Promise<AgentIntentResult> {
-  assertGeminiAllowed(env);
-  return generateGeminiIntent(body, env);
+async function generateIntent(
+  body: AgentChatRequest,
+  env: AiProxyEnv,
+  options: ChatProviderOptions = {},
+): Promise<AgentIntentResult> {
+  assertChatProviderPrivacyAllowed(env);
+  return generateGeminiIntent(body, env, options);
 }
 
 async function generateAgentTurn(
   body: AgentChatRequest,
   env: AiProxyEnv,
-  options: { streamGroqFallback?: boolean } = {},
+  options: ChatProviderOptions = {},
 ): Promise<AgentTurn> {
-  assertGeminiAllowed(env);
+  assertChatProviderPrivacyAllowed(env);
   return generateGeminiAgentTurn(body, env, options);
 }
 
-function assertGeminiAllowed(env: AiProxyEnv): void {
+async function chatProviderOptions(request: Request): Promise<ChatProviderOptions> {
+  const sessionToken = request.headers.get('x-offpay-ai-session')?.trim();
+  if (sessionToken == null || sessionToken.length === 0) return {};
+  return {
+    sessionAffinity: `offpay-${(await sha256Hex(sessionToken)).slice(0, 32)}`,
+  };
+}
+
+function assertChatProviderPrivacyAllowed(env: AiProxyEnv): void {
   if (!isStrictPrivacy(env)) return;
+  if ((env.GEMINI_API_KEY?.trim() ?? '').length === 0) return;
 
   if (env.AI_PROXY_ALLOW_GEMINI_UNPAID === 'true') {
     throw new ProviderError('gemini', 503, 'Gemini unpaid mode is not allowed in strict privacy.');

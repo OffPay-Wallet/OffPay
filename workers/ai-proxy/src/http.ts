@@ -225,6 +225,13 @@ export function primaryProviderTimeoutMs(env: AiProxyEnv): number {
   );
 }
 
+export function cloudflareAiProviderTimeoutMs(env: AiProxyEnv): number {
+  return positiveInt(
+    env.CLOUDFLARE_AI_PROVIDER_TIMEOUT_MS,
+    Math.min(12_000, providerTimeoutMs(env)),
+  );
+}
+
 export function groqProviderTimeoutMs(env: AiProxyEnv): number {
   return positiveInt(env.GROQ_PROVIDER_TIMEOUT_MS, Math.min(16_000, providerTimeoutMs(env)));
 }

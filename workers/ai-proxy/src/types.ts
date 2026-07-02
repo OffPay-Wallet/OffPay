@@ -122,7 +122,18 @@ export type VoiceSpeechRequest = {
   preferredProvider?: VoiceProvider;
 };
 
+export type WorkersAiBinding = {
+  run(
+    model: string,
+    inputs: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+};
+
 export type AiProxyEnv = {
+  AI?: WorkersAiBinding;
+  CLOUDFLARE_AI_CHAT_MODEL?: string;
+  CLOUDFLARE_AI_PROVIDER_TIMEOUT_MS?: string;
   GEMINI_API_KEY?: string;
   GEMINI_CHAT_MODEL?: string;
   AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS?: string;

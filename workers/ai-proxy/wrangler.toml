@@ -14,6 +14,9 @@ binding = "OFFPAY_API_AI_CREDITS"
 service = "offpay-api"
 entrypoint = "AiCreditsEntrypoint"
 
+[ai]
+binding = "AI"
+
 [vars]
 AI_PROXY_PRIVACY_MODE = "strict"
 AI_PROXY_GEMINI_PRIVACY_CONFIRMED = "true"
@@ -24,6 +27,8 @@ AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION = "false"
 # preferredProvider=elevenlabs is rejected, even if ELEVENLABS_API_KEY is
 # set as a secret. Remove this var to restore Sarvam-first-with-ElevenLabs.
 AI_PROXY_VOICE_PROVIDER_LOCK = "sarvam"
+CLOUDFLARE_AI_CHAT_MODEL = "@cf/zai-org/glm-4.7-flash"
+CLOUDFLARE_AI_PROVIDER_TIMEOUT_MS = "5500"
 GEMINI_CHAT_MODEL = "gemini-3.1-flash-lite"
 AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS = "8000"
 GROQ_CHAT_MODEL = "llama-3.1-8b-instant"
@@ -70,10 +75,12 @@ AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
 # Until then the Worker logs the failure but allows the request, so a
 # staged rollout doesn't break older app builds.
 #
-# Chat provider is Gemini API primary with Groq fallback. Voice is locked
-# to Sarvam for STT and TTS via AI_PROXY_VOICE_PROVIDER_LOCK="sarvam" in
-# [vars] above; ElevenLabs secrets remain supported but dormant until that
-# lock is removed.
+# Chat provider is Workers AI primary through the [ai] binding above,
+# using CLOUDFLARE_AI_CHAT_MODEL. Gemini and Groq remain fallback paths
+# when their secrets are configured. Voice is locked to Sarvam for STT
+# and TTS via AI_PROXY_VOICE_PROVIDER_LOCK="sarvam" in [vars] above;
+# ElevenLabs secrets remain supported but dormant until that lock is
+# removed.
 #
 # Set AI_PROXY_ALLOWED_ORIGINS only for browser/web clients. Native app
 # requests do not send Origin, so origin allowlists are not a substitute for
