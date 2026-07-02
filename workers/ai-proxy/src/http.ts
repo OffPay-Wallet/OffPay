@@ -1,6 +1,6 @@
 import type { AiProxyEnv, AudioUpload } from './types';
 
-export const DEFAULT_GEMINI_MODEL = 'gemma-4-26b-a4b-it';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_CHAT_BYTES = 64 * 1024;
 export const DEFAULT_MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -225,8 +225,8 @@ export function primaryProviderTimeoutMs(env: AiProxyEnv): number {
   );
 }
 
-export function openRouterProviderTimeoutMs(env: AiProxyEnv): number {
-  return positiveInt(env.OPENROUTER_PROVIDER_TIMEOUT_MS, Math.min(16_000, providerTimeoutMs(env)));
+export function groqProviderTimeoutMs(env: AiProxyEnv): number {
+  return positiveInt(env.GROQ_PROVIDER_TIMEOUT_MS, Math.min(16_000, providerTimeoutMs(env)));
 }
 
 export function isTtsEnabled(env: AiProxyEnv): boolean {

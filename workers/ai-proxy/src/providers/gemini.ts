@@ -3,7 +3,7 @@ import {
   DEFAULT_GEMINI_MODEL,
   ProviderError,
   fetchWithTimeout,
-  openRouterProviderTimeoutMs,
+  groqProviderTimeoutMs,
   providerErrorFromResponse,
   providerTimeoutMs,
   primaryProviderTimeoutMs,
@@ -37,13 +37,13 @@ type GeminiPartInput =
     };
 
 const MAX_FUNCTION_DECLARATIONS = 40;
-const DEFAULT_OPENROUTER_MODEL = 'google/gemma-4-31b-it:free';
+const DEFAULT_GROQ_MODEL = 'llama-3.1-8b-instant';
 const GEMINI_NATIVE_TOOLS_REJECTION_TTL_MS = 30 * 60 * 1000;
 
 const geminiNativeToolRejectionCache = new Map<string, number>();
 
 interface GenerateAgentTurnOptions {
-  streamOpenRouterFallback?: boolean;
+  streamGroqFallback?: boolean;
 }
 
 export function resetGeminiProviderCachesForTests(): void {
@@ -55,10 +55,10 @@ export async function generateGeminiIntent(
   env: AiProxyEnv,
 ): Promise<AgentIntentResult> {
   if (!env.GEMINI_API_KEY) {
-    if (!shouldUseOpenRouterFallback(env)) {
+    if (!shouldUseGroqFallback(env)) {
       throw new ProviderError('gemini', 503, 'Gemini API key is not configured.');
     }
-    const payload = await fetchOpenRouterIntentJson(body, env);
+    const payload = await fetchGroqIntentJson(body, env);
     return parseIntentResult(geminiText(payload));
   }
 
@@ -68,15 +68,15 @@ export async function generateGeminiIntent(
     env,
     'intent',
     () => fetchGeminiJson(geminiRequest, env, 'intent'),
-    () => fetchOpenRouterIntentJson(body, env),
+    () => fetchGroqIntentJson(body, env),
   );
   const text = geminiText(payload);
   return parseIntentResult(text);
 }
 
 /**
- * Tool-calling agent loop turn. Gemma 4 26B supports Gemini function
- * declarations, but some provider-side deploys can reject native tool
+ * Tool-calling agent loop turn. Gemini supports function declarations,
+ * but some provider-side deploys can reject native tool
  * payloads. In that case, fall back to a JSON tool protocol carried as text
  * so the client can still run the same local tools.
  */
@@ -86,22 +86,22 @@ export async function generateGeminiAgentTurn(
   options: GenerateAgentTurnOptions = {},
 ): Promise<AgentTurn> {
   if (!env.GEMINI_API_KEY) {
-    if (!shouldUseOpenRouterFallback(env)) {
+    if (!shouldUseGroqFallback(env)) {
       throw new ProviderError('gemini', 503, 'Gemini API key is not configured.');
     }
-    return parseGemmaJsonAgentTurn(await fetchOpenRouterAgentTurnJson(body, env, options));
+    return parseJsonAgentTurn(await fetchGroqAgentTurnJson(body, env, options));
   }
 
   const rejectionKey = await geminiNativeToolsRejectionKey(body, env);
-  if (!(await isGeminiNativeToolsRejected(rejectionKey, env))) {
+  if (!hasReplayedToolTrace(body) && !(await isGeminiNativeToolsRejected(rejectionKey, env))) {
     try {
       const nativeRequest = buildGeminiAgentTurnRequest(body);
       const payload = await fetchGeminiJson(nativeRequest, env, 'agent_native');
       return parseGeminiAgentTurn(payload);
     } catch (error) {
-      if (shouldFallbackToOpenRouter(error, env)) {
+      if (shouldFallbackToGroq(error, env)) {
         console.warn(
-          'aiProxy.providerFallback.openRouter',
+          'aiProxy.providerFallback.groq',
           safeJson(
             {
               requestKind: 'agent_native',
@@ -112,22 +112,26 @@ export async function generateGeminiAgentTurn(
             1200,
           ),
         );
-        return parseGemmaJsonAgentTurn(await fetchOpenRouterAgentTurnJson(body, env, options));
+        return parseJsonAgentTurn(await fetchGroqAgentTurnJson(body, env, options));
       }
       if (!shouldRetryAgentTurnAsJson(error)) throw error;
       await rememberGeminiNativeToolsRejected(rejectionKey, env);
     }
   }
 
-  const jsonRequest = buildGemmaJsonAgentTurnRequest(body);
+  const jsonRequest = buildJsonAgentTurnRequest(body);
   const fallbackPayload = await fetchProviderJson(
     jsonRequest,
     env,
     'agent_json_fallback',
     () => fetchGeminiJson(jsonRequest, env, 'agent_json_fallback'),
-    () => fetchOpenRouterAgentTurnJson(body, env, options),
+    () => fetchGroqAgentTurnJson(body, env, options),
   );
-  return parseGemmaJsonAgentTurn(fallbackPayload);
+  return parseJsonAgentTurn(fallbackPayload);
+}
+
+function hasReplayedToolTrace(body: AgentChatRequest): boolean {
+  return (body.assistantToolCalls?.length ?? 0) > 0 || (body.toolResults?.length ?? 0) > 0;
 }
 
 function buildGeminiIntentRequest(body: AgentChatRequest): Record<string, unknown> {
@@ -184,14 +188,14 @@ export function buildGeminiAgentTurnRequest(body: AgentChatRequest): Record<stri
   return request;
 }
 
-export function buildGemmaJsonAgentTurnRequest(body: AgentChatRequest): Record<string, unknown> {
+export function buildJsonAgentTurnRequest(body: AgentChatRequest): Record<string, unknown> {
   return {
     contents: [
       {
         role: 'user',
         parts: [
           {
-            text: buildGemmaJsonAgentTurnPrompt(body),
+            text: buildJsonAgentTurnPrompt(body),
           },
         ],
       },
@@ -199,7 +203,7 @@ export function buildGemmaJsonAgentTurnRequest(body: AgentChatRequest): Record<s
   };
 }
 
-function buildGemmaJsonAgentTurnPrompt(body: AgentChatRequest): string {
+function buildJsonAgentTurnPrompt(body: AgentChatRequest): string {
   return [
     OFFPAY_AGENT_TURN_PROMPT,
     '',
@@ -369,7 +373,7 @@ function normalizeGeminiSchema(schema: Record<string, unknown>): Record<string, 
   return normalized;
 }
 
-export function parseGemmaJsonAgentTurn(payload: GeminiResponse): AgentTurn {
+export function parseJsonAgentTurn(payload: GeminiResponse): AgentTurn {
   const rawText = geminiText(payload);
   const parsed = parseJsonObjectFromModelText(rawText);
   const kind = typeof parsed.kind === 'string' ? parsed.kind : null;
@@ -377,7 +381,7 @@ export function parseGemmaJsonAgentTurn(payload: GeminiResponse): AgentTurn {
   if (kind === 'agent_text') {
     const text = sanitizeProviderText(typeof parsed.text === 'string' ? parsed.text.trim() : '');
     if (text.length === 0) {
-      throw new ProviderError('gemini', 502, 'Gemma returned an empty agent response.');
+      throw new ProviderError('gemini', 502, 'Provider returned an empty agent response.');
     }
     return { kind: 'agent_text', text };
   }
@@ -391,7 +395,7 @@ export function parseGemmaJsonAgentTurn(payload: GeminiResponse): AgentTurn {
     if (toolCalls.length > 0) return { kind: 'agent_tool_calls', toolCalls };
   }
 
-  throw new ProviderError('gemini', 502, 'Gemma returned an invalid agent turn.');
+  throw new ProviderError('gemini', 502, 'Provider returned an invalid agent turn.');
 }
 
 function normalizeJsonProtocolToolCall(value: unknown): AgentToolCall | null {
@@ -415,17 +419,17 @@ function parseJsonObjectFromModelText(text: string): Record<string, unknown> {
   const start = unfenced.indexOf('{');
   const end = unfenced.lastIndexOf('}');
   if (start < 0 || end <= start) {
-    throw new ProviderError('gemini', 502, 'Gemma returned non-JSON agent text.');
+    throw new ProviderError('gemini', 502, 'Provider returned non-JSON agent text.');
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(unfenced.slice(start, end + 1)) as unknown;
   } catch {
-    throw new ProviderError('gemini', 502, 'Gemma returned malformed agent JSON.');
+    throw new ProviderError('gemini', 502, 'Provider returned malformed agent JSON.');
   }
   if (!isPlainObject(parsed)) {
-    throw new ProviderError('gemini', 502, 'Gemma returned non-object agent JSON.');
+    throw new ProviderError('gemini', 502, 'Provider returned non-object agent JSON.');
   }
   return parsed;
 }
@@ -491,7 +495,7 @@ async function fetchGeminiJson(
       },
       body: JSON.stringify(geminiRequest),
     },
-    shouldUseOpenRouterFallback(env) ? primaryProviderTimeoutMs(env) : providerTimeoutMs(env),
+    shouldUseGroqFallback(env) ? primaryProviderTimeoutMs(env) : providerTimeoutMs(env),
   );
 
   if (!response.ok) {
@@ -501,7 +505,7 @@ async function fetchGeminiJson(
   return (await response.json()) as GeminiResponse;
 }
 
-interface OpenRouterChatCompletion {
+interface GroqChatCompletion {
   choices?: Array<{
     message?: {
       content?: string;
@@ -519,9 +523,9 @@ async function fetchProviderJson(
   try {
     return await fetchPrimary();
   } catch (error) {
-    if (!shouldFallbackToOpenRouter(error, env)) throw error;
+    if (!shouldFallbackToGroq(error, env)) throw error;
     console.warn(
-      'aiProxy.providerFallback.openRouter',
+      'aiProxy.providerFallback.groq',
       safeJson(
         {
           requestKind,
@@ -537,45 +541,41 @@ async function fetchProviderJson(
   }
 }
 
-async function fetchOpenRouterIntentJson(
+async function fetchGroqIntentJson(
   body: AgentChatRequest,
   env: AiProxyEnv,
 ): Promise<GeminiResponse> {
-  return fetchOpenRouterJson(buildOpenRouterIntentRequest(body, env), env, 'intent');
+  return fetchGroqJson(buildGroqIntentRequest(body, env), env, 'intent');
 }
 
-async function fetchOpenRouterAgentTurnJson(
+async function fetchGroqAgentTurnJson(
   body: AgentChatRequest,
   env: AiProxyEnv,
   options: GenerateAgentTurnOptions = {},
 ): Promise<GeminiResponse> {
-  return fetchOpenRouterJson(
-    buildOpenRouterAgentTurnRequest(body, env),
-    env,
-    'agent_json_fallback',
-    { stream: options.streamOpenRouterFallback === true },
-  );
+  return fetchGroqJson(buildGroqAgentTurnRequest(body, env), env, 'agent_json_fallback', {
+    stream: options.streamGroqFallback === true,
+  });
 }
 
-async function fetchOpenRouterJson(
-  openRouterRequest: Record<string, unknown>,
+async function fetchGroqJson(
+  groqRequest: Record<string, unknown>,
   env: AiProxyEnv,
   requestKind: string,
   options: { stream?: boolean } = {},
 ): Promise<GeminiResponse> {
-  if (!shouldUseOpenRouterFallback(env)) {
-    throw new ProviderError('openrouter', 503, 'OpenRouter fallback is not configured.');
+  if (!shouldUseGroqFallback(env)) {
+    throw new ProviderError('groq', 503, 'Groq fallback is not configured.');
   }
 
-  const request =
-    options.stream === true ? { ...openRouterRequest, stream: true } : openRouterRequest;
+  const request = options.stream === true ? { ...groqRequest, stream: true } : groqRequest;
   const payload =
     options.stream === true
-      ? await fetchOpenRouterStreamingText(request, env, requestKind)
-      : await fetchOpenRouterCompletionText(request, env, requestKind);
+      ? await fetchGroqStreamingText(request, env, requestKind)
+      : await fetchGroqCompletionText(request, env, requestKind);
 
   if (payload.length === 0) {
-    throw new ProviderError('openrouter', 502, 'OpenRouter returned an empty response.');
+    throw new ProviderError('groq', 502, 'Groq returned an empty response.');
   }
 
   return {
@@ -589,58 +589,58 @@ async function fetchOpenRouterJson(
   };
 }
 
-async function fetchOpenRouterCompletionText(
-  openRouterRequest: Record<string, unknown>,
+async function fetchGroqCompletionText(
+  groqRequest: Record<string, unknown>,
   env: AiProxyEnv,
   requestKind: string,
 ): Promise<string> {
   const response = await fetchWithTimeout(
-    'https://openrouter.ai/api/v1/chat/completions',
-    openRouterFetchInit(openRouterRequest, env),
-    openRouterProviderTimeoutMs(env),
+    'https://api.groq.com/openai/v1/chat/completions',
+    groqFetchInit(groqRequest, env),
+    groqProviderTimeoutMs(env),
   );
 
   if (!response.ok) {
-    throw await providerErrorFromResponse('openrouter', response, {
+    throw await providerErrorFromResponse('groq', response, {
       requestKind,
-      model: openRouterModel(env),
+      model: groqModel(env),
     });
   }
 
-  const payload = (await response.json()) as OpenRouterChatCompletion;
+  const payload = (await response.json()) as GroqChatCompletion;
   const text = payload.choices?.[0]?.message?.content?.trim() ?? '';
   return text;
 }
 
-async function fetchOpenRouterStreamingText(
-  openRouterRequest: Record<string, unknown>,
+async function fetchGroqStreamingText(
+  groqRequest: Record<string, unknown>,
   env: AiProxyEnv,
   requestKind: string,
 ): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(
-    () => controller.abort('openrouter stream timeout'),
-    openRouterProviderTimeoutMs(env),
+    () => controller.abort('groq stream timeout'),
+    groqProviderTimeoutMs(env),
   );
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      ...openRouterFetchInit(openRouterRequest, env),
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      ...groqFetchInit(groqRequest, env),
       signal: controller.signal,
     });
 
     if (!response.ok) {
-      throw await providerErrorFromResponse('openrouter', response, {
+      throw await providerErrorFromResponse('groq', response, {
         requestKind,
-        model: openRouterModel(env),
+        model: groqModel(env),
         stream: true,
       });
     }
 
-    return (await readOpenRouterSseText(response)).trim();
+    return (await readGroqSseText(response)).trim();
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new ProviderError('openrouter', 504, 'OpenRouter stream timed out.');
+      throw new ProviderError('groq', 504, 'Groq stream timed out.');
     }
     throw error;
   } finally {
@@ -648,26 +648,21 @@ async function fetchOpenRouterStreamingText(
   }
 }
 
-function openRouterFetchInit(
-  openRouterRequest: Record<string, unknown>,
-  env: AiProxyEnv,
-): RequestInit {
+function groqFetchInit(groqRequest: Record<string, unknown>, env: AiProxyEnv): RequestInit {
   return {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${env.OPENROUTER_API_KEY?.trim() ?? ''}`,
+      authorization: `Bearer ${env.GROQ_API_KEY?.trim() ?? ''}`,
       'content-type': 'application/json',
-      'http-referer': env.OPENROUTER_HTTP_REFERER?.trim() || 'https://offpay.app',
-      'x-openrouter-title': env.OPENROUTER_APP_TITLE?.trim() || 'OffPay',
     },
-    body: JSON.stringify(openRouterRequest),
+    body: JSON.stringify(groqRequest),
   };
 }
 
-async function readOpenRouterSseText(response: Response): Promise<string> {
+async function readGroqSseText(response: Response): Promise<string> {
   const reader = response.body?.getReader();
   if (reader == null) {
-    throw new ProviderError('openrouter', 502, 'OpenRouter stream body is not readable.');
+    throw new ProviderError('groq', 502, 'Groq stream body is not readable.');
   }
 
   const decoder = new TextDecoder();
@@ -680,7 +675,7 @@ async function readOpenRouterSseText(response: Response): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const parsed = parseOpenRouterSseBuffer(buffer);
+      const parsed = parseGroqSseBuffer(buffer);
       buffer = parsed.buffer;
       text += parsed.text;
       finished = parsed.finished;
@@ -688,7 +683,7 @@ async function readOpenRouterSseText(response: Response): Promise<string> {
 
     buffer += decoder.decode();
     if (!finished && buffer.trim().length > 0) {
-      const parsed = parseOpenRouterSseBuffer(`${buffer}\n`);
+      const parsed = parseGroqSseBuffer(`${buffer}\n`);
       text += parsed.text;
       finished = parsed.finished;
     }
@@ -699,7 +694,7 @@ async function readOpenRouterSseText(response: Response): Promise<string> {
   return text;
 }
 
-function parseOpenRouterSseBuffer(buffer: string): {
+function parseGroqSseBuffer(buffer: string): {
   buffer: string;
   text: string;
   finished: boolean;
@@ -723,9 +718,9 @@ function parseOpenRouterSseBuffer(buffer: string): {
       break;
     }
 
-    const chunk = parseOpenRouterStreamChunk(data);
+    const chunk = parseGroqStreamChunk(data);
     if (chunk.errorMessage != null) {
-      throw new ProviderError('openrouter', chunk.errorStatus, chunk.errorMessage);
+      throw new ProviderError('groq', chunk.errorStatus, chunk.errorMessage);
     }
     text += chunk.content;
   }
@@ -733,7 +728,7 @@ function parseOpenRouterSseBuffer(buffer: string): {
   return { buffer: remaining, text, finished };
 }
 
-function parseOpenRouterStreamChunk(data: string): {
+function parseGroqStreamChunk(data: string): {
   content: string;
   errorMessage?: string;
   errorStatus: number;
@@ -751,7 +746,7 @@ function parseOpenRouterStreamChunk(data: string): {
     const message =
       typeof error.message === 'string' && error.message.trim().length > 0
         ? error.message.trim()
-        : 'OpenRouter stream failed.';
+        : 'Groq stream failed.';
     const status = typeof error.code === 'number' && Number.isFinite(error.code) ? error.code : 502;
     return { content: '', errorMessage: message, errorStatus: status };
   }
@@ -768,88 +763,67 @@ function parseOpenRouterStreamChunk(data: string): {
   };
 }
 
-function buildOpenRouterIntentRequest(
+function buildGroqIntentRequest(body: AgentChatRequest, env: AiProxyEnv): Record<string, unknown> {
+  return {
+    messages: [
+      {
+        role: 'system',
+        content: `${OFFPAY_CHAT_INTENT_PROMPT}\n\nSafe intent context:\n${safeJson(
+          body.context ?? {},
+          4000,
+        )}`,
+      },
+      ...body.messages.slice(-12).map((message) => ({
+        role: message.role === 'assistant' ? 'assistant' : 'user',
+        content: message.content.slice(0, 4000),
+      })),
+    ],
+    model: groqModel(env),
+    temperature: 0.1,
+    max_completion_tokens: groqMaxCompletionTokens(env),
+    top_p: 0.95,
+    response_format: { type: 'json_object' },
+    reasoning_effort: env.GROQ_REASONING_EFFORT?.trim() || 'default',
+    stop: null,
+  };
+}
+
+function buildGroqAgentTurnRequest(
   body: AgentChatRequest,
   env: AiProxyEnv,
 ): Record<string, unknown> {
-  return withOpenRouterModelRouting(
-    {
-      messages: [
-        {
-          role: 'system',
-          content: `${OFFPAY_CHAT_INTENT_PROMPT}\n\nSafe intent context:\n${safeJson(
-            body.context ?? {},
-            4000,
-          )}`,
-        },
-        ...body.messages.slice(-12).map((message) => ({
-          role: message.role === 'assistant' ? 'assistant' : 'user',
-          content: message.content.slice(0, 4000),
-        })),
-      ],
-      temperature: 0.1,
-      max_tokens: 512,
-      response_format: { type: 'json_object' },
-      provider: {
-        sort: 'latency',
-        allow_fallbacks: true,
+  return {
+    messages: [
+      {
+        role: 'user',
+        content: buildJsonAgentTurnPrompt(body),
       },
-    },
-    env,
-  );
+    ],
+    model: groqModel(env),
+    temperature: 0.6,
+    max_completion_tokens: groqMaxCompletionTokens(env),
+    top_p: 0.95,
+    response_format: { type: 'json_object' },
+    reasoning_effort: env.GROQ_REASONING_EFFORT?.trim() || 'default',
+    stop: null,
+  };
 }
 
-function buildOpenRouterAgentTurnRequest(
-  body: AgentChatRequest,
-  env: AiProxyEnv,
-): Record<string, unknown> {
-  return withOpenRouterModelRouting(
-    {
-      messages: [
-        {
-          role: 'user',
-          content: buildGemmaJsonAgentTurnPrompt(body),
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 512,
-      response_format: { type: 'json_object' },
-      provider: {
-        sort: 'latency',
-        allow_fallbacks: true,
-      },
-    },
-    env,
-  );
+function groqModel(env: AiProxyEnv): string {
+  return env.GROQ_CHAT_MODEL?.trim() || DEFAULT_GROQ_MODEL;
 }
 
-function withOpenRouterModelRouting(
-  request: Record<string, unknown>,
-  env: AiProxyEnv,
-): Record<string, unknown> {
-  const models = openRouterModels(env);
-  return models.length > 1 ? { ...request, models } : { ...request, model: models[0] };
+function groqMaxCompletionTokens(env: AiProxyEnv): number {
+  const parsed = Number(env.GROQ_MAX_COMPLETION_TOKENS);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(4096, Math.floor(parsed)) : 4096;
 }
 
-function openRouterModels(env: AiProxyEnv): string[] {
-  const configured = env.OPENROUTER_CHAT_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
-  const extra = (env.OPENROUTER_FALLBACK_MODELS ?? '')
-    .split(',')
-    .map((model) => model.trim())
-    .filter(Boolean);
-  return Array.from(new Set([configured, ...extra]));
+function shouldUseGroqFallback(env: AiProxyEnv): boolean {
+  return (env.GROQ_API_KEY?.trim() ?? '').length > 0;
 }
 
-function openRouterModel(env: AiProxyEnv): string {
-  return openRouterModels(env)[0] ?? DEFAULT_OPENROUTER_MODEL;
-}
-
-function shouldUseOpenRouterFallback(env: AiProxyEnv): boolean {
-  return (env.OPENROUTER_API_KEY?.trim() ?? '').length > 0;
-}
-
-function shouldFallbackToOpenRouter(error: unknown, env: AiProxyEnv): boolean {
-  if (!shouldUseOpenRouterFallback(env)) return false;
+function shouldFallbackToGroq(error: unknown, env: AiProxyEnv): boolean {
+  if (!shouldUseGroqFallback(env)) return false;
   if (!(error instanceof ProviderError)) return false;
   if (error.provider !== 'gemini' && error.provider !== 'provider') return false;
   return (

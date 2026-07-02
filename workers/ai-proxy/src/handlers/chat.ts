@@ -99,7 +99,7 @@ async function chatResponseCacheKey(
     turnId,
     sessionHash: await sha256Hex(sessionToken),
     model: env.GEMINI_CHAT_MODEL?.trim() ?? null,
-    openRouterModel: env.OPENROUTER_CHAT_MODEL?.trim() ?? null,
+    groqModel: env.GROQ_CHAT_MODEL?.trim() ?? null,
     body,
   });
   return `ai-proxy:chat-response:v1:${await sha256Hex(cacheInput)}`;
@@ -169,7 +169,7 @@ function streamAgentTurnResponse(
   void (async () => {
     try {
       await write(': offpay-ai-stream\n\n');
-      const turn = await generateAgentTurn(body, env, { streamOpenRouterFallback: true });
+      const turn = await generateAgentTurn(body, env, { streamGroqFallback: true });
       if (turn.kind === 'agent_text') {
         await writeEvent({ kind: 'chat_delta', text: turn.text });
       } else {
@@ -262,7 +262,7 @@ async function generateIntent(body: AgentChatRequest, env: AiProxyEnv): Promise<
 async function generateAgentTurn(
   body: AgentChatRequest,
   env: AiProxyEnv,
-  options: { streamOpenRouterFallback?: boolean } = {},
+  options: { streamGroqFallback?: boolean } = {},
 ): Promise<AgentTurn> {
   assertGeminiAllowed(env);
   return generateGeminiAgentTurn(body, env, options);

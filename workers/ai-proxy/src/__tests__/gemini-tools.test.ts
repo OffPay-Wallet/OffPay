@@ -1,9 +1,9 @@
 import {
   buildGeminiAgentTurnRequest,
-  buildGemmaJsonAgentTurnRequest,
+  buildJsonAgentTurnRequest,
   generateGeminiAgentTurn,
   normalizeGeminiToolParameters,
-  parseGemmaJsonAgentTurn,
+  parseJsonAgentTurn,
   resetGeminiProviderCachesForTests,
 } from '../providers/gemini';
 
@@ -13,7 +13,7 @@ describe('Gemini tool declaration normalization', () => {
     resetGeminiProviderCachesForTests();
   });
 
-  it('normalizes app JSON Schema tool parameters for Gemma REST declarations', () => {
+  it('normalizes app JSON Schema tool parameters for Gemini REST declarations', () => {
     expect(
       normalizeGeminiToolParameters({
         type: 'object',
@@ -52,7 +52,7 @@ describe('Gemini tool declaration normalization', () => {
     ).toBeNull();
   });
 
-  it('does not attach extra tool config to Gemma native declarations', () => {
+  it('does not attach extra tool config to Gemini native declarations', () => {
     const request = buildGeminiAgentTurnRequest({
       responseMode: 'agent_turn',
       messages: [{ role: 'user', content: 'Show my wallet balance' }],
@@ -84,8 +84,8 @@ describe('Gemini tool declaration normalization', () => {
     expect(request).not.toHaveProperty('toolConfig');
   });
 
-  it('builds a JSON protocol fallback prompt when Gemma rejects native tools', () => {
-    const request = buildGemmaJsonAgentTurnRequest({
+  it('builds a JSON protocol fallback prompt when Gemini rejects native tools', () => {
+    const request = buildJsonAgentTurnRequest({
       responseMode: 'agent_turn',
       messages: [{ role: 'user', content: 'Show my wallet balance' }],
       toolSchemas: [
@@ -113,8 +113,8 @@ describe('Gemini tool declaration normalization', () => {
     expect(request).not.toHaveProperty('systemInstruction');
   });
 
-  it('parses JSON protocol tool calls from Gemma text', () => {
-    const turn = parseGemmaJsonAgentTurn({
+  it('parses JSON protocol tool calls from provider text', () => {
+    const turn = parseJsonAgentTurn({
       candidates: [
         {
           content: {
@@ -138,7 +138,7 @@ describe('Gemini tool declaration normalization', () => {
     }
   });
 
-  it('falls back to JSON protocol when Gemma rejects the native agent-turn request', async () => {
+  it('falls back to JSON protocol when Gemini rejects the native agent-turn request', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
@@ -177,7 +177,7 @@ describe('Gemini tool declaration normalization', () => {
       },
       {
         GEMINI_API_KEY: 'test-key',
-        GEMINI_CHAT_MODEL: 'gemma-4-26b-a4b-it',
+        GEMINI_CHAT_MODEL: 'gemini-3.1-flash-lite',
       },
     );
 
@@ -191,7 +191,7 @@ describe('Gemini tool declaration normalization', () => {
     }
   });
 
-  it('uses OpenRouter when Gemini is rate-limited', async () => {
+  it('uses Groq when Gemini is rate-limited', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
@@ -219,16 +219,18 @@ describe('Gemini tool declaration normalization', () => {
       },
       {
         GEMINI_API_KEY: 'test-key',
-        OPENROUTER_API_KEY: 'openrouter-key',
+        GROQ_API_KEY: 'groq-key',
       },
     );
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(String(fetchSpy.mock.calls[1][0])).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(String(fetchSpy.mock.calls[1][0])).toBe(
+      'https://api.groq.com/openai/v1/chat/completions',
+    );
     expect(turn).toEqual({ kind: 'agent_text', text: 'Fallback is ready.' });
   });
 
-  it('uses OpenRouter streaming for streamed fallback agent turns', async () => {
+  it('uses Groq streaming for streamed fallback agent turns', async () => {
     const sseChunk = (content: string): string =>
       `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
     const fetchSpy = jest
@@ -239,7 +241,7 @@ describe('Gemini tool declaration normalization', () => {
       .mockResolvedValueOnce(
         new Response(
           [
-            ': OPENROUTER PROCESSING\n\n',
+            ': GROQ PROCESSING\n\n',
             sseChunk('{"kind":"agent_text",'),
             sseChunk('"text":"Streamed fallback."}'),
             'data: [DONE]\n\n',
@@ -258,19 +260,88 @@ describe('Gemini tool declaration normalization', () => {
       },
       {
         GEMINI_API_KEY: 'test-key',
-        OPENROUTER_API_KEY: 'openrouter-key',
-        OPENROUTER_CHAT_MODEL: 'google/gemma-4-31b-it:free',
+        GROQ_API_KEY: 'groq-key',
+        GROQ_CHAT_MODEL: 'llama-3.1-8b-instant',
       },
-      { streamOpenRouterFallback: true },
+      { streamGroqFallback: true },
     );
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(String(fetchSpy.mock.calls[1][0])).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(String(fetchSpy.mock.calls[1][0])).toBe(
+      'https://api.groq.com/openai/v1/chat/completions',
+    );
     expect(JSON.parse(String((fetchSpy.mock.calls[1][1] as RequestInit).body))).toMatchObject({
-      model: 'google/gemma-4-31b-it:free',
+      model: 'llama-3.1-8b-instant',
       stream: true,
+      reasoning_effort: 'default',
     });
     expect(turn).toEqual({ kind: 'agent_text', text: 'Streamed fallback.' });
+  });
+
+  it('uses JSON protocol for replayed tool traces to avoid Gemini thought signature errors', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: '{"kind":"agent_text","text":"Tool result handled."}',
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const turn = await generateGeminiAgentTurn(
+      {
+        responseMode: 'agent_turn',
+        messages: [
+          { role: 'user', content: 'Shield 5 usdc into Umbra' },
+          { role: 'assistant', content: '' },
+        ],
+        assistantToolCalls: [
+          {
+            id: 'tool-1',
+            name: 'draft_umbra_vault_action',
+            args: { action: 'shield', amount: '5', token: 'USDC' },
+          },
+        ],
+        toolResults: [
+          {
+            toolCallId: 'tool-1',
+            name: 'draft_umbra_vault_action',
+            result: { status: 'draft_ready' },
+          },
+        ],
+        toolSchemas: [
+          {
+            name: 'draft_umbra_vault_action',
+            description: 'Drafts an Umbra vault action.',
+            parameters: { type: 'object', properties: {} },
+          },
+        ],
+      },
+      {
+        GEMINI_API_KEY: 'test-key',
+        GEMINI_CHAT_MODEL: 'gemini-3.1-flash-lite',
+      },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const providerBody = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));
+    const serialized = JSON.stringify(providerBody);
+    expect(providerBody).not.toHaveProperty('tools');
+    expect(serialized).not.toContain('functionCall');
+    expect(serialized).not.toContain('functionResponse');
+    expect(serialized).toContain('assistant_tool_calls');
+    expect(serialized).toContain('tool_results');
+    expect(turn).toEqual({ kind: 'agent_text', text: 'Tool result handled.' });
   });
 
   it('caches native tool rejection and skips the failed native attempt on the next turn', async () => {
@@ -329,7 +400,7 @@ describe('Gemini tool declaration normalization', () => {
     };
     const env = {
       GEMINI_API_KEY: 'test-key',
-      GEMINI_CHAT_MODEL: 'gemma-4-26b-a4b-it',
+      GEMINI_CHAT_MODEL: 'gemini-3.1-flash-lite',
     };
 
     await expect(generateGeminiAgentTurn(request, env)).resolves.toEqual({

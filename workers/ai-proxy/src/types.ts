@@ -165,12 +165,11 @@ export type AiProxyEnv = {
   KV_REST_API_URL?: string;
   /** Deprecated alias. Prefer UPSTASH_REDIS_REST_TOKEN. */
   KV_REST_API_TOKEN?: string;
-  OPENROUTER_API_KEY?: string;
-  OPENROUTER_CHAT_MODEL?: string;
-  OPENROUTER_FALLBACK_MODELS?: string;
-  OPENROUTER_PROVIDER_TIMEOUT_MS?: string;
-  OPENROUTER_HTTP_REFERER?: string;
-  OPENROUTER_APP_TITLE?: string;
+  GROQ_API_KEY?: string;
+  GROQ_CHAT_MODEL?: string;
+  GROQ_PROVIDER_TIMEOUT_MS?: string;
+  GROQ_MAX_COMPLETION_TOKENS?: string;
+  GROQ_REASONING_EFFORT?: string;
   OFFPAY_API_AI_CREDITS?: {
     getStatus(payload: unknown): Promise<unknown>;
     consume(payload: unknown): Promise<unknown>;

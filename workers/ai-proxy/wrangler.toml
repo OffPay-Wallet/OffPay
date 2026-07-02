@@ -24,12 +24,12 @@ AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION = "false"
 # preferredProvider=elevenlabs is rejected, even if ELEVENLABS_API_KEY is
 # set as a secret. Remove this var to restore Sarvam-first-with-ElevenLabs.
 AI_PROXY_VOICE_PROVIDER_LOCK = "sarvam"
-GEMINI_CHAT_MODEL = "gemma-4-26b-a4b-it"
+GEMINI_CHAT_MODEL = "gemini-3.1-flash-lite"
 AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS = "8000"
-OPENROUTER_CHAT_MODEL = "google/gemma-4-31b-it:free"
-OPENROUTER_PROVIDER_TIMEOUT_MS = "16000"
-OPENROUTER_HTTP_REFERER = "https://offpay.app"
-OPENROUTER_APP_TITLE = "OffPay"
+GROQ_CHAT_MODEL = "llama-3.1-8b-instant"
+GROQ_PROVIDER_TIMEOUT_MS = "16000"
+GROQ_MAX_COMPLETION_TOKENS = "4096"
+GROQ_REASONING_EFFORT = "default"
 SARVAM_STT_MODEL = "saaras:v3"
 SARVAM_STT_MODE = "transcribe"
 SARVAM_TTS_MODEL = "bulbul:v3"
@@ -58,7 +58,7 @@ AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
 # npx wrangler secret put ELEVENLABS_API_KEY --config workers/ai-proxy/wrangler.toml
 # npx wrangler secret put ELEVENLABS_VOICE_ID --config workers/ai-proxy/wrangler.toml
 # npx wrangler secret put AI_PROXY_SESSION_SECRET --config workers/ai-proxy/wrangler.toml
-# npx wrangler secret put OPENROUTER_API_KEY --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put GROQ_API_KEY --config workers/ai-proxy/wrangler.toml
 # npx wrangler secret put UPSTASH_REDIS_REST_URL --config workers/ai-proxy/wrangler.toml
 # npx wrangler secret put UPSTASH_REDIS_REST_TOKEN --config workers/ai-proxy/wrangler.toml
 #
@@ -70,7 +70,7 @@ AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
 # Until then the Worker logs the failure but allows the request, so a
 # staged rollout doesn't break older app builds.
 #
-# Chat provider is Google Gemma 4 26B via the Gemini API. Voice is locked
+# Chat provider is Gemini API primary with Groq fallback. Voice is locked
 # to Sarvam for STT and TTS via AI_PROXY_VOICE_PROVIDER_LOCK="sarvam" in
 # [vars] above; ElevenLabs secrets remain supported but dormant until that
 # lock is removed.
