@@ -6,13 +6,6 @@ workers_dev = true
 # and point ai.offpay.app to this Worker from the DNS/frontend host.
 # routes = [{ pattern = "ai.offpay.app", custom_domain = true }]
 
-[placement]
-# Gemini Developer API rejects some Cloudflare edge locations with
-# FAILED_PRECONDITION "User location is not supported for the API use".
-# Keep chat provider egress near India instead of letting Smart Placement
-# route this Worker through unsupported colos such as HKG.
-region = "gcp:asia-south1"
-
 [observability]
 enabled = true
 
@@ -32,6 +25,11 @@ AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION = "false"
 # set as a secret. Remove this var to restore Sarvam-first-with-ElevenLabs.
 AI_PROXY_VOICE_PROVIDER_LOCK = "sarvam"
 GEMINI_CHAT_MODEL = "gemma-4-26b-a4b-it"
+AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS = "8000"
+OPENROUTER_CHAT_MODEL = "google/gemma-4-31b-it:free"
+OPENROUTER_PROVIDER_TIMEOUT_MS = "16000"
+OPENROUTER_HTTP_REFERER = "https://offpay.app"
+OPENROUTER_APP_TITLE = "OffPay"
 SARVAM_STT_MODEL = "saaras:v3"
 SARVAM_STT_MODE = "transcribe"
 SARVAM_TTS_MODEL = "bulbul:v3"
@@ -45,7 +43,7 @@ ELEVENLABS_ENABLE_LOGGING = "false"
 AI_PROXY_MAX_CHAT_BYTES = "65536"
 AI_PROXY_MAX_AUDIO_BYTES = "8388608"
 AI_PROXY_MAX_TTS_CHARS = "900"
-AI_PROXY_PROVIDER_TIMEOUT_MS = "20000"
+AI_PROXY_PROVIDER_TIMEOUT_MS = "24000"
 AI_PROXY_TTS_ENABLED = "true"
 AI_PROXY_ALLOWED_ORIGINS = "https://offpay.app"
 AI_PROXY_RATE_LIMIT_WINDOW_MS = "60000"
@@ -60,6 +58,9 @@ AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
 # npx wrangler secret put ELEVENLABS_API_KEY --config workers/ai-proxy/wrangler.toml
 # npx wrangler secret put ELEVENLABS_VOICE_ID --config workers/ai-proxy/wrangler.toml
 # npx wrangler secret put AI_PROXY_SESSION_SECRET --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put OPENROUTER_API_KEY --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put UPSTASH_REDIS_REST_URL --config workers/ai-proxy/wrangler.toml
+# npx wrangler secret put UPSTASH_REDIS_REST_TOKEN --config workers/ai-proxy/wrangler.toml
 #
 # AI_PROXY_SESSION_SECRET is the HMAC secret the Worker uses to verify
 # the `x-offpay-ai-session` header. Distribute the same value to clients

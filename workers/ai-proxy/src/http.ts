@@ -218,6 +218,17 @@ export function providerTimeoutMs(env: AiProxyEnv): number {
   return positiveInt(env.AI_PROXY_PROVIDER_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
 }
 
+export function primaryProviderTimeoutMs(env: AiProxyEnv): number {
+  return positiveInt(
+    env.AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS,
+    Math.min(8_000, providerTimeoutMs(env)),
+  );
+}
+
+export function openRouterProviderTimeoutMs(env: AiProxyEnv): number {
+  return positiveInt(env.OPENROUTER_PROVIDER_TIMEOUT_MS, Math.min(16_000, providerTimeoutMs(env)));
+}
+
 export function isTtsEnabled(env: AiProxyEnv): boolean {
   return env.AI_PROXY_TTS_ENABLED !== 'false';
 }

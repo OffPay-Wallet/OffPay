@@ -38,10 +38,6 @@ export function validateIntentChatRequest(body: AgentChatRequest): void {
 export function validateAgentTurnRequest(body: AgentChatRequest): void {
   validateChatRequest(body);
 
-  if (body.stream === true) {
-    throw new ProviderError('proxy', 400, 'Agent turn requests do not support streaming yet.');
-  }
-
   if ((body.toolResults?.length ?? 0) > 8) {
     throw new ProviderError('proxy', 400, 'Too many tool results in a single turn.');
   }

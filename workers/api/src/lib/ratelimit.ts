@@ -1,3 +1,4 @@
+import { getRequiredUpstashBinding } from './provider-utils.js';
 import type { Bindings } from './types.js';
 
 type RateLimitScope = 'ip' | 'wallet' | 'device';
@@ -157,8 +158,8 @@ function getRateLimitPolicy(method: string, path: string): RateLimitPolicy {
 }
 
 function createUpstashKvClient(bindings: Bindings): KvClient {
-  const endpoint = bindings.KV_REST_API_URL.replace(/\/$/, '');
-  const token = bindings.KV_REST_API_TOKEN;
+  const endpoint = getRequiredUpstashBinding(bindings, 'url').replace(/\/$/, '');
+  const token = getRequiredUpstashBinding(bindings, 'token');
 
   async function runPipeline(
     commands: ReadonlyArray<ReadonlyArray<string | number>>,

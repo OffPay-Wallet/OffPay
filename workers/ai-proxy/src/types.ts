@@ -125,6 +125,7 @@ export type VoiceSpeechRequest = {
 export type AiProxyEnv = {
   GEMINI_API_KEY?: string;
   GEMINI_CHAT_MODEL?: string;
+  AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS?: string;
   AI_PROXY_PRIVACY_MODE?: string;
   AI_PROXY_GEMINI_PRIVACY_CONFIRMED?: string;
   AI_PROXY_ALLOW_GEMINI_UNPAID?: string;
@@ -158,6 +159,18 @@ export type AiProxyEnv = {
   AI_PROXY_TTS_ENABLED?: string;
   AI_PROXY_RATE_LIMIT_WINDOW_MS?: string;
   AI_PROXY_RATE_LIMIT_MAX?: string;
+  UPSTASH_REDIS_REST_URL?: string;
+  UPSTASH_REDIS_REST_TOKEN?: string;
+  /** Deprecated alias. Prefer UPSTASH_REDIS_REST_URL. */
+  KV_REST_API_URL?: string;
+  /** Deprecated alias. Prefer UPSTASH_REDIS_REST_TOKEN. */
+  KV_REST_API_TOKEN?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_CHAT_MODEL?: string;
+  OPENROUTER_FALLBACK_MODELS?: string;
+  OPENROUTER_PROVIDER_TIMEOUT_MS?: string;
+  OPENROUTER_HTTP_REFERER?: string;
+  OPENROUTER_APP_TITLE?: string;
   OFFPAY_API_AI_CREDITS?: {
     getStatus(payload: unknown): Promise<unknown>;
     consume(payload: unknown): Promise<unknown>;

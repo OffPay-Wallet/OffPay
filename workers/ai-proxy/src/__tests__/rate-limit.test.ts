@@ -1,7 +1,4 @@
-import {
-  assertAiProxyRateLimit,
-  resetAiProxyRateLimitForTests,
-} from '../rate-limit';
+import { assertAiProxyRateLimit, resetAiProxyRateLimitForTests } from '../rate-limit';
 
 import type { AiProxyEnv } from '../types';
 
@@ -10,7 +7,7 @@ describe('AI Worker rate limit', () => {
     resetAiProxyRateLimitForTests();
   });
 
-  it('rejects repeated requests from the same Cloudflare client IP', () => {
+  it('rejects repeated requests from the same Cloudflare client IP', async () => {
     const env: AiProxyEnv = {
       AI_PROXY_RATE_LIMIT_WINDOW_MS: '60000',
       AI_PROXY_RATE_LIMIT_MAX: '2',
@@ -22,18 +19,20 @@ describe('AI Worker rate limit', () => {
       },
     });
 
-    expect(() => assertAiProxyRateLimit(request, env)).not.toThrow();
-    expect(() => assertAiProxyRateLimit(request, env)).not.toThrow();
-    expect(() => assertAiProxyRateLimit(request, env)).toThrow('AI proxy rate limit exceeded.');
+    await expect(assertAiProxyRateLimit(request, env)).resolves.toBeUndefined();
+    await expect(assertAiProxyRateLimit(request, env)).resolves.toBeUndefined();
+    await expect(assertAiProxyRateLimit(request, env)).rejects.toThrow(
+      'AI proxy rate limit exceeded.',
+    );
   });
 
-  it('keeps separate client IPs in separate buckets', () => {
+  it('keeps separate client IPs in separate buckets', async () => {
     const env: AiProxyEnv = {
       AI_PROXY_RATE_LIMIT_WINDOW_MS: '60000',
       AI_PROXY_RATE_LIMIT_MAX: '1',
     };
 
-    expect(() =>
+    await expect(
       assertAiProxyRateLimit(
         new Request('https://ai.offpay.test/api/ai/chat', {
           method: 'POST',
@@ -41,9 +40,9 @@ describe('AI Worker rate limit', () => {
         }),
         env,
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
 
-    expect(() =>
+    await expect(
       assertAiProxyRateLimit(
         new Request('https://ai.offpay.test/api/ai/chat', {
           method: 'POST',
@@ -51,16 +50,16 @@ describe('AI Worker rate limit', () => {
         }),
         env,
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it('keys authenticated callers by wallet subject so IP rotation does not bypass the limit', () => {
+  it('keys authenticated callers by wallet subject so IP rotation does not bypass the limit', async () => {
     const env: AiProxyEnv = {
       AI_PROXY_RATE_LIMIT_WINDOW_MS: '60000',
       AI_PROXY_RATE_LIMIT_MAX: '2',
     };
 
-    expect(() =>
+    await expect(
       assertAiProxyRateLimit(
         new Request('https://ai.offpay.test/api/ai/chat', {
           method: 'POST',
@@ -69,8 +68,8 @@ describe('AI Worker rate limit', () => {
         env,
         { walletSubject: 'Wallet1234' },
       ),
-    ).not.toThrow();
-    expect(() =>
+    ).resolves.toBeUndefined();
+    await expect(
       assertAiProxyRateLimit(
         new Request('https://ai.offpay.test/api/ai/chat', {
           method: 'POST',
@@ -79,8 +78,8 @@ describe('AI Worker rate limit', () => {
         env,
         { walletSubject: 'Wallet1234' },
       ),
-    ).not.toThrow();
-    expect(() =>
+    ).resolves.toBeUndefined();
+    await expect(
       assertAiProxyRateLimit(
         new Request('https://ai.offpay.test/api/ai/chat', {
           method: 'POST',
@@ -89,10 +88,10 @@ describe('AI Worker rate limit', () => {
         env,
         { walletSubject: 'Wallet1234' },
       ),
-    ).toThrow('AI proxy rate limit exceeded.');
+    ).rejects.toThrow('AI proxy rate limit exceeded.');
   });
 
-  it('uses a tighter anonymous bucket when no wallet subject is bound', () => {
+  it('uses a tighter anonymous bucket when no wallet subject is bound', async () => {
     const env: AiProxyEnv = {
       AI_PROXY_RATE_LIMIT_WINDOW_MS: '60000',
       AI_PROXY_RATE_LIMIT_MAX: '40',
@@ -102,7 +101,7 @@ describe('AI Worker rate limit', () => {
     // Anonymous cap is min(8, configured) — so the 9th anonymous request
     // from the same IP must fail even though the authenticated max is 40.
     for (let index = 0; index < 8; index += 1) {
-      expect(() =>
+      await expect(
         assertAiProxyRateLimit(
           new Request('https://ai.offpay.test/api/ai/chat', {
             method: 'POST',
@@ -110,10 +109,10 @@ describe('AI Worker rate limit', () => {
           }),
           env,
         ),
-      ).not.toThrow();
+      ).resolves.toBeUndefined();
     }
 
-    expect(() =>
+    await expect(
       assertAiProxyRateLimit(
         new Request('https://ai.offpay.test/api/ai/chat', {
           method: 'POST',
@@ -121,6 +120,6 @@ describe('AI Worker rate limit', () => {
         }),
         env,
       ),
-    ).toThrow('AI proxy rate limit exceeded.');
+    ).rejects.toThrow('AI proxy rate limit exceeded.');
   });
 });

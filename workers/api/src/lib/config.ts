@@ -38,8 +38,6 @@ const NETWORKS = ['devnet', 'mainnet'] as const;
 
 const PROTECTED_AUTH_BINDINGS: BindingKey[] = [
   'BOOTSTRAP_SECRET_VERSION',
-  'KV_REST_API_TOKEN',
-  'KV_REST_API_URL',
   'MIN_APP_VERSION',
   'OFFPAY_BOOTSTRAP_SECRET',
 ];
@@ -75,6 +73,23 @@ function hasTruthyStringBinding(value: string | undefined): boolean {
 
 function missingStringBindings(bindings: Bindings, keys: readonly BindingKey[]): string[] {
   return keys.flatMap((key) => (hasStringBinding(bindings, key) ? [] : [key]));
+}
+
+function missingUpstashBindings(bindings: Bindings): string[] {
+  const missing: string[] = [];
+  if (
+    !hasStringBinding(bindings, 'UPSTASH_REDIS_REST_URL') &&
+    !hasStringBinding(bindings, 'KV_REST_API_URL')
+  ) {
+    missing.push('UPSTASH_REDIS_REST_URL');
+  }
+  if (
+    !hasStringBinding(bindings, 'UPSTASH_REDIS_REST_TOKEN') &&
+    !hasStringBinding(bindings, 'KV_REST_API_TOKEN')
+  ) {
+    missing.push('UPSTASH_REDIS_REST_TOKEN');
+  }
+  return missing;
 }
 
 function withConfiguredState(missing: string[]): FeatureConfigStatus {
@@ -208,7 +223,10 @@ function getAndroidAttestationStatus(bindings: Bindings): FeatureConfigStatus {
 
 function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
   const protectedAuth = withConfiguredState(
-    missingStringBindings(bindings, PROTECTED_AUTH_BINDINGS),
+    mergeMissing(
+      missingStringBindings(bindings, PROTECTED_AUTH_BINDINGS),
+      missingUpstashBindings(bindings),
+    ),
   );
   const inviteGate = withConfiguredState(missingInviteGateBindings(bindings));
   const androidAttestation = getAndroidAttestationStatus(bindings);

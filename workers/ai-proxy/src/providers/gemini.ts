@@ -3,11 +3,14 @@ import {
   DEFAULT_GEMINI_MODEL,
   ProviderError,
   fetchWithTimeout,
+  openRouterProviderTimeoutMs,
   providerErrorFromResponse,
   providerTimeoutMs,
+  primaryProviderTimeoutMs,
   safeJson,
 } from '../http';
 import { parseIntentResult, sanitizeProviderText } from '../privacy/response';
+import { runAiProxyUpstashPipeline, sha256Hex } from '../upstash';
 import type {
   AgentChatRequest,
   AgentIntentResult,
@@ -34,16 +37,39 @@ type GeminiPartInput =
     };
 
 const MAX_FUNCTION_DECLARATIONS = 40;
+const DEFAULT_OPENROUTER_MODEL = 'google/gemma-4-31b-it:free';
+const GEMINI_NATIVE_TOOLS_REJECTION_TTL_MS = 30 * 60 * 1000;
+
+const geminiNativeToolRejectionCache = new Map<string, number>();
+
+interface GenerateAgentTurnOptions {
+  streamOpenRouterFallback?: boolean;
+}
+
+export function resetGeminiProviderCachesForTests(): void {
+  geminiNativeToolRejectionCache.clear();
+}
 
 export async function generateGeminiIntent(
   body: AgentChatRequest,
   env: AiProxyEnv,
 ): Promise<AgentIntentResult> {
   if (!env.GEMINI_API_KEY) {
-    throw new ProviderError('gemini', 503, 'Gemini API key is not configured.');
+    if (!shouldUseOpenRouterFallback(env)) {
+      throw new ProviderError('gemini', 503, 'Gemini API key is not configured.');
+    }
+    const payload = await fetchOpenRouterIntentJson(body, env);
+    return parseIntentResult(geminiText(payload));
   }
 
-  const payload = await fetchGeminiJson(buildGeminiIntentRequest(body), env, 'intent');
+  const geminiRequest = buildGeminiIntentRequest(body);
+  const payload = await fetchProviderJson(
+    geminiRequest,
+    env,
+    'intent',
+    () => fetchGeminiJson(geminiRequest, env, 'intent'),
+    () => fetchOpenRouterIntentJson(body, env),
+  );
   const text = geminiText(payload);
   return parseIntentResult(text);
 }
@@ -57,23 +83,51 @@ export async function generateGeminiIntent(
 export async function generateGeminiAgentTurn(
   body: AgentChatRequest,
   env: AiProxyEnv,
+  options: GenerateAgentTurnOptions = {},
 ): Promise<AgentTurn> {
   if (!env.GEMINI_API_KEY) {
-    throw new ProviderError('gemini', 503, 'Gemini API key is not configured.');
+    if (!shouldUseOpenRouterFallback(env)) {
+      throw new ProviderError('gemini', 503, 'Gemini API key is not configured.');
+    }
+    return parseGemmaJsonAgentTurn(await fetchOpenRouterAgentTurnJson(body, env, options));
   }
 
-  try {
-    const payload = await fetchGeminiJson(buildGeminiAgentTurnRequest(body), env, 'agent_native');
-    return parseGeminiAgentTurn(payload);
-  } catch (error) {
-    if (!shouldRetryAgentTurnAsJson(error)) throw error;
-    const fallbackPayload = await fetchGeminiJson(
-      buildGemmaJsonAgentTurnRequest(body),
-      env,
-      'agent_json_fallback',
-    );
-    return parseGemmaJsonAgentTurn(fallbackPayload);
+  const rejectionKey = await geminiNativeToolsRejectionKey(body, env);
+  if (!(await isGeminiNativeToolsRejected(rejectionKey, env))) {
+    try {
+      const nativeRequest = buildGeminiAgentTurnRequest(body);
+      const payload = await fetchGeminiJson(nativeRequest, env, 'agent_native');
+      return parseGeminiAgentTurn(payload);
+    } catch (error) {
+      if (shouldFallbackToOpenRouter(error, env)) {
+        console.warn(
+          'aiProxy.providerFallback.openRouter',
+          safeJson(
+            {
+              requestKind: 'agent_native',
+              primaryProvider: 'gemini',
+              primaryStatus: error instanceof ProviderError ? error.status : undefined,
+              primaryMessage: error instanceof Error ? error.message : String(error),
+            },
+            1200,
+          ),
+        );
+        return parseGemmaJsonAgentTurn(await fetchOpenRouterAgentTurnJson(body, env, options));
+      }
+      if (!shouldRetryAgentTurnAsJson(error)) throw error;
+      await rememberGeminiNativeToolsRejected(rejectionKey, env);
+    }
   }
+
+  const jsonRequest = buildGemmaJsonAgentTurnRequest(body);
+  const fallbackPayload = await fetchProviderJson(
+    jsonRequest,
+    env,
+    'agent_json_fallback',
+    () => fetchGeminiJson(jsonRequest, env, 'agent_json_fallback'),
+    () => fetchOpenRouterAgentTurnJson(body, env, options),
+  );
+  return parseGemmaJsonAgentTurn(fallbackPayload);
 }
 
 function buildGeminiIntentRequest(body: AgentChatRequest): Record<string, unknown> {
@@ -119,7 +173,7 @@ export function buildGeminiAgentTurnRequest(body: AgentChatRequest): Record<stri
     contents: conversation,
     generationConfig: {
       temperature: 0.4,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 512,
     },
   };
 
@@ -437,7 +491,7 @@ async function fetchGeminiJson(
       },
       body: JSON.stringify(geminiRequest),
     },
-    providerTimeoutMs(env),
+    shouldUseOpenRouterFallback(env) ? primaryProviderTimeoutMs(env) : providerTimeoutMs(env),
   );
 
   if (!response.ok) {
@@ -445,6 +499,400 @@ async function fetchGeminiJson(
   }
 
   return (await response.json()) as GeminiResponse;
+}
+
+interface OpenRouterChatCompletion {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
+async function fetchProviderJson(
+  geminiRequest: Record<string, unknown>,
+  env: AiProxyEnv,
+  requestKind: string,
+  fetchPrimary: () => Promise<GeminiResponse>,
+  fetchFallback: () => Promise<GeminiResponse>,
+): Promise<GeminiResponse> {
+  try {
+    return await fetchPrimary();
+  } catch (error) {
+    if (!shouldFallbackToOpenRouter(error, env)) throw error;
+    console.warn(
+      'aiProxy.providerFallback.openRouter',
+      safeJson(
+        {
+          requestKind,
+          primaryProvider: 'gemini',
+          primaryStatus: error instanceof ProviderError ? error.status : undefined,
+          primaryMessage: error instanceof Error ? error.message : String(error),
+          promptBytes: JSON.stringify(geminiRequest).length,
+        },
+        1200,
+      ),
+    );
+    return fetchFallback();
+  }
+}
+
+async function fetchOpenRouterIntentJson(
+  body: AgentChatRequest,
+  env: AiProxyEnv,
+): Promise<GeminiResponse> {
+  return fetchOpenRouterJson(buildOpenRouterIntentRequest(body, env), env, 'intent');
+}
+
+async function fetchOpenRouterAgentTurnJson(
+  body: AgentChatRequest,
+  env: AiProxyEnv,
+  options: GenerateAgentTurnOptions = {},
+): Promise<GeminiResponse> {
+  return fetchOpenRouterJson(
+    buildOpenRouterAgentTurnRequest(body, env),
+    env,
+    'agent_json_fallback',
+    { stream: options.streamOpenRouterFallback === true },
+  );
+}
+
+async function fetchOpenRouterJson(
+  openRouterRequest: Record<string, unknown>,
+  env: AiProxyEnv,
+  requestKind: string,
+  options: { stream?: boolean } = {},
+): Promise<GeminiResponse> {
+  if (!shouldUseOpenRouterFallback(env)) {
+    throw new ProviderError('openrouter', 503, 'OpenRouter fallback is not configured.');
+  }
+
+  const request =
+    options.stream === true ? { ...openRouterRequest, stream: true } : openRouterRequest;
+  const payload =
+    options.stream === true
+      ? await fetchOpenRouterStreamingText(request, env, requestKind)
+      : await fetchOpenRouterCompletionText(request, env, requestKind);
+
+  if (payload.length === 0) {
+    throw new ProviderError('openrouter', 502, 'OpenRouter returned an empty response.');
+  }
+
+  return {
+    candidates: [
+      {
+        content: {
+          parts: [{ text: payload }],
+        },
+      },
+    ],
+  };
+}
+
+async function fetchOpenRouterCompletionText(
+  openRouterRequest: Record<string, unknown>,
+  env: AiProxyEnv,
+  requestKind: string,
+): Promise<string> {
+  const response = await fetchWithTimeout(
+    'https://openrouter.ai/api/v1/chat/completions',
+    openRouterFetchInit(openRouterRequest, env),
+    openRouterProviderTimeoutMs(env),
+  );
+
+  if (!response.ok) {
+    throw await providerErrorFromResponse('openrouter', response, {
+      requestKind,
+      model: openRouterModel(env),
+    });
+  }
+
+  const payload = (await response.json()) as OpenRouterChatCompletion;
+  const text = payload.choices?.[0]?.message?.content?.trim() ?? '';
+  return text;
+}
+
+async function fetchOpenRouterStreamingText(
+  openRouterRequest: Record<string, unknown>,
+  env: AiProxyEnv,
+  requestKind: string,
+): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort('openrouter stream timeout'),
+    openRouterProviderTimeoutMs(env),
+  );
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      ...openRouterFetchInit(openRouterRequest, env),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw await providerErrorFromResponse('openrouter', response, {
+        requestKind,
+        model: openRouterModel(env),
+        stream: true,
+      });
+    }
+
+    return (await readOpenRouterSseText(response)).trim();
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ProviderError('openrouter', 504, 'OpenRouter stream timed out.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function openRouterFetchInit(
+  openRouterRequest: Record<string, unknown>,
+  env: AiProxyEnv,
+): RequestInit {
+  return {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.OPENROUTER_API_KEY?.trim() ?? ''}`,
+      'content-type': 'application/json',
+      'http-referer': env.OPENROUTER_HTTP_REFERER?.trim() || 'https://offpay.app',
+      'x-openrouter-title': env.OPENROUTER_APP_TITLE?.trim() || 'OffPay',
+    },
+    body: JSON.stringify(openRouterRequest),
+  };
+}
+
+async function readOpenRouterSseText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (reader == null) {
+    throw new ProviderError('openrouter', 502, 'OpenRouter stream body is not readable.');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+  let finished = false;
+
+  try {
+    while (!finished) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = parseOpenRouterSseBuffer(buffer);
+      buffer = parsed.buffer;
+      text += parsed.text;
+      finished = parsed.finished;
+    }
+
+    buffer += decoder.decode();
+    if (!finished && buffer.trim().length > 0) {
+      const parsed = parseOpenRouterSseBuffer(`${buffer}\n`);
+      text += parsed.text;
+      finished = parsed.finished;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return text;
+}
+
+function parseOpenRouterSseBuffer(buffer: string): {
+  buffer: string;
+  text: string;
+  finished: boolean;
+} {
+  let remaining = buffer;
+  let text = '';
+  let finished = false;
+
+  while (true) {
+    const lineEnd = remaining.indexOf('\n');
+    if (lineEnd === -1) break;
+
+    const line = remaining.slice(0, lineEnd).trim();
+    remaining = remaining.slice(lineEnd + 1);
+    if (line.length === 0 || line.startsWith(':')) continue;
+    if (!line.startsWith('data:')) continue;
+
+    const data = line.slice(5).trim();
+    if (data === '[DONE]') {
+      finished = true;
+      break;
+    }
+
+    const chunk = parseOpenRouterStreamChunk(data);
+    if (chunk.errorMessage != null) {
+      throw new ProviderError('openrouter', chunk.errorStatus, chunk.errorMessage);
+    }
+    text += chunk.content;
+  }
+
+  return { buffer: remaining, text, finished };
+}
+
+function parseOpenRouterStreamChunk(data: string): {
+  content: string;
+  errorMessage?: string;
+  errorStatus: number;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data) as unknown;
+  } catch {
+    return { content: '', errorStatus: 502 };
+  }
+
+  if (!isPlainObject(parsed)) return { content: '', errorStatus: 502 };
+  const error = parsed.error;
+  if (isPlainObject(error)) {
+    const message =
+      typeof error.message === 'string' && error.message.trim().length > 0
+        ? error.message.trim()
+        : 'OpenRouter stream failed.';
+    const status = typeof error.code === 'number' && Number.isFinite(error.code) ? error.code : 502;
+    return { content: '', errorMessage: message, errorStatus: status };
+  }
+
+  const choices = parsed.choices;
+  if (!Array.isArray(choices)) return { content: '', errorStatus: 502 };
+  const firstChoice = choices[0];
+  if (!isPlainObject(firstChoice)) return { content: '', errorStatus: 502 };
+  const delta = firstChoice.delta;
+  if (!isPlainObject(delta)) return { content: '', errorStatus: 502 };
+  return {
+    content: typeof delta.content === 'string' ? delta.content : '',
+    errorStatus: 502,
+  };
+}
+
+function buildOpenRouterIntentRequest(
+  body: AgentChatRequest,
+  env: AiProxyEnv,
+): Record<string, unknown> {
+  return withOpenRouterModelRouting(
+    {
+      messages: [
+        {
+          role: 'system',
+          content: `${OFFPAY_CHAT_INTENT_PROMPT}\n\nSafe intent context:\n${safeJson(
+            body.context ?? {},
+            4000,
+          )}`,
+        },
+        ...body.messages.slice(-12).map((message) => ({
+          role: message.role === 'assistant' ? 'assistant' : 'user',
+          content: message.content.slice(0, 4000),
+        })),
+      ],
+      temperature: 0.1,
+      max_tokens: 512,
+      response_format: { type: 'json_object' },
+      provider: {
+        sort: 'latency',
+        allow_fallbacks: true,
+      },
+    },
+    env,
+  );
+}
+
+function buildOpenRouterAgentTurnRequest(
+  body: AgentChatRequest,
+  env: AiProxyEnv,
+): Record<string, unknown> {
+  return withOpenRouterModelRouting(
+    {
+      messages: [
+        {
+          role: 'user',
+          content: buildGemmaJsonAgentTurnPrompt(body),
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 512,
+      response_format: { type: 'json_object' },
+      provider: {
+        sort: 'latency',
+        allow_fallbacks: true,
+      },
+    },
+    env,
+  );
+}
+
+function withOpenRouterModelRouting(
+  request: Record<string, unknown>,
+  env: AiProxyEnv,
+): Record<string, unknown> {
+  const models = openRouterModels(env);
+  return models.length > 1 ? { ...request, models } : { ...request, model: models[0] };
+}
+
+function openRouterModels(env: AiProxyEnv): string[] {
+  const configured = env.OPENROUTER_CHAT_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+  const extra = (env.OPENROUTER_FALLBACK_MODELS ?? '')
+    .split(',')
+    .map((model) => model.trim())
+    .filter(Boolean);
+  return Array.from(new Set([configured, ...extra]));
+}
+
+function openRouterModel(env: AiProxyEnv): string {
+  return openRouterModels(env)[0] ?? DEFAULT_OPENROUTER_MODEL;
+}
+
+function shouldUseOpenRouterFallback(env: AiProxyEnv): boolean {
+  return (env.OPENROUTER_API_KEY?.trim() ?? '').length > 0;
+}
+
+function shouldFallbackToOpenRouter(error: unknown, env: AiProxyEnv): boolean {
+  if (!shouldUseOpenRouterFallback(env)) return false;
+  if (!(error instanceof ProviderError)) return false;
+  if (error.provider !== 'gemini' && error.provider !== 'provider') return false;
+  return (
+    error.status === 401 || error.status === 403 || error.status === 429 || error.status >= 500
+  );
+}
+
+async function geminiNativeToolsRejectionKey(
+  body: AgentChatRequest,
+  env: AiProxyEnv,
+): Promise<string> {
+  const model = env.GEMINI_CHAT_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  const schemaFingerprint = JSON.stringify(
+    (body.toolSchemas ?? []).slice(0, MAX_FUNCTION_DECLARATIONS).map((schema) => ({
+      name: schema.name,
+      description: schema.description,
+      parameters: normalizeGeminiToolParameters(schema.parameters),
+    })),
+  );
+  return `ai-proxy:gemini-native-tools-rejected:v1:${await sha256Hex(`${model}:${schemaFingerprint}`)}`;
+}
+
+async function isGeminiNativeToolsRejected(key: string, env: AiProxyEnv): Promise<boolean> {
+  const now = Date.now();
+  const localExpiry = geminiNativeToolRejectionCache.get(key);
+  if (localExpiry != null) {
+    if (localExpiry > now) return true;
+    geminiNativeToolRejectionCache.delete(key);
+  }
+
+  const result = await runAiProxyUpstashPipeline(env, [['GET', key]]);
+  if (result?.[0] === '1') {
+    geminiNativeToolRejectionCache.set(key, now + GEMINI_NATIVE_TOOLS_REJECTION_TTL_MS);
+    return true;
+  }
+
+  return false;
+}
+
+async function rememberGeminiNativeToolsRejected(key: string, env: AiProxyEnv): Promise<void> {
+  const ttlMs = GEMINI_NATIVE_TOOLS_REJECTION_TTL_MS;
+  geminiNativeToolRejectionCache.set(key, Date.now() + ttlMs);
+  await runAiProxyUpstashPipeline(env, [['SET', key, '1', 'PX', ttlMs]]);
 }
 
 function geminiText(payload: GeminiResponse): string {

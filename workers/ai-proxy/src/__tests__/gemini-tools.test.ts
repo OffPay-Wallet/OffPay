@@ -4,11 +4,13 @@ import {
   generateGeminiAgentTurn,
   normalizeGeminiToolParameters,
   parseGemmaJsonAgentTurn,
+  resetGeminiProviderCachesForTests,
 } from '../providers/gemini';
 
 describe('Gemini tool declaration normalization', () => {
   afterEach(() => {
     jest.restoreAllMocks();
+    resetGeminiProviderCachesForTests();
   });
 
   it('normalizes app JSON Schema tool parameters for Gemma REST declarations', () => {
@@ -187,5 +189,161 @@ describe('Gemini tool declaration normalization', () => {
         args: {},
       });
     }
+  });
+
+  it('uses OpenRouter when Gemini is rate-limited', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: '{"kind":"agent_text","text":"Fallback is ready."}',
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const turn = await generateGeminiAgentTurn(
+      {
+        responseMode: 'agent_turn',
+        messages: [{ role: 'user', content: 'Can you help?' }],
+      },
+      {
+        GEMINI_API_KEY: 'test-key',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[1][0])).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(turn).toEqual({ kind: 'agent_text', text: 'Fallback is ready.' });
+  });
+
+  it('uses OpenRouter streaming for streamed fallback agent turns', async () => {
+    const sseChunk = (content: string): string =>
+      `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          [
+            ': OPENROUTER PROCESSING\n\n',
+            sseChunk('{"kind":"agent_text",'),
+            sseChunk('"text":"Streamed fallback."}'),
+            'data: [DONE]\n\n',
+          ].join(''),
+          {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          },
+        ),
+      );
+
+    const turn = await generateGeminiAgentTurn(
+      {
+        responseMode: 'agent_turn',
+        messages: [{ role: 'user', content: 'Can you help?' }],
+      },
+      {
+        GEMINI_API_KEY: 'test-key',
+        OPENROUTER_API_KEY: 'openrouter-key',
+        OPENROUTER_CHAT_MODEL: 'google/gemma-4-31b-it:free',
+      },
+      { streamOpenRouterFallback: true },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[1][0])).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(JSON.parse(String((fetchSpy.mock.calls[1][1] as RequestInit).body))).toMatchObject({
+      model: 'google/gemma-4-31b-it:free',
+      stream: true,
+    });
+    expect(turn).toEqual({ kind: 'agent_text', text: 'Streamed fallback.' });
+  });
+
+  it('caches native tool rejection and skips the failed native attempt on the next turn', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'Bad request' } }), { status: 400 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '{"kind":"agent_text","text":"JSON fallback one"}',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '{"kind":"agent_text","text":"JSON fallback two"}',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const request = {
+      responseMode: 'agent_turn' as const,
+      messages: [{ role: 'user' as const, content: 'Show my wallet balance' }],
+      toolSchemas: [
+        {
+          name: 'get_wallet_balance',
+          description: 'Returns wallet balance.',
+          parameters: { type: 'object', properties: {} },
+        },
+      ],
+    };
+    const env = {
+      GEMINI_API_KEY: 'test-key',
+      GEMINI_CHAT_MODEL: 'gemma-4-26b-a4b-it',
+    };
+
+    await expect(generateGeminiAgentTurn(request, env)).resolves.toEqual({
+      kind: 'agent_text',
+      text: 'JSON fallback one',
+    });
+    await expect(generateGeminiAgentTurn(request, env)).resolves.toEqual({
+      kind: 'agent_text',
+      text: 'JSON fallback two',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String((fetchSpy.mock.calls[2][1] as RequestInit).body))).not.toHaveProperty(
+      'tools',
+    );
   });
 });

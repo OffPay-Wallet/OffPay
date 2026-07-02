@@ -48,8 +48,8 @@ id = "dc1e56579a7145989f69bc34a8b069d4"
 # npx wrangler secret put ALCHEMY_MAINNET_FALLBACK_RPC_URL
 # npx wrangler secret put ALCHEMY_PRICE_API_KEY
 # npx wrangler secret put JUPITER_API_KEY
-# npx wrangler secret put KV_REST_API_URL
-# npx wrangler secret put KV_REST_API_TOKEN
+# npx wrangler secret put UPSTASH_REDIS_REST_URL
+# npx wrangler secret put UPSTASH_REDIS_REST_TOKEN
 # npx wrangler secret put OFFPAY_BOOTSTRAP_SECRET
 # npx wrangler secret put OFFPAY_BACKUP_HMAC_SECRET
 # npx wrangler secret put OFFPAY_DEVNET_FAUCET_SECRET_KEY
@@ -71,6 +71,7 @@ OFFPAY_PROTOTYPE_MODE = "true"
 OFFPAY_INVITE_GATE_MODE = "required"
 OFFPAY_AI_CHAT_CREDIT_LIMIT = "5"
 OFFPAY_AI_CHAT_CREDIT_WINDOW_MS = "3600000"
+OFFPAY_AI_CHAT_CREDITS_BACKEND = "upstash"
 OFFPAY_ALLOWED_ORIGINS = "capacitor://localhost,https://offpay.app"
 MIN_APP_VERSION = "1.0.0"
 BOOTSTRAP_SECRET_VERSION = "1"

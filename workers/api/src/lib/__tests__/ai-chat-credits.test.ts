@@ -63,6 +63,7 @@ describe('API Worker AI chat Mongo credits', () => {
 
   afterEach(() => {
     resetAiChatCreditDatabaseRunnerForTests();
+    jest.restoreAllMocks();
     jest.useRealTimers();
   });
 
@@ -174,6 +175,52 @@ describe('API Worker AI chat Mongo credits', () => {
       last_released_at: new Date('2026-06-29T10:00:00.000Z'),
       last_release_reason: 'provider_timeout',
     });
+  });
+
+  it('uses Upstash as the hot credit ledger when enabled', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(
+        async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          const commands = JSON.parse(String(init?.body ?? '[]')) as unknown[][];
+          const command = commands[0];
+          if (command?.[0] === 'EVAL' && String(command[1]).includes('SREM')) {
+            return new Response(JSON.stringify([{ result: [0, 3600] }]), { status: 200 });
+          }
+          if (command?.[0] === 'EVAL' && String(command[1]).includes('SISMEMBER')) {
+            return new Response(JSON.stringify([{ result: [1, 1, 1, 3600] }]), { status: 200 });
+          }
+          return new Response(JSON.stringify([{ result: null }, { result: -2 }]), { status: 200 });
+        },
+      );
+    const kvEnv: Bindings = {
+      ...env,
+      OFFPAY_AI_CHAT_CREDITS_BACKEND: 'upstash',
+    };
+
+    const consumed = await consumeAiChatCredit(kvEnv, {
+      walletSubject: 'WalletKv111',
+      fallbackSubjectKey: fallbackKey('device-kv'),
+      turnId: 'turn-kv-1',
+    });
+    expect(consumed).toMatchObject({
+      allowed: true,
+      charged: true,
+      status: { used: 1, remaining: 4, subjectType: 'wallet' },
+    });
+
+    const released = await releaseAiChatCredit(
+      kvEnv,
+      {
+        walletSubject: 'WalletKv111',
+        fallbackSubjectKey: fallbackKey('device-kv'),
+        turnId: 'turn-kv-1',
+      },
+      'provider_timeout',
+    );
+    expect(released).toMatchObject({ used: 0, remaining: 5 });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(collection.snapshot()).toHaveLength(0);
   });
 
   it('resets credits after the configured window ends', async () => {

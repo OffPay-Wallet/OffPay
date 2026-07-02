@@ -81,6 +81,7 @@ export type Bindings = {
   OFFPAY_INVITE_ADMIN_TOKEN?: string;
   OFFPAY_AI_CHAT_CREDIT_LIMIT?: string;
   OFFPAY_AI_CHAT_CREDIT_WINDOW_MS?: string;
+  OFFPAY_AI_CHAT_CREDITS_BACKEND?: string;
   MONGODB_URI?: string;
   MONGODB_DATABASE?: string;
   GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL?: string;
@@ -88,8 +89,12 @@ export type Bindings = {
   OFFPAY_BOOTSTRAP_SECRET: string;
   BOOTSTRAP_SECRET_VERSION: string;
   OFFPAY_BACKUP_HMAC_SECRET: string;
-  KV_REST_API_URL: string;
-  KV_REST_API_TOKEN: string;
+  UPSTASH_REDIS_REST_URL?: string;
+  UPSTASH_REDIS_REST_TOKEN?: string;
+  /** Deprecated alias. Prefer UPSTASH_REDIS_REST_URL. */
+  KV_REST_API_URL?: string;
+  /** Deprecated alias. Prefer UPSTASH_REDIS_REST_TOKEN. */
+  KV_REST_API_TOKEN?: string;
   PRICE_CACHE?: KVNamespace;
   TOKEN_REGISTRY_CACHE?: KVNamespace;
   PENDING_BACKUP_BUCKET?: R2Bucket;

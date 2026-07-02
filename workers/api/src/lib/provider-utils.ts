@@ -16,6 +16,24 @@ function getRequiredBinding(bindings: Bindings, key: keyof Bindings): string {
   return value;
 }
 
+function getRequiredUpstashBinding(bindings: Bindings, kind: 'url' | 'token'): string {
+  const preferred =
+    kind === 'url' ? bindings.UPSTASH_REDIS_REST_URL : bindings.UPSTASH_REDIS_REST_TOKEN;
+  const legacy = kind === 'url' ? bindings.KV_REST_API_URL : bindings.KV_REST_API_TOKEN;
+  const value = typeof preferred === 'string' && preferred.trim().length > 0 ? preferred : legacy;
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed.length === 0) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Required backend configuration is unavailable.',
+      retryable: true,
+    });
+  }
+
+  return trimmed;
+}
+
 function readTrimmedString(value: unknown): string | null {
   return typeof value === 'string' ? value.trim() : null;
 }
@@ -48,7 +66,7 @@ function sanitizeText(value: string | null | undefined, maxLength = 160): string
   return normalized.slice(0, maxLength);
 }
 
-// Upstash is a network hop on the read hot path, and a slow KV call blocks the
+// Upstash is a network hop on the read hot path, and a slow Redis call blocks the
 // resolver it is supposed to accelerate. Bound it tightly: on timeout the
 // shared cache degrades to a miss (callers already treat a throw as
 // unavailable) and the authoritative upstream read proceeds.
@@ -59,8 +77,8 @@ async function runKvPipeline(
   commands: ReadonlyArray<ReadonlyArray<string | number>>,
   unavailableMessage: string,
 ): Promise<unknown[]> {
-  const endpoint = getRequiredBinding(bindings, 'KV_REST_API_URL').replace(/\/$/, '');
-  const token = getRequiredBinding(bindings, 'KV_REST_API_TOKEN');
+  const endpoint = getRequiredUpstashBinding(bindings, 'url').replace(/\/$/, '');
+  const token = getRequiredUpstashBinding(bindings, 'token');
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
@@ -117,6 +135,7 @@ async function runKvPipeline(
 
 export {
   getRequiredBinding,
+  getRequiredUpstashBinding,
   readFiniteNumber,
   readTrimmedString,
   runKvPipeline,

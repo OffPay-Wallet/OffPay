@@ -1,15 +1,7 @@
 import { handleChat, handleKindDispatch } from './handlers/chat';
 import { handleHealth } from './handlers/health';
 import { handleVoiceSpeech, handleVoiceTranscribe } from './handlers/voice';
-import {
-  corsHeaders,
-  errorStatus,
-  isOriginAllowed,
-  jsonResponse,
-  maxChatBytes,
-  normalizeError,
-  readJson,
-} from './http';
+import { corsHeaders, errorStatus, isOriginAllowed, jsonResponse, normalizeError } from './http';
 import { assertAiProxyRateLimit } from './rate-limit';
 import {
   aiChatCreditLimitResponse,
@@ -19,6 +11,12 @@ import {
   releaseAiChatCredit,
 } from './chat-credits';
 import { verifyOffpayAiSessionToken } from './auth/session-token';
+import {
+  applyAiProxyTimingHeaders,
+  createAiProxyTimingContext,
+  timeAiProxyStage,
+  type AiProxyTimingContext,
+} from './timing';
 import type { AiProxyEnv } from './types';
 import type {
   AiChatCreditIdentity,
@@ -36,19 +34,23 @@ interface SessionTokenGateResult {
 export default {
   async fetch(request: Request, env: AiProxyEnv): Promise<Response> {
     const cors = corsHeaders(request, env);
+    const timing = createAiProxyTimingContext(request);
+    const finalize = (response: Response): Response => applyAiProxyTimingHeaders(response, timing);
 
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: cors });
+      return finalize(new Response(null, { status: 204, headers: cors }));
     }
 
     try {
       const url = new URL(request.url);
 
       if (!isOriginAllowed(request, env)) {
-        return jsonResponse(
-          { kind: 'error', code: 'ORIGIN_NOT_ALLOWED', message: 'Origin is not allowed.' },
-          403,
-          cors,
+        return finalize(
+          jsonResponse(
+            { kind: 'error', code: 'ORIGIN_NOT_ALLOWED', message: 'Origin is not allowed.' },
+            403,
+            cors,
+          ),
         );
       }
 
@@ -56,41 +58,49 @@ export default {
         request.method === 'GET' &&
         (url.pathname === '/health' || url.pathname === '/api/ai/health')
       ) {
-        return handleHealth(env, cors);
+        return finalize(handleHealth(env, cors));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/ai/credits') {
-        const tokenGate = await verifySessionToken(request, env);
+        const tokenGate = await timeAiProxyStage(timing, 'session', () =>
+          verifySessionToken(request, env),
+        );
         if (!tokenGate.ok) {
-          return jsonResponse(
-            {
-              kind: 'error',
-              code: 'SESSION_TOKEN_INVALID',
-              message: 'Yuga session token is invalid or expired.',
-            },
-            401,
-            cors,
+          return finalize(
+            jsonResponse(
+              {
+                kind: 'error',
+                code: 'SESSION_TOKEN_INVALID',
+                message: 'Yuga session token is invalid or expired.',
+              },
+              401,
+              cors,
+            ),
           );
         }
 
-        const credits = await getAiChatCreditStatus(request, env, {
-          walletSubject: tokenGate.walletSubject,
-          deviceId: tokenGate.deviceId,
-        });
+        const credits = await timeAiProxyStage(timing, 'credit_status', () =>
+          getAiChatCreditStatus(request, env, {
+            walletSubject: tokenGate.walletSubject,
+            deviceId: tokenGate.deviceId,
+          }),
+        );
         const response = jsonResponse({ credits }, 200, cors);
         applyAiChatCreditHeaders(response.headers, credits);
-        return response;
+        return finalize(response);
       }
 
       if (request.method !== 'POST') {
-        return jsonResponse(
-          {
-            kind: 'error',
-            code: 'METHOD_NOT_ALLOWED',
-            message: 'Use POST for AI proxy operations.',
-          },
-          405,
-          cors,
+        return finalize(
+          jsonResponse(
+            {
+              kind: 'error',
+              code: 'METHOD_NOT_ALLOWED',
+              message: 'Use POST for AI proxy operations.',
+            },
+            405,
+            cors,
+          ),
         );
       }
 
@@ -98,57 +108,81 @@ export default {
       // get bucket keys derived from their wallet subject (durable, not
       // IP-roundrobinable). Unverified callers fall back to the IP key
       // and a stricter rate.
-      const tokenGate = await verifySessionToken(request, env);
+      const tokenGate = await timeAiProxyStage(timing, 'session', () =>
+        verifySessionToken(request, env),
+      );
       if (!tokenGate.ok) {
-        return jsonResponse(
-          {
-            kind: 'error',
-            code: 'SESSION_TOKEN_INVALID',
-            message: 'Yuga session token is invalid or expired.',
-          },
-          401,
-          cors,
+        return finalize(
+          jsonResponse(
+            {
+              kind: 'error',
+              code: 'SESSION_TOKEN_INVALID',
+              message: 'Yuga session token is invalid or expired.',
+            },
+            401,
+            cors,
+          ),
         );
       }
 
-      assertAiProxyRateLimit(request, env, { walletSubject: tokenGate.walletSubject });
+      await timeAiProxyStage(timing, 'rate_limit', () =>
+        assertAiProxyRateLimit(request, env, { walletSubject: tokenGate.walletSubject }),
+      );
 
       if (url.pathname === '/api/ai/chat') {
-        return await handleCreditMeteredChat(request, env, cors, {
-          walletSubject: tokenGate.walletSubject,
-          deviceId: tokenGate.deviceId,
-        });
+        return finalize(
+          await handleCreditMeteredChat(
+            request,
+            env,
+            cors,
+            {
+              walletSubject: tokenGate.walletSubject,
+              deviceId: tokenGate.deviceId,
+            },
+            timing,
+          ),
+        );
       }
 
       if (url.pathname === '/api/ai/voice/transcribe') {
-        return await handleVoiceTranscribe(request, env, cors);
+        return finalize(await handleVoiceTranscribe(request, env, cors));
       }
 
       if (url.pathname === '/api/ai/voice/speech') {
-        return await handleVoiceSpeech(request, env, cors);
+        return finalize(await handleVoiceSpeech(request, env, cors));
       }
 
       if (url.pathname === '/api/ai') {
-        return await handleKindDispatch(
-          request,
-          env,
-          cors,
-          (chatRequest, chatEnv, chatCors) =>
-            handleCreditMeteredChat(chatRequest, chatEnv, chatCors, {
-              walletSubject: tokenGate.walletSubject,
-              deviceId: tokenGate.deviceId,
-            }),
-          handleVoiceSpeech,
+        return finalize(
+          await handleKindDispatch(
+            request,
+            env,
+            cors,
+            (chatRequest, chatEnv, chatCors) =>
+              handleCreditMeteredChat(
+                chatRequest,
+                chatEnv,
+                chatCors,
+                {
+                  walletSubject: tokenGate.walletSubject,
+                  deviceId: tokenGate.deviceId,
+                },
+                timing,
+              ),
+            handleVoiceSpeech,
+          ),
         );
       }
 
-      return jsonResponse(
-        { kind: 'error', code: 'NOT_FOUND', message: 'AI proxy endpoint not found.' },
-        404,
-        cors,
+      return finalize(
+        jsonResponse(
+          { kind: 'error', code: 'NOT_FOUND', message: 'AI proxy endpoint not found.' },
+          404,
+          cors,
+        ),
       );
     } catch (error) {
-      return jsonResponse(normalizeError(error), errorStatus(error), cors);
+      return finalize(jsonResponse(normalizeError(error), errorStatus(error), cors));
     }
   },
 };
@@ -158,24 +192,30 @@ async function handleCreditMeteredChat(
   env: AiProxyEnv,
   cors: HeadersInit,
   identity: AiChatCreditIdentity,
+  timing: AiProxyTimingContext,
 ): Promise<Response> {
-  const creditResult = await consumeAiChatCredit(request, env, identity);
+  const creditResult = await timeAiProxyStage(timing, 'credit_consume', () =>
+    consumeAiChatCredit(request, env, identity),
+  );
   if (!creditResult.allowed) {
     return aiChatCreditLimitResponse(creditResult.status, cors);
   }
 
   try {
-    return await handleChat(request, env, cors, { credits: creditResult.status });
+    return await timeAiProxyStage(timing, 'chat', () =>
+      handleChat(request, env, cors, {
+        credits: creditResult.status,
+        releaseCreditOnStreamError: (error) =>
+          releaseCreditAfterStreamError(request, env, identity, creditResult.charged, error),
+      }),
+    );
   } catch (error) {
     let credits: AiChatCreditStatus = creditResult.status;
     let creditReleased = false;
     if (creditResult.charged) {
       try {
-        credits = await releaseAiChatCredit(
-          request,
-          env,
-          identity,
-          creditReleaseReasonForError(error),
+        credits = await timeAiProxyStage(timing, 'credit_release', () =>
+          releaseAiChatCredit(request, env, identity, creditReleaseReasonForError(error)),
         );
         creditReleased = true;
       } catch (releaseError) {
@@ -200,6 +240,19 @@ async function handleCreditMeteredChat(
     applyAiChatCreditHeaders(response.headers, credits);
     return response;
   }
+}
+
+async function releaseCreditAfterStreamError(
+  request: Request,
+  env: AiProxyEnv,
+  identity: AiChatCreditIdentity,
+  charged: boolean,
+  error: unknown,
+): Promise<AiChatCreditStatus> {
+  if (!charged) {
+    return getAiChatCreditStatus(request, env, identity);
+  }
+  return releaseAiChatCredit(request, env, identity, creditReleaseReasonForError(error));
 }
 
 function creditPreservedMessage(error: unknown, fallback: unknown): string {

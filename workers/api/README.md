@@ -64,8 +64,8 @@ npx wrangler secret put ALCHEMY_DEVNET_FALLBACK_RPC_URL
 npx wrangler secret put ALCHEMY_MAINNET_FALLBACK_RPC_URL
 npx wrangler secret put ALCHEMY_PRICE_API_KEY
 npx wrangler secret put JUPITER_API_KEY
-npx wrangler secret put KV_REST_API_URL
-npx wrangler secret put KV_REST_API_TOKEN
+npx wrangler secret put UPSTASH_REDIS_REST_URL
+npx wrangler secret put UPSTASH_REDIS_REST_TOKEN
 npx wrangler secret put OFFPAY_BOOTSTRAP_SECRET
 npx wrangler secret put OFFPAY_BACKUP_HMAC_SECRET
 npx wrangler secret put OFFPAY_DEVNET_FAUCET_SECRET_KEY

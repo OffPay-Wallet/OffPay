@@ -1,6 +1,7 @@
 import { verifyAsync as verifyEd25519 } from '@noble/ed25519';
 import bs58 from 'bs58';
 import { AppError } from './errors.js';
+import { getRequiredUpstashBinding } from './provider-utils.js';
 import type { Bindings } from './types.js';
 import { isValidEd25519Signature, isValidSolanaAddress } from './validation.js';
 
@@ -25,31 +26,11 @@ type BootstrapNonceStoreFactory = (bindings: Bindings) => BootstrapNonceStore;
 let nonceStoreFactory: BootstrapNonceStoreFactory = createBootstrapNonceStore;
 
 function createKvEndpoint(bindings: Bindings): string {
-  const endpoint = bindings.KV_REST_API_URL?.trim();
-  if (!endpoint) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: 'Required backend configuration is unavailable.',
-      retryable: true,
-    });
-  }
-
-  return endpoint.replace(/\/$/, '');
+  return getRequiredUpstashBinding(bindings, 'url').replace(/\/$/, '');
 }
 
 function getRequiredKvToken(bindings: Bindings): string {
-  const token = bindings.KV_REST_API_TOKEN?.trim();
-  if (!token) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: 'Required backend configuration is unavailable.',
-      retryable: true,
-    });
-  }
-
-  return token;
+  return getRequiredUpstashBinding(bindings, 'token');
 }
 
 async function runKvPipeline(
