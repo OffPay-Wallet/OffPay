@@ -38,11 +38,13 @@ type GeminiPartInput =
     };
 
 const MAX_FUNCTION_DECLARATIONS = 40;
-const DEFAULT_CLOUDFLARE_AI_MODEL = '@cf/zai-org/glm-4.7-flash';
+const DEFAULT_CLOUDFLARE_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 const DEFAULT_GROQ_MODEL = 'llama-3.1-8b-instant';
 const GEMINI_NATIVE_TOOLS_REJECTION_TTL_MS = 30 * 60 * 1000;
+const CLOUDFLARE_AI_FAILURE_CIRCUIT_TTL_MS = 2 * 60 * 1000;
 
 const geminiNativeToolRejectionCache = new Map<string, number>();
+const cloudflareAiFailureCircuitCache = new Map<string, number>();
 
 interface GenerateAgentTurnOptions {
   streamGroqFallback?: boolean;
@@ -55,6 +57,7 @@ interface GenerateIntentOptions {
 
 export function resetGeminiProviderCachesForTests(): void {
   geminiNativeToolRejectionCache.clear();
+  cloudflareAiFailureCircuitCache.clear();
 }
 
 export async function generateGeminiIntent(
@@ -62,12 +65,13 @@ export async function generateGeminiIntent(
   env: AiProxyEnv,
   options: GenerateIntentOptions = {},
 ): Promise<AgentIntentResult> {
-  if (shouldUseCloudflareAi(env)) {
+  if (shouldUseCloudflareAi(env) && shouldAttemptCloudflareAi(env)) {
     try {
       const payload = await fetchCloudflareAiIntentJson(body, env, options);
       return parseIntentResult(geminiText(payload));
     } catch (error) {
       if (!shouldFallbackFromCloudflareAi(error, env)) throw error;
+      rememberCloudflareAiFailure(error, env);
       logProviderFallback('intent', 'cloudflare-ai', error);
     }
   }
@@ -107,12 +111,13 @@ export async function generateGeminiAgentTurn(
   env: AiProxyEnv,
   options: GenerateAgentTurnOptions = {},
 ): Promise<AgentTurn> {
-  if (shouldUseCloudflareAi(env)) {
-    const requestKind = cloudflareAiAgentTurnRequestKind(body);
+  if (shouldUseCloudflareAi(env) && shouldAttemptCloudflareAi(env)) {
+    const requestKind = cloudflareAiAgentTurnRequestKind(body, env);
     try {
       return await fetchCloudflareAiAgentTurn(body, env, options);
     } catch (error) {
       if (!shouldFallbackFromCloudflareAi(error, env)) throw error;
+      rememberCloudflareAiFailure(error, env);
       logProviderFallback(requestKind, 'cloudflare-ai', error);
     }
   }
@@ -518,7 +523,12 @@ async function fetchCloudflareAiIntentJson(
   env: AiProxyEnv,
   options: GenerateIntentOptions,
 ): Promise<GeminiResponse> {
-  return fetchCloudflareAiJson(buildCloudflareAiIntentRequest(body), env, 'intent', options);
+  return fetchCloudflareAiJson(
+    buildCloudflareAiIntentRequest(body, cloudflareAiModel(env)),
+    env,
+    'intent',
+    options,
+  );
 }
 
 async function fetchCloudflareAiAgentTurn(
@@ -526,24 +536,34 @@ async function fetchCloudflareAiAgentTurn(
   env: AiProxyEnv,
   options: GenerateAgentTurnOptions,
 ): Promise<AgentTurn> {
-  const requestKind = cloudflareAiAgentTurnRequestKind(body);
+  const model = cloudflareAiModel(env);
+  const requestKind = cloudflareAiAgentTurnRequestKind(body, env);
+  if (!hasReplayedToolTrace(body) && cloudflareAiUsesJsonAgentProtocol(model)) {
+    return parseJsonAgentTurn(
+      await fetchCloudflareAiJson(
+        buildCloudflareAiJsonAgentTurnRequest(body),
+        env,
+        requestKind,
+        options,
+      ),
+      'cloudflare-ai',
+    );
+  }
+
   const request = hasReplayedToolTrace(body)
-    ? buildCloudflareAiToolResultRequest(body)
-    : buildCloudflareAiAgentTurnRequest(body);
-  const result = await runCloudflareAiWithTimeout(
-    env,
-    cloudflareAiModel(env),
-    request,
-    requestKind,
-    {
-      sessionAffinity: options.sessionAffinity,
-    },
-  );
+    ? buildCloudflareAiToolResultRequest(body, model)
+    : buildCloudflareAiAgentTurnRequest(body, model);
+  const result = await runCloudflareAiWithTimeout(env, model, request, requestKind, {
+    sessionAffinity: options.sessionAffinity,
+  });
   return parseCloudflareAiAgentTurn(result);
 }
 
-function cloudflareAiAgentTurnRequestKind(body: AgentChatRequest): string {
-  return hasReplayedToolTrace(body) ? 'agent_text_after_tools' : 'agent_native';
+function cloudflareAiAgentTurnRequestKind(body: AgentChatRequest, env: AiProxyEnv): string {
+  if (hasReplayedToolTrace(body)) return 'agent_text_after_tools';
+  return cloudflareAiUsesJsonAgentProtocol(cloudflareAiModel(env))
+    ? 'agent_json_primary'
+    : 'agent_native';
 }
 
 async function fetchCloudflareAiJson(
@@ -622,8 +642,11 @@ async function runCloudflareAiWithTimeout(
   }
 }
 
-function buildCloudflareAiIntentRequest(body: AgentChatRequest): Record<string, unknown> {
-  return {
+function buildCloudflareAiIntentRequest(
+  body: AgentChatRequest,
+  model: string,
+): Record<string, unknown> {
+  const request: Record<string, unknown> = {
     messages: [
       {
         role: 'system',
@@ -638,13 +661,17 @@ function buildCloudflareAiIntentRequest(body: AgentChatRequest): Record<string, 
       })),
     ],
     temperature: 0.1,
-    max_completion_tokens: 192,
+    max_tokens: 192,
     top_p: 0.95,
-    response_format: { type: 'json_object' },
   };
+  applyCloudflareAiResponseControls(request, model, 'json_object');
+  return request;
 }
 
-function buildCloudflareAiAgentTurnRequest(body: AgentChatRequest): Record<string, unknown> {
+function buildCloudflareAiAgentTurnRequest(
+  body: AgentChatRequest,
+  model: string,
+): Record<string, unknown> {
   const tools = buildCloudflareAiTools(body.toolSchemas);
   const request: Record<string, unknown> = {
     messages: [
@@ -655,9 +682,10 @@ function buildCloudflareAiAgentTurnRequest(body: AgentChatRequest): Record<strin
       ...buildCloudflareAiConversationMessages(body),
     ],
     temperature: 0.2,
-    max_completion_tokens: 192,
+    max_tokens: 192,
     top_p: 0.95,
   };
+  applyCloudflareAiResponseControls(request, model, 'text');
 
   if (tools.length > 0) {
     request.tools = tools;
@@ -668,8 +696,25 @@ function buildCloudflareAiAgentTurnRequest(body: AgentChatRequest): Record<strin
   return request;
 }
 
-function buildCloudflareAiToolResultRequest(body: AgentChatRequest): Record<string, unknown> {
+function buildCloudflareAiJsonAgentTurnRequest(body: AgentChatRequest): Record<string, unknown> {
   return {
+    messages: [
+      {
+        role: 'user',
+        content: buildJsonAgentTurnPrompt(body),
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 256,
+    top_p: 0.9,
+  };
+}
+
+function buildCloudflareAiToolResultRequest(
+  body: AgentChatRequest,
+  model: string,
+): Record<string, unknown> {
+  const request: Record<string, unknown> = {
     messages: [
       {
         role: 'system',
@@ -698,9 +743,11 @@ function buildCloudflareAiToolResultRequest(body: AgentChatRequest): Record<stri
       },
     ],
     temperature: 0.2,
-    max_completion_tokens: 192,
+    max_tokens: 192,
     top_p: 0.95,
   };
+  applyCloudflareAiResponseControls(request, model, 'text');
+  return request;
 }
 
 function buildCloudflareAiAgentSystemPrompt(body: AgentChatRequest): string {
@@ -733,11 +780,36 @@ function buildCloudflareAiTools(
   return schemas.slice(0, MAX_FUNCTION_DECLARATIONS).map((schema) => {
     const parameters = normalizeCloudflareAiToolParameters(schema.parameters);
     return {
-      name: schema.name.slice(0, 64),
-      description: compactToolDescription(schema),
-      parameters: parameters ?? { type: 'object', properties: {} },
+      type: 'function',
+      function: {
+        name: schema.name.slice(0, 64),
+        description: compactToolDescription(schema),
+        parameters: parameters ?? { type: 'object', properties: {} },
+        strict: false,
+      },
     };
   });
+}
+
+function cloudflareAiChatTemplateOptions(): Record<string, unknown> {
+  return {
+    enable_thinking: false,
+    clear_thinking: true,
+  };
+}
+
+function applyCloudflareAiResponseControls(
+  request: Record<string, unknown>,
+  model: string,
+  responseType: 'text' | 'json_object',
+): void {
+  if (cloudflareAiSupportsResponseFormat(model)) {
+    request.response_format = { type: responseType };
+  }
+
+  if (cloudflareAiSupportsThinkingControls(model)) {
+    request.chat_template_kwargs = cloudflareAiChatTemplateOptions();
+  }
 }
 
 function compactToolDescription(schema: AgentToolSchema): string {
@@ -1148,6 +1220,23 @@ function cloudflareAiModel(env: AiProxyEnv): string {
   return env.CLOUDFLARE_AI_CHAT_MODEL?.trim() || DEFAULT_CLOUDFLARE_AI_MODEL;
 }
 
+function normalizedCloudflareAiModel(model: string): string {
+  return model.trim().toLowerCase();
+}
+
+function cloudflareAiUsesJsonAgentProtocol(model: string): boolean {
+  return normalizedCloudflareAiModel(model) === '@cf/meta/llama-3.1-8b-instruct-fast';
+}
+
+function cloudflareAiSupportsResponseFormat(model: string): boolean {
+  return !cloudflareAiUsesJsonAgentProtocol(model);
+}
+
+function cloudflareAiSupportsThinkingControls(model: string): boolean {
+  const normalized = normalizedCloudflareAiModel(model);
+  return normalized.includes('/zai-org/') || normalized.includes('glm-');
+}
+
 function parseCloudflareAiAgentTurn(payload: unknown): AgentTurn {
   const toolCalls = cloudflareAiToolCalls(payload);
   if (toolCalls.length > 0) {
@@ -1306,12 +1395,60 @@ function shouldUseCloudflareAi(env: AiProxyEnv): boolean {
   return env.AI != null;
 }
 
+function shouldAttemptCloudflareAi(env: AiProxyEnv): boolean {
+  const key = cloudflareAiFailureCircuitKey(env);
+  const expiry = cloudflareAiFailureCircuitCache.get(key);
+  if (expiry == null) return true;
+
+  const now = Date.now();
+  if (expiry <= now) {
+    cloudflareAiFailureCircuitCache.delete(key);
+    return true;
+  }
+
+  if (!hasExternalChatFallback(env)) return true;
+  console.warn(
+    'aiProxy.providerFallback.cloudflareAiCircuitOpen',
+    safeJson(
+      {
+        primaryProvider: 'cloudflare-ai',
+        model: cloudflareAiModel(env),
+        remainingMs: expiry - now,
+      },
+      800,
+    ),
+  );
+  return false;
+}
+
+function cloudflareAiFailureCircuitKey(env: AiProxyEnv): string {
+  return `cloudflare-ai:${normalizedCloudflareAiModel(cloudflareAiModel(env))}`;
+}
+
+function rememberCloudflareAiFailure(error: unknown, env: AiProxyEnv): void {
+  if (!hasExternalChatFallback(env) || !shouldOpenCloudflareAiFailureCircuit(error)) return;
+  cloudflareAiFailureCircuitCache.set(
+    cloudflareAiFailureCircuitKey(env),
+    Date.now() + CLOUDFLARE_AI_FAILURE_CIRCUIT_TTL_MS,
+  );
+}
+
+function shouldOpenCloudflareAiFailureCircuit(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return true;
+  if (error.provider !== 'cloudflare-ai') return false;
+  return error.status === 429 || error.status >= 500;
+}
+
 function hasGeminiProvider(env: AiProxyEnv): boolean {
   return (env.GEMINI_API_KEY?.trim() ?? '').length > 0;
 }
 
 function shouldUseGroqFallback(env: AiProxyEnv): boolean {
   return (env.GROQ_API_KEY?.trim() ?? '').length > 0;
+}
+
+function hasExternalChatFallback(env: AiProxyEnv): boolean {
+  return hasGeminiProvider(env) || shouldUseGroqFallback(env);
 }
 
 function shouldFallbackFromCloudflareAi(error: unknown, env: AiProxyEnv): boolean {

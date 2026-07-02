@@ -138,12 +138,12 @@ describe('Gemini tool declaration normalization', () => {
     }
   });
 
-  it('uses Workers AI GLM before external chat providers', async () => {
+  it('uses the fast Workers AI model before external chat providers', async () => {
     const aiRun = jest.fn().mockResolvedValue({
       choices: [
         {
           message: {
-            content: 'Workers AI ready.',
+            content: '{"kind":"agent_text","text":"Workers AI ready."}',
           },
         },
       ],
@@ -163,10 +163,10 @@ describe('Gemini tool declaration normalization', () => {
     );
 
     expect(aiRun).toHaveBeenCalledWith(
-      '@cf/zai-org/glm-4.7-flash',
+      '@cf/meta/llama-3.1-8b-instruct-fast',
       expect.objectContaining({
         messages: expect.any(Array),
-        max_completion_tokens: 192,
+        max_tokens: 256,
       }),
       {},
     );
@@ -174,7 +174,58 @@ describe('Gemini tool declaration normalization', () => {
     expect(turn).toEqual({ kind: 'agent_text', text: 'Workers AI ready.' });
   });
 
-  it('uses Workers AI native tool declarations instead of the JSON prompt', async () => {
+  it('uses JSON protocol on the fast Workers AI model for local tool decisions', async () => {
+    const aiRun = jest.fn().mockResolvedValue({
+      response: '{"kind":"agent_tool_calls","toolCalls":[{"name":"get_wallet_balance","args":{}}]}',
+    });
+
+    const turn = await generateGeminiAgentTurn(
+      {
+        responseMode: 'agent_turn',
+        messages: [{ role: 'user', content: 'Show my wallet balance' }],
+        toolSchemas: [
+          {
+            name: 'get_wallet_balance',
+            description: 'Returns wallet balance.',
+            parameters: { type: 'object', properties: {} },
+            xOffpay: {
+              networkScope: 'devnet_and_mainnet',
+              modelInstructions: ['Use for generic balance questions.'],
+            },
+          },
+        ],
+      },
+      {
+        AI: { run: aiRun },
+      },
+      { sessionAffinity: 'offpay-test-session' },
+    );
+
+    const providerBody = aiRun.mock.calls[0][1] as Record<string, unknown>;
+    expect(providerBody).toMatchObject({
+      max_tokens: 256,
+      temperature: 0.1,
+    });
+    expect(providerBody).not.toHaveProperty('tools');
+    expect(providerBody).not.toHaveProperty('tool_choice');
+    expect(providerBody).not.toHaveProperty('response_format');
+    expect(providerBody).not.toHaveProperty('chat_template_kwargs');
+    expect(JSON.stringify(providerBody)).toContain('Available local tools');
+    expect(aiRun.mock.calls[0][2]).toEqual({
+      extraHeaders: {
+        'x-session-affinity': 'offpay-test-session',
+      },
+    });
+    expect(turn.kind).toBe('agent_tool_calls');
+    if (turn.kind === 'agent_tool_calls') {
+      expect(turn.toolCalls[0]).toMatchObject({
+        name: 'get_wallet_balance',
+        args: {},
+      });
+    }
+  });
+
+  it('uses Workers AI native tool declarations for native tool-capable model overrides', async () => {
     const aiRun = jest.fn().mockResolvedValue({
       tool_calls: [
         {
@@ -202,6 +253,7 @@ describe('Gemini tool declaration normalization', () => {
       },
       {
         AI: { run: aiRun },
+        CLOUDFLARE_AI_CHAT_MODEL: '@cf/ibm-granite/granite-4.0-h-micro',
       },
       { sessionAffinity: 'offpay-test-session' },
     );
@@ -210,13 +262,19 @@ describe('Gemini tool declaration normalization', () => {
     expect(providerBody).toMatchObject({
       tool_choice: 'auto',
       parallel_tool_calls: false,
-      max_completion_tokens: 192,
+      max_tokens: 192,
+      response_format: { type: 'text' },
     });
+    expect(providerBody).not.toHaveProperty('chat_template_kwargs');
     expect(providerBody.tools).toEqual([
-      expect.objectContaining({
-        name: 'get_wallet_balance',
-        parameters: { type: 'object', properties: {} },
-      }),
+      {
+        type: 'function',
+        function: expect.objectContaining({
+          name: 'get_wallet_balance',
+          parameters: { type: 'object', properties: {} },
+          strict: false,
+        }),
+      },
     ]);
     expect(JSON.stringify(providerBody)).not.toContain('Available local tools');
     expect(aiRun.mock.calls[0][2]).toEqual({
@@ -282,6 +340,11 @@ describe('Gemini tool declaration normalization', () => {
     const providerBody = aiRun.mock.calls[0][1] as Record<string, unknown>;
     const serialized = JSON.stringify(providerBody);
     expect(providerBody).not.toHaveProperty('tools');
+    expect(providerBody).toMatchObject({
+      max_tokens: 192,
+    });
+    expect(providerBody).not.toHaveProperty('response_format');
+    expect(providerBody).not.toHaveProperty('chat_template_kwargs');
     expect(serialized).toContain('Local tool execution trace');
     expect(serialized).toContain('draft_umbra_vault_action');
     expect(serialized).not.toContain('Available local tools');
@@ -323,6 +386,61 @@ describe('Gemini tool declaration normalization', () => {
     expect(aiRun).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(turn).toEqual({ kind: 'agent_text', text: 'Gemini fallback ready.' });
+  });
+
+  it('skips Workers AI briefly after a transient Workers AI failure', async () => {
+    const aiRun = jest.fn().mockRejectedValueOnce(new Error('Workers AI overloaded'));
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: 'Gemini fallback one.' }],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: 'Gemini fallback two.' }],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const request = {
+      responseMode: 'agent_turn' as const,
+      messages: [{ role: 'user' as const, content: 'Can you help?' }],
+    };
+    const env = {
+      AI: { run: aiRun },
+      GEMINI_API_KEY: 'test-key',
+    };
+
+    await expect(generateGeminiAgentTurn(request, env)).resolves.toEqual({
+      kind: 'agent_text',
+      text: 'Gemini fallback one.',
+    });
+    await expect(generateGeminiAgentTurn(request, env)).resolves.toEqual({
+      kind: 'agent_text',
+      text: 'Gemini fallback two.',
+    });
+
+    expect(aiRun).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it('falls back to JSON protocol when Gemini rejects the native agent-turn request', async () => {

@@ -17,7 +17,7 @@ In strict privacy mode, chat providers receive sanitized prompt text only and re
 
 ## Providers
 
-- Chat: Workers AI primary (`@cf/zai-org/glm-4.7-flash`) with Gemini API and Groq fallback.
+- Chat: Workers AI primary (`@cf/meta/llama-3.1-8b-instruct-fast`) with Gemini API and Groq fallback.
 - STT: Sarvam first, ElevenLabs fallback only when strict fallback gates allow it.
 - TTS: Sarvam first, ElevenLabs fallback with `enable_logging=false`. Can be disabled with `AI_PROXY_TTS_ENABLED=false`.
 
@@ -47,39 +47,39 @@ npx wrangler secret put AI_PROXY_SESSION_SECRET --config workers/ai-proxy/wrangl
 
 These are non-secret Worker variables. The defaults are already in `wrangler.toml`; override them in Cloudflare only when the deployed Worker needs a different value.
 
-| Name                                           | Default                     |
-| ---------------------------------------------- | --------------------------- |
-| `AI_PROXY_PRIVACY_MODE`                        | `strict`                    |
-| `AI_PROXY_GEMINI_PRIVACY_CONFIRMED`            | `true`                      |
-| `AI_PROXY_ALLOW_GEMINI_UNPAID`                 | `false`                     |
-| `AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION` | `false`                     |
-| `CLOUDFLARE_AI_CHAT_MODEL`                     | `@cf/zai-org/glm-4.7-flash` |
-| `CLOUDFLARE_AI_PROVIDER_TIMEOUT_MS`            | `5500`                      |
-| `GEMINI_CHAT_MODEL`                            | `gemini-3.1-flash-lite`     |
-| `AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS`         | `8000`                      |
-| `GROQ_CHAT_MODEL`                              | `llama-3.1-8b-instant`      |
-| `GROQ_PROVIDER_TIMEOUT_MS`                     | `16000`                     |
-| `GROQ_MAX_COMPLETION_TOKENS`                   | `4096`                      |
-| `GROQ_REASONING_EFFORT`                        | `default`                   |
-| `SARVAM_STT_MODEL`                             | `saaras:v3`                 |
-| `SARVAM_STT_MODE`                              | `transcribe`                |
-| `SARVAM_TTS_MODEL`                             | `bulbul:v3`                 |
-| `SARVAM_TTS_SPEAKER`                           | `shubh`                     |
-| `SARVAM_TTS_LANGUAGE`                          | `en-IN`                     |
-| `SARVAM_TTS_CODEC`                             | `mp3`                       |
-| `ELEVENLABS_STT_MODEL`                         | `scribe_v2`                 |
-| `ELEVENLABS_TTS_MODEL`                         | `eleven_flash_v2_5`         |
-| `ELEVENLABS_OUTPUT_FORMAT`                     | `mp3_44100_128`             |
-| `ELEVENLABS_ENABLE_LOGGING`                    | `false`                     |
-| `AI_PROXY_MAX_CHAT_BYTES`                      | `65536`                     |
-| `AI_PROXY_MAX_AUDIO_BYTES`                     | `8388608`                   |
-| `AI_PROXY_MAX_TTS_CHARS`                       | `900`                       |
-| `AI_PROXY_PROVIDER_TIMEOUT_MS`                 | `24000`                     |
-| `AI_PROXY_TTS_ENABLED`                         | `true`                      |
-| `AI_PROXY_ALLOWED_ORIGINS`                     | empty                       |
-| `AI_PROXY_RATE_LIMIT_WINDOW_MS`                | `60000`                     |
-| `AI_PROXY_RATE_LIMIT_MAX`                      | `40`                        |
-| `AI_PROXY_REQUIRE_SESSION_TOKEN`               | `false`                     |
+| Name                                           | Default                               |
+| ---------------------------------------------- | ------------------------------------- |
+| `AI_PROXY_PRIVACY_MODE`                        | `strict`                              |
+| `AI_PROXY_GEMINI_PRIVACY_CONFIRMED`            | `true`                                |
+| `AI_PROXY_ALLOW_GEMINI_UNPAID`                 | `false`                               |
+| `AI_PROXY_ALLOW_VOICE_FALLBACK_WITH_RETENTION` | `false`                               |
+| `CLOUDFLARE_AI_CHAT_MODEL`                     | `@cf/meta/llama-3.1-8b-instruct-fast` |
+| `CLOUDFLARE_AI_PROVIDER_TIMEOUT_MS`            | `3000`                                |
+| `GEMINI_CHAT_MODEL`                            | `gemini-3.1-flash-lite`               |
+| `AI_PROXY_PRIMARY_PROVIDER_TIMEOUT_MS`         | `8000`                                |
+| `GROQ_CHAT_MODEL`                              | `llama-3.1-8b-instant`                |
+| `GROQ_PROVIDER_TIMEOUT_MS`                     | `16000`                               |
+| `GROQ_MAX_COMPLETION_TOKENS`                   | `4096`                                |
+| `GROQ_REASONING_EFFORT`                        | `default`                             |
+| `SARVAM_STT_MODEL`                             | `saaras:v3`                           |
+| `SARVAM_STT_MODE`                              | `transcribe`                          |
+| `SARVAM_TTS_MODEL`                             | `bulbul:v3`                           |
+| `SARVAM_TTS_SPEAKER`                           | `shubh`                               |
+| `SARVAM_TTS_LANGUAGE`                          | `en-IN`                               |
+| `SARVAM_TTS_CODEC`                             | `mp3`                                 |
+| `ELEVENLABS_STT_MODEL`                         | `scribe_v2`                           |
+| `ELEVENLABS_TTS_MODEL`                         | `eleven_flash_v2_5`                   |
+| `ELEVENLABS_OUTPUT_FORMAT`                     | `mp3_44100_128`                       |
+| `ELEVENLABS_ENABLE_LOGGING`                    | `false`                               |
+| `AI_PROXY_MAX_CHAT_BYTES`                      | `65536`                               |
+| `AI_PROXY_MAX_AUDIO_BYTES`                     | `8388608`                             |
+| `AI_PROXY_MAX_TTS_CHARS`                       | `900`                                 |
+| `AI_PROXY_PROVIDER_TIMEOUT_MS`                 | `24000`                               |
+| `AI_PROXY_TTS_ENABLED`                         | `true`                                |
+| `AI_PROXY_ALLOWED_ORIGINS`                     | empty                                 |
+| `AI_PROXY_RATE_LIMIT_WINDOW_MS`                | `60000`                               |
+| `AI_PROXY_RATE_LIMIT_MAX`                      | `40`                                  |
+| `AI_PROXY_REQUIRE_SESSION_TOKEN`               | `false`                               |
 
 `AI_PROXY_ALLOWED_ORIGINS` is only for browser/web clients that send an `Origin` header. Native app requests do not send `Origin`, so this is not a replacement for the planned attestation and rate-limit gate.
 
@@ -97,13 +97,14 @@ credits. Run `npm run invite:setup` with the API Worker's existing `MONGODB_URI`
 `MONGODB_DATABASE` to create the `ai_chat_usage` indexes used by the fallback ledger.
 
 Workers AI is the primary chat provider through the `AI` binding in `wrangler.toml` and uses
-`CLOUDFLARE_AI_CHAT_MODEL` (`@cf/zai-org/glm-4.7-flash` by default). The Workers AI path uses native
-tool calling for first-turn local tool decisions, compact final-answer prompts after tool execution,
-and a hashed `x-session-affinity` value so Cloudflare prefix caching can reuse the static agent/tool
-prefix across a chat session. If Workers AI times out, rate-limits, or is unavailable, the Worker
-falls back to Gemini when `GEMINI_API_KEY` is configured, then to Groq when `GROQ_API_KEY` is
-configured. Streamed agent turns still return SSE to the app; the worker gathers the provider result
-first and then emits the existing `chat_delta`, `tool_request`, and `chat_done` events.
+`CLOUDFLARE_AI_CHAT_MODEL` (`@cf/meta/llama-3.1-8b-instruct-fast` by default). The fast Workers AI
+path uses the existing JSON tool protocol for first-turn local tool decisions, compact final-answer
+prompts after tool execution, and a hashed `x-session-affinity` value so Cloudflare prefix caching
+can reuse the static agent/tool prefix across a chat session. If Workers AI times out, rate-limits,
+or is unavailable, the Worker opens a short in-isolate circuit and falls back to Gemini when
+`GEMINI_API_KEY` is configured, then to Groq when `GROQ_API_KEY` is configured. Streamed agent turns
+still return SSE to the app; the worker gathers the provider result first and then emits the existing
+`chat_delta`, `tool_request`, and `chat_done` events.
 
 ## Local Env
 
