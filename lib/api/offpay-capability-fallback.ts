@@ -36,6 +36,13 @@ export function buildUnavailableCapabilities(
         triggerOrders: status,
         recurringSwap: status,
       },
+      rwa: {
+        assets: status,
+        price: status,
+        devnetSandboxQuote: status,
+        devnetSandboxExecute: status,
+        magicBlockTransfer: status,
+      },
       payment: {
         privateInitMint: status,
         privateBalance: status,

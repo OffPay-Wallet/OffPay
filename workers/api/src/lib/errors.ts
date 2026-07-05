@@ -12,6 +12,7 @@ type ErrorCode =
   | 'INVALID_NONCE'
   | 'INVALID_REQUEST'
   | 'NOT_FOUND'
+  | 'NOT_IMPLEMENTED'
   | 'OUTDATED_APP'
   | 'QUOTE_EXPIRED'
   | 'RATE_LIMITED'

@@ -73,6 +73,12 @@ import type {
   DevnetAirdropRequest,
   DevnetAirdropResponse,
   QueryParams,
+  RwaAssetsResponse,
+  RwaExecuteRequest,
+  RwaExecuteResponse,
+  RwaPriceResponse,
+  RwaQuoteRequest,
+  RwaQuoteResponse,
   RpcAccountsRequest,
   RpcAccountsResponse,
   RpcBroadcastRequest,
@@ -1610,6 +1616,55 @@ export async function getSwapTokens(
     signal: options?.signal,
     headers: await buildOffpayPublicReadHeaders(),
     requestOwner: options?.requestOwner,
+  });
+}
+
+export async function getRwaAssets(
+  network: OffpayNetwork,
+  options?: { signal?: AbortSignal; requestOwner?: string },
+): Promise<RwaAssetsResponse> {
+  return offpayPublicRequest<RwaAssetsResponse>({
+    path: '/api/rwa/assets',
+    query: { network },
+    signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
+  });
+}
+
+export async function getRwaPrice(
+  mint: string,
+  network: OffpayNetwork,
+  options?: { signal?: AbortSignal; requestOwner?: string },
+): Promise<RwaPriceResponse> {
+  return offpayPublicRequest<RwaPriceResponse>({
+    path: '/api/rwa/price',
+    query: { mint, network },
+    signal: options?.signal,
+    headers: await buildOffpayPublicReadHeaders(),
+    requestOwner: options?.requestOwner,
+  });
+}
+
+export function createRwaQuote(
+  request: RwaQuoteRequest,
+  options?: { signal?: AbortSignal },
+): Promise<RwaQuoteResponse> {
+  return offpayApiRequest<RwaQuoteResponse>({
+    path: '/api/rwa/quote',
+    method: 'POST',
+    body: request,
+    network: request.network,
+    signal: options?.signal,
+  });
+}
+
+export function executeRwaQuote(request: RwaExecuteRequest): Promise<RwaExecuteResponse> {
+  return offpayApiRequest<RwaExecuteResponse>({
+    path: '/api/rwa/execute',
+    method: 'POST',
+    body: request,
+    network: request.network,
   });
 }
 

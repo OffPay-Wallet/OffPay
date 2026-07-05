@@ -10,6 +10,11 @@ export type OffpayFeature =
   | 'swap.privacySwap'
   | 'swap.triggerOrders'
   | 'swap.recurringSwap'
+  | 'rwa.assets'
+  | 'rwa.price'
+  | 'rwa.devnetSandboxQuote'
+  | 'rwa.devnetSandboxExecute'
+  | 'rwa.magicBlockTransfer'
   | 'payment.privateInitMint'
   | 'payment.privateBalance'
   | 'payment.privateSend'
@@ -48,6 +53,14 @@ const OFFPAY_FEATURE_SELECTORS: Record<OffpayFeature, CapabilitySelector> = {
   'swap.privacySwap': (capabilities) => capabilities.swap.privacySwap,
   'swap.triggerOrders': (capabilities) => capabilities.swap.triggerOrders,
   'swap.recurringSwap': (capabilities) => capabilities.swap.recurringSwap,
+  'rwa.assets': (capabilities) => capabilities.rwa?.assets ?? CAPABILITY_NOT_IMPLEMENTED,
+  'rwa.price': (capabilities) => capabilities.rwa?.price ?? CAPABILITY_NOT_IMPLEMENTED,
+  'rwa.devnetSandboxQuote': (capabilities) =>
+    capabilities.rwa?.devnetSandboxQuote ?? CAPABILITY_NOT_IMPLEMENTED,
+  'rwa.devnetSandboxExecute': (capabilities) =>
+    capabilities.rwa?.devnetSandboxExecute ?? CAPABILITY_NOT_IMPLEMENTED,
+  'rwa.magicBlockTransfer': (capabilities) =>
+    capabilities.rwa?.magicBlockTransfer ?? CAPABILITY_NOT_IMPLEMENTED,
   'payment.privateInitMint': (capabilities) => capabilities.payment.privateInitMint,
   'payment.privateBalance': (capabilities) => capabilities.payment.privateBalance,
   'payment.privateSend': (capabilities) => capabilities.payment.privateSend,

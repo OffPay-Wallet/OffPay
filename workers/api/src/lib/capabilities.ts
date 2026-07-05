@@ -40,6 +40,13 @@ interface CapabilitiesResponse {
       triggerOrders: CapabilityStatus;
       recurringSwap: CapabilityStatus;
     };
+    rwa: {
+      assets: CapabilityStatus;
+      price: CapabilityStatus;
+      devnetSandboxQuote: CapabilityStatus;
+      devnetSandboxExecute: CapabilityStatus;
+      magicBlockTransfer: CapabilityStatus;
+    };
     payment: {
       privateInitMint: CapabilityStatus;
       privateBalance: CapabilityStatus;
@@ -236,6 +243,27 @@ async function getCapabilities(
           'Recurring swaps are available on mainnet.',
           'Recurring swaps are currently available only on mainnet.',
           'Recurring swaps are not enabled for this deployment.',
+        ),
+      },
+      rwa: {
+        assets:
+          network === 'devnet'
+            ? available('Devnet RWA sandbox assets are available on this network.')
+            : unsupportedNetwork('RWA assets are currently enabled only for the devnet sandbox.'),
+        price:
+          network === 'devnet'
+            ? available('Devnet RWA sandbox pricing is available on this network.')
+            : unsupportedNetwork('RWA pricing is currently enabled only for the devnet sandbox.'),
+        devnetSandboxQuote:
+          network === 'devnet'
+            ? notImplemented('Devnet RWA quote preparation is planned for the next phase.')
+            : unsupportedNetwork('RWA quote preparation is currently enabled only for devnet.'),
+        devnetSandboxExecute:
+          network === 'devnet'
+            ? notImplemented('Devnet RWA execution is planned for the next phase.')
+            : unsupportedNetwork('RWA execution is currently enabled only for devnet.'),
+        magicBlockTransfer: notImplemented(
+          'MagicBlock RWA transfers will be enabled only after devnet escrow compatibility is verified.',
         ),
       },
       payment: {

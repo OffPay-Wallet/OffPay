@@ -41,6 +41,13 @@ export interface CapabilitiesResponse {
       triggerOrders: CapabilityStatus;
       recurringSwap: CapabilityStatus;
     };
+    rwa?: {
+      assets?: CapabilityStatus;
+      price?: CapabilityStatus;
+      devnetSandboxQuote?: CapabilityStatus;
+      devnetSandboxExecute?: CapabilityStatus;
+      magicBlockTransfer?: CapabilityStatus;
+    };
     payment: {
       privateInitMint: CapabilityStatus;
       privateBalance: CapabilityStatus;
@@ -283,6 +290,89 @@ export interface SwapPriceResponse {
   price: number;
   currency: 'USD';
   fetchedAt: number;
+}
+
+export type RwaAssetCategory = 'equity' | 'etf' | 'treasury' | 'commodity';
+export type RwaProvider = 'offpay-devnet';
+export type RwaExecutionMode = 'devnet_sandbox' | 'dex' | 'issuer' | 'disabled';
+export type RwaRiskLevel = 'sandbox' | 'low' | 'medium' | 'high';
+
+export interface RwaExecutionPolicy {
+  buy: RwaExecutionMode;
+  sell: RwaExecutionMode;
+  transfer: RwaExecutionMode;
+  magicBlock: RwaExecutionMode;
+}
+
+export interface RwaAsset {
+  id: string;
+  symbol: string;
+  name: string;
+  mint: string;
+  decimals: number;
+  network: OffpayNetwork;
+  category: RwaAssetCategory;
+  provider: RwaProvider;
+  providerLabel: string;
+  settlementMint: string;
+  settlementSymbol: 'USDC';
+  priceUsd: number;
+  change24hPct: number;
+  verified: boolean;
+  tradable: boolean;
+  devnetSandbox: boolean;
+  magicBlockEligible: boolean;
+  riskLevel: RwaRiskLevel;
+  complianceLabel: string;
+  execution: RwaExecutionPolicy;
+}
+
+export interface RwaAssetsResponse {
+  network: OffpayNetwork;
+  mode: 'devnet_sandbox' | 'mainnet_disabled';
+  assets: RwaAsset[];
+  fetchedAt: number;
+}
+
+export interface RwaPriceResponse {
+  network: OffpayNetwork;
+  mint: string;
+  symbol: string;
+  price: number;
+  currency: 'USD';
+  change24hPct: number;
+  provider: RwaProvider;
+  fetchedAt: number;
+}
+
+export interface RwaQuoteRequest {
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  side: 'buy' | 'sell';
+  network: OffpayNetwork;
+}
+
+export interface RwaQuoteResponse {
+  quoteId: string;
+  inputMint: string;
+  outputMint: string;
+  inAmount: string;
+  outAmount: string;
+  side: 'buy' | 'sell';
+  priceUsd: number;
+  expiresAt: number;
+  unsignedTransaction: string;
+}
+
+export interface RwaExecuteRequest {
+  quoteId: string;
+  signedTransaction: string;
+  network: OffpayNetwork;
+}
+
+export interface RwaExecuteResponse {
+  signature: string;
 }
 
 export interface FxRateResponse {
