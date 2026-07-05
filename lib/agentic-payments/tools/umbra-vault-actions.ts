@@ -60,10 +60,36 @@ function inferVaultOperation(userText: string): AgenticUmbraVaultOperation | nul
   return null;
 }
 
+function latestUserTurn(userText: string): string {
+  const turns = userText
+    .split('\n')
+    .map((turn) => turn.trim())
+    .filter((turn) => turn.length > 0);
+  return turns.at(-1) ?? '';
+}
+
+function isExplicitVaultActionText(text: string): boolean {
+  return (
+    /\b(?:shield|encrypt|deposit|lock|withdraw|unshield|decrypt|release)\b/i.test(text) ||
+    /\b(?:into|to|from|out\s+of)\s+(?:my\s+)?(?:umbra\s+)?vault\b/i.test(text)
+  );
+}
+
+function isPrivateUmbraSendText(text: string): boolean {
+  return (
+    /\b(?:send|transfer|pay|move)\b/i.test(text) &&
+    /\bumbra\b/i.test(text) &&
+    !isExplicitVaultActionText(text)
+  );
+}
+
 function readVaultOperation(
   call: AgentToolCall,
   context: AgenticToolRunnerContext,
 ): AgenticUmbraVaultOperation | null {
+  const latest = latestUserTurn(context.userText);
+  if (isPrivateUmbraSendText(latest)) return null;
+
   const raw = readStringArg(call, 'operation')?.toLowerCase() as VaultOperationArg | undefined;
   if (raw === 'shield') return 'shield';
   if (raw === 'unshield' || raw === 'withdraw') return 'unshield';
@@ -107,6 +133,17 @@ function inferAmountFromText(context: AgenticToolRunnerContext): string {
   return '';
 }
 
+function inferAmountFromLatestUserText(context: AgenticToolRunnerContext): string {
+  const alternation = buildTokenAlternation(context);
+  if (alternation.length === 0) return '';
+  const regex = new RegExp(
+    `(?<![A-Za-z0-9.])(\\d+(?:\\.\\d+)?)\\s*(?:${alternation})(?![A-Za-z0-9])`,
+    'i',
+  );
+  const match = regex.exec(latestUserTurn(context.userText));
+  return match?.[1] ?? '';
+}
+
 function inferTokenFromText(context: AgenticToolRunnerContext): string {
   const alternation = buildTokenAlternation(context);
   if (alternation.length === 0) return '';
@@ -121,6 +158,14 @@ function inferTokenFromText(context: AgenticToolRunnerContext): string {
     if (match?.[1] != null) return match[1];
   }
   return '';
+}
+
+function inferTokenFromLatestUserText(context: AgenticToolRunnerContext): string {
+  const alternation = buildTokenAlternation(context);
+  if (alternation.length === 0) return '';
+  const regex = new RegExp(`(?<![A-Za-z0-9])(${alternation})(?![A-Za-z0-9])`, 'i');
+  const match = regex.exec(latestUserTurn(context.userText));
+  return match?.[1] ?? '';
 }
 
 function getUmbraVaultActionReadiness(
@@ -264,9 +309,13 @@ export const draftUmbraVaultActionTool: AgenticToolDefinition = {
     if (operation == null) return { error: { code: 'operation_missing' } };
 
     const amountText =
-      hydrateStringArg(call, 'amount', context.redactions) || inferAmountFromText(context);
+      inferAmountFromLatestUserText(context) ||
+      hydrateStringArg(call, 'amount', context.redactions) ||
+      inferAmountFromText(context);
     const tokenText =
-      hydrateStringArg(call, 'token', context.redactions) || inferTokenFromText(context);
+      inferTokenFromLatestUserText(context) ||
+      hydrateStringArg(call, 'token', context.redactions) ||
+      inferTokenFromText(context);
     const tokenResolution = resolveVaultToken({ network: scope.network, token: tokenText });
     if (!tokenResolution.ok) return { error: { code: tokenResolution.code } };
     const token = tokenResolution.token;

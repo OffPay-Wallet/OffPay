@@ -63,13 +63,7 @@ export async function handleChat(
     if (body.stream === true || request.headers.get('accept')?.includes('text/event-stream')) {
       return streamAgentTurnResponse(safeBody, env, cors, context, providerOptions);
     }
-    const cacheKey = await chatResponseCacheKey(request, env, mode, safeBody);
-    const cached = await getCachedChatResponse(cacheKey, env, isAgentTurnChatResponse);
-    if (cached != null) {
-      return chatJsonResponse(cached, 200, cors, context.credits);
-    }
     const responseBody = { turn: await generateAgentTurn(safeBody, env, providerOptions) };
-    await setCachedChatResponse(cacheKey, env, responseBody);
     return chatJsonResponse(responseBody, 200, cors, context.credits);
   }
 
@@ -94,7 +88,7 @@ export async function handleChat(
 async function chatResponseCacheKey(
   request: Request,
   env: AiProxyEnv,
-  mode: 'intent_json' | 'agent_turn',
+  mode: 'intent_json',
   body: AgentChatRequest,
 ): Promise<string | null> {
   const turnId = request.headers.get('x-offpay-ai-turn-id')?.trim() ?? '';
@@ -148,15 +142,6 @@ function isIntentChatResponse(value: unknown): value is { intent: AgentIntentRes
     value != null &&
     'intent' in value &&
     typeof (value as { intent?: unknown }).intent === 'object'
-  );
-}
-
-function isAgentTurnChatResponse(value: unknown): value is { turn: AgentTurn } {
-  return (
-    typeof value === 'object' &&
-    value != null &&
-    'turn' in value &&
-    typeof (value as { turn?: unknown }).turn === 'object'
   );
 }
 

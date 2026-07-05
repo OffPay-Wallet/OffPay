@@ -143,6 +143,17 @@ function inferTokenFromRecentUserText(
   return null;
 }
 
+function inferTokenFromLatestUserText(
+  context: AgenticToolRunnerContext,
+  route: AgenticTransferRoute,
+): string | null {
+  const tokenRegex = buildTokenRegex(context, route);
+  if (tokenRegex == null) return null;
+
+  const match = tokenRegex.exec(latestUserTurn(context.userText));
+  return match?.[1] ?? null;
+}
+
 function inferAmountFromRecentUserText(params: {
   context: AgenticToolRunnerContext;
   route: AgenticTransferRoute;
@@ -167,6 +178,21 @@ function inferAmountFromRecentUserText(params: {
   }
 
   return null;
+}
+
+function inferAmountFromLatestUserText(params: {
+  context: AgenticToolRunnerContext;
+  route: AgenticTransferRoute;
+}): string | null {
+  const tokenAlternation = buildRecoverableTokenAlternation(params.context, params.route);
+  if (tokenAlternation == null) return null;
+  const amountTokenRegex = new RegExp(
+    `(?<![A-Za-z0-9.])(\\d+(?:\\.\\d+)?)\\s*(?:${tokenAlternation})(?![A-Za-z0-9])`,
+    'i',
+  );
+
+  const match = amountTokenRegex.exec(latestUserTurn(params.context.userText));
+  return match?.[1] ?? null;
 }
 
 function readPaymentRoute(
@@ -270,10 +296,12 @@ export async function buildPaymentDraft(
   }
 
   const amount =
+    inferAmountFromLatestUserText({ context, route }) ||
     hydrateStringArg(call, 'amount', context.redactions) ||
     inferAmountFromRecentUserText({ context, route }) ||
     '';
   const token =
+    inferTokenFromLatestUserText(context, route) ||
     hydrateStringArg(call, 'token', context.redactions) ||
     inferTokenFromRecentUserText(context, route) ||
     '';

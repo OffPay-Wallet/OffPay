@@ -211,6 +211,8 @@ describe('Gemini tool declaration normalization', () => {
     expect(providerBody).not.toHaveProperty('response_format');
     expect(providerBody).not.toHaveProperty('chat_template_kwargs');
     expect(JSON.stringify(providerBody)).toContain('Available local tools');
+    expect(JSON.stringify(providerBody)).toContain('Latest user message, authoritative');
+    expect(JSON.stringify(providerBody)).toContain('latest values must override earlier drafts');
     expect(aiRun.mock.calls[0][2]).toEqual({
       extraHeaders: {
         'x-session-affinity': 'offpay-test-session',

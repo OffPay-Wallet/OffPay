@@ -262,6 +262,9 @@ function buildJsonAgentTurnPrompt(body: AgentChatRequest): string {
       18_000,
     ),
     '',
+    'Latest user message, authoritative for this turn:',
+    latestUserMessageContent(body) || '(none)',
+    '',
     'Conversation:',
     safeJson(buildJsonProtocolConversationTrace(body), 18_000),
     '',
@@ -269,7 +272,13 @@ function buildJsonAgentTurnPrompt(body: AgentChatRequest): string {
     'For a final answer, return {"kind":"agent_text","text":"short answer"}.',
     'To call tools, return {"kind":"agent_tool_calls","toolCalls":[{"name":"tool_name","args":{}}]}.',
     'Use only tool names from Available local tools. Do not include private wallet data.',
+    'If the latest user message has an explicit amount/token/route/action, those latest values must override earlier drafts in Conversation.',
   ].join('\n');
+}
+
+function latestUserMessageContent(body: AgentChatRequest): string {
+  const latest = [...body.messages].reverse().find((message) => message.role === 'user');
+  return latest?.content.trim().slice(0, 4000) ?? '';
 }
 
 function toolMetadataForPrompt(schema: AgentToolSchema): Record<string, unknown> | undefined {

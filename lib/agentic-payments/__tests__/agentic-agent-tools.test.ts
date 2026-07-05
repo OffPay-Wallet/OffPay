@@ -813,6 +813,105 @@ describe('runAgenticTools', () => {
     });
   });
 
+  it('uses the latest explicit amount over stale Umbra vault tool args', async () => {
+    const highBalance: WalletBalanceResponse = {
+      ...balance,
+      tokens: balance.tokens.map((token) => ({ ...token, balance: '100' })),
+    };
+
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-vault-stale-amount',
+          name: 'draft_umbra_vault_action',
+          args: { operation: 'shield', amount: '10', token: 'USDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        balance: highBalance,
+        walletId: 'wallet-1',
+        userText: ['shield 10 USDC into my Umbra vault', 'shield 25 USDC into my Umbra vault'].join(
+          '\n',
+        ),
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'umbra_vault',
+      draft: {
+        operation: 'shield',
+        amount: '25',
+        rawAmount: '25000000',
+      },
+    });
+  });
+
+  it('rejects stale Umbra vault tool calls when the latest request is an Umbra send', async () => {
+    const highBalance: WalletBalanceResponse = {
+      ...balance,
+      tokens: balance.tokens.map((token) => ({ ...token, balance: '100' })),
+    };
+
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-vault-stale-route',
+          name: 'draft_umbra_vault_action',
+          args: { operation: 'shield', amount: '10', token: 'USDC' },
+        },
+      ],
+      {
+        ...baseContext,
+        balance: highBalance,
+        walletId: 'wallet-1',
+        userText: ['shield 10 USDC into my Umbra vault', 'Send 25 USDC using Umbra'].join('\n'),
+      },
+    );
+
+    expect(run.drafts).toHaveLength(0);
+    expect(run.results[0].error?.code).toBe('operation_missing');
+  });
+
+  it('uses the latest explicit amount over stale Umbra private-send tool args', async () => {
+    const highBalance: WalletBalanceResponse = {
+      ...balance,
+      tokens: balance.tokens.map((token) => ({ ...token, balance: '100' })),
+    };
+
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-umbra-stale-amount',
+          name: 'draft_private_send',
+          args: { amount: '10', token: 'dUSDC', recipient: 'Karan', route: 'umbra' },
+        },
+      ],
+      {
+        ...baseContext,
+        balance: highBalance,
+        knownWallets: [
+          ...baseContext.knownWallets,
+          { name: 'Karan', address: contactRecipient, active: false },
+        ],
+        userText: ['send 10 dUSDC to Karan using Umbra', 'send 25 dUSDC to Karan using Umbra'].join(
+          '\n',
+        ),
+      },
+    );
+
+    expect(run.results[0].error).toBeUndefined();
+    expect(run.drafts[0]).toMatchObject({
+      route: 'umbra',
+      draft: {
+        recipient: contactRecipient,
+        amount: '25',
+        rawAmount: '25000000',
+      },
+    });
+  });
+
   it('builds an Umbra withdraw draft from cached vault balance', async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(

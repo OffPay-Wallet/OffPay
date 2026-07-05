@@ -9,7 +9,7 @@ describe('AI chat response cache', () => {
     jest.restoreAllMocks();
   });
 
-  it('reuses a cached agent turn for duplicate turn retries', async () => {
+  it('does not cache agent turns because they can carry executable tool state', async () => {
     const kvStore = new Map<string, string>();
     let providerCalls = 0;
     jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init): Promise<Response> => {
@@ -99,6 +99,6 @@ describe('AI chat response cache', () => {
     expect(await second.json()).toMatchObject({
       turn: { kind: 'agent_text', text: 'Cached answer.' },
     });
-    expect(providerCalls).toBe(1);
+    expect(providerCalls).toBe(2);
   });
 });
