@@ -105,10 +105,18 @@ The Devnet faucet is backend-gated to one claim per authenticated wallet every 4
 - `dUSDT`: 100 tokens on mint `DXQwBNGgyQ2BzGWxEriJPVmXYFQBsQbXvfvfSNTaJkL6`
 - `USDC`: 5 tokens on `OFFPAY_DEVNET_USDC_MINT`, defaulting to
   `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+- `RWAUSDC`: 1,000 tokens on `OFFPAY_RWA_DEVNET_SETTLEMENT_MINT` when configured
+- `AAPLd`: 10 sandbox RWA tokens on `OFFPAY_RWA_DEVNET_SANDBOX_MINT` when configured
 
-Fund the treasury wallet's associated token accounts for those three mints. The treasury also pays
-the 0.25 SOL transfer, transaction fees, and recipient associated-token-account rent when a wallet
-does not already have those token accounts.
+Fund the treasury wallet's associated token accounts for the configured mints. The treasury also
+pays the 0.25 SOL transfer, transaction fees, and recipient associated-token-account rent when a
+wallet does not already have those token accounts. For direct devnet RWA workflow testing from the
+sandbox mint authority, top up a wallet with:
+
+```sh
+npm run program:rwa:sandbox:fund-wallet:devnet -- --wallet <DEVNET_WALLET>
+npm run program:rwa:sandbox:verify-workflow:devnet
+```
 
 `workers/api/.dev.vars` is ignored by git. Use `workers/api/.dev.vars.example` as the local template.
 

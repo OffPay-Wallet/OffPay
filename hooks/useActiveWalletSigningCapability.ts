@@ -1,9 +1,5 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo } from 'react';
 
-import {
-  getExternalWalletSigningSnapshot,
-  subscribeExternalWalletSigners,
-} from '@/lib/wallet/external-wallet-signing';
 import { getWalletSigningBlocker, walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -53,11 +49,6 @@ export function useActiveWalletSigningCapability(): {
 } {
   const importMethod = useWalletStore(selectActiveWalletImportMethod);
   const walletAddress = useWalletStore(selectActiveWalletAddress);
-  const signingSnapshot = useSyncExternalStore(
-    subscribeExternalWalletSigners,
-    getExternalWalletSigningSnapshot,
-    getExternalWalletSigningSnapshot,
-  );
 
   return useMemo(
     () => ({
@@ -66,6 +57,6 @@ export function useActiveWalletSigningCapability(): {
       canSignWithApp: walletCanSignWithApp({ importMethod, walletAddress }),
       signingBlocker: getWalletSigningBlocker(importMethod, 'This action', walletAddress),
     }),
-    [importMethod, signingSnapshot, walletAddress],
+    [importMethod, walletAddress],
   );
 }

@@ -33,8 +33,13 @@
     "verify:hardening": "node scripts/verify-client-hardening.js",
     "program:rwa:keys:sync": "anchor keys sync",
     "program:rwa:build": "anchor build --program-name offpay_rwa_delegate",
-    "program:rwa:deploy:devnet": "anchor deploy --program-name offpay_rwa_delegate --provider.cluster devnet",
-    "program:rwa:show:devnet": "solana program show 4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7 --url devnet"
+    "program:rwa:deploy:devnet": "PROGRAM_LEN=$(wc -c < target/deploy/offpay_rwa_delegate.so) && solana program deploy target/deploy/offpay_rwa_delegate.so --program-id target/deploy/offpay_rwa_delegate-keypair.json --max-len \"$PROGRAM_LEN\" --url https://api.devnet.solana.com --use-tpu-client --with-compute-unit-price 50000 --max-sign-attempts 100",
+    "program:rwa:deploy:devnet:rpc": ": \"${SOLANA_DEVNET_RPC_URL:?Set SOLANA_DEVNET_RPC_URL to a stake-weighted devnet RPC URL}\" && PROGRAM_LEN=$(wc -c < target/deploy/offpay_rwa_delegate.so) && solana program deploy target/deploy/offpay_rwa_delegate.so --program-id target/deploy/offpay_rwa_delegate-keypair.json --max-len \"$PROGRAM_LEN\" --url \"$SOLANA_DEVNET_RPC_URL\" --use-rpc --with-compute-unit-price 50000 --max-sign-attempts 100",
+    "program:rwa:buffers:close:devnet": "solana program close --buffers --recipient $(solana address) --url https://api.devnet.solana.com",
+    "program:rwa:show:devnet": "solana program show 4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7 --url devnet",
+    "program:rwa:sandbox:init:devnet": "node scripts/setup-rwa-devnet-sandbox.mjs",
+    "program:rwa:sandbox:fund-wallet:devnet": "node scripts/fund-rwa-devnet-wallet.mjs",
+    "program:rwa:sandbox:verify-workflow:devnet": "node scripts/verify-rwa-devnet-workflow.mjs"
   },
   "dependencies": {
     "@bonfida/spl-name-service": "^3.0.21",

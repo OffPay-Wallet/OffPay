@@ -154,6 +154,14 @@ function hasConfiguredSolanaAddress(bindings: Bindings, key: keyof Bindings): bo
   return typeof value === 'string' && isValidSolanaAddress(value.trim());
 }
 
+function hasConfiguredRwaDevnetSandbox(bindings: Bindings): boolean {
+  return (
+    hasConfiguredSolanaAddress(bindings, 'OFFPAY_RWA_DELEGATE_PROGRAM_ID') &&
+    hasTruthyBinding(bindings, 'OFFPAY_RWA_DELEGATE_DEVNET_ENABLED') &&
+    hasConfiguredSolanaAddress(bindings, 'OFFPAY_RWA_DEVNET_SANDBOX_MINT')
+  );
+}
+
 function hasWalletRpcNetworkConfig(bindings: Bindings, network: Network): boolean {
   return hasConfiguredRpcHttp(bindings, network);
 }
@@ -229,6 +237,7 @@ async function getCapabilities(
     'OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST',
   );
   const rwaMainnetEnabled = hasTruthyBinding(bindings, 'OFFPAY_RWA_MAINNET_ENABLED');
+  const rwaDevnetSandboxConfigured = hasConfiguredRwaDevnetSandbox(bindings);
   const magicBlockConfigured = hasMagicBlockNetworkConfig(bindings, network);
   const rwaDelegateProgramConfigured = hasConfiguredSolanaAddress(
     bindings,
@@ -313,34 +322,50 @@ async function getCapabilities(
         ),
       },
       rwa: {
-        assets: buildMainnetOnlyCapability(
-          network,
-          jupiterConfigured && rwaAllowlistConfigured,
-          'Jupiter verified stocks catalog is available on mainnet.',
-          'Real RWA secondary-market catalog is currently available only on mainnet.',
-          'RWA catalog requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
-        ),
-        price: buildMainnetOnlyCapability(
-          network,
-          jupiterConfigured && rwaAllowlistConfigured,
-          'Jupiter RWA pricing is available on mainnet.',
-          'Real RWA pricing is currently available only on mainnet.',
-          'RWA pricing requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
-        ),
-        quote: buildMainnetOnlyCapability(
-          network,
-          jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled,
-          'Jupiter RWA secondary-market quote creation is enabled on mainnet.',
-          'RWA secondary-market quotes are currently available only on mainnet.',
-          'RWA quote creation requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, and OFFPAY_RWA_MAINNET_ENABLED=1.',
-        ),
-        execute: buildMainnetOnlyCapability(
-          network,
-          jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled && walletRpcConfigured,
-          'Signed Jupiter RWA swap transactions can be submitted on mainnet.',
-          'RWA secondary-market execution is currently available only on mainnet.',
-          'RWA execution requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, OFFPAY_RWA_MAINNET_ENABLED=1, and mainnet RPC configuration.',
-        ),
+        assets: network === 'devnet'
+          ? jupiterConfigured && rwaDevnetSandboxConfigured
+            ? available('Devnet RWA sandbox catalog is available with live Jupiter reference pricing.')
+            : notImplemented('Devnet RWA sandbox requires JUPITER_API_KEY, OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_DEVNET_ENABLED=1, and OFFPAY_RWA_DEVNET_SANDBOX_MINT.')
+          : buildMainnetOnlyCapability(
+            network,
+            jupiterConfigured && rwaAllowlistConfigured,
+            'Jupiter verified stocks catalog is available on mainnet.',
+            'Real RWA secondary-market catalog is currently available only on mainnet.',
+            'RWA catalog requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
+          ),
+        price: network === 'devnet'
+          ? jupiterConfigured && rwaDevnetSandboxConfigured
+            ? available('Devnet RWA sandbox pricing uses the configured live Jupiter stock reference mint.')
+            : notImplemented('Devnet RWA sandbox pricing requires JUPITER_API_KEY and OFFPAY_RWA_DEVNET_SANDBOX_MINT.')
+          : buildMainnetOnlyCapability(
+            network,
+            jupiterConfigured && rwaAllowlistConfigured,
+            'Jupiter RWA pricing is available on mainnet.',
+            'Real RWA pricing is currently available only on mainnet.',
+            'RWA pricing requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
+          ),
+        quote: network === 'devnet'
+          ? jupiterConfigured && rwaDevnetSandboxConfigured && walletRpcConfigured
+            ? available('Devnet RWA sandbox quote creation builds wallet-signed delegate-program settlement transactions.')
+            : notImplemented('Devnet RWA sandbox quotes require JUPITER_API_KEY, delegate program config, sandbox mint config, and devnet RPC configuration.')
+          : buildMainnetOnlyCapability(
+            network,
+            jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled,
+            'Jupiter RWA secondary-market quote creation is enabled on mainnet.',
+            'RWA secondary-market quotes are currently available only on mainnet.',
+            'RWA quote creation requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, and OFFPAY_RWA_MAINNET_ENABLED=1.',
+          ),
+        execute: network === 'devnet'
+          ? rwaDevnetSandboxConfigured && walletRpcConfigured
+            ? available('Signed devnet RWA sandbox settlement transactions can be submitted on-chain.')
+            : notImplemented('Devnet RWA sandbox execution requires delegate program config, sandbox mint config, and devnet RPC configuration.')
+          : buildMainnetOnlyCapability(
+            network,
+            jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled && walletRpcConfigured,
+            'Signed Jupiter RWA swap transactions can be submitted on mainnet.',
+            'RWA secondary-market execution is currently available only on mainnet.',
+            'RWA execution requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, OFFPAY_RWA_MAINNET_ENABLED=1, and mainnet RPC configuration.',
+          ),
         magicBlockIntent: buildRwaMagicBlockIntentCapability(network, rwaDelegateConfigured),
         magicBlockTransfer: notImplemented(
           'Direct MagicBlock RWA token transfers remain disabled; ER is only used for OffPay-owned delegated intent accounts, while Jupiter and Token-2022 settlement stay on base Solana.',

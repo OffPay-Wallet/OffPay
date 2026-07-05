@@ -294,10 +294,10 @@ export interface SwapPriceResponse {
 }
 
 export type RwaAssetCategory = 'equity' | 'etf' | 'treasury' | 'commodity' | 'unknown';
-export type RwaProvider = 'jupiter_stocks';
-export type RwaProviderEnvironment = 'production';
-export type RwaExecutionMode = 'jupiter_swap' | 'issuer' | 'disabled';
-export type RwaRiskLevel = 'regulated' | 'high';
+export type RwaProvider = 'jupiter_stocks' | 'offpay_devnet_sandbox';
+export type RwaProviderEnvironment = 'production' | 'devnet_sandbox';
+export type RwaExecutionMode = 'jupiter_swap' | 'devnet_sandbox' | 'issuer' | 'disabled';
+export type RwaRiskLevel = 'sandbox' | 'regulated' | 'high';
 
 export interface RwaExecutionPolicy {
   buy: RwaExecutionMode;
@@ -335,7 +335,7 @@ export interface RwaAsset {
 
 export interface RwaAssetsResponse {
   network: OffpayNetwork;
-  mode: 'jupiter_stocks' | 'devnet_unavailable';
+  mode: 'jupiter_stocks' | 'devnet_sandbox' | 'devnet_unavailable';
   provider: RwaProvider;
   providerEnvironment: RwaProviderEnvironment;
   assets: RwaAsset[];
@@ -381,7 +381,14 @@ export interface RwaQuoteResponse {
   provider: RwaProvider;
   providerEnvironment: RwaProviderEnvironment;
   unsignedTransaction: string;
-  transactionFormat: 'solana_versioned_transaction_base64';
+  transactionFormat: 'solana_legacy_transaction_base64' | 'solana_versioned_transaction_base64';
+  sandboxIntent?: {
+    programId: string;
+    intent: string;
+    market: string;
+    nonce: string;
+    quoteHash: string;
+  };
 }
 
 export interface RwaExecuteRequest {
@@ -703,7 +710,7 @@ export interface DevnetAirdropResponse {
   lamports: string;
   sol: number;
   tokens: Array<{
-    symbol: 'dUSDC' | 'dUSDT' | 'USDC';
+    symbol: 'dUSDC' | 'dUSDT' | 'USDC' | 'AAPLd' | 'RWAUSDC';
     name: string;
     mint: string;
     decimals: number;

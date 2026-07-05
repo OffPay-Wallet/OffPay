@@ -8,6 +8,8 @@ import { resetHeliusFetchImplementation, setHeliusFetchImplementation } from '..
 import type { Bindings } from '../types';
 
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const RWA_ASSET_MINT = 'CrieBJEXarFm2C7vgPJs9v7M9PLuHV6axkNWhjUTwKZq';
+const RWA_SETTLEMENT_MINT = 'GN2nuuhUG2PnG6RsdGEcucuu1Ev2HRaacmrprVWBmKdE';
 
 const faucetKeypair = Keypair.fromSeed(new Uint8Array(32).fill(7));
 const recipientKeypair = Keypair.fromSeed(new Uint8Array(32).fill(9));
@@ -98,6 +100,90 @@ describe('requestDevnetTreasuryAirdrop', () => {
     globalThis.fetch = originalFetch;
     resetHeliusFetchImplementation();
     jest.restoreAllMocks();
+  });
+
+  it('includes configured RWA sandbox tokens in the treasury top-up', async () => {
+    setHeliusFetchImplementation(
+      jest.fn(async (_input: string, init: RequestInit) => {
+        const request = JSON.parse(String(init.body)) as {
+          id: unknown;
+          method: string;
+          params: unknown[];
+        };
+
+        if (request.method === 'getBalance') {
+          return jsonRpcResponse(request.id, { value: 10_000_000_000 });
+        }
+
+        if (request.method === 'getMultipleAccounts') {
+          const addresses = Array.isArray(request.params[0]) ? (request.params[0] as string[]) : [];
+          return jsonRpcResponse(request.id, {
+            value: addresses.map((_, index) =>
+              index % 2 === 0
+                ? {
+                    data: [tokenAccountDataBase64(2_000_000_000n), 'base64'],
+                    executable: false,
+                    lamports: 2_039_280,
+                    owner: TOKEN_PROGRAM_ID,
+                    rentEpoch: 0,
+                  }
+                : null,
+            ),
+          });
+        }
+
+        if (request.method === 'getMinimumBalanceForRentExemption') {
+          return jsonRpcResponse(request.id, 2_039_280);
+        }
+
+        if (request.method === 'getLatestBlockhash') {
+          return jsonRpcResponse(request.id, {
+            value: {
+              blockhash: '11111111111111111111111111111111',
+              lastValidBlockHeight: 1_000,
+            },
+          });
+        }
+
+        if (request.method === 'sendTransaction') {
+          return jsonRpcResponse(
+            request.id,
+            '2UV7CJH8ocFrkEQe8yRE2PW8ckZjsJdKqeGhBmjowwkgTKRJuRvy58aZnqQq9QfF87hbHDLpKfJ9kvCYXx1ji5a1',
+          );
+        }
+
+        throw new Error(`Unexpected RPC method ${request.method}`);
+      }),
+    );
+
+    const result = await requestDevnetTreasuryAirdrop(
+      {
+        ...bindings,
+        OFFPAY_RWA_DEVNET_SANDBOX_MINT: RWA_ASSET_MINT,
+        OFFPAY_RWA_DEVNET_SETTLEMENT_MINT: RWA_SETTLEMENT_MINT,
+      },
+      {
+        walletAddress: recipientKeypair.publicKey.toBase58(),
+      },
+    );
+
+    expect(result.tokens.map((token) => token.symbol)).toEqual([
+      'dUSDC',
+      'dUSDT',
+      'USDC',
+      'RWAUSDC',
+      'AAPLd',
+    ]);
+    expect(result.tokens.find((token) => token.symbol === 'RWAUSDC')).toMatchObject({
+      mint: RWA_SETTLEMENT_MINT,
+      amount: 1_000,
+      capAmount: 1_000,
+    });
+    expect(result.tokens.find((token) => token.symbol === 'AAPLd')).toMatchObject({
+      mint: RWA_ASSET_MINT,
+      amount: 10,
+      capAmount: 10,
+    });
   });
 
   it('releases the faucet cooldown when transaction broadcast fails', async () => {

@@ -51,6 +51,8 @@ const RWA_CONTENT_MAX_WIDTH = 560;
 const RWA_CASH_AMOUNT_MAX_LENGTH = 48;
 const RWA_CASH_AMOUNT_DECIMALS = 12;
 
+type RwaTradeSide = 'buy' | 'sell';
+
 const RWA_CATEGORY_LABELS: Record<RwaAsset['category'], string> = {
   equity: 'Equity',
   etf: 'ETF',
@@ -87,7 +89,8 @@ interface ParsedRwaCashAmount {
 
 interface RwaQuoteMutationInput {
   asset: RwaAsset;
-  cashAmount: string;
+  side: RwaTradeSide;
+  inputAmount: string;
   network: OffpayNetwork;
   walletAddress: string;
   walletId: string | null;
@@ -95,7 +98,8 @@ interface RwaQuoteMutationInput {
 
 interface RwaQuoteReviewState {
   asset: RwaAsset;
-  cashAmount: string;
+  side: RwaTradeSide;
+  inputAmount: string;
   quote: RwaQuoteResponse;
   network: OffpayNetwork;
   walletAddress: string;
@@ -114,12 +118,13 @@ interface RwaBuyExecutionResult {
 interface RwaLastExecution {
   assetId: string;
   symbol: string;
-  cashAmount: string;
+  side: RwaTradeSide;
+  amount: string;
   signature: string;
   submittedAt: number;
 }
 
-function sanitizeCashAmountInput(value: string): string {
+function sanitizeTradeAmountInput(value: string): string {
   const normalized = value.replace(/,/g, '.').replace(/[^\d.]/g, '');
   const [whole = '', ...fractionParts] = normalized.split('.');
   const fraction = fractionParts.join('').slice(0, RWA_CASH_AMOUNT_DECIMALS);
@@ -127,21 +132,21 @@ function sanitizeCashAmountInput(value: string): string {
   return candidate.slice(0, RWA_CASH_AMOUNT_MAX_LENGTH);
 }
 
-function parseRwaCashAmount(input: string): ParsedRwaCashAmount {
+function parseRwaTradeAmount(input: string, label: string): ParsedRwaCashAmount {
   const trimmed = input.trim();
   if (trimmed.length === 0) return { amount: null, message: null };
   if (trimmed.length > RWA_CASH_AMOUNT_MAX_LENGTH) {
     return { amount: null, message: 'Amount is too long.' };
   }
   if (!/^\d+(?:\.\d{1,12})?$/.test(trimmed)) {
-    return { amount: null, message: 'Enter a positive USDC amount.' };
+    return { amount: null, message: `Enter a positive ${label}.` };
   }
 
   const [whole, fraction] = trimmed.split('.');
   const nonZeroWhole = whole.replace(/^0+/, '');
   const hasNonZeroFraction = fraction != null && /[1-9]/.test(fraction);
   if (nonZeroWhole.length === 0 && !hasNonZeroFraction) {
-    return { amount: null, message: 'Enter a positive USDC amount.' };
+    return { amount: null, message: `Enter a positive ${label}.` };
   }
 
   const normalizedWhole = whole.replace(/^0+(?=\d)/, '') || '0';
@@ -216,8 +221,16 @@ function RwaQuoteReviewPanel({
   onCancel: () => void;
   onConfirm: () => void;
 }): React.JSX.Element {
-  const payAmount = review.quote.cashAmount ?? review.cashAmount;
-  const receiveAmount = review.quote.quantity ?? '—';
+  const payAmount =
+    review.side === 'buy'
+      ? review.quote.cashAmount ?? review.inputAmount
+      : review.quote.quantity ?? review.inputAmount;
+  const paySymbol =
+    review.side === 'buy' ? review.asset.settlementSymbol : review.asset.symbol;
+  const receiveAmount =
+    review.side === 'buy' ? review.quote.quantity ?? '—' : review.quote.cashAmount ?? '—';
+  const receiveSymbol =
+    review.side === 'buy' ? review.asset.symbol : review.asset.settlementSymbol;
 
   return (
     <View style={styles.reviewPanel}>
@@ -227,7 +240,7 @@ function RwaQuoteReviewPanel({
             Review order
           </Text>
           <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
-            {review.asset.symbol} · {review.network}
+            {review.side === 'buy' ? 'Buy' : 'Sell'} {review.asset.symbol} · {review.network}
           </Text>
         </View>
         <View style={styles.reviewIcon}>
@@ -236,8 +249,8 @@ function RwaQuoteReviewPanel({
       </View>
 
       <View style={styles.reviewDetailList}>
-        <ReviewDetailRow label="Pay" value={`${payAmount} ${review.asset.settlementSymbol}`} />
-        <ReviewDetailRow label="Receive" value={`${receiveAmount} ${review.asset.symbol}`} />
+        <ReviewDetailRow label="Pay" value={`${payAmount} ${paySymbol}`} />
+        <ReviewDetailRow label="Receive" value={`${receiveAmount} ${receiveSymbol}`} />
         <ReviewDetailRow label="Route" value={review.quote.routeSummary} />
         <ReviewDetailRow label="Impact" value={formatPercent(review.quote.priceImpactPct)} />
         <ReviewDetailRow label="Expires" value={formatQuoteExpiry(review.quote.expiresAt)} />
@@ -284,21 +297,30 @@ function RwaAssetRow({
   asset,
   dense,
   buyDisabledReason,
+  sellDisabledReason,
   isBuyPending,
+  isSellPending,
   lastExecution,
   onBuy,
+  onSell,
 }: {
   asset: RwaAsset;
   dense: boolean;
   buyDisabledReason: string | null;
+  sellDisabledReason: string | null;
   isBuyPending: boolean;
+  isSellPending: boolean;
   lastExecution: RwaLastExecution | null;
   onBuy: (asset: RwaAsset) => void;
+  onSell: (asset: RwaAsset) => void;
 }): React.JSX.Element {
   const positive = asset.change24hPct == null || asset.change24hPct >= 0;
   const tokenProgramLabel = asset.tokenProgramId?.includes('TokenzQd') ? 'Token-2022' : 'SPL';
+  const executionLabel = asset.devnetSandbox ? 'Devnet vault' : asset.tradable ? 'Jupiter' : 'Read only';
   const canBuy = buyDisabledReason == null && !isBuyPending;
+  const canSell = sellDisabledReason == null && !isSellPending;
   const showActiveBuyButton = canBuy || isBuyPending;
+  const showActiveSellButton = canSell || isSellPending;
 
   return (
     <View style={[styles.assetCard, dense && styles.assetCardDense]}>
@@ -353,7 +375,7 @@ function RwaAssetRow({
         <View style={styles.metaPill}>
           <Ionicons name="shield-checkmark-outline" size={14} color={colors.text.secondary} />
           <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-            {asset.tradable ? 'Jupiter' : 'Read only'}
+            {executionLabel}
           </Text>
         </View>
         {asset.tokenProgramId != null ? (
@@ -417,13 +439,36 @@ function RwaAssetRow({
             color={showActiveBuyButton ? colors.text.onAccent : colors.text.tertiary}
             style={styles.actionLabel}
           >
-            {isBuyPending ? 'Quoting' : 'Review'}
+            {isBuyPending ? 'Quoting' : 'Buy'}
           </Text>
         </Pressable>
-        <Pressable disabled style={[styles.actionButton, styles.actionButtonDisabled]}>
-          <Ionicons name="flash-outline" size={16} color={colors.text.tertiary} />
-          <Text variant="caption" color={colors.text.tertiary} style={styles.actionLabel}>
-            MagicBlock
+        <Pressable
+          disabled={!canSell}
+          onPress={() => onSell(asset)}
+          style={({ pressed }) => [
+            styles.actionButton,
+            showActiveSellButton ? styles.actionButtonSecondary : styles.actionButtonDisabled,
+            pressed && canSell ? styles.actionButtonPressed : null,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`Sell ${asset.symbol}`}
+          accessibilityHint={sellDisabledReason ?? undefined}
+        >
+          {isSellPending ? (
+            <ActivityIndicator size="small" color={colors.text.secondary} />
+          ) : (
+            <Ionicons
+              name="cash-outline"
+              size={16}
+              color={showActiveSellButton ? colors.text.secondary : colors.text.tertiary}
+            />
+          )}
+          <Text
+            variant="caption"
+            color={showActiveSellButton ? colors.text.secondary : colors.text.tertiary}
+            style={styles.actionLabel}
+          >
+            {isSellPending ? 'Quoting' : 'Sell'}
           </Text>
         </Pressable>
       </View>
@@ -445,6 +490,7 @@ export default function RwasScreen(): React.JSX.Element {
   const activeWalletId = useWalletStore((state) => state.activeWalletId);
   const { walletAddress, canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const [cashAmountInput, setCashAmountInput] = useState('');
+  const [tradeSide, setTradeSide] = useState<RwaTradeSide>('buy');
   const [lastExecution, setLastExecution] = useState<RwaLastExecution | null>(null);
   const [reviewQuote, setReviewQuote] = useState<RwaQuoteReviewState | null>(null);
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
@@ -454,7 +500,11 @@ export default function RwasScreen(): React.JSX.Element {
   const executeCapability = getOffpayFeatureCapability(capabilities, 'rwa.execute');
   const canLoadAssets =
     network != null && canUseNetwork && isOffpayFeatureAvailable(capabilities, 'rwa.assets');
-  const cashAmountState = useMemo(() => parseRwaCashAmount(cashAmountInput), [cashAmountInput]);
+  const tradeAmountLabel = tradeSide === 'buy' ? 'USDC amount' : 'quantity';
+  const cashAmountState = useMemo(
+    () => parseRwaTradeAmount(cashAmountInput, tradeAmountLabel),
+    [cashAmountInput, tradeAmountLabel],
+  );
 
   const assetsQuery = useQuery({
     queryKey: rwaAssetsQueryKey(network),
@@ -475,11 +525,12 @@ export default function RwasScreen(): React.JSX.Element {
   });
 
   const rwaQuoteMutation = useMutation<RwaQuoteReviewState, unknown, RwaQuoteMutationInput>({
-    mutationFn: async ({ asset, cashAmount, network: quoteNetwork, walletAddress, walletId }) => {
+    mutationFn: async ({ asset, side, inputAmount, network: quoteNetwork, walletAddress, walletId }) => {
       const quote = await createRwaQuote({
         assetMint: asset.mint,
-        cashAmount,
-        side: 'buy',
+        cashAmount: side === 'buy' ? inputAmount : undefined,
+        quantity: side === 'sell' ? inputAmount : undefined,
+        side,
         network: quoteNetwork,
       });
       if (quote.unsignedTransaction.trim().length === 0) {
@@ -488,7 +539,8 @@ export default function RwasScreen(): React.JSX.Element {
 
       return {
         asset,
-        cashAmount,
+        side,
+        inputAmount,
         quote,
         network: quoteNetwork,
         walletAddress,
@@ -527,24 +579,30 @@ export default function RwasScreen(): React.JSX.Element {
       };
     },
     onSuccess: async ({ review, execution }) => {
-      const { asset, cashAmount, quote } = review;
+      const { asset, side, inputAmount, quote } = review;
+      const summaryAmount =
+        side === 'buy'
+          ? quote.cashAmount ?? inputAmount
+          : quote.quantity ?? inputAmount;
+      const summarySymbol = side === 'buy' ? asset.settlementSymbol : asset.symbol;
       setLastExecution({
         assetId: asset.id,
         symbol: asset.symbol,
-        cashAmount,
+        side,
+        amount: summaryAmount,
         signature: execution.signature,
         submittedAt: execution.submittedAt,
       });
       setReviewQuote(null);
       showToast({
         title: 'RWA order submitted',
-        message: `${asset.symbol} buy submitted for ${quote.cashAmount ?? cashAmount} ${asset.settlementSymbol}.`,
+        message: `${asset.symbol} ${side} submitted for ${summaryAmount} ${summarySymbol}.`,
         variant: 'success',
       });
       void presentWalletTransactionNotification({
-        identifier: `rwa-buy-${review.network}-${execution.signature}`,
-        title: `Bought ${asset.symbol}`,
-        body: `${quote.cashAmount ?? cashAmount} ${asset.settlementSymbol}`,
+        identifier: `rwa-${side}-${review.network}-${execution.signature}`,
+        title: `${side === 'buy' ? 'Bought' : 'Sold'} ${asset.symbol}`,
+        body: `${summaryAmount} ${summarySymbol}`,
         type: 'swap',
         signature: execution.signature,
       });
@@ -594,7 +652,9 @@ export default function RwasScreen(): React.JSX.Element {
     if (!quoteCapability.available) return quoteCapability.message;
     if (!executeCapability.available) return executeCapability.message;
     if (cashAmountState.message != null) return cashAmountState.message;
-    if (cashAmountState.amount == null) return 'Enter USDC amount';
+    if (cashAmountState.amount == null) {
+      return tradeSide === 'buy' ? 'Enter USDC amount' : 'Enter quantity';
+    }
     if (walletAddress == null) return 'Unlock wallet';
     if (!canSignWithApp) return signingBlocker ?? 'Wallet signing unavailable';
     return 'Ready';
@@ -613,11 +673,12 @@ export default function RwasScreen(): React.JSX.Element {
     rwaExecuteMutation.isPending,
     rwaQuoteMutation.isPending,
     signingBlocker,
+    tradeSide,
     walletAddress,
   ]);
 
-  const getBuyDisabledReason = useCallback(
-    (asset: RwaAsset): string | null => {
+  const getTradeDisabledReason = useCallback(
+    (asset: RwaAsset, side: RwaTradeSide): string | null => {
       if (rwaQuoteMutation.isPending || rwaExecuteMutation.isPending) {
         return 'Another RWA order is in progress.';
       }
@@ -628,11 +689,18 @@ export default function RwasScreen(): React.JSX.Element {
       if (!quoteCapability.available) return quoteCapability.message;
       if (!executeCapability.available) return executeCapability.message;
       if (cashAmountState.message != null) return cashAmountState.message;
-      if (cashAmountState.amount == null) return 'Enter USDC amount.';
+      if (cashAmountState.amount == null) {
+        return side === 'buy' ? 'Enter USDC amount.' : 'Enter quantity.';
+      }
       if (walletAddress == null) return 'Unlock wallet.';
       if (!canSignWithApp) return signingBlocker ?? 'Wallet signing unavailable.';
       if (!asset.tradable) return 'This asset is read only from the provider.';
-      if (asset.execution.buy !== 'jupiter_swap') return 'Jupiter RWA buy is unavailable.';
+      if (
+        asset.execution[side] !== 'jupiter_swap' &&
+        asset.execution[side] !== 'devnet_sandbox'
+      ) {
+        return `RWA ${side} is unavailable for this asset.`;
+      }
       return null;
     },
     [
@@ -654,12 +722,12 @@ export default function RwasScreen(): React.JSX.Element {
     ],
   );
 
-  const handleBuyAsset = useCallback(
-    (asset: RwaAsset) => {
-      const disabledReason = getBuyDisabledReason(asset);
+  const handleTradeAsset = useCallback(
+    (asset: RwaAsset, side: RwaTradeSide) => {
+      const disabledReason = getTradeDisabledReason(asset, side);
       if (disabledReason != null) {
         showToast({
-          title: 'Buy unavailable',
+          title: `${side === 'buy' ? 'Buy' : 'Sell'} unavailable`,
           message: disabledReason,
           variant: 'error',
         });
@@ -669,7 +737,8 @@ export default function RwasScreen(): React.JSX.Element {
 
       rwaQuoteMutation.mutate({
         asset,
-        cashAmount: cashAmountState.amount,
+        side,
+        inputAmount: cashAmountState.amount,
         network,
         walletAddress,
         walletId: activeWalletId,
@@ -678,12 +747,22 @@ export default function RwasScreen(): React.JSX.Element {
     [
       activeWalletId,
       cashAmountState.amount,
-      getBuyDisabledReason,
+      getTradeDisabledReason,
       network,
       rwaQuoteMutation,
       showToast,
       walletAddress,
     ],
+  );
+
+  const handleBuyAsset = useCallback(
+    (asset: RwaAsset) => handleTradeAsset(asset, 'buy'),
+    [handleTradeAsset],
+  );
+
+  const handleSellAsset = useCallback(
+    (asset: RwaAsset) => handleTradeAsset(asset, 'sell'),
+    [handleTradeAsset],
   );
 
   const handleCancelReview = useCallback(() => {
@@ -712,8 +791,10 @@ export default function RwasScreen(): React.JSX.Element {
     if (!assetsCapability.available) return assetsCapability.reason === 'unsupported_network'
       ? 'Mainnet only'
       : 'Unavailable';
-    return assetsQuery.isPending ? 'Loading' : 'Jupiter stocks';
+    if (assetsQuery.isPending) return 'Loading';
+    return assets.some((asset) => asset.devnetSandbox) ? 'Devnet sandbox' : 'Jupiter stocks';
   }, [
+    assets,
     assetsCapability.available,
     assetsCapability.reason,
     assetsQuery.isPending,
@@ -819,7 +900,7 @@ export default function RwasScreen(): React.JSX.Element {
           <View style={styles.tradePanelHeader}>
             <View style={styles.tradePanelTitleBlock}>
               <Text variant="body" color={colors.text.primary} style={styles.tradePanelTitle}>
-                RWA buy
+                RWA trade
               </Text>
               <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
                 {tradeStatusMessage}
@@ -827,13 +908,40 @@ export default function RwasScreen(): React.JSX.Element {
             </View>
             <View style={styles.amountSymbolPill}>
               <Text variant="caption" color={colors.text.secondary} style={styles.amountSymbol}>
-                USDC
+                {tradeSide === 'buy' ? 'USDC' : 'RWA'}
               </Text>
             </View>
           </View>
+          <View style={styles.sideControl}>
+            {(['buy', 'sell'] as const).map((side) => {
+              const selected = tradeSide === side;
+              return (
+                <Pressable
+                  key={side}
+                  onPress={() => setTradeSide(side)}
+                  style={({ pressed }) => [
+                    styles.sideButton,
+                    selected ? styles.sideButtonSelected : styles.sideButtonIdle,
+                    pressed ? styles.sideButtonPressed : null,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${side === 'buy' ? 'Buy' : 'Sell'} RWA`}
+                >
+                  <Text
+                    variant="caption"
+                    color={selected ? colors.text.onAccent : colors.text.secondary}
+                    style={styles.sideButtonLabel}
+                  >
+                    {side === 'buy' ? 'Buy' : 'Sell'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
           <TextInput
             value={cashAmountInput}
-            onChangeText={(value) => setCashAmountInput(sanitizeCashAmountInput(value))}
+            onChangeText={(value) => setCashAmountInput(sanitizeTradeAmountInput(value))}
             placeholder="0.00"
             placeholderTextColor={colors.text.placeholder}
             keyboardType="decimal-pad"
@@ -860,15 +968,27 @@ export default function RwasScreen(): React.JSX.Element {
                 key={asset.id}
                 asset={asset}
                 dense={dense}
-                buyDisabledReason={getBuyDisabledReason(asset)}
+                buyDisabledReason={getTradeDisabledReason(asset, 'buy')}
+                sellDisabledReason={getTradeDisabledReason(asset, 'sell')}
                 isBuyPending={
                   (rwaQuoteMutation.isPending &&
-                    rwaQuoteMutation.variables?.asset.id === asset.id) ||
+                    rwaQuoteMutation.variables?.asset.id === asset.id &&
+                    rwaQuoteMutation.variables?.side === 'buy') ||
                   (rwaExecuteMutation.isPending &&
-                    rwaExecuteMutation.variables?.review.asset.id === asset.id)
+                    rwaExecuteMutation.variables?.review.asset.id === asset.id &&
+                    rwaExecuteMutation.variables?.review.side === 'buy')
+                }
+                isSellPending={
+                  (rwaQuoteMutation.isPending &&
+                    rwaQuoteMutation.variables?.asset.id === asset.id &&
+                    rwaQuoteMutation.variables?.side === 'sell') ||
+                  (rwaExecuteMutation.isPending &&
+                    rwaExecuteMutation.variables?.review.asset.id === asset.id &&
+                    rwaExecuteMutation.variables?.review.side === 'sell')
                 }
                 lastExecution={lastExecution?.assetId === asset.id ? lastExecution : null}
                 onBuy={handleBuyAsset}
+                onSell={handleSellAsset}
               />
             ))}
           </View>
@@ -980,6 +1100,37 @@ const styles = StyleSheet.create({
   },
   amountSymbol: {
     fontFamily: fontFamily.mono,
+  },
+  sideControl: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    padding: 4,
+    borderRadius: radii.md,
+    backgroundColor: colors.glass.smokeWash,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+  },
+  sideButton: {
+    minHeight: 34,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sideButtonSelected: {
+    backgroundColor: colors.brand.glossAccent,
+    borderColor: colors.brand.glossAccent,
+  },
+  sideButtonIdle: {
+    backgroundColor: colors.surface.solidControl,
+    borderColor: colors.glass.rimSubtle,
+  },
+  sideButtonPressed: {
+    opacity: 0.86,
+  },
+  sideButtonLabel: {
+    fontFamily: fontFamily.medium,
   },
   amountInput: {
     minHeight: 54,
@@ -1169,6 +1320,10 @@ const styles = StyleSheet.create({
   actionButtonPrimary: {
     backgroundColor: colors.brand.glossAccent,
     borderColor: colors.brand.glossAccent,
+  },
+  actionButtonSecondary: {
+    backgroundColor: colors.glass.smokeWash,
+    borderColor: colors.glass.rimSubtle,
   },
   actionButtonPressed: {
     backgroundColor: colors.surface.glossPressed,

@@ -12,6 +12,9 @@ import type { Bindings } from '../types';
 
 const AAPLX_MAINNET_MINT = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
 const USDC_MAINNET_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const DEVNET_SANDBOX_RWA_MINT = 'So11111111111111111111111111111111111111112';
+const DEVNET_SANDBOX_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const RWA_DELEGATE_PROGRAM_ID = '4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7';
 const WALLET = '11111111111111111111111111111111';
 const JUPITER_BASE_URL = 'https://api.jup.ag';
 
@@ -23,6 +26,18 @@ const bindings = {
   OFFPAY_RWA_MAINNET_ENABLED: '1',
   UPSTASH_REDIS_REST_URL: 'https://redis.test',
   UPSTASH_REDIS_REST_TOKEN: 'redis-token',
+} as Bindings;
+
+const devnetSandboxBindings = {
+  ...bindings,
+  OFFPAY_RWA_DELEGATE_PROGRAM_ID: RWA_DELEGATE_PROGRAM_ID,
+  OFFPAY_RWA_DELEGATE_DEVNET_ENABLED: '1',
+  OFFPAY_RWA_DEVNET_SANDBOX_MINT: DEVNET_SANDBOX_RWA_MINT,
+  OFFPAY_RWA_DEVNET_SETTLEMENT_MINT: DEVNET_SANDBOX_USDC_MINT,
+  OFFPAY_RWA_DEVNET_SANDBOX_SYMBOL: 'AAPLd',
+  OFFPAY_RWA_DEVNET_SANDBOX_NAME: 'Apple Sandbox RWA',
+  OFFPAY_RWA_DEVNET_SANDBOX_DECIMALS: '6',
+  OFFPAY_RWA_DEVNET_PRICE_REFERENCE_MINT: AAPLX_MAINNET_MINT,
 } as Bindings;
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -158,6 +173,43 @@ describe('RWA Jupiter stocks integration', () => {
     expect(response.assets).toEqual([]);
   });
 
+  it('returns a configured devnet sandbox asset with live provider pricing', async () => {
+    setRwaFetchImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith(`/price/v3?ids=${encodeURIComponent(AAPLX_MAINNET_MINT)}`)) {
+        return jsonResponse({
+          [AAPLX_MAINNET_MINT]: {
+            usdPrice: 214.42,
+          },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const response = await getRwaAssets(devnetSandboxBindings, 'devnet');
+
+    expect(response).toMatchObject({
+      mode: 'devnet_sandbox',
+      provider: 'offpay_devnet_sandbox',
+      providerEnvironment: 'devnet_sandbox',
+    });
+    expect(response.assets[0]).toMatchObject({
+      symbol: 'AAPLd',
+      mint: DEVNET_SANDBOX_RWA_MINT,
+      settlementMint: DEVNET_SANDBOX_USDC_MINT,
+      provider: 'offpay_devnet_sandbox',
+      priceUsd: 214.42,
+      tradable: true,
+      devnetSandbox: true,
+      magicBlockEligible: true,
+      execution: {
+        buy: 'devnet_sandbox',
+        sell: 'devnet_sandbox',
+        magicBlock: 'devnet_sandbox',
+      },
+    });
+  });
+
   it('returns nullable Jupiter pricing without inventing a fallback price', async () => {
     setRwaFetchImplementation(async (input) => {
       const url = String(input);
@@ -181,7 +233,7 @@ describe('RWA Jupiter stocks integration', () => {
     });
   });
 
-  it('fails closed for quote creation on devnet', async () => {
+  it('fails closed for quote creation on devnet without sandbox config', async () => {
     await expect(
       createRwaQuote(bindings, {
         assetMint: AAPLX_MAINNET_MINT,
@@ -190,7 +242,7 @@ describe('RWA Jupiter stocks integration', () => {
         network: 'devnet',
         walletAddress: WALLET,
       }),
-    ).rejects.toThrow('mainnet');
+    ).rejects.toThrow('not configured');
   });
 
   it('creates mainnet RWA buy quotes through Jupiter without issuer API keys', async () => {

@@ -4,7 +4,7 @@ export interface DevnetAirdropResult {
   signature: string;
   sol: number;
   tokens: Array<{
-    symbol: 'dUSDC' | 'dUSDT' | 'USDC';
+    symbol: 'dUSDC' | 'dUSDT' | 'USDC' | 'AAPLd' | 'RWAUSDC';
     amount: number;
     capAmount: number;
   }>;

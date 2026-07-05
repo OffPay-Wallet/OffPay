@@ -34,8 +34,10 @@ const CREATE_ASSOCIATED_TOKEN_ACCOUNT_IDEMPOTENT_INSTRUCTION = 1;
 const TRANSFER_CHECKED_INSTRUCTION = 12;
 const U64_MAX = (1n << 64n) - 1n;
 
+type FaucetTokenSymbol = 'dUSDC' | 'dUSDT' | 'USDC' | 'AAPLd' | 'RWAUSDC';
+
 interface FaucetTokenConfig {
-  symbol: 'dUSDC' | 'dUSDT' | 'USDC';
+  symbol: FaucetTokenSymbol;
   name: string;
   mint: string;
   decimals: number;
@@ -149,8 +151,10 @@ function getFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
     bindings.OFFPAY_DEVNET_USDC_MINT ?? DEVNET_USDC_MINT,
     'Devnet USDC',
   );
+  const rwaAssetMint = bindings.OFFPAY_RWA_DEVNET_SANDBOX_MINT?.trim() ?? '';
+  const rwaSettlementMint = bindings.OFFPAY_RWA_DEVNET_SETTLEMENT_MINT?.trim() ?? '';
 
-  return [
+  const tokens: FaucetTokenConfig[] = [
     {
       symbol: 'dUSDC',
       name: 'Devnet USDC (Umbra test)',
@@ -176,6 +180,30 @@ function getFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
       capRawAmount: 5_000_000n,
     },
   ];
+
+  if (rwaSettlementMint.length > 0) {
+    tokens.push({
+      symbol: 'RWAUSDC',
+      name: 'Devnet RWA Settlement USDC',
+      mint: assertConfiguredMint(rwaSettlementMint, 'Devnet RWA settlement USDC'),
+      decimals: TOKEN_DECIMALS,
+      capUiAmount: 1_000,
+      capRawAmount: 1_000_000_000n,
+    });
+  }
+
+  if (rwaAssetMint.length > 0) {
+    tokens.push({
+      symbol: 'AAPLd',
+      name: 'Apple Sandbox RWA',
+      mint: assertConfiguredMint(rwaAssetMint, 'Devnet RWA sandbox asset'),
+      decimals: TOKEN_DECIMALS,
+      capUiAmount: 10,
+      capRawAmount: 10_000_000n,
+    });
+  }
+
+  return tokens;
 }
 
 function associatedTokenAddress(owner: string, mint: string): string {

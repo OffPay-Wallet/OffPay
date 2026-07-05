@@ -106,7 +106,6 @@ import {
   RN_ZK_PROVER_NATIVE_MODULE_UNAVAILABLE_MESSAGE,
 } from '@/lib/umbra/umbra-rn-zk-prover';
 import { applyCachedOfflineDebit } from '@/lib/wallet/wallet-display-cache';
-import { PRIVY_SIGNING_NOT_READY_MESSAGE } from '@/lib/wallet/wallet-capabilities';
 import { formatFiatCurrency, normalizeCurrency } from '@/lib/currency-rates';
 import { resolveXHandle, XHandleNotRegisteredError } from '@/lib/identity/x-handle';
 import {
@@ -130,7 +129,6 @@ import {
   classifySendFailure,
   getMutationErrorMessage,
   getRecipientStepDisabledReason,
-  getSendFlowBlockingSigningReason,
   getStablecoinOptions,
   isAmountWithinBalance,
   isMagicBlockPrivateToken,
@@ -554,7 +552,6 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     capabilities,
     'payment.rpcBroadcast',
   );
-  const privySignerLoadingInBackground = signingBlocker === PRIVY_SIGNING_NOT_READY_MESSAGE;
   const magicBlockPrivatePaymentDisabledReason = signingBlocker
     ? signingBlocker
     : !magicBlockInitMintCapability.available
@@ -565,10 +562,8 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           ? magicBlockRpcBroadcastCapability.message
           : null;
   const canUseMagicBlockPrivatePayment = magicBlockPrivatePaymentDisabledReason == null;
-  const magicBlockPrivatePaymentRouteMessage = privySignerLoadingInBackground
-    ? null
-    : magicBlockPrivatePaymentDisabledReason;
-  const formSigningBlocker = getSendFlowBlockingSigningReason(signingBlocker);
+  const magicBlockPrivatePaymentRouteMessage = magicBlockPrivatePaymentDisabledReason;
+  const formSigningBlocker = signingBlocker;
   const canUseUmbraNativeProver = isRnZkProverNativeModuleAvailable();
   const umbraPrivateP2pCapability = getOffpayFeatureCapability(
     capabilities,
@@ -617,9 +612,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
           : !rpcBroadcastCapability.available
             ? rpcBroadcastCapability.message
             : umbraVaultDisabledReason;
-  const umbraPrivateP2pRouteMessage = privySignerLoadingInBackground
-    ? null
-    : umbraPrivateP2pDisabledReason;
+  const umbraPrivateP2pRouteMessage = umbraPrivateP2pDisabledReason;
   const offlineReadySlots = offlinePaymentSlots.snapshot?.counts.ready ?? 0;
 
   const amountRaw = useMemo(
@@ -1737,11 +1730,8 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     walletAddress,
     walletId,
   ]);
-  const visibleBaseDisabledReason =
-    baseDisabledReason === PRIVY_SIGNING_NOT_READY_MESSAGE ? null : baseDisabledReason;
-
   const amountHelper = useMemo(() => {
-    if (visibleBaseDisabledReason != null) return visibleBaseDisabledReason;
+    if (baseDisabledReason != null) return baseDisabledReason;
     if (selectedToken == null) return 'Choose a token first.';
     if (amount.trim().length === 0) return null;
     if (!isPositiveRawAmount(amountRaw)) return 'Enter an amount greater than zero.';
@@ -1750,7 +1740,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     // repeating the figure.
     if (!amountValid) return 'Amount exceeds your balance.';
     return null;
-  }, [amount, amountRaw, amountValid, selectedToken, visibleBaseDisabledReason]);
+  }, [amount, amountRaw, amountValid, selectedToken, baseDisabledReason]);
 
   const recipientStepDisabledReason = useMemo(
     () =>
@@ -2443,7 +2433,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
       tokens={filteredStablecoins}
       tokenValuations={amountValuationQuery.data?.tokenValues}
       loading={balanceQuery.isLoading || capabilitiesQuery.isCapabilitiesPending}
-      emptyMessage={visibleBaseDisabledReason ?? 'Only tokens with a positive balance can be sent.'}
+      emptyMessage={baseDisabledReason ?? 'Only tokens with a positive balance can be sent.'}
       onQueryChange={setQuery}
       onSelectToken={handleSelectToken}
     />

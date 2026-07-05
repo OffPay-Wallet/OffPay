@@ -78,6 +78,9 @@ scripts/*
 !scripts/push-invite-worker-secrets.sh
 !scripts/push-all-worker-secrets.sh
 !scripts/setup-invite-gate.js
+!scripts/setup-rwa-devnet-sandbox.mjs
+!scripts/fund-rwa-devnet-wallet.mjs
+!scripts/verify-rwa-devnet-workflow.mjs
 
 # ---------------------------------------------------------------------------
 # TypeScript
@@ -153,3 +156,4 @@ app-example/
 .kotlin/
 *.orig.*
 .prettierignore
+.superstack/build-context.md

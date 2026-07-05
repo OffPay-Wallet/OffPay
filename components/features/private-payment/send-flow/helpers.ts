@@ -25,7 +25,6 @@
 import { formatLamportsAsSol, type TokenLogoLookup } from '@/lib/api/offpay-wallet-data';
 import { isSupportedStablecoinToken } from '@/lib/policy/stablecoin-policy';
 import { getUmbraTokenByMint } from '@/lib/umbra/umbra-supported-tokens';
-import { PRIVY_SIGNING_NOT_READY_MESSAGE } from '@/lib/wallet/wallet-capabilities';
 
 import type { ProcessResultVariant } from '@/components/ui/ProcessResultScreen';
 import type { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -263,16 +262,6 @@ export function isAmountWithinBalance(
   }
 
   return BigInt(amountRaw) <= BigInt(balanceRaw);
-}
-
-export function getSendFlowBlockingSigningReason(signingBlocker: string | null): string | null {
-  // Privy registers its signer asynchronously; the submit path waits for it.
-  // Keep amount review usable while that bridge finishes loading.
-  if (signingBlocker === PRIVY_SIGNING_NOT_READY_MESSAGE) {
-    return null;
-  }
-
-  return signingBlocker;
 }
 
 export function getRecipientStepDisabledReason(params: {
