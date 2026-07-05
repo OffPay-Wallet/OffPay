@@ -30,7 +30,7 @@ import type {
   ExternalWalletSigner,
 } from '@/lib/wallet/external-wallet-signing';
 
-const EXTERNAL_SIGNER_WAIT_TIMEOUT_MS = 8000;
+const EXTERNAL_SIGNER_WAIT_TIMEOUT_MS = 15_000;
 
 interface SignSerializedTransactionParams {
   unsignedTransaction: string;

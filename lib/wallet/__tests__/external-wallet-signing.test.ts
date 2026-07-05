@@ -57,4 +57,46 @@ describe('external wallet signing registry', () => {
 
     await expect(pending).resolves.toBeNull();
   });
+
+  it('keeps a signer available through a delayed unregister window', () => {
+    jest.useFakeTimers();
+
+    const dispose = registerExternalWalletSigner(makeSigner('wallet-reconnecting'), {
+      unregisterDelayMs: 1000,
+    });
+
+    dispose();
+    expect(getExternalWalletSigner('wallet-reconnecting')).toMatchObject({
+      walletAddress: 'wallet-reconnecting',
+    });
+
+    jest.advanceTimersByTime(999);
+    expect(getExternalWalletSigner('wallet-reconnecting')).toMatchObject({
+      walletAddress: 'wallet-reconnecting',
+    });
+
+    jest.advanceTimersByTime(1);
+    expect(getExternalWalletSigner('wallet-reconnecting')).toBeNull();
+  });
+
+  it('does not let a delayed unregister remove a replacement signer', () => {
+    jest.useFakeTimers();
+
+    const disposeOld = registerExternalWalletSigner(makeSigner('wallet-replaced'), {
+      unregisterDelayMs: 1000,
+    });
+    disposeOld();
+
+    const disposeNew = registerExternalWalletSigner(makeSigner('wallet-replaced'));
+    try {
+      jest.advanceTimersByTime(1000);
+      expect(getExternalWalletSigner('wallet-replaced')).toMatchObject({
+        walletAddress: 'wallet-replaced',
+      });
+    } finally {
+      disposeNew();
+    }
+
+    expect(getExternalWalletSigner('wallet-replaced')).toBeNull();
+  });
 });

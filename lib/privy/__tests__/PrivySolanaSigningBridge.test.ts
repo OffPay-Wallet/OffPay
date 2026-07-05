@@ -11,6 +11,7 @@ jest.mock('@privy-io/expo', () => ({
 import {
   decodePrivySignatureResponse,
   readPrivySignedTransactionResponse,
+  readPrivySolanaWallets,
   signPrivySolanaMessage,
   signPrivySolanaTransaction,
 } from '@/lib/privy/PrivySolanaSigningBridge';
@@ -30,6 +31,25 @@ function makeWallet(provider: unknown): BridgeSolanaWallet {
 }
 
 describe('PrivySolanaSigningBridge', () => {
+  it('reads legacy reconnecting Solana wallet state when a provider is available', () => {
+    const getProvider = jest.fn();
+
+    expect(
+      readPrivySolanaWallets({
+        status: 'reconnecting',
+        publicKey: 'privy-wallet',
+        getProvider,
+      }),
+    ).toEqual([
+      {
+        address: 'privy-wallet',
+        publicKey: 'privy-wallet',
+        walletIndex: 0,
+        getProvider,
+      },
+    ]);
+  });
+
   it('decodes current and wrapped Privy signMessage responses', () => {
     const signature = makeSignature();
     const encoded = Buffer.from(signature).toString('base64');

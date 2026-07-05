@@ -13,6 +13,8 @@ import type {
 } from '@/lib/wallet/external-wallet-signing';
 import type { PrivyEmbeddedSolanaWalletProvider } from '@privy-io/expo';
 
+const PRIVY_SIGNER_RECONNECT_GRACE_MS = 15_000;
+
 export interface BridgeSolanaWallet {
   address: string;
   publicKey?: string;
@@ -62,7 +64,9 @@ export function readPrivySolanaWallets(state: unknown): BridgeSolanaWallet[] {
   if (wallets.length > 0) return wallets;
 
   if (
-    candidate.status === 'connected' &&
+    (candidate.status === 'connected' ||
+      candidate.status === 'connecting' ||
+      candidate.status === 'reconnecting') &&
     typeof candidate.publicKey === 'string' &&
     candidate.publicKey.length > 0 &&
     typeof candidate.getProvider === 'function'
@@ -196,10 +200,11 @@ export function PrivySolanaSigningBridge(): null {
   const { isReady: privyReady } = usePrivy();
   const solanaWallet = useEmbeddedSolanaWallet();
   const walletsRef = useRef<BridgeSolanaWallet[]>([]);
-  const wallets = useMemo(
-    () => (privyReady ? readPrivySolanaWallets(solanaWallet) : []),
-    [privyReady, solanaWallet],
-  );
+  const wallets = useMemo(() => {
+    const parsedWallets = readPrivySolanaWallets(solanaWallet);
+    if (privyReady || parsedWallets.length > 0) return parsedWallets;
+    return [];
+  }, [privyReady, solanaWallet]);
   const walletKey = wallets
     .map((wallet) => `${wallet.address}:${wallet.walletIndex ?? 0}`)
     .sort()
@@ -227,7 +232,9 @@ export function PrivySolanaSigningBridge(): null {
         },
       };
 
-      return registerExternalWalletSigner(signer);
+      return registerExternalWalletSigner(signer, {
+        unregisterDelayMs: PRIVY_SIGNER_RECONNECT_GRACE_MS,
+      });
     });
 
     return () => {

@@ -40,7 +40,18 @@ describe('devnet airdrop faucet', () => {
     await expect(requestDevnetSolAirdrop('wallet-address')).resolves.toEqual({
       signature: 'signature-from-worker',
       sol: 0.25,
-      tokens: [{ symbol: 'dUSDC', amount: 100, capAmount: 100 }],
+      tokens: [
+        {
+          symbol: 'dUSDC',
+          mint: '4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7',
+          decimals: 6,
+          rawAmount: '100000000',
+          amount: 100,
+          capRawAmount: '100000000',
+          capAmount: 100,
+          recipientTokenAccount: 'recipient-dusdc-ata',
+        },
+      ],
       nextEligibleAt: 1_800_000,
     });
 

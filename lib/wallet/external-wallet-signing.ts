@@ -21,6 +21,10 @@ const signersByAddress = new Map<string, ExternalWalletSigner>();
 const listeners = new Set<Listener>();
 let snapshotVersion = 0;
 
+interface RegisterExternalWalletSignerOptions {
+  unregisterDelayMs?: number;
+}
+
 function normalizeAddress(address: string): string {
   return address.trim();
 }
@@ -32,21 +36,34 @@ function emitChange(): void {
   }
 }
 
-export function registerExternalWalletSigner(signer: ExternalWalletSigner): () => void {
+export function registerExternalWalletSigner(
+  signer: ExternalWalletSigner,
+  options?: RegisterExternalWalletSignerOptions,
+): () => void {
   const walletAddress = normalizeAddress(signer.walletAddress);
   const normalizedSigner: ExternalWalletSigner = {
     ...signer,
     walletAddress,
   };
+  const unregisterDelayMs = Math.max(0, options?.unregisterDelayMs ?? 0);
 
   signersByAddress.set(walletAddress, normalizedSigner);
   emitChange();
 
   return () => {
-    const active = signersByAddress.get(walletAddress);
-    if (active !== normalizedSigner) return;
-    signersByAddress.delete(walletAddress);
-    emitChange();
+    const removeIfStillActive = () => {
+      const active = signersByAddress.get(walletAddress);
+      if (active !== normalizedSigner) return;
+      signersByAddress.delete(walletAddress);
+      emitChange();
+    };
+
+    if (unregisterDelayMs <= 0) {
+      removeIfStillActive();
+      return;
+    }
+
+    setTimeout(removeIfStillActive, unregisterDelayMs);
   };
 }
 

@@ -5,8 +5,13 @@ export interface DevnetAirdropResult {
   sol: number;
   tokens: Array<{
     symbol: 'dUSDC' | 'dUSDT' | 'USDC' | 'AAPLd' | 'RWAUSDC';
+    mint: string;
+    decimals: number;
+    rawAmount: string;
     amount: number;
+    capRawAmount: string;
     capAmount: number;
+    recipientTokenAccount: string;
   }>;
   nextEligibleAt: number;
 }
@@ -51,8 +56,13 @@ export async function requestDevnetSolAirdrop(walletAddress: string): Promise<De
     sol: result.sol,
     tokens: result.tokens.map((token) => ({
       symbol: token.symbol,
+      mint: token.mint,
+      decimals: token.decimals,
+      rawAmount: token.rawAmount,
       amount: token.amount,
+      capRawAmount: token.capRawAmount,
       capAmount: token.capAmount,
+      recipientTokenAccount: token.recipientTokenAccount,
     })),
     nextEligibleAt: result.nextEligibleAt,
   };

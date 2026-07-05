@@ -23,6 +23,7 @@ import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigning
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
+import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
 import {
   offpayWalletBalanceQueryKey,
   offpayWalletDashboardBaseQueryKey,
@@ -33,9 +34,20 @@ import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
-import { createRwaQuote, executeRwaQuote, getRwaAssets } from '@/lib/api/offpay-api-client';
+import {
+  createRwaQuote,
+  executeRwaQuote,
+  getRpcSignatureStatuses,
+  getRwaAssets,
+} from '@/lib/api/offpay-api-client';
 import { signSerializedTransactionForWallet } from '@/lib/crypto/solana-transaction-signing';
+import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
+import {
+  assertRwaDevnetSandboxFaucetCoversRequirement,
+  formatRwaDevnetSandboxFundingMessage,
+  getRwaDevnetSandboxFundingRequirement,
+} from '@/lib/rwa/devnet-sandbox-funding';
 import { useWalletStore } from '@/store/walletStore';
 
 import type {
@@ -50,6 +62,9 @@ const RWA_ASSETS_GC_TIME_MS = 15 * 60 * 1000;
 const RWA_CONTENT_MAX_WIDTH = 560;
 const RWA_CASH_AMOUNT_MAX_LENGTH = 48;
 const RWA_CASH_AMOUNT_DECIMALS = 12;
+const RWA_DEVNET_FAUCET_CONFIRMATION_ATTEMPTS = 8;
+const RWA_DEVNET_FAUCET_CONFIRMATION_DELAY_MS = 750;
+const RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL = 'RWAUSDC';
 
 type RwaTradeSide = 'buy' | 'sell';
 
@@ -78,8 +93,38 @@ function formatChange(value: number | null): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+function getRwaSettlementDisplaySymbol(
+  asset: Pick<RwaAsset, 'devnetSandbox' | 'settlementSymbol'>,
+): string {
+  return asset.devnetSandbox ? RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL : asset.settlementSymbol;
+}
+
 function rwaAssetsQueryKey(network: string | null) {
   return ['offpay', 'rwa', 'assets', network] as const;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForRwaDevnetFaucetConfirmation(signature: string): Promise<void> {
+  for (let attempt = 0; attempt < RWA_DEVNET_FAUCET_CONFIRMATION_ATTEMPTS; attempt += 1) {
+    const response = await getRpcSignatureStatuses({
+      network: 'devnet',
+      signatures: [signature],
+    });
+    const status = response.statuses[0];
+    if (status?.err != null) {
+      throw new Error('Devnet faucet transaction failed on-chain.');
+    }
+    if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') {
+      return;
+    }
+
+    await delay(RWA_DEVNET_FAUCET_CONFIRMATION_DELAY_MS);
+  }
+
+  throw new Error('Devnet faucet transaction is still pending. Wait a moment and retry signing.');
 }
 
 interface ParsedRwaCashAmount {
@@ -162,7 +207,13 @@ function shortenSignature(signature: string): string {
 }
 
 function getRwaErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  if (error instanceof Error && error.message.trim().length > 0) {
+    if (/transaction simulation failed/i.test(error.message)) {
+      return 'RWA settlement simulation failed. Refresh the quote and make sure this Devnet wallet has RWAUSDC for buys or AAPLd for sells.';
+    }
+
+    return error.message;
+  }
   return 'RWA order failed.';
 }
 
@@ -186,13 +237,7 @@ function isRwaQuoteStale(quote: RwaQuoteResponse): boolean {
   return quote.expiresAt != null && quote.expiresAt <= Date.now() + 2500;
 }
 
-function ReviewDetailRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): React.JSX.Element {
+function ReviewDetailRow({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
     <View style={styles.reviewDetailRow}>
       <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
@@ -223,14 +268,14 @@ function RwaQuoteReviewPanel({
 }): React.JSX.Element {
   const payAmount =
     review.side === 'buy'
-      ? review.quote.cashAmount ?? review.inputAmount
-      : review.quote.quantity ?? review.inputAmount;
+      ? (review.quote.cashAmount ?? review.inputAmount)
+      : (review.quote.quantity ?? review.inputAmount);
   const paySymbol =
-    review.side === 'buy' ? review.asset.settlementSymbol : review.asset.symbol;
+    review.side === 'buy' ? getRwaSettlementDisplaySymbol(review.asset) : review.asset.symbol;
   const receiveAmount =
-    review.side === 'buy' ? review.quote.quantity ?? '—' : review.quote.cashAmount ?? '—';
+    review.side === 'buy' ? (review.quote.quantity ?? '—') : (review.quote.cashAmount ?? '—');
   const receiveSymbol =
-    review.side === 'buy' ? review.asset.symbol : review.asset.settlementSymbol;
+    review.side === 'buy' ? review.asset.symbol : getRwaSettlementDisplaySymbol(review.asset);
 
   return (
     <View style={styles.reviewPanel}>
@@ -316,7 +361,11 @@ function RwaAssetRow({
 }): React.JSX.Element {
   const positive = asset.change24hPct == null || asset.change24hPct >= 0;
   const tokenProgramLabel = asset.tokenProgramId?.includes('TokenzQd') ? 'Token-2022' : 'SPL';
-  const executionLabel = asset.devnetSandbox ? 'Devnet vault' : asset.tradable ? 'Jupiter' : 'Read only';
+  const executionLabel = asset.devnetSandbox
+    ? 'Devnet vault'
+    : asset.tradable
+      ? 'Jupiter'
+      : 'Read only';
   const canBuy = buyDisabledReason == null && !isBuyPending;
   const canSell = sellDisabledReason == null && !isSellPending;
   const showActiveBuyButton = canBuy || isBuyPending;
@@ -389,7 +438,7 @@ function RwaAssetRow({
         <View style={styles.metaPill}>
           <Ionicons name="logo-usd" size={14} color={colors.text.secondary} />
           <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-            {asset.settlementSymbol}
+            {getRwaSettlementDisplaySymbol(asset)}
           </Text>
         </View>
       </View>
@@ -505,6 +554,77 @@ export default function RwasScreen(): React.JSX.Element {
     () => parseRwaTradeAmount(cashAmountInput, tradeAmountLabel),
     [cashAmountInput, tradeAmountLabel],
   );
+  const walletBalanceQuery = useOffpayWalletBalance(walletAddress, {
+    eagerWithoutCapabilities: true,
+    enabled: walletAddress != null && network === 'devnet' && canUseNetwork,
+    requestOwner: 'rwa.wallet.balance',
+    waitForDashboard: false,
+  });
+
+  const invalidateWalletData = useCallback(
+    async (address: string, invalidationNetwork: OffpayNetwork): Promise<void> => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: offpayWalletDashboardBaseQueryKey(address, invalidationNetwork),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: offpayWalletBalanceQueryKey(address, invalidationNetwork),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: offpayWalletTransactionsBaseQueryKey(address, invalidationNetwork),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: offpayWalletTokenTransactionsBaseQueryKey(address, invalidationNetwork),
+        }),
+      ]);
+    },
+    [queryClient],
+  );
+
+  const ensureDevnetSandboxFunding = useCallback(
+    async (review: RwaQuoteReviewState): Promise<void> => {
+      const getRequirement = (walletBalance = walletBalanceQuery.data ?? null) =>
+        getRwaDevnetSandboxFundingRequirement({
+          asset: review.asset,
+          inputAmount: review.inputAmount,
+          network: review.network,
+          quote: review.quote,
+          side: review.side,
+          walletBalance,
+        });
+
+      let requirement = getRequirement();
+      if (requirement == null || requirement.hasEnough) return;
+
+      const refreshedBalance = await walletBalanceQuery.refetch();
+      requirement = getRequirement(refreshedBalance.data ?? walletBalanceQuery.data ?? null);
+      if (requirement == null || requirement.hasEnough) return;
+
+      showToast({
+        title: 'Funding sandbox wallet',
+        message: formatRwaDevnetSandboxFundingMessage(requirement),
+        variant: 'info',
+        persistToNotificationCenter: false,
+      });
+
+      let faucetResult: Awaited<ReturnType<typeof requestDevnetSolAirdrop>>;
+      try {
+        faucetResult = await requestDevnetSolAirdrop(review.walletAddress);
+      } catch (error) {
+        throw new Error(
+          `${requirement.symbol} balance is too low for this Devnet sandbox order. ${getDevnetAirdropErrorMessage(
+            error,
+          )}`,
+        );
+      }
+
+      assertRwaDevnetSandboxFaucetCoversRequirement(requirement, faucetResult);
+      await waitForRwaDevnetFaucetConfirmation(faucetResult.signature);
+      await invalidateWalletData(review.walletAddress, review.network);
+      void walletBalanceQuery.refetch();
+    },
+    [invalidateWalletData, showToast, walletBalanceQuery.data, walletBalanceQuery.refetch],
+  );
 
   const assetsQuery = useQuery({
     queryKey: rwaAssetsQueryKey(network),
@@ -525,7 +645,14 @@ export default function RwasScreen(): React.JSX.Element {
   });
 
   const rwaQuoteMutation = useMutation<RwaQuoteReviewState, unknown, RwaQuoteMutationInput>({
-    mutationFn: async ({ asset, side, inputAmount, network: quoteNetwork, walletAddress, walletId }) => {
+    mutationFn: async ({
+      asset,
+      side,
+      inputAmount,
+      network: quoteNetwork,
+      walletAddress,
+      walletId,
+    }) => {
       const quote = await createRwaQuote({
         assetMint: asset.mint,
         cashAmount: side === 'buy' ? inputAmount : undefined,
@@ -562,6 +689,7 @@ export default function RwasScreen(): React.JSX.Element {
 
   const rwaExecuteMutation = useMutation<RwaBuyExecutionResult, unknown, RwaExecuteMutationInput>({
     mutationFn: async ({ review }) => {
+      await ensureDevnetSandboxFunding(review);
       const signedTransaction = await signSerializedTransactionForWallet({
         unsignedTransaction: review.quote.unsignedTransaction,
         walletAddress: review.walletAddress,
@@ -581,10 +709,8 @@ export default function RwasScreen(): React.JSX.Element {
     onSuccess: async ({ review, execution }) => {
       const { asset, side, inputAmount, quote } = review;
       const summaryAmount =
-        side === 'buy'
-          ? quote.cashAmount ?? inputAmount
-          : quote.quantity ?? inputAmount;
-      const summarySymbol = side === 'buy' ? asset.settlementSymbol : asset.symbol;
+        side === 'buy' ? (quote.cashAmount ?? inputAmount) : (quote.quantity ?? inputAmount);
+      const summarySymbol = side === 'buy' ? getRwaSettlementDisplaySymbol(asset) : asset.symbol;
       setLastExecution({
         assetId: asset.id,
         symbol: asset.symbol,
@@ -607,29 +733,7 @@ export default function RwasScreen(): React.JSX.Element {
         signature: execution.signature,
       });
 
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: offpayWalletDashboardBaseQueryKey(
-            review.walletAddress,
-            review.network,
-          ),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: offpayWalletBalanceQueryKey(review.walletAddress, review.network),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: offpayWalletTransactionsBaseQueryKey(
-            review.walletAddress,
-            review.network,
-          ),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: offpayWalletTokenTransactionsBaseQueryKey(
-            review.walletAddress,
-            review.network,
-          ),
-        }),
-      ]);
+      await invalidateWalletData(review.walletAddress, review.network);
     },
     onError: (error) => {
       const message = getRwaErrorMessage(error);
@@ -695,10 +799,7 @@ export default function RwasScreen(): React.JSX.Element {
       if (walletAddress == null) return 'Unlock wallet.';
       if (!canSignWithApp) return signingBlocker ?? 'Wallet signing unavailable.';
       if (!asset.tradable) return 'This asset is read only from the provider.';
-      if (
-        asset.execution[side] !== 'jupiter_swap' &&
-        asset.execution[side] !== 'devnet_sandbox'
-      ) {
+      if (asset.execution[side] !== 'jupiter_swap' && asset.execution[side] !== 'devnet_sandbox') {
         return `RWA ${side} is unavailable for this asset.`;
       }
       return null;
@@ -788,9 +889,8 @@ export default function RwasScreen(): React.JSX.Element {
     if (isNetworkSwitching) return 'Switching';
     if (!canUseNetwork) return 'Offline';
     if (capabilitiesQuery.isCapabilitiesPending) return 'Loading';
-    if (!assetsCapability.available) return assetsCapability.reason === 'unsupported_network'
-      ? 'Mainnet only'
-      : 'Unavailable';
+    if (!assetsCapability.available)
+      return assetsCapability.reason === 'unsupported_network' ? 'Mainnet only' : 'Unavailable';
     if (assetsQuery.isPending) return 'Loading';
     return assets.some((asset) => asset.devnetSandbox) ? 'Devnet sandbox' : 'Jupiter stocks';
   }, [
@@ -908,7 +1008,11 @@ export default function RwasScreen(): React.JSX.Element {
             </View>
             <View style={styles.amountSymbolPill}>
               <Text variant="caption" color={colors.text.secondary} style={styles.amountSymbol}>
-                {tradeSide === 'buy' ? 'USDC' : 'RWA'}
+                {tradeSide === 'buy'
+                  ? assets.some((asset) => asset.devnetSandbox)
+                    ? RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL
+                    : 'USDC'
+                  : 'RWA'}
               </Text>
             </View>
           </View>

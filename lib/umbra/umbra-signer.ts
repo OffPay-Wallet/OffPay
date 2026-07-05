@@ -25,7 +25,7 @@ import {
 import type { IUmbraSigner } from '@umbra-privacy/sdk/client';
 import type { ExternalWalletSigner } from '@/lib/wallet/external-wallet-signing';
 
-const UMBRA_EXTERNAL_SIGNER_WAIT_TIMEOUT_MS = 8000;
+const UMBRA_EXTERNAL_SIGNER_WAIT_TIMEOUT_MS = 15_000;
 
 /**
  * Security-critical helpers for the Umbra signer.
