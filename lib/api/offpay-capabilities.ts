@@ -12,8 +12,9 @@ export type OffpayFeature =
   | 'swap.recurringSwap'
   | 'rwa.assets'
   | 'rwa.price'
-  | 'rwa.devnetSandboxQuote'
-  | 'rwa.devnetSandboxExecute'
+  | 'rwa.quote'
+  | 'rwa.execute'
+  | 'rwa.magicBlockIntent'
   | 'rwa.magicBlockTransfer'
   | 'payment.privateInitMint'
   | 'payment.privateBalance'
@@ -55,10 +56,10 @@ const OFFPAY_FEATURE_SELECTORS: Record<OffpayFeature, CapabilitySelector> = {
   'swap.recurringSwap': (capabilities) => capabilities.swap.recurringSwap,
   'rwa.assets': (capabilities) => capabilities.rwa?.assets ?? CAPABILITY_NOT_IMPLEMENTED,
   'rwa.price': (capabilities) => capabilities.rwa?.price ?? CAPABILITY_NOT_IMPLEMENTED,
-  'rwa.devnetSandboxQuote': (capabilities) =>
-    capabilities.rwa?.devnetSandboxQuote ?? CAPABILITY_NOT_IMPLEMENTED,
-  'rwa.devnetSandboxExecute': (capabilities) =>
-    capabilities.rwa?.devnetSandboxExecute ?? CAPABILITY_NOT_IMPLEMENTED,
+  'rwa.quote': (capabilities) => capabilities.rwa?.quote ?? CAPABILITY_NOT_IMPLEMENTED,
+  'rwa.execute': (capabilities) => capabilities.rwa?.execute ?? CAPABILITY_NOT_IMPLEMENTED,
+  'rwa.magicBlockIntent': (capabilities) =>
+    capabilities.rwa?.magicBlockIntent ?? CAPABILITY_NOT_IMPLEMENTED,
   'rwa.magicBlockTransfer': (capabilities) =>
     capabilities.rwa?.magicBlockTransfer ?? CAPABILITY_NOT_IMPLEMENTED,
   'payment.privateInitMint': (capabilities) => capabilities.payment.privateInitMint,

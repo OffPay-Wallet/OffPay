@@ -43,8 +43,9 @@ interface CapabilitiesResponse {
     rwa: {
       assets: CapabilityStatus;
       price: CapabilityStatus;
-      devnetSandboxQuote: CapabilityStatus;
-      devnetSandboxExecute: CapabilityStatus;
+      quote: CapabilityStatus;
+      execute: CapabilityStatus;
+      magicBlockIntent: CapabilityStatus;
       magicBlockTransfer: CapabilityStatus;
     };
     payment: {
@@ -134,6 +135,25 @@ function hasConfiguredValidatorList(bindings: Bindings, key: keyof Bindings): bo
   return validators.length > 0 && validators.every((validator) => isValidSolanaAddress(validator));
 }
 
+function hasConfiguredMintAllowlist(bindings: Bindings, key: keyof Bindings): boolean {
+  const value = bindings[key];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return false;
+  }
+
+  const mints = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  return mints.length > 0 && mints.every((mint) => isValidSolanaAddress(mint));
+}
+
+function hasConfiguredSolanaAddress(bindings: Bindings, key: keyof Bindings): boolean {
+  const value = bindings[key];
+  return typeof value === 'string' && isValidSolanaAddress(value.trim());
+}
+
 function hasWalletRpcNetworkConfig(bindings: Bindings, network: Network): boolean {
   return hasConfiguredRpcHttp(bindings, network);
 }
@@ -148,6 +168,39 @@ function hasMagicBlockNetworkConfig(bindings: Bindings, network: Network): boole
   return network === 'mainnet'
     ? hasConfiguredValidatorList(bindings, 'MAGICBLOCK_MAINNET_VALIDATORS')
     : hasConfiguredValidatorList(bindings, 'MAGICBLOCK_DEVNET_VALIDATORS');
+}
+
+function hasRwaMagicBlockRouterConfig(bindings: Bindings, network: Network): boolean {
+  const key =
+    network === 'mainnet'
+      ? 'OFFPAY_RWA_MAGICBLOCK_ROUTER_MAINNET_URL'
+      : 'OFFPAY_RWA_MAGICBLOCK_ROUTER_DEVNET_URL';
+  return hasConfiguredBinding(bindings, key);
+}
+
+function isRwaDelegateEnabled(bindings: Bindings, network: Network): boolean {
+  return network === 'mainnet'
+    ? hasTruthyBinding(bindings, 'OFFPAY_RWA_DELEGATE_MAINNET_ENABLED')
+    : hasTruthyBinding(bindings, 'OFFPAY_RWA_DELEGATE_DEVNET_ENABLED');
+}
+
+function buildRwaMagicBlockIntentCapability(
+  network: Network,
+  configured: boolean,
+): CapabilityStatus {
+  if (network === 'mainnet') {
+    return configured
+      ? available('MagicBlock delegated RWA intent accounts are enabled on mainnet.')
+      : notImplemented(
+        'Mainnet MagicBlock RWA intents require OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_MAINNET_ENABLED=1, MagicBlock validator config, and router config after audit.',
+      );
+  }
+
+  return configured
+    ? available('MagicBlock delegated RWA intent accounts are enabled on devnet.')
+    : notImplemented(
+      'Devnet MagicBlock RWA intents require OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_DEVNET_ENABLED=1, MagicBlock validator config, and router config.',
+    );
 }
 
 function buildMainnetOnlyCapability(
@@ -171,7 +224,21 @@ async function getCapabilities(
   const walletRpcConfigured = hasWalletRpcNetworkConfig(bindings, network);
   const riskProviderConfigured = hasRiskProviderNetworkConfig(bindings, network);
   const jupiterConfigured = hasConfiguredBinding(bindings, 'JUPITER_API_KEY');
+  const rwaAllowlistConfigured = hasConfiguredMintAllowlist(
+    bindings,
+    'OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST',
+  );
+  const rwaMainnetEnabled = hasTruthyBinding(bindings, 'OFFPAY_RWA_MAINNET_ENABLED');
   const magicBlockConfigured = hasMagicBlockNetworkConfig(bindings, network);
+  const rwaDelegateProgramConfigured = hasConfiguredSolanaAddress(
+    bindings,
+    'OFFPAY_RWA_DELEGATE_PROGRAM_ID',
+  );
+  const rwaDelegateConfigured =
+    rwaDelegateProgramConfigured &&
+    magicBlockConfigured &&
+    hasRwaMagicBlockRouterConfig(bindings, network) &&
+    isRwaDelegateEnabled(bindings, network);
   const umbraLocalTestMode = hasTruthyBinding(bindings, 'UMBRA_LOCAL_TEST_MODE');
   const umbraCircuitMetadata = getUmbraCircuitMetadata(bindings);
   const umbraIndexerEndpoint = getUmbraIndexerUrl(bindings, network);
@@ -246,24 +313,37 @@ async function getCapabilities(
         ),
       },
       rwa: {
-        assets:
-          network === 'devnet'
-            ? available('Devnet RWA sandbox assets are available on this network.')
-            : unsupportedNetwork('RWA assets are currently enabled only for the devnet sandbox.'),
-        price:
-          network === 'devnet'
-            ? available('Devnet RWA sandbox pricing is available on this network.')
-            : unsupportedNetwork('RWA pricing is currently enabled only for the devnet sandbox.'),
-        devnetSandboxQuote:
-          network === 'devnet'
-            ? notImplemented('Devnet RWA quote preparation is planned for the next phase.')
-            : unsupportedNetwork('RWA quote preparation is currently enabled only for devnet.'),
-        devnetSandboxExecute:
-          network === 'devnet'
-            ? notImplemented('Devnet RWA execution is planned for the next phase.')
-            : unsupportedNetwork('RWA execution is currently enabled only for devnet.'),
+        assets: buildMainnetOnlyCapability(
+          network,
+          jupiterConfigured && rwaAllowlistConfigured,
+          'Jupiter verified stocks catalog is available on mainnet.',
+          'Real RWA secondary-market catalog is currently available only on mainnet.',
+          'RWA catalog requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
+        ),
+        price: buildMainnetOnlyCapability(
+          network,
+          jupiterConfigured && rwaAllowlistConfigured,
+          'Jupiter RWA pricing is available on mainnet.',
+          'Real RWA pricing is currently available only on mainnet.',
+          'RWA pricing requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
+        ),
+        quote: buildMainnetOnlyCapability(
+          network,
+          jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled,
+          'Jupiter RWA secondary-market quote creation is enabled on mainnet.',
+          'RWA secondary-market quotes are currently available only on mainnet.',
+          'RWA quote creation requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, and OFFPAY_RWA_MAINNET_ENABLED=1.',
+        ),
+        execute: buildMainnetOnlyCapability(
+          network,
+          jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled && walletRpcConfigured,
+          'Signed Jupiter RWA swap transactions can be submitted on mainnet.',
+          'RWA secondary-market execution is currently available only on mainnet.',
+          'RWA execution requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, OFFPAY_RWA_MAINNET_ENABLED=1, and mainnet RPC configuration.',
+        ),
+        magicBlockIntent: buildRwaMagicBlockIntentCapability(network, rwaDelegateConfigured),
         magicBlockTransfer: notImplemented(
-          'MagicBlock RWA transfers will be enabled only after devnet escrow compatibility is verified.',
+          'Direct MagicBlock RWA token transfers remain disabled; ER is only used for OffPay-owned delegated intent accounts, while Jupiter and Token-2022 settlement stay on base Solana.',
         ),
       },
       payment: {

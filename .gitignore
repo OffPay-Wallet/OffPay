@@ -28,6 +28,12 @@ expo-env.d.ts
 *.hbc
 *.bundle
 *.map
+target/
+.anchor/
+test-ledger/
+
+# Solana/Anchor deploy keypairs are generated locally and must not be committed.
+**/target/deploy/*-keypair.json
 
 # Metro bundler
 .metro-health-check*

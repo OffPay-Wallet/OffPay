@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getAuthenticatedContext } from '../lib/auth.js';
 import { getOrSetEdgeJsonCache } from '../lib/edge-cache.js';
 import { AppError } from '../lib/errors.js';
-import { getRwaAssets, getRwaPrice } from '../lib/rwa.js';
+import { createRwaQuote, executeRwaQuote, getRwaAssets, getRwaPrice } from '../lib/rwa.js';
 import type { AppEnv, Network } from '../lib/types.js';
 import {
   DEFAULT_MAX_JSON_BODY_BYTES,
@@ -17,7 +17,7 @@ const RWA_ASSETS_EDGE_FRESH_TTL_MS = 5 * 60 * 1000;
 const RWA_ASSETS_EDGE_STALE_TTL_MS = 10 * 60 * 1000;
 const MAX_MINT_LENGTH = 64;
 const MAX_TRANSACTION_BASE64_LENGTH = 256_000;
-const MAX_AMOUNT_DIGITS = 40;
+const MAX_DECIMAL_STRING_LENGTH = 48;
 
 const rwaAssetsQuerySchema = z.object({
   network: networkSchema,
@@ -28,12 +28,12 @@ const rwaPriceQuerySchema = z.object({
   mint: z.string().trim().min(1).max(MAX_MINT_LENGTH),
 });
 
-const positiveIntegerStringSchema = z
+const positiveDecimalStringSchema = z
   .string()
   .trim()
-  .max(MAX_AMOUNT_DIGITS, 'Expected a positive integer string.')
-  .regex(/^\d+$/, 'Expected a positive integer string.')
-  .refine((value) => value !== '0', 'Expected a positive integer string.');
+  .max(MAX_DECIMAL_STRING_LENGTH, 'Expected a positive decimal string.')
+  .regex(/^\d+(?:\.\d{1,12})?$/, 'Expected a positive decimal string.')
+  .refine((value) => Number(value) > 0, 'Expected a positive decimal string.');
 
 const base64StringSchema = z
   .string()
@@ -42,11 +42,60 @@ const base64StringSchema = z
   .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Expected a base64-encoded string.');
 
 const rwaQuoteBodySchema = z.object({
-  inputMint: z.string().trim().min(1).max(MAX_MINT_LENGTH),
-  outputMint: z.string().trim().min(1).max(MAX_MINT_LENGTH),
-  amount: positiveIntegerStringSchema,
-  side: z.enum(['buy', 'sell']),
+  assetMint: z.string().trim().min(1).max(MAX_MINT_LENGTH).optional(),
+  assetSymbol: z.string().trim().min(1).max(32).optional(),
+  quantity: positiveDecimalStringSchema.optional(),
+  cashAmount: positiveDecimalStringSchema.optional(),
+  side: z.enum(['buy', 'sell']).optional(),
   network: networkSchema,
+}).superRefine((value, context) => {
+  if (value.assetMint == null && value.assetSymbol == null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'RWA quote requires assetMint or assetSymbol.',
+      path: ['assetMint'],
+    });
+  }
+
+  if (value.quantity == null && value.cashAmount == null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'RWA quote requires quantity or cashAmount.',
+      path: ['quantity'],
+    });
+  }
+
+  if (value.side == null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'RWA quote requires side.',
+      path: ['side'],
+    });
+  }
+
+  if (value.quantity != null && value.cashAmount != null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'RWA quote accepts either quantity or cashAmount, not both.',
+      path: ['cashAmount'],
+    });
+  }
+
+  if (value.side === 'buy' && value.cashAmount == null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'RWA buy quote requires cashAmount.',
+      path: ['cashAmount'],
+    });
+  }
+
+  if (value.side === 'sell' && value.quantity == null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'RWA sell quote requires quantity.',
+      path: ['quantity'],
+    });
+  }
 });
 
 const rwaExecuteBodySchema = z.object({
@@ -75,15 +124,6 @@ function assertRequestedNetwork(requestedNetwork: Network, authenticatedNetwork:
   }
 }
 
-function throwDevnetExecutionNotImplemented(): never {
-  throw new AppError({
-    status: 501,
-    code: 'NOT_IMPLEMENTED',
-    message:
-      'Devnet RWA transaction execution is not enabled yet. The current phase supports catalog and pricing only.',
-  });
-}
-
 const rwaRoutes = new Hono<AppEnv>();
 
 rwaRoutes.get('/assets', async (context) => {
@@ -96,7 +136,7 @@ rwaRoutes.get('/assets', async (context) => {
       keyParts: [query.network],
       freshTtlMs: RWA_ASSETS_EDGE_FRESH_TTL_MS,
       staleTtlMs: RWA_ASSETS_EDGE_STALE_TTL_MS,
-      resolver: () => Promise.resolve(getRwaAssets(context.env, query.network)),
+      resolver: () => getRwaAssets(context.env, query.network),
     }),
   );
   response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
@@ -108,7 +148,7 @@ rwaRoutes.get('/price', async (context) => {
   assertSolanaAddress(query.mint, 'RWA mint address is invalid.');
 
   const response = context.json(
-    getRwaPrice(context.env, {
+    await getRwaPrice(context.env, {
       mint: query.mint,
       network: query.network,
     }),
@@ -127,11 +167,17 @@ rwaRoutes.post('/quote', async (context) => {
     DEFAULT_MAX_JSON_BODY_BYTES,
   );
 
-  assertSolanaAddress(body.inputMint, 'Input mint address is invalid.');
-  assertSolanaAddress(body.outputMint, 'Output mint address is invalid.');
+  if (body.assetMint != null) {
+    assertSolanaAddress(body.assetMint, 'RWA mint address is invalid.');
+  }
   assertRequestedNetwork(body.network, authenticatedContext.network);
 
-  throwDevnetExecutionNotImplemented();
+  return context.json(
+    await createRwaQuote(context.env, {
+      ...body,
+      walletAddress: authenticatedContext.wallet,
+    }),
+  );
 });
 
 rwaRoutes.post('/execute', async (context) => {
@@ -146,7 +192,12 @@ rwaRoutes.post('/execute', async (context) => {
 
   assertRequestedNetwork(body.network, authenticatedContext.network);
 
-  throwDevnetExecutionNotImplemented();
+  return context.json(
+    await executeRwaQuote(context.env, {
+      ...body,
+      walletAddress: authenticatedContext.wallet,
+    }),
+  );
 });
 
 export default rwaRoutes;

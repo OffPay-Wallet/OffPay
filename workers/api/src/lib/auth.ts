@@ -26,6 +26,7 @@ const PROTECTED_ROUTE_PREFIXES = [
   '/api/payment/',
   '/api/offline/',
   '/api/privacy/',
+  '/api/rwa/',
   '/api/stream/',
   '/api/pending/',
   '/api/rpc/',
@@ -44,6 +45,8 @@ const PUBLIC_AUTH_EXEMPT_ROUTES = new Set([
   'GET /api/wallet/token-transactions',
   'GET /api/stream/capabilities',
   'GET /api/stream/wallet-activity',
+  'GET /api/rwa/assets',
+  'GET /api/rwa/price',
 ]);
 const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/bootstrap/provision',
@@ -64,6 +67,8 @@ const PUBLIC_RATE_LIMITED_ROUTES = new Set([
   'GET /api/wallet/token-transactions',
   'GET /api/stream/capabilities',
   'GET /api/stream/wallet-activity',
+  'GET /api/rwa/assets',
+  'GET /api/rwa/price',
 ]);
 const PUBLIC_RATE_LIMIT_FAIL_CLOSED_ROUTES = new Set([
   'GET /api/bootstrap/provision',

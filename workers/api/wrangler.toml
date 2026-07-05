@@ -64,6 +64,15 @@ id = "dc1e56579a7145989f69bc34a8b069d4"
 # npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY
 # Optional only when using a gated/private Umbra endpoint:
 # npx wrangler secret put UMBRA_API_KEY
+# Required for RWA secondary-market quotes and execution:
+# npx wrangler secret put JUPITER_API_KEY
+# Configure allowed RWA token mints before enabling mainnet trading:
+# OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST = "mint1,mint2"
+# OFFPAY_RWA_MAINNET_ENABLED = "1"
+# Required only after deploying the OffPay RWA delegated intent program:
+# OFFPAY_RWA_DELEGATE_PROGRAM_ID = "<program_id>"
+# OFFPAY_RWA_DELEGATE_DEVNET_ENABLED = "1"
+# OFFPAY_RWA_MAGICBLOCK_ROUTER_DEVNET_URL = "https://devnet-router.magicblock.app"
 
 [vars]
 NODE_ENV = "production"
@@ -94,3 +103,11 @@ OFFPAY_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 OFFPAY_DEVNET_USDT_MINT = ""
 OFFPAY_MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 OFFPAY_MAINNET_USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST = ""
+OFFPAY_RWA_MAINNET_ENABLED = "0"
+OFFPAY_RWA_MAX_PRICE_IMPACT_BPS = "200"
+OFFPAY_RWA_DELEGATE_PROGRAM_ID = ""
+OFFPAY_RWA_DELEGATE_DEVNET_ENABLED = "0"
+OFFPAY_RWA_DELEGATE_MAINNET_ENABLED = "0"
+OFFPAY_RWA_MAGICBLOCK_ROUTER_DEVNET_URL = "https://devnet-router.magicblock.app"
+OFFPAY_RWA_MAGICBLOCK_ROUTER_MAINNET_URL = ""

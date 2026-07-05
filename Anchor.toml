@@ -1,0 +1,22 @@
+[toolchain]
+anchor_version = "1.0.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+offpay_rwa_delegate = "4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7"
+
+[programs.devnet]
+offpay_rwa_delegate = "4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "anchor test --skip-local-validator"

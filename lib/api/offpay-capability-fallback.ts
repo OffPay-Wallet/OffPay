@@ -39,8 +39,9 @@ export function buildUnavailableCapabilities(
       rwa: {
         assets: status,
         price: status,
-        devnetSandboxQuote: status,
-        devnetSandboxExecute: status,
+        quote: status,
+        execute: status,
+        magicBlockIntent: status,
         magicBlockTransfer: status,
       },
       payment: {

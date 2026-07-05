@@ -44,8 +44,9 @@ export interface CapabilitiesResponse {
     rwa?: {
       assets?: CapabilityStatus;
       price?: CapabilityStatus;
-      devnetSandboxQuote?: CapabilityStatus;
-      devnetSandboxExecute?: CapabilityStatus;
+      quote?: CapabilityStatus;
+      execute?: CapabilityStatus;
+      magicBlockIntent?: CapabilityStatus;
       magicBlockTransfer?: CapabilityStatus;
     };
     payment: {
@@ -292,10 +293,11 @@ export interface SwapPriceResponse {
   fetchedAt: number;
 }
 
-export type RwaAssetCategory = 'equity' | 'etf' | 'treasury' | 'commodity';
-export type RwaProvider = 'offpay-devnet';
-export type RwaExecutionMode = 'devnet_sandbox' | 'dex' | 'issuer' | 'disabled';
-export type RwaRiskLevel = 'sandbox' | 'low' | 'medium' | 'high';
+export type RwaAssetCategory = 'equity' | 'etf' | 'treasury' | 'commodity' | 'unknown';
+export type RwaProvider = 'jupiter_stocks';
+export type RwaProviderEnvironment = 'production';
+export type RwaExecutionMode = 'jupiter_swap' | 'issuer' | 'disabled';
+export type RwaRiskLevel = 'regulated' | 'high';
 
 export interface RwaExecutionPolicy {
   buy: RwaExecutionMode;
@@ -309,27 +311,33 @@ export interface RwaAsset {
   symbol: string;
   name: string;
   mint: string;
-  decimals: number;
+  decimals: number | null;
   network: OffpayNetwork;
   category: RwaAssetCategory;
   provider: RwaProvider;
   providerLabel: string;
+  providerEnvironment: RwaProviderEnvironment;
+  tokenProgramId: string | null;
   settlementMint: string;
   settlementSymbol: 'USDC';
-  priceUsd: number;
-  change24hPct: number;
+  priceUsd: number | null;
+  change24hPct: number | null;
   verified: boolean;
   tradable: boolean;
   devnetSandbox: boolean;
   magicBlockEligible: boolean;
   riskLevel: RwaRiskLevel;
+  logo: string | null;
+  underlyingSymbol: string | null;
   complianceLabel: string;
   execution: RwaExecutionPolicy;
 }
 
 export interface RwaAssetsResponse {
   network: OffpayNetwork;
-  mode: 'devnet_sandbox' | 'mainnet_disabled';
+  mode: 'jupiter_stocks' | 'devnet_unavailable';
+  provider: RwaProvider;
+  providerEnvironment: RwaProviderEnvironment;
   assets: RwaAsset[];
   fetchedAt: number;
 }
@@ -338,31 +346,42 @@ export interface RwaPriceResponse {
   network: OffpayNetwork;
   mint: string;
   symbol: string;
-  price: number;
+  price: number | null;
   currency: 'USD';
-  change24hPct: number;
+  change24hPct: number | null;
   provider: RwaProvider;
+  providerEnvironment: RwaProviderEnvironment;
   fetchedAt: number;
 }
 
 export interface RwaQuoteRequest {
-  inputMint: string;
-  outputMint: string;
-  amount: string;
-  side: 'buy' | 'sell';
+  assetMint?: string;
+  assetSymbol?: string;
+  quantity?: string;
+  cashAmount?: string;
+  side?: 'buy' | 'sell';
   network: OffpayNetwork;
 }
 
 export interface RwaQuoteResponse {
   quoteId: string;
-  inputMint: string;
-  outputMint: string;
-  inAmount: string;
-  outAmount: string;
+  assetMint: string | null;
+  assetSymbol: string | null;
+  settlementMint: string | null;
+  settlementSymbol: 'USDC' | null;
   side: 'buy' | 'sell';
-  priceUsd: number;
-  expiresAt: number;
+  priceUsd: number | null;
+  quantity: string | null;
+  cashAmount: string | null;
+  priceImpactPct: number;
+  routeSummary: string;
+  fee: string;
+  slippageBps: number | null;
+  expiresAt: number | null;
+  provider: RwaProvider;
+  providerEnvironment: RwaProviderEnvironment;
   unsignedTransaction: string;
+  transactionFormat: 'solana_versioned_transaction_base64';
 }
 
 export interface RwaExecuteRequest {
@@ -372,7 +391,12 @@ export interface RwaExecuteRequest {
 }
 
 export interface RwaExecuteResponse {
+  quoteId: string;
+  network: OffpayNetwork;
   signature: string;
+  status: 'submitted';
+  submittedAt: number;
+  provider: RwaProvider;
 }
 
 export interface FxRateResponse {
