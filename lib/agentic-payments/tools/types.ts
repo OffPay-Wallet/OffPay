@@ -8,6 +8,7 @@ import type {
   AgenticPrivateSendAction,
   AgenticUmbraVaultAction,
   AgenticSwapAction,
+  AgenticRwaTradeAction,
   AgenticFlashPositionAction,
 } from '@/store/agenticChatStore';
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
@@ -23,6 +24,10 @@ export type AgenticToolName =
   | 'get_swap_tokens'
   | 'get_swap_price'
   | 'prepare_swap_quote'
+  | 'get_rwa_assets'
+  | 'get_rwa_holdings'
+  | 'get_rwa_history'
+  | 'prepare_rwa_trade'
   | 'scan_umbra_claims'
   | 'get_umbra_balances'
   | 'list_wallet_tokens'
@@ -70,6 +75,8 @@ export type AgenticToolCategory =
   | 'fee_quote'
   | 'payment_draft'
   | 'swap'
+  | 'rwa_read'
+  | 'rwa_draft'
   | 'umbra'
   | 'payroll'
   | 'flash_read'
@@ -128,6 +135,10 @@ export type AgenticToolDraft =
         AgenticSwapAction,
         'id' | 'kind' | 'status' | 'route' | 'createdAt' | 'updatedAt'
       >;
+    }
+  | {
+      kind: 'rwa_trade';
+      draft: Omit<AgenticRwaTradeAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
     }
   | {
       kind: 'flash_position';

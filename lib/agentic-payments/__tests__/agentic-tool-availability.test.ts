@@ -34,6 +34,14 @@ function buildCapabilities(
       triggerOrders: swapExecution,
       recurringSwap: swapExecution,
     },
+    rwa: {
+      assets: available,
+      price: available,
+      quote: available,
+      execute: available,
+      magicBlockIntent: available,
+      magicBlockTransfer: unsupportedNetwork,
+    },
     payment: {
       privateInitMint: available,
       privateBalance: available,
@@ -66,6 +74,7 @@ describe('agentic tool availability', () => {
       'activity',
       'send',
       'private-send',
+      'rwa',
       'payroll',
       'umbra-vault',
       'umbra-deposit',
@@ -91,6 +100,7 @@ describe('agentic tool availability', () => {
       'send',
       'private-send',
       'swap',
+      'rwa',
       'payroll',
       'umbra-vault',
       'umbra-deposit',
@@ -118,6 +128,10 @@ describe('agentic tool availability', () => {
     expect(toolNames).toContain('draft_private_send');
     expect(toolNames).toContain('draft_umbra_vault_action');
     expect(toolNames).toContain('stage_payroll');
+    expect(toolNames).toContain('get_rwa_assets');
+    expect(toolNames).toContain('get_rwa_holdings');
+    expect(toolNames).toContain('get_rwa_history');
+    expect(toolNames).toContain('prepare_rwa_trade');
     expect(toolNames).toContain('get_umbra_balances');
     expect(toolNames).toContain('scan_umbra_claims');
     expect(toolNames).not.toContain('get_private_payment_balance');
@@ -151,6 +165,7 @@ describe('agentic tool availability', () => {
             normalSend: true,
             privateSend: true,
             swap: network === 'mainnet',
+            rwaTrade: true,
             umbra: true,
             umbraVaultBalance: true,
             privateBalance: true,

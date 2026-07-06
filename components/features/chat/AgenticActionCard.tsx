@@ -4,12 +4,14 @@ import type {
   AgenticChatAction,
   AgenticFlashPositionAction,
   AgenticPrivateSendAction,
+  AgenticRwaTradeAction,
   AgenticSwapAction,
   AgenticUmbraVaultAction,
 } from '@/store/agenticChatStore';
 
 import { FlashPositionConfirmationCard } from './FlashPositionConfirmationCard';
 import { PrivateSendConfirmationCard } from './PrivateSendConfirmationCard';
+import { RwaTradeConfirmationCard } from './RwaTradeConfirmationCard';
 import { SwapConfirmationCard } from './SwapConfirmationCard';
 import { UmbraVaultConfirmationCard } from './UmbraVaultConfirmationCard';
 
@@ -17,6 +19,7 @@ export type AgenticTransactionAction =
   | AgenticPrivateSendAction
   | AgenticUmbraVaultAction
   | AgenticSwapAction
+  | AgenticRwaTradeAction
   | AgenticFlashPositionAction;
 
 interface AgenticActionCardProps {
@@ -38,6 +41,7 @@ export function isAgenticTransactionAction(
       action.kind === 'normal_send' ||
       action.kind === 'umbra_vault' ||
       action.kind === 'swap' ||
+      action.kind === 'rwa_trade' ||
       action.kind === 'flash_position')
   );
 }
@@ -59,6 +63,10 @@ export function AgenticActionCard({
 }: AgenticActionCardProps): React.JSX.Element {
   if (action.kind === 'swap') {
     return <SwapConfirmationCard action={action} onConfirm={onConfirm} onCancel={onCancel} />;
+  }
+
+  if (action.kind === 'rwa_trade') {
+    return <RwaTradeConfirmationCard action={action} onConfirm={onConfirm} onCancel={onCancel} />;
   }
 
   if (action.kind === 'flash_position') {

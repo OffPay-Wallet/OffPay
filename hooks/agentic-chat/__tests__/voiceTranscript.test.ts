@@ -18,4 +18,15 @@ describe('normalizeVoiceTranscript', () => {
       'Umbra unshield from vault',
     );
   });
+
+  it('normalizes RWA voice vocabulary and stock tickers', () => {
+    expect(normalizeVoiceTranscript('buy 5 R W A U S D C of T S L A')).toBe(
+      'buy 5 RWAUSDC of TSLA',
+    );
+    expect(normalizeVoiceTranscript('sell zero point zero two S P Y')).toBe(
+      'sell zero point zero two SPY',
+    );
+    expect(normalizeVoiceTranscript('buy S and P five hundred')).toBe('buy SP500');
+    expect(normalizeVoiceTranscript('show are double you a holdings')).toBe('show RWA holdings');
+  });
 });

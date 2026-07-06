@@ -17,6 +17,7 @@ const DRAFT_TOOL_NAMES = new Set([
   'draft_private_send',
   'draft_umbra_vault_action',
   'prepare_swap_quote',
+  'prepare_rwa_trade',
   'stage_payroll',
   'flash_open_position',
   'flash_close_position',
@@ -37,6 +38,9 @@ const TOOL_TITLES: Record<string, string> = {
   get_normal_transfer_fee: 'Transfer fee',
   get_swap_tokens: 'Swap tokens',
   get_swap_price: 'Token price',
+  get_rwa_assets: 'RWA catalog',
+  get_rwa_holdings: 'RWA holdings',
+  get_rwa_history: 'RWA activity',
   scan_umbra_claims: 'Umbra claims',
   get_umbra_balances: 'Umbra vault',
   list_wallet_tokens: 'Wallet tokens',
@@ -109,6 +113,12 @@ function buildToolResultCard(toolResult: AgentToolResult): AgenticChatToolCard |
       return buildTokenListCard(toolResult, result, 'Swap tokens');
     case 'get_swap_price':
       return buildSwapPriceCard(toolResult, result);
+    case 'get_rwa_assets':
+      return buildRwaAssetsCard(toolResult, result);
+    case 'get_rwa_holdings':
+      return buildRwaHoldingsCard(toolResult, result);
+    case 'get_rwa_history':
+      return buildRwaHistoryCard(toolResult, result);
     case 'flash_get_markets':
       return buildFlashMarketsCard(toolResult, result);
     case 'flash_get_positions':
@@ -363,6 +373,79 @@ function buildSwapPriceCard(
     ),
     row('Currency', readString(result.currency) ?? 'USD'),
   ]);
+}
+
+function buildRwaAssetsCard(
+  toolResult: AgentToolResult,
+  result: Record<string, unknown>,
+): AgenticChatToolCard {
+  const assets = arrayOfRecords(result.assets);
+  return {
+    id: `${toolResult.toolCallId}:rwa-assets`,
+    toolName: toolResult.name,
+    title: 'RWA catalog',
+    subtitle: assets.length === 0 ? 'No RWAs available' : `${assets.length} shown`,
+    tone: assets.length === 0 ? 'default' : 'success',
+    items: assets.slice(0, MAX_ITEMS_PER_CARD).map((asset) => ({
+      title: `${formatUnknown(asset.symbol)} ${formatMoney(asset.priceUsd)}`,
+      detail: readString(asset.name),
+      tone: asset.tradable === false ? 'warning' : 'default',
+    })),
+    footer: result.truncated === true ? 'More RWAs are available.' : null,
+  };
+}
+
+function buildRwaHoldingsCard(
+  toolResult: AgentToolResult,
+  result: Record<string, unknown>,
+): AgenticChatToolCard {
+  const holdings = arrayOfRecords(result.holdings);
+  const settlement = arrayOfRecords(result.settlement);
+  return {
+    id: `${toolResult.toolCallId}:rwa-holdings`,
+    toolName: toolResult.name,
+    title: 'RWA holdings',
+    subtitle: holdings.length === 0 ? 'No RWA holdings' : `${holdings.length} position(s)`,
+    tone: holdings.length === 0 ? 'default' : 'success',
+    rows: settlement.slice(0, 2).map((token) =>
+      row(
+        readString(token.symbol) ?? 'Settlement',
+        readString(token.balance) ?? '0',
+        'default',
+      ),
+    ),
+    items: holdings.slice(0, MAX_ITEMS_PER_CARD).map((holding) => ({
+      title: `${formatUnknown(holding.balance)} ${formatUnknown(holding.symbol)}`,
+      detail:
+        readNumber(holding.valueUsd) == null
+          ? readString(holding.name)
+          : `${readString(holding.name) ?? 'RWA'} | ${formatMoney(holding.valueUsd)}`,
+    })),
+  };
+}
+
+function buildRwaHistoryCard(
+  toolResult: AgentToolResult,
+  result: Record<string, unknown>,
+): AgenticChatToolCard {
+  const transactions = arrayOfRecords(result.transactions);
+  return {
+    id: `${toolResult.toolCallId}:rwa-history`,
+    toolName: toolResult.name,
+    title: 'RWA activity',
+    subtitle:
+      transactions.length === 0
+        ? 'No RWA activity'
+        : `${transactions.length} recent ${transactions.length === 1 ? 'item' : 'items'}`,
+    tone: transactions.length === 0 ? 'default' : 'success',
+    items: transactions.slice(0, MAX_ITEMS_PER_CARD).map((transaction) => ({
+      title: `${humanize(readString(transaction.type) ?? 'transaction')} ${formatUnknown(transaction.amount)} ${formatUnknown(transaction.tokenSymbol)}`,
+      detail: humanize(readString(transaction.status) ?? 'unknown'),
+      tone: readString(transaction.status) === 'failed' ? 'danger' : 'default',
+    })),
+    rows: [row('Source', humanize(readString(result.source) ?? 'local'))],
+    footer: result.hasMore === true ? 'More RWA activity is available in History.' : null,
+  };
 }
 
 function buildFlashMarketsCard(

@@ -3,7 +3,10 @@ import {
   type RwaSwapReviewScreenPhase,
   type RwaSwapReviewScreenTokenLeg,
 } from '@/components/features/rwa/RwaSwapReviewScreen';
-import { getRwaDevnetSandboxFundingRequirement } from '@/lib/rwa/devnet-sandbox-funding';
+import {
+  formatRwaDevnetSandboxBalanceError,
+  type RwaTradeSide,
+} from '@/lib/rwa/rwa-trade-execution';
 
 import type {
   OffpayNetwork,
@@ -17,7 +20,8 @@ export const RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL = 'RWAUSDC';
 
 const XSTOCKS_LOGO_BASE_URL = 'https://xstocks-metadata.backed.fi/logos/tokens';
 
-export type RwaTradeSide = 'buy' | 'sell';
+export { formatRwaDevnetSandboxBalanceError };
+export type { RwaTradeSide };
 
 export const RWA_CATEGORY_LABELS: Record<RwaAsset['category'], string> = {
   equity: 'Equity',
@@ -61,10 +65,6 @@ interface WalletBalanceLike {
     spam?: boolean;
   }[];
 }
-
-type RwaDevnetSandboxFundingRequirement = NonNullable<
-  ReturnType<typeof getRwaDevnetSandboxFundingRequirement>
->;
 
 export function formatUsd(value: number | null): string {
   if (value == null) return 'Price unavailable';
@@ -184,17 +184,6 @@ export function getRwaErrorMessage(error: unknown): string {
     return error.message;
   }
   return 'RWA swap failed.';
-}
-
-export function formatRwaDevnetSandboxBalanceError(
-  side: RwaTradeSide,
-  requirement: RwaDevnetSandboxFundingRequirement,
-): string {
-  if (side === 'buy' && requirement.symbol === RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL) {
-    return `This Devnet buy needs ${requirement.amount} ${RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL}; wallet has ${requirement.balanceAmount}. Tap the gift faucet on Home to add ${RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL}, then retry.`;
-  }
-
-  return `This Devnet sell needs ${requirement.amount} ${requirement.symbol}; wallet has ${requirement.balanceAmount}. Buy ${requirement.symbol} first or reduce the sell amount.`;
 }
 
 export function formatPercent(value: number | null | undefined): string {

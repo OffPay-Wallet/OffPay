@@ -67,6 +67,7 @@ export type AiIntentContext = {
     normalSend?: boolean;
     privateSend?: boolean;
     swap?: boolean;
+    rwaTrade?: boolean;
     umbra?: boolean;
     umbraVaultBalance?: boolean;
     privateBalance?: boolean;

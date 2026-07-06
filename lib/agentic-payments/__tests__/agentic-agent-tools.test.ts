@@ -72,6 +72,14 @@ const capabilities: CapabilitiesResponse['capabilities'] = {
     triggerOrders: available,
     recurringSwap: available,
   },
+  rwa: {
+    assets: available,
+    price: available,
+    quote: available,
+    execute: available,
+    magicBlockIntent: available,
+    magicBlockTransfer: available,
+  },
   payment: {
     privateInitMint: available,
     privateBalance: available,
@@ -143,6 +151,7 @@ describe('runAgenticTools', () => {
       (schema) => schema.name === 'list_local_contacts',
     );
     const swapSchema = AGENTIC_TOOL_SCHEMAS.find((schema) => schema.name === 'prepare_swap_quote');
+    const rwaSchema = AGENTIC_TOOL_SCHEMAS.find((schema) => schema.name === 'prepare_rwa_trade');
 
     expect(balanceSchema?.xOffpay).toMatchObject({
       category: 'wallet_read',
@@ -162,6 +171,12 @@ describe('runAgenticTools', () => {
       pendingLabel: 'Quoting swap',
     });
     expect(swapSchema?.description).toContain('mainnet only');
+    expect(rwaSchema?.xOffpay).toMatchObject({
+      category: 'rwa_draft',
+      networkScope: 'devnet_and_mainnet',
+      pendingLabel: 'Quoting RWA trade',
+    });
+    expect(rwaSchema?.description).toContain('tokenized stock');
   });
 
   it('scopes model-visible tools by active network while preserving both-network tools', () => {
@@ -193,6 +208,10 @@ describe('runAgenticTools', () => {
         'draft_private_send',
         'draft_umbra_vault_action',
         'check_private_send_ready',
+        'get_rwa_assets',
+        'get_rwa_holdings',
+        'get_rwa_history',
+        'prepare_rwa_trade',
       ]),
     );
     expect(devnetToolNames).not.toContain('prepare_swap_quote');
@@ -201,6 +220,7 @@ describe('runAgenticTools', () => {
       expect.arrayContaining([
         'get_wallet_balance',
         'prepare_swap_quote',
+        'prepare_rwa_trade',
         'flash_get_markets',
         'flash_open_position',
       ]),
@@ -215,6 +235,9 @@ describe('runAgenticTools', () => {
       'Preparing Umbra vault',
     );
     expect(formatAgenticToolProcessingLabel([{ name: 'prepare_swap_quote' }])).toBe('Quoting swap');
+    expect(formatAgenticToolProcessingLabel([{ name: 'prepare_rwa_trade' }])).toBe(
+      'Quoting RWA trade',
+    );
     expect(
       formatAgenticToolProcessingLabel([
         { name: 'get_wallet_balance' },

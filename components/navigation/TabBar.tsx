@@ -12,6 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { TabBarBackdrop } from '@/components/navigation/TabBarBackdrop';
 import { PuffyChatIcon } from '@/components/ui/icons/PuffyChatIcon';
 import { PuffyHistoryIcon } from '@/components/ui/icons/PuffyHistoryIcon';
 import { PuffyHomeIcon } from '@/components/ui/icons/PuffyHomeIcon';
@@ -43,6 +44,9 @@ const FAB_SIZE_COMPACT = 50;
 const FAB_GAP = spacing.sm;
 const QUICK_ACTION_PUCK_SIZE = 52;
 const QUICK_ACTION_ROW_GAP = spacing.md;
+// Extra height above the capsule so the frost feathers out before the bar
+// rather than cutting off with a hard edge.
+const BACKDROP_TOP_FEATHER = 44;
 
 // ---------------------------------------------------------------------------
 // Material recipes
@@ -387,6 +391,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     transform: [{ translateY: (1 - barVisibility.value) * 10 }],
   }));
 
+  // Backdrop frost fades with the bar so it only shows on screens where the
+  // tab chrome is visible (not on full-screen flows or while overlays are up).
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: barVisibility.value,
+  }));
+
   const fabIconStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${fabExpansion.value * 45}deg` }],
   }));
@@ -434,6 +444,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     Math.max(0, QUICK_ACTIONS.length - 1) * QUICK_ACTION_ROW_GAP +
     QUICK_ACTION_ROW_GAP;
   const containerHeight = barHeight + bottomGap + stackedActionsHeight;
+  const backdropHeight = bottomGap + barHeight + BACKDROP_TOP_FEATHER;
   const routeCount = Math.max(primaryRoutes.length, 1);
   const innerRailWidth = barWidth;
   const tabSlotWidth = innerRailWidth / routeCount;
@@ -598,6 +609,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
       accessibilityElementsHidden={tabBarHidden}
       importantForAccessibility={tabBarHidden ? 'no-hide-descendants' : 'auto'}
     >
+      {/* Frosted backdrop — blurs and occludes whatever scrolls beneath the
+          bottom chrome, with a feathered top edge so it blends into the
+          scene instead of reading as a solid box. */}
+      <TabBarBackdrop height={backdropHeight} animatedStyle={backdropStyle} />
+
       {/* Frost scrim - sits behind the bar/FAB/quick actions and fades
           everything underneath to the app's neutral tone. Tap-to-dismiss;
           the negative `top` extends

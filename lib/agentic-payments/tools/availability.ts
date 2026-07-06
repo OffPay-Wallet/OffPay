@@ -12,6 +12,7 @@ export type AgenticChatCtaId =
   | 'send'
   | 'private-send'
   | 'swap'
+  | 'rwa'
   | 'payroll'
   | 'umbra-vault'
   | 'umbra-deposit'
@@ -60,6 +61,14 @@ const SWAP_TOOL_NAMES = new Set<AgenticToolName>([
   'prepare_swap_quote',
 ]);
 
+const RWA_READ_TOOL_NAMES = new Set<AgenticToolName>([
+  'get_rwa_assets',
+  'get_rwa_holdings',
+  'get_rwa_history',
+]);
+
+const RWA_TRADE_TOOL_NAMES = new Set<AgenticToolName>(['prepare_rwa_trade']);
+
 const FLASH_TOOL_NAMES = new Set<AgenticToolName>([
   'flash_get_markets',
   'flash_get_positions',
@@ -85,6 +94,7 @@ export function getAvailableAgenticChatCtaIds(
   if (canUseNormalSendTools(params)) ctas.push('send');
   if (canUseUmbraVaultActionTools(params)) ctas.push('private-send');
   if (canUseSwapTools(params)) ctas.push('swap');
+  if (canUseRwaReadTools(params)) ctas.push('rwa');
   if (canUsePayrollTools(params)) ctas.push('payroll');
   if (canUseUmbraVaultTools(params)) ctas.push('umbra-vault');
   if (canUseUmbraVaultActionTools(params)) ctas.push('umbra-deposit', 'umbra-withdraw');
@@ -117,6 +127,8 @@ function isModelToolAvailable(
   if (UMBRA_CLAIM_TOOL_NAMES.has(name)) return canUseUmbraClaimTools(params);
   if (name === 'stage_payroll') return canUsePayrollTools(params);
   if (SWAP_TOOL_NAMES.has(name)) return canUseSwapTools(params);
+  if (RWA_READ_TOOL_NAMES.has(name)) return canUseRwaReadTools(params);
+  if (RWA_TRADE_TOOL_NAMES.has(name)) return canUseRwaTradeTools(params);
   if (FLASH_TOOL_NAMES.has(name)) return canUseFlashTools(params);
   return false;
 }
@@ -208,6 +220,23 @@ function canUseSwapTools(params: AgenticToolAvailabilityParams): boolean {
   return (
     isOffpayFeatureAvailable(capabilities, 'swap.tokens') &&
     isOffpayFeatureAvailable(capabilities, 'swap.normalSwap')
+  );
+}
+
+function canUseRwaReadTools(params: AgenticToolAvailabilityParams): boolean {
+  if (!hasActiveWallet(params) || !isOnlineNetworkReady(params)) return false;
+  const capabilities = params.capabilities ?? null;
+  if (capabilities == null) return true;
+  return isOffpayFeatureAvailable(capabilities, 'rwa.assets');
+}
+
+function canUseRwaTradeTools(params: AgenticToolAvailabilityParams): boolean {
+  if (!canUseRwaReadTools(params)) return false;
+  const capabilities = params.capabilities ?? null;
+  if (capabilities == null) return true;
+  return (
+    isOffpayFeatureAvailable(capabilities, 'rwa.quote') &&
+    isOffpayFeatureAvailable(capabilities, 'rwa.execute')
   );
 }
 

@@ -29,7 +29,6 @@ import {
   findWalletTokenBalance,
   findWalletTokenHolding,
   formatRwaAssetDisplayName,
-  formatRwaDevnetSandboxBalanceError,
   formatUsd,
   getRwaAssetLogoUri,
   getRwaErrorMessage,
@@ -63,13 +62,9 @@ import {
   getOffpayFeatureCapability,
 } from '@/lib/api/offpay-capabilities';
 import { formatTokenBalance } from '@/lib/api/offpay-wallet-data';
-import { createRwaQuote, executeRwaQuote } from '@/lib/api/offpay-api-client';
-import {
-  signSerializedTransactionForWallet,
-  signSerializedTransactionsForWallet,
-} from '@/lib/crypto/solana-transaction-signing';
+import { createRwaQuote } from '@/lib/api/offpay-api-client';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
-import { getRwaDevnetSandboxFundingRequirement } from '@/lib/rwa/devnet-sandbox-funding';
+import { executeRwaTradeReview } from '@/lib/rwa/rwa-trade-execution';
 import { TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -187,30 +182,6 @@ export function RwaScreenContent(): React.JSX.Element {
     [queryClient],
   );
 
-  const assertDevnetSandboxFunding = useCallback(
-    async (review: RwaQuoteReviewState): Promise<void> => {
-      const getRequirement = (walletBalance = walletBalanceData ?? null) =>
-        getRwaDevnetSandboxFundingRequirement({
-          asset: review.asset,
-          inputAmount: review.inputAmount,
-          network: review.network,
-          quote: review.quote,
-          side: review.side,
-          walletBalance,
-        });
-
-      let requirement = getRequirement();
-      if (requirement == null || requirement.hasEnough) return;
-
-      const refreshedBalance = await refetchWalletBalance();
-      requirement = getRequirement(refreshedBalance.data ?? walletBalanceData ?? null);
-      if (requirement == null || requirement.hasEnough) return;
-
-      throw new Error(formatRwaDevnetSandboxBalanceError(review.side, requirement));
-    },
-    [refetchWalletBalance, walletBalanceData],
-  );
-
   const refetchRwaAssets = assetsQuery.refetch;
 
   useFocusEffect(
@@ -265,64 +236,14 @@ export function RwaScreenContent(): React.JSX.Element {
 
   const rwaExecuteMutation = useMutation<RwaBuyExecutionResult, unknown, RwaExecuteMutationInput>({
     mutationFn: async ({ review }) => {
-      await assertDevnetSandboxFunding(review);
-      const unsignedTransactions = review.quote.unsignedTransactions;
-      if (
-        review.network === 'devnet' &&
-        unsignedTransactions != null &&
-        unsignedTransactions.length > 0
-      ) {
-        const signedTransactions = await signSerializedTransactionsForWallet({
-          unsignedTransactions: unsignedTransactions.map((step) => step.unsignedTransaction),
-          walletAddress: review.walletAddress,
-          walletId: review.walletId,
-        });
-        if (signedTransactions.length !== unsignedTransactions.length) {
-          throw new Error(
-            'RWA wallet signing returned an incomplete MagicBlock transaction sequence.',
-          );
-        }
-
-        const execution = await executeRwaQuote({
-          quoteId: review.quote.quoteId,
-          signedTransaction: signedTransactions[0] ?? '',
-          signedTransactions: unsignedTransactions.map((step, index) => {
-            const signedTransaction = signedTransactions[index];
-            if (signedTransaction == null) {
-              throw new Error(
-                'RWA wallet signing returned an incomplete MagicBlock transaction sequence.',
-              );
-            }
-            return {
-              id: step.id,
-              target: step.target,
-              signedTransaction,
-            };
-          }),
-          network: review.network,
-        });
-
-        return {
-          review,
-          execution,
-        };
-      }
-
-      const signedTransaction = await signSerializedTransactionForWallet({
-        unsignedTransaction: review.quote.unsignedTransaction,
-        walletAddress: review.walletAddress,
-        walletId: review.walletId,
-      });
-      const execution = await executeRwaQuote({
-        quoteId: review.quote.quoteId,
-        signedTransaction,
-        network: review.network,
-      });
-
-      return {
+      return executeRwaTradeReview({
         review,
-        execution,
-      };
+        walletBalance: walletBalanceData,
+        refreshWalletBalance: async () => {
+          const refreshedBalance = await refetchWalletBalance();
+          return refreshedBalance.data ?? walletBalanceData ?? null;
+        },
+      });
     },
     onSuccess: async ({ review, execution }) => {
       const { asset, side, inputAmount, quote } = review;

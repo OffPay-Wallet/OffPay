@@ -100,6 +100,48 @@ export const AGENTIC_TOOL_METADATA = {
       'Do not guess missing token or amount fields; ask one short clarification instead.',
     ],
   },
+  get_rwa_assets: {
+    category: 'rwa_read',
+    networkScope: bothNetworks,
+    pendingLabel: 'Checking RWA catalog',
+    parallelSafe: true,
+    modelInstructions: [
+      'Use when the user asks which tokenized stocks, ETFs, xStocks, or RWA assets are available.',
+      'Use this before answering RWA catalog or stock ticker availability questions.',
+      'Do not use normal swap tools for tokenized stocks or RWAs.',
+    ],
+  },
+  get_rwa_holdings: {
+    category: 'rwa_read',
+    networkScope: bothNetworks,
+    pendingLabel: 'Checking RWA holdings',
+    parallelSafe: true,
+    modelInstructions: [
+      'Use when the user asks for RWA balances, stock holdings, RWAUSDC balance, or tokenized-stock positions.',
+      'Return holdings from the current RWA catalog only; do not infer holdings from normal token balances.',
+    ],
+  },
+  get_rwa_history: {
+    category: 'rwa_read',
+    networkScope: bothNetworks,
+    pendingLabel: 'Checking RWA history',
+    parallelSafe: true,
+    modelInstructions: [
+      'Use when the user asks for historic RWA trades, tokenized-stock buys/sells, or recent RWA activity.',
+      'This returns a capped safe summary and never exposes signatures or mints.',
+    ],
+  },
+  prepare_rwa_trade: {
+    category: 'rwa_draft',
+    networkScope: bothNetworks,
+    pendingLabel: 'Quoting RWA trade',
+    parallelSafe: false,
+    modelInstructions: [
+      'Use when the user asks to buy or sell a tokenized stock, ETF, xStock, or RWA and provides asset, side, and amount.',
+      'Buy amount is settlement cash amount. Sell amount is the RWA token quantity.',
+      'Ask one short clarification if asset, side, or amount is missing. Never submit; the app confirmation card handles signing.',
+    ],
+  },
   scan_umbra_claims: {
     category: 'umbra',
     networkScope: bothNetworks,

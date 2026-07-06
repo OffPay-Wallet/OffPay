@@ -369,6 +369,10 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.privateSend') &&
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.rpcBroadcast'),
             swap: isOffpayFeatureAvailable(params.capabilities ?? null, 'swap.normalSwap'),
+            rwaTrade:
+              isOffpayFeatureAvailable(params.capabilities ?? null, 'rwa.assets') &&
+              isOffpayFeatureAvailable(params.capabilities ?? null, 'rwa.quote') &&
+              isOffpayFeatureAvailable(params.capabilities ?? null, 'rwa.execute'),
             umbra:
               activeWalletCanUseUmbra &&
               canReadUmbraVaultBalance &&
@@ -531,6 +535,17 @@ function persistDraftAction({
           createdAt: now,
           updatedAt: now,
         }
+      : draft.kind === 'rwa_trade'
+        ? {
+            ...draft.draft,
+            id: createAgenticId('agentic-rwa'),
+            kind: 'rwa_trade',
+            status: 'needs_confirmation',
+            conversationId,
+            toolCallId: createAgenticId('intent'),
+            createdAt: now,
+            updatedAt: now,
+          }
       : draft.kind === 'flash_position'
         ? {
             ...draft.draft,

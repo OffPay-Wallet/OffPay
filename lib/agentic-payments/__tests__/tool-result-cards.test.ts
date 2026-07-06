@@ -104,12 +104,71 @@ describe('buildAgenticToolResultCards', () => {
     });
   });
 
+  it('builds RWA catalog, holdings, and activity cards', () => {
+    const cards = buildAgenticToolResultCards([
+      {
+        toolCallId: 'call-rwa-assets',
+        name: 'get_rwa_assets',
+        result: {
+          status: 'ok',
+          assets: [
+            {
+              symbol: 'SPYd',
+              name: 'SP500',
+              priceUsd: 749.12,
+              tradable: true,
+            },
+          ],
+        },
+      },
+      {
+        toolCallId: 'call-rwa-holdings',
+        name: 'get_rwa_holdings',
+        result: {
+          status: 'ok',
+          settlement: [{ symbol: 'RWAUSDC', balance: '100' }],
+          holdings: [{ symbol: 'SPYd', name: 'SP500', balance: '0.01', valueUsd: 7.49 }],
+        },
+      },
+      {
+        toolCallId: 'call-rwa-history',
+        name: 'get_rwa_history',
+        result: {
+          status: 'ok',
+          source: 'network',
+          transactions: [
+            { type: 'swap', amount: '0.01', tokenSymbol: 'SPYd', status: 'confirmed' },
+          ],
+        },
+      },
+    ]);
+
+    expect(cards[0]).toMatchObject({
+      title: 'RWA catalog',
+      items: [expect.objectContaining({ title: 'SPYd $749.12' })],
+    });
+    expect(cards[1]).toMatchObject({
+      title: 'RWA holdings',
+      rows: [expect.objectContaining({ label: 'RWAUSDC', value: '100' })],
+      items: [expect.objectContaining({ title: '0.01 SPYd' })],
+    });
+    expect(cards[2]).toMatchObject({
+      title: 'RWA activity',
+      items: [expect.objectContaining({ title: 'Swap 0.01 SPYd' })],
+    });
+  });
+
   it('skips successful draft tools because confirmation cards cover them', () => {
     const cards = buildAgenticToolResultCards([
       {
         toolCallId: 'call-draft',
         name: 'draft_private_send',
         result: { status: 'drafted', amount: '1', tokenSymbol: 'USDC' },
+      },
+      {
+        toolCallId: 'call-rwa-draft',
+        name: 'prepare_rwa_trade',
+        result: { status: 'drafted', assetSymbol: 'SPYd' },
       },
     ]);
 

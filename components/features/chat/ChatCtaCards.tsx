@@ -66,6 +66,13 @@ const CHAT_CTAS: readonly ChatCta[] = [
     prompt: 'I want to swap tokens',
   },
   {
+    id: 'rwa',
+    title: 'RWAs',
+    caption: 'Stocks & ETFs',
+    icon: 'business-outline',
+    prompt: 'Show available RWAs',
+  },
+  {
     id: 'payroll',
     title: 'Batch Send',
     caption: 'Upload recipients',

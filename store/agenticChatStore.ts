@@ -5,7 +5,7 @@ import { mmkvStorage } from '@/lib/cache/mmkv-storage';
 import { usePayrollStore } from '@/store/payrollStore';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
-import type { OffpayNetwork } from '@/types/offpay-api';
+import type { OffpayNetwork, RwaAsset, RwaProvider, RwaProviderEnvironment } from '@/types/offpay-api';
 
 export type AgenticChatRole = 'user' | 'assistant';
 
@@ -176,6 +176,48 @@ export interface AgenticSwapAction {
   errorMessage?: string | null;
 }
 
+export interface AgenticRwaTradeAction {
+  id: string;
+  kind: 'rwa_trade';
+  status: AgenticActionStatus;
+  walletAddress: string;
+  network: OffpayNetwork;
+  asset: RwaAsset;
+  side: 'buy' | 'sell';
+  inputAmount: string;
+  cashAmount: string | null;
+  quantity: string | null;
+  settlementSymbol: string;
+  payAmount: string;
+  paySymbol: string;
+  receiveAmount: string;
+  receiveSymbol: string;
+  priceUsd: number | null;
+  priceImpactPct: number;
+  fee: string;
+  routeSummary: string;
+  slippageBps: number | null;
+  quoteId: string;
+  unsignedTransaction: string;
+  unsignedTransactions?: Array<{
+    id: string;
+    label: string;
+    target: 'solana_devnet' | 'magicblock_er_devnet';
+    unsignedTransaction: string;
+    transactionFormat: 'solana_legacy_transaction_base64';
+  }>;
+  expiresAt: number | null;
+  provider: RwaProvider;
+  providerEnvironment: RwaProviderEnvironment;
+  walletId: string | null;
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  errorMessage?: string | null;
+}
+
 export interface AgenticPayrollAction {
   id: string;
   kind: 'payroll';
@@ -220,6 +262,7 @@ export type AgenticChatAction =
   | AgenticPrivateSendAction
   | AgenticUmbraVaultAction
   | AgenticSwapAction
+  | AgenticRwaTradeAction
   | AgenticPayrollAction
   | AgenticFlashPositionAction;
 
@@ -227,6 +270,7 @@ type AgenticActionPatch =
   | Partial<Omit<AgenticPrivateSendAction, 'id'>>
   | Partial<Omit<AgenticUmbraVaultAction, 'id'>>
   | Partial<Omit<AgenticSwapAction, 'id'>>
+  | Partial<Omit<AgenticRwaTradeAction, 'id'>>
   | Partial<Omit<AgenticPayrollAction, 'id'>>
   | Partial<Omit<AgenticFlashPositionAction, 'id'>>;
 

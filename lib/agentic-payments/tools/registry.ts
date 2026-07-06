@@ -15,6 +15,12 @@ import { listLocalContactsTool } from './list-local-contacts';
 import { listWalletTokensTool } from './list-wallet-tokens';
 import { prepareSwapQuoteTool } from './prepare-swap-quote';
 import { resolveRecipientTool } from './resolve-recipient';
+import {
+  getRwaAssetsTool,
+  getRwaHistoryTool,
+  getRwaHoldingsTool,
+  prepareRwaTradeTool,
+} from './rwa';
 import { scanUmbraClaimsTool } from './scan-umbra-claims';
 import { stagePayrollTool } from './stage-payroll';
 import { draftUmbraVaultActionTool } from './umbra-vault-actions';
@@ -86,6 +92,10 @@ const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   getSwapTokensTool,
   getSwapPriceTool,
   prepareSwapQuoteTool,
+  getRwaAssetsTool,
+  getRwaHoldingsTool,
+  getRwaHistoryTool,
+  prepareRwaTradeTool,
   scanUmbraClaimsTool,
   getUmbraBalancesTool,
   listWalletTokensTool,

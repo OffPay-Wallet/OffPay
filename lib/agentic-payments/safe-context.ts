@@ -55,6 +55,10 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
         isOffpayFeatureAvailable(capabilities, 'payment.privateSend') &&
         isOffpayFeatureAvailable(capabilities, 'payment.rpcBroadcast'),
       swap: isOffpayFeatureAvailable(capabilities, 'swap.normalSwap'),
+      rwaTrade:
+        isOffpayFeatureAvailable(capabilities, 'rwa.assets') &&
+        isOffpayFeatureAvailable(capabilities, 'rwa.quote') &&
+        isOffpayFeatureAvailable(capabilities, 'rwa.execute'),
       umbra: umbraVaultBalance && isOffpayFeatureAvailable(capabilities, 'payment.umbraPrivateP2p'),
       umbraVaultBalance,
       privateBalance: umbraVaultBalance,
@@ -70,6 +74,10 @@ export function buildAgentSafeContext(params: BuildAgentSafeContextParams): Agen
       'get_swap_tokens',
       'get_swap_price',
       'prepare_swap_quote',
+      'get_rwa_assets',
+      'get_rwa_holdings',
+      'get_rwa_history',
+      'prepare_rwa_trade',
       'scan_umbra_claims',
       'get_umbra_balances',
       'draft_normal_send',

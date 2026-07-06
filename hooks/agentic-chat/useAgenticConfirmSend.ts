@@ -50,6 +50,7 @@ import {
   type AgenticChatAction,
   type AgenticChatScope,
   type AgenticPrivateSendAction,
+  type AgenticRwaTradeAction,
   type AgenticSwapAction,
   type AgenticFlashPositionAction,
   type AgenticUmbraVaultAction,
@@ -186,6 +187,18 @@ export function useAgenticConfirmSend({
         await confirmSwapAction({
           action,
           walletId,
+          queryClient,
+          updateAction,
+          showToast,
+        });
+        return;
+      }
+
+      if (action.kind === 'rwa_trade') {
+        await confirmRwaTradeAction({
+          action,
+          walletId,
+          balance,
           queryClient,
           updateAction,
           showToast,
@@ -921,6 +934,134 @@ async function confirmSwapAction(params: {
     const message = error instanceof Error ? error.message : 'Unable to submit swap.';
     updateAction(action.id, { status: 'failed', errorMessage: message });
     showToast({ title: 'Yuga swap failed', message, variant: 'error' });
+  }
+}
+
+const RWA_QUOTE_REFRESH_BUFFER_MS = 15_000;
+
+async function confirmRwaTradeAction(params: {
+  action: AgenticRwaTradeAction;
+  walletId: string | null;
+  balance: WalletBalanceResponse | null | undefined;
+  queryClient: ReturnType<typeof useQueryClient>;
+  updateAction: ReturnType<typeof useAgenticChatStore.getState>['updateAction'];
+  showToast: ReturnType<typeof useAppToast>['showToast'];
+}): Promise<void> {
+  const { action, walletId, balance, queryClient, updateAction, showToast } = params;
+  if (walletId == null) {
+    const message = 'Unlock wallet and try again.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'Confirmation blocked', message, variant: 'error' });
+    return;
+  }
+
+  updateAction(action.id, { status: 'submitting', errorMessage: null });
+  await yieldToUi();
+
+  try {
+    const { createRwaQuote, getWalletBalance } = await import('@/lib/api/offpay-api-client');
+    const { executeRwaTradeReview } = await import('@/lib/rwa/rwa-trade-execution');
+    const quote =
+      action.expiresAt != null && action.expiresAt - Date.now() <= RWA_QUOTE_REFRESH_BUFFER_MS
+        ? await createRwaQuote({
+            assetMint: action.asset.mint,
+            cashAmount: action.side === 'buy' ? action.inputAmount : undefined,
+            quantity: action.side === 'sell' ? action.inputAmount : undefined,
+            side: action.side,
+            network: action.network,
+          })
+        : {
+            quoteId: action.quoteId,
+            assetMint: action.asset.mint,
+            assetSymbol: action.asset.symbol,
+            settlementMint: action.asset.settlementMint,
+            settlementSymbol: 'USDC' as const,
+            side: action.side,
+            priceUsd: action.priceUsd,
+            quantity: action.quantity,
+            cashAmount: action.cashAmount,
+            priceImpactPct: action.priceImpactPct,
+            routeSummary: action.routeSummary,
+            fee: action.fee,
+            slippageBps: action.slippageBps,
+            expiresAt: action.expiresAt,
+            provider: action.provider,
+            providerEnvironment: action.providerEnvironment,
+            unsignedTransaction: action.unsignedTransaction,
+            transactionFormat: 'solana_legacy_transaction_base64' as const,
+            unsignedTransactions: action.unsignedTransactions,
+          };
+    const hasUnsignedSequence =
+      quote.unsignedTransactions != null && quote.unsignedTransactions.length > 0;
+    if (quote.unsignedTransaction.trim().length === 0 && !hasUnsignedSequence) {
+      throw new Error('RWA quote expired. Ask Yuga to prepare a fresh quote.');
+    }
+
+    const execution = await executeRwaTradeReview({
+      review: {
+        asset: action.asset,
+        side: action.side,
+        inputAmount: action.inputAmount,
+        quote,
+        network: action.network,
+        walletAddress: action.walletAddress,
+        walletId,
+      },
+      walletBalance: balance,
+      refreshWalletBalance: () =>
+        getWalletBalance(action.walletAddress, action.network, {
+          requestOwner: 'agent.rwa.confirm.balance',
+        }),
+    });
+    const payAmount =
+      action.side === 'buy' ? quote.cashAmount ?? action.inputAmount : quote.quantity ?? action.inputAmount;
+    const receiveAmount =
+      action.side === 'buy' ? quote.quantity ?? action.receiveAmount : quote.cashAmount ?? action.receiveAmount;
+
+    void presentWalletTransactionEventNotification({
+      identifier: `wallet-transaction-${action.network}-${execution.execution.signature}`,
+      type: 'swap',
+      amountLabel: `+${receiveAmount} ${action.receiveSymbol}`,
+      secondaryAmountLabel: `-${payAmount} ${action.paySymbol}`,
+      signature: execution.execution.signature,
+    });
+
+    await invalidateAfterTransfer({
+      queryClient,
+      walletAddress: action.walletAddress,
+      network: action.network,
+      isNormalRoute: true,
+    });
+
+    updateAction(action.id, {
+      status: 'submitted',
+      signature: execution.execution.signature,
+      errorMessage: null,
+      quoteId: quote.quoteId,
+      unsignedTransaction: quote.unsignedTransaction,
+      unsignedTransactions: quote.unsignedTransactions,
+      cashAmount: quote.cashAmount,
+      quantity: quote.quantity,
+      payAmount,
+      receiveAmount,
+      priceUsd: quote.priceUsd,
+      priceImpactPct: quote.priceImpactPct,
+      fee: quote.fee,
+      routeSummary: quote.routeSummary,
+      slippageBps: quote.slippageBps,
+      expiresAt: quote.expiresAt,
+      provider: quote.provider,
+      providerEnvironment: quote.providerEnvironment,
+    });
+    showToast({
+      title: 'RWA trade submitted',
+      message: `${action.side === 'buy' ? 'Buy' : 'Sell'} ${action.asset.symbol}`,
+      variant: 'success',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to submit RWA trade.';
+    updateAction(action.id, { status: 'failed', errorMessage: message });
+    showToast({ title: 'RWA trade failed', message, variant: 'error' });
   }
 }
 
