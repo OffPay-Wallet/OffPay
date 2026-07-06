@@ -4,7 +4,7 @@ export interface DevnetAirdropResult {
   signature: string;
   sol: number;
   tokens: Array<{
-    symbol: 'dUSDC' | 'dUSDT' | 'USDC' | 'AAPLd' | 'RWAUSDC';
+    symbol: string;
     mint: string;
     decimals: number;
     rawAmount: string;
@@ -14,6 +14,11 @@ export interface DevnetAirdropResult {
     recipientTokenAccount: string;
   }>;
   nextEligibleAt: number;
+}
+
+interface DevnetAirdropOptions {
+  scope?: 'general' | 'rwa_sandbox';
+  rwaAssetMint?: string;
 }
 
 function readErrorStringField(error: unknown, field: 'code' | 'message'): string | null {
@@ -45,10 +50,15 @@ function isRateLimitError(error: unknown): boolean {
   );
 }
 
-export async function requestDevnetSolAirdrop(walletAddress: string): Promise<DevnetAirdropResult> {
+export async function requestDevnetSolAirdrop(
+  walletAddress: string,
+  options: DevnetAirdropOptions = {},
+): Promise<DevnetAirdropResult> {
   const result = await requestDevnetSolAirdropFromApi({
     walletAddress,
     network: 'devnet',
+    ...(options.scope != null ? { scope: options.scope } : {}),
+    ...(options.rwaAssetMint != null ? { rwaAssetMint: options.rwaAssetMint } : {}),
   });
 
   return {

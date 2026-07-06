@@ -61,6 +61,31 @@ describe('devnet airdrop faucet', () => {
     });
   });
 
+  it('passes the selected RWA asset mint when sell-side funding needs it', async () => {
+    mockRequestDevnetSolAirdropFromApi.mockResolvedValueOnce({
+      network: 'devnet',
+      walletAddress: 'wallet-address',
+      treasuryAddress: 'treasury-address',
+      signature: 'signature-from-worker',
+      lamports: '250000000',
+      sol: 0.25,
+      tokens: [],
+      nextEligibleAt: 1_800_000,
+    });
+
+    await requestDevnetSolAirdrop('wallet-address', {
+      scope: 'rwa_sandbox',
+      rwaAssetMint: 'CrieBJEXarFm2C7vgPJs9v7M9PLuHV6axkNWhjUTwKZq',
+    });
+
+    expect(mockRequestDevnetSolAirdropFromApi).toHaveBeenCalledWith({
+      walletAddress: 'wallet-address',
+      network: 'devnet',
+      scope: 'rwa_sandbox',
+      rwaAssetMint: 'CrieBJEXarFm2C7vgPJs9v7M9PLuHV6axkNWhjUTwKZq',
+    });
+  });
+
   it('explains backend faucet treasury failures', () => {
     expect(
       getDevnetAirdropErrorMessage(new Error('Devnet faucet treasury needs more dUSDC.')),

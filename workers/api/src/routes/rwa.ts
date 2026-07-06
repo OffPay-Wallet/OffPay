@@ -41,66 +41,78 @@ const base64StringSchema = z
   .max(MAX_TRANSACTION_BASE64_LENGTH, 'Expected a base64-encoded string.')
   .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Expected a base64-encoded string.');
 
-const rwaQuoteBodySchema = z.object({
-  assetMint: z.string().trim().min(1).max(MAX_MINT_LENGTH).optional(),
-  assetSymbol: z.string().trim().min(1).max(32).optional(),
-  quantity: positiveDecimalStringSchema.optional(),
-  cashAmount: positiveDecimalStringSchema.optional(),
-  side: z.enum(['buy', 'sell']).optional(),
-  network: networkSchema,
-}).superRefine((value, context) => {
-  if (value.assetMint == null && value.assetSymbol == null) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'RWA quote requires assetMint or assetSymbol.',
-      path: ['assetMint'],
-    });
-  }
+const rwaQuoteBodySchema = z
+  .object({
+    assetMint: z.string().trim().min(1).max(MAX_MINT_LENGTH).optional(),
+    assetSymbol: z.string().trim().min(1).max(32).optional(),
+    quantity: positiveDecimalStringSchema.optional(),
+    cashAmount: positiveDecimalStringSchema.optional(),
+    side: z.enum(['buy', 'sell']).optional(),
+    network: networkSchema,
+  })
+  .superRefine((value, context) => {
+    if (value.assetMint == null && value.assetSymbol == null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'RWA quote requires assetMint or assetSymbol.',
+        path: ['assetMint'],
+      });
+    }
 
-  if (value.quantity == null && value.cashAmount == null) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'RWA quote requires quantity or cashAmount.',
-      path: ['quantity'],
-    });
-  }
+    if (value.quantity == null && value.cashAmount == null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'RWA quote requires quantity or cashAmount.',
+        path: ['quantity'],
+      });
+    }
 
-  if (value.side == null) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'RWA quote requires side.',
-      path: ['side'],
-    });
-  }
+    if (value.side == null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'RWA quote requires side.',
+        path: ['side'],
+      });
+    }
 
-  if (value.quantity != null && value.cashAmount != null) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'RWA quote accepts either quantity or cashAmount, not both.',
-      path: ['cashAmount'],
-    });
-  }
+    if (value.quantity != null && value.cashAmount != null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'RWA quote accepts either quantity or cashAmount, not both.',
+        path: ['cashAmount'],
+      });
+    }
 
-  if (value.side === 'buy' && value.cashAmount == null) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'RWA buy quote requires cashAmount.',
-      path: ['cashAmount'],
-    });
-  }
+    if (value.side === 'buy' && value.cashAmount == null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'RWA buy quote requires cashAmount.',
+        path: ['cashAmount'],
+      });
+    }
 
-  if (value.side === 'sell' && value.quantity == null) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'RWA sell quote requires quantity.',
-      path: ['quantity'],
-    });
-  }
-});
+    if (value.side === 'sell' && value.quantity == null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'RWA sell quote requires quantity.',
+        path: ['quantity'],
+      });
+    }
+  });
 
 const rwaExecuteBodySchema = z.object({
   quoteId: z.string().trim().min(1).max(128),
   signedTransaction: base64StringSchema,
+  signedTransactions: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(64),
+        target: z.enum(['solana_devnet', 'magicblock_er_devnet']),
+        signedTransaction: base64StringSchema,
+      }),
+    )
+    .max(8)
+    .optional(),
   network: networkSchema,
 });
 

@@ -1,6 +1,4 @@
-import {
-  STREAM_DEFAULTS,
-} from './helius.js';
+import { STREAM_DEFAULTS } from './helius.js';
 import { getSupportedStablecoins, type SupportedStablecoin } from './offline.js';
 import { hasConfiguredRpcHttp } from './solana-rpc-providers.js';
 import type { Bindings, Network } from './types.js';
@@ -141,6 +139,11 @@ function hasConfiguredMintAllowlist(bindings: Bindings, key: keyof Bindings): bo
     return false;
   }
 
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '*' || normalized === 'all' || normalized === 'jupiter:stocks') {
+    return true;
+  }
+
   const mints = value
     .split(',')
     .map((entry) => entry.trim())
@@ -155,10 +158,14 @@ function hasConfiguredSolanaAddress(bindings: Bindings, key: keyof Bindings): bo
 }
 
 function hasConfiguredRwaDevnetSandbox(bindings: Bindings): boolean {
+  const hasCatalog =
+    hasConfiguredBinding(bindings, 'OFFPAY_RWA_DEVNET_ASSETS_JSON') ||
+    hasConfiguredSolanaAddress(bindings, 'OFFPAY_RWA_DEVNET_SANDBOX_MINT');
+
   return (
     hasConfiguredSolanaAddress(bindings, 'OFFPAY_RWA_DELEGATE_PROGRAM_ID') &&
     hasTruthyBinding(bindings, 'OFFPAY_RWA_DELEGATE_DEVNET_ENABLED') &&
-    hasConfiguredSolanaAddress(bindings, 'OFFPAY_RWA_DEVNET_SANDBOX_MINT')
+    hasCatalog
   );
 }
 
@@ -200,15 +207,15 @@ function buildRwaMagicBlockIntentCapability(
     return configured
       ? available('MagicBlock delegated RWA intent accounts are enabled on mainnet.')
       : notImplemented(
-        'Mainnet MagicBlock RWA intents require OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_MAINNET_ENABLED=1, MagicBlock validator config, and router config after audit.',
-      );
+          'Mainnet MagicBlock RWA intents require OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_MAINNET_ENABLED=1, MagicBlock validator config, and router config after audit.',
+        );
   }
 
   return configured
     ? available('MagicBlock delegated RWA intent accounts are enabled on devnet.')
     : notImplemented(
-      'Devnet MagicBlock RWA intents require OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_DEVNET_ENABLED=1, MagicBlock validator config, and router config.',
-    );
+        'Devnet MagicBlock RWA intents require OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_DEVNET_ENABLED=1, MagicBlock validator config, and router config.',
+      );
 }
 
 function buildMainnetOnlyCapability(
@@ -252,19 +259,18 @@ async function getCapabilities(
   const umbraCircuitMetadata = getUmbraCircuitMetadata(bindings);
   const umbraIndexerEndpoint = getUmbraIndexerUrl(bindings, network);
   const umbraRelayerEndpoint = getUmbraRelayerUrl(bindings, network);
-  const umbraExecutionAvailable = umbraLocalTestMode || (
-    umbraIndexerEndpoint.length > 0 &&
-    umbraRelayerEndpoint.length > 0
-  );
+  const umbraExecutionAvailable =
+    umbraLocalTestMode || (umbraIndexerEndpoint.length > 0 && umbraRelayerEndpoint.length > 0);
   const umbraMetadataAvailable = umbraExecutionAvailable;
   const supportedStablecoins = getSupportedStablecoins(bindings, network);
   const hasEnabledStablecoin = supportedStablecoins.some((stablecoin) => stablecoin.enabled);
-  const walletActivity =
-    !walletRpcConfigured
-      ? notImplemented('Live wallet activity streaming is not enabled for this network in this deployment.')
-      : STREAM_DEFAULTS[network].walletActivity
-        ? available('Live wallet activity streaming is available for this network.')
-        : unsupportedNetwork('Live wallet activity streaming is not supported on this network.');
+  const walletActivity = !walletRpcConfigured
+    ? notImplemented(
+        'Live wallet activity streaming is not enabled for this network in this deployment.',
+      )
+    : STREAM_DEFAULTS[network].walletActivity
+      ? available('Live wallet activity streaming is available for this network.')
+      : unsupportedNetwork('Live wallet activity streaming is not supported on this network.');
 
   return {
     network,
@@ -275,12 +281,15 @@ async function getCapabilities(
           : notImplemented('Wallet balances are not enabled for this network in this deployment.'),
         transactions: walletRpcConfigured
           ? available('Wallet transactions are available on this network.')
-          : notImplemented('Wallet transactions are not enabled for this network in this deployment.'),
+          : notImplemented(
+              'Wallet transactions are not enabled for this network in this deployment.',
+            ),
       },
       risk: {
-        score: riskProviderConfigured && walletRpcConfigured
-          ? available('Risk scoring is available on this network.')
-          : notImplemented('Risk scoring is not enabled for this network in this deployment.'),
+        score:
+          riskProviderConfigured && walletRpcConfigured
+            ? available('Risk scoring is available on this network.')
+            : notImplemented('Risk scoring is not enabled for this network in this deployment.'),
       },
       stream: {
         walletActivity,
@@ -322,121 +331,178 @@ async function getCapabilities(
         ),
       },
       rwa: {
-        assets: network === 'devnet'
-          ? jupiterConfigured && rwaDevnetSandboxConfigured
-            ? available('Devnet RWA sandbox catalog is available with live Jupiter reference pricing.')
-            : notImplemented('Devnet RWA sandbox requires JUPITER_API_KEY, OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_DEVNET_ENABLED=1, and OFFPAY_RWA_DEVNET_SANDBOX_MINT.')
-          : buildMainnetOnlyCapability(
-            network,
-            jupiterConfigured && rwaAllowlistConfigured,
-            'Jupiter verified stocks catalog is available on mainnet.',
-            'Real RWA secondary-market catalog is currently available only on mainnet.',
-            'RWA catalog requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
-          ),
-        price: network === 'devnet'
-          ? jupiterConfigured && rwaDevnetSandboxConfigured
-            ? available('Devnet RWA sandbox pricing uses the configured live Jupiter stock reference mint.')
-            : notImplemented('Devnet RWA sandbox pricing requires JUPITER_API_KEY and OFFPAY_RWA_DEVNET_SANDBOX_MINT.')
-          : buildMainnetOnlyCapability(
-            network,
-            jupiterConfigured && rwaAllowlistConfigured,
-            'Jupiter RWA pricing is available on mainnet.',
-            'Real RWA pricing is currently available only on mainnet.',
-            'RWA pricing requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
-          ),
-        quote: network === 'devnet'
-          ? jupiterConfigured && rwaDevnetSandboxConfigured && walletRpcConfigured
-            ? available('Devnet RWA sandbox quote creation builds wallet-signed delegate-program settlement transactions.')
-            : notImplemented('Devnet RWA sandbox quotes require JUPITER_API_KEY, delegate program config, sandbox mint config, and devnet RPC configuration.')
-          : buildMainnetOnlyCapability(
-            network,
-            jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled,
-            'Jupiter RWA secondary-market quote creation is enabled on mainnet.',
-            'RWA secondary-market quotes are currently available only on mainnet.',
-            'RWA quote creation requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, and OFFPAY_RWA_MAINNET_ENABLED=1.',
-          ),
-        execute: network === 'devnet'
-          ? rwaDevnetSandboxConfigured && walletRpcConfigured
-            ? available('Signed devnet RWA sandbox settlement transactions can be submitted on-chain.')
-            : notImplemented('Devnet RWA sandbox execution requires delegate program config, sandbox mint config, and devnet RPC configuration.')
-          : buildMainnetOnlyCapability(
-            network,
-            jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled && walletRpcConfigured,
-            'Signed Jupiter RWA swap transactions can be submitted on mainnet.',
-            'RWA secondary-market execution is currently available only on mainnet.',
-            'RWA execution requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, OFFPAY_RWA_MAINNET_ENABLED=1, and mainnet RPC configuration.',
-          ),
+        assets:
+          network === 'devnet'
+            ? jupiterConfigured && rwaDevnetSandboxConfigured
+              ? available(
+                  'Devnet RWA sandbox catalog is available with live Jupiter reference pricing.',
+                )
+              : notImplemented(
+                  'Devnet RWA sandbox requires JUPITER_API_KEY, OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_DEVNET_ENABLED=1, and OFFPAY_RWA_DEVNET_ASSETS_JSON or OFFPAY_RWA_DEVNET_SANDBOX_MINT.',
+                )
+            : buildMainnetOnlyCapability(
+                network,
+                jupiterConfigured && rwaAllowlistConfigured,
+                'Jupiter verified stocks catalog is available on mainnet.',
+                'Real RWA secondary-market catalog is currently available only on mainnet.',
+                'RWA catalog requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
+              ),
+        price:
+          network === 'devnet'
+            ? jupiterConfigured && rwaDevnetSandboxConfigured
+              ? available(
+                  'Devnet RWA sandbox pricing uses the configured live Jupiter stock reference mint.',
+                )
+              : notImplemented(
+                  'Devnet RWA sandbox pricing requires JUPITER_API_KEY and OFFPAY_RWA_DEVNET_ASSETS_JSON or OFFPAY_RWA_DEVNET_SANDBOX_MINT.',
+                )
+            : buildMainnetOnlyCapability(
+                network,
+                jupiterConfigured && rwaAllowlistConfigured,
+                'Jupiter RWA pricing is available on mainnet.',
+                'Real RWA pricing is currently available only on mainnet.',
+                'RWA pricing requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
+              ),
+        quote:
+          network === 'devnet'
+            ? jupiterConfigured && rwaDevnetSandboxConfigured && walletRpcConfigured
+              ? available(
+                  'Devnet RWA sandbox quote creation builds wallet-signed delegate-program settlement transactions.',
+                )
+              : notImplemented(
+                  'Devnet RWA sandbox quotes require JUPITER_API_KEY, delegate program config, sandbox mint config, and devnet RPC configuration.',
+                )
+            : buildMainnetOnlyCapability(
+                network,
+                jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled,
+                'Jupiter RWA secondary-market quote creation is enabled on mainnet.',
+                'RWA secondary-market quotes are currently available only on mainnet.',
+                'RWA quote creation requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, and OFFPAY_RWA_MAINNET_ENABLED=1.',
+              ),
+        execute:
+          network === 'devnet'
+            ? rwaDevnetSandboxConfigured && walletRpcConfigured
+              ? available(
+                  'Signed devnet RWA sandbox settlement transactions can be submitted on-chain.',
+                )
+              : notImplemented(
+                  'Devnet RWA sandbox execution requires delegate program config, sandbox mint config, and devnet RPC configuration.',
+                )
+            : buildMainnetOnlyCapability(
+                network,
+                jupiterConfigured &&
+                  rwaAllowlistConfigured &&
+                  rwaMainnetEnabled &&
+                  walletRpcConfigured,
+                'Signed Jupiter RWA swap transactions can be submitted on mainnet.',
+                'RWA secondary-market execution is currently available only on mainnet.',
+                'RWA execution requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, OFFPAY_RWA_MAINNET_ENABLED=1, and mainnet RPC configuration.',
+              ),
         magicBlockIntent: buildRwaMagicBlockIntentCapability(network, rwaDelegateConfigured),
         magicBlockTransfer: notImplemented(
           'Direct MagicBlock RWA token transfers remain disabled; ER is only used for OffPay-owned delegated intent accounts, while Jupiter and Token-2022 settlement stay on base Solana.',
         ),
       },
       payment: {
-        privateInitMint: magicBlockConfigured && hasEnabledStablecoin
-          ? available('Private payment mint initialization is currently enabled on this network.')
-          : notImplemented('Private payment mint initialization is not enabled for this network in this deployment.'),
-        privateBalance: magicBlockConfigured && hasEnabledStablecoin
-          ? available('Private payment balance lookup is currently enabled on this network.')
-          : notImplemented('Private payment balance lookup is not enabled for this network in this deployment.'),
-        privateSend: magicBlockConfigured && hasEnabledStablecoin
-          ? available('Private payment send is currently enabled on this network.')
-          : notImplemented('Private payment send is not enabled for this network in this deployment.'),
-        umbraPrivateP2p: walletRpcConfigured && umbraExecutionAvailable
-          ? available(
-            umbraLocalTestMode
-              ? 'Umbra private P2P route is available in local bridge test mode.'
-              : 'Umbra private P2P route is available on this network.',
-          )
-          : notImplemented('Umbra private P2P route is not enabled for this network in this deployment.'),
+        privateInitMint:
+          magicBlockConfigured && hasEnabledStablecoin
+            ? available('Private payment mint initialization is currently enabled on this network.')
+            : notImplemented(
+                'Private payment mint initialization is not enabled for this network in this deployment.',
+              ),
+        privateBalance:
+          magicBlockConfigured && hasEnabledStablecoin
+            ? available('Private payment balance lookup is currently enabled on this network.')
+            : notImplemented(
+                'Private payment balance lookup is not enabled for this network in this deployment.',
+              ),
+        privateSend:
+          magicBlockConfigured && hasEnabledStablecoin
+            ? available('Private payment send is currently enabled on this network.')
+            : notImplemented(
+                'Private payment send is not enabled for this network in this deployment.',
+              ),
+        umbraPrivateP2p:
+          walletRpcConfigured && umbraExecutionAvailable
+            ? available(
+                umbraLocalTestMode
+                  ? 'Umbra private P2P route is available in local bridge test mode.'
+                  : 'Umbra private P2P route is available on this network.',
+              )
+            : notImplemented(
+                'Umbra private P2P route is not enabled for this network in this deployment.',
+              ),
         settle: walletRpcConfigured
           ? available('Offline settlement is currently enabled on this network.')
-          : notImplemented('Offline settlement is not enabled for this network in this deployment.'),
+          : notImplemented(
+              'Offline settlement is not enabled for this network in this deployment.',
+            ),
         rpcBroadcast: walletRpcConfigured
           ? available('Raw transaction broadcast fallback is currently enabled on this network.')
-          : notImplemented('Raw transaction broadcast fallback is not enabled for this network in this deployment.'),
+          : notImplemented(
+              'Raw transaction broadcast fallback is not enabled for this network in this deployment.',
+            ),
       },
       offline: {
         noncePool: walletRpcConfigured
-          ? available('Offline payment slot pool preparation and status are enabled on this network.')
-          : notImplemented('Offline payment slot pool routes are not enabled for this network in this deployment.'),
+          ? available(
+              'Offline payment slot pool preparation and status are enabled on this network.',
+            )
+          : notImplemented(
+              'Offline payment slot pool routes are not enabled for this network in this deployment.',
+            ),
         nonceCreate: walletRpcConfigured
           ? available('Offline payment slot creation preparation is enabled on this network.')
-          : notImplemented('Offline payment slot creation preparation is not enabled for this network in this deployment.'),
+          : notImplemented(
+              'Offline payment slot creation preparation is not enabled for this network in this deployment.',
+            ),
         nonceAdvance: walletRpcConfigured
           ? available('Offline payment slot nonce advance preparation is enabled on this network.')
-          : notImplemented('Offline payment slot nonce advance preparation is not enabled for this network in this deployment.'),
+          : notImplemented(
+              'Offline payment slot nonce advance preparation is not enabled for this network in this deployment.',
+            ),
         nonceStatus: walletRpcConfigured
           ? available('Offline payment slot status refresh is enabled on this network.')
-          : notImplemented('Offline payment slot status refresh is not enabled for this network in this deployment.'),
-        tokenContext: walletRpcConfigured && hasEnabledStablecoin
-          ? available('Offline USDC/USDT token context is enabled on this network.')
-          : notImplemented('Offline token context is not enabled for this network in this deployment.'),
+          : notImplemented(
+              'Offline payment slot status refresh is not enabled for this network in this deployment.',
+            ),
+        tokenContext:
+          walletRpcConfigured && hasEnabledStablecoin
+            ? available('Offline USDC/USDT token context is enabled on this network.')
+            : notImplemented(
+                'Offline token context is not enabled for this network in this deployment.',
+              ),
         rentEstimate: walletRpcConfigured
           ? available('Offline payment slot rent estimation is enabled on this network.')
-          : notImplemented('Offline payment slot rent estimation is not enabled for this network in this deployment.'),
+          : notImplemented(
+              'Offline payment slot rent estimation is not enabled for this network in this deployment.',
+            ),
         supportedStablecoins,
       },
       umbra: {
-        execution: walletRpcConfigured && umbraExecutionAvailable
-          ? available(
-            umbraLocalTestMode
-              ? 'Umbra execution provider proxies are available in local bridge test mode.'
-              : 'Umbra execution provider proxies are available on this network through the configured indexer and relayer.',
-          )
-          : notImplemented('Umbra execution provider proxies are not enabled for this network in this deployment.'),
+        execution:
+          walletRpcConfigured && umbraExecutionAvailable
+            ? available(
+                umbraLocalTestMode
+                  ? 'Umbra execution provider proxies are available in local bridge test mode.'
+                  : 'Umbra execution provider proxies are available on this network through the configured indexer and relayer.',
+              )
+            : notImplemented(
+                'Umbra execution provider proxies are not enabled for this network in this deployment.',
+              ),
         indexer: umbraExecutionAvailable
           ? available(
-            umbraLocalTestMode
-              ? 'Umbra indexer is available in local bridge test mode.'
-              : 'Umbra indexer is configured for this network.',
-          )
+              umbraLocalTestMode
+                ? 'Umbra indexer is available in local bridge test mode.'
+                : 'Umbra indexer is configured for this network.',
+            )
           : notImplemented('Umbra indexer is not configured for this network in this deployment.'),
         relayer: umbraExecutionAvailable
           ? available(
-            umbraLocalTestMode
-              ? 'Umbra relayer is available in local bridge test mode.'
-              : 'Umbra relayer is configured for this network.',
-          )
+              umbraLocalTestMode
+                ? 'Umbra relayer is available in local bridge test mode.'
+                : 'Umbra relayer is configured for this network.',
+            )
           : notImplemented('Umbra relayer is not configured for this network in this deployment.'),
         circuitVersion: umbraCircuitMetadata.circuitVersion,
         minSdkVersion: umbraCircuitMetadata.minSdkVersion,
@@ -446,33 +512,28 @@ async function getCapabilities(
       privacy: {
         shieldedBalance: umbraMetadataAvailable
           ? available(
-            umbraLocalTestMode
-              ? 'Umbra shielded-balance metadata is available in local bridge test mode.'
-              : 'Umbra shielded-balance metadata is available on this network.',
-          )
+              umbraLocalTestMode
+                ? 'Umbra shielded-balance metadata is available in local bridge test mode.'
+                : 'Umbra shielded-balance metadata is available on this network.',
+            )
           : notImplemented('Umbra shielded-balance metadata is not enabled for this deployment.'),
         scanAnnouncements: umbraMetadataAvailable
           ? available(
-            umbraLocalTestMode
-              ? 'Umbra announcement scanning is available in local bridge test mode.'
-              : 'Umbra announcement scanning is available on this network.',
-          )
+              umbraLocalTestMode
+                ? 'Umbra announcement scanning is available in local bridge test mode.'
+                : 'Umbra announcement scanning is available on this network.',
+            )
           : notImplemented('Umbra announcement scanning is not enabled for this deployment.'),
         registerViewingKey: umbraMetadataAvailable
           ? available(
-            umbraLocalTestMode
-              ? 'Umbra viewing-key registration is available in local bridge test mode.'
-              : 'Umbra viewing-key registration is available on this network.',
-          )
+              umbraLocalTestMode
+                ? 'Umbra viewing-key registration is available in local bridge test mode.'
+                : 'Umbra viewing-key registration is available on this network.',
+            )
           : notImplemented('Umbra viewing-key registration is not enabled for this deployment.'),
       },
     },
   };
 }
 
-export {
-  getCapabilities,
-  type CapabilityReason,
-  type CapabilityStatus,
-  type CapabilitiesResponse,
-};
+export { getCapabilities, type CapabilityReason, type CapabilityStatus, type CapabilitiesResponse };

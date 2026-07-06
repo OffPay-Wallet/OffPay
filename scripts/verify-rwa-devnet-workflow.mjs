@@ -13,6 +13,12 @@ import {
   Transaction,
   TransactionInstruction,
 } from '@solana/web3.js';
+import {
+  paceSolanaRpcRead,
+  paceSolanaTransaction,
+  readRateLimitDelayMs,
+  withRetry,
+} from './rwa-devnet-rate-limit.mjs';
 
 const DEFAULT_API_ORIGIN = 'https://offpay-api.mail-offpay.workers.dev';
 const DEFAULT_RPC_URL = 'https://api.devnet.solana.com';
@@ -57,8 +63,10 @@ function parseUiAmount(value, decimals) {
   if (fraction.length > decimals) {
     throw new Error(`Amount ${value} has more than ${decimals} decimals.`);
   }
-  return BigInt(whole) * 10n ** BigInt(decimals)
-    + BigInt((fraction + '0'.repeat(decimals)).slice(0, decimals));
+  return (
+    BigInt(whole) * 10n ** BigInt(decimals) +
+    BigInt((fraction + '0'.repeat(decimals)).slice(0, decimals))
+  );
 }
 
 function formatUiAmount(rawAmount, decimals) {
@@ -126,6 +134,45 @@ function createMintToInstruction({ mint, destination, authority, amount }) {
     ],
     data: Buffer.concat([Buffer.from([7]), u64Le(amount)]),
   });
+}
+
+async function getAccountInfoWithRetry(connection, publicKey, label) {
+  return withRetry(`${label} account lookup`, async () => {
+    await paceSolanaRpcRead();
+    return connection.getAccountInfo(publicKey, 'confirmed');
+  });
+}
+
+async function getLatestBlockhashWithRetry(connection, label) {
+  return withRetry(`${label} latest blockhash`, async () => {
+    await paceSolanaRpcRead();
+    return connection.getLatestBlockhash('confirmed');
+  });
+}
+
+async function getTokenAccountBalanceWithRetry(connection, tokenAccount, label) {
+  return withRetry(`${label} token balance`, async () => {
+    await paceSolanaRpcRead();
+    return connection.getTokenAccountBalance(tokenAccount, 'confirmed');
+  });
+}
+
+async function send(connection, transaction, signers, label) {
+  if (transaction.instructions.length === 0) {
+    console.log(`${label}: no-op`);
+    return null;
+  }
+
+  const signature = await withRetry(label, async () => {
+    await paceSolanaTransaction();
+    return sendAndConfirmTransaction(connection, transaction, signers, {
+      commitment: 'confirmed',
+      skipPreflight: false,
+      maxRetries: 8,
+    });
+  });
+  console.log(`${label}: ${signature}`);
+  return signature;
 }
 
 function quoteHash(params) {
@@ -210,9 +257,9 @@ function settleSandboxInstruction(params) {
   });
 }
 
-async function tokenBalance(connection, tokenAccount) {
+async function tokenBalance(connection, tokenAccount, label) {
   try {
-    const balance = await connection.getTokenAccountBalance(tokenAccount, 'confirmed');
+    const balance = await getTokenAccountBalanceWithRetry(connection, tokenAccount, label);
     return BigInt(balance.value.amount);
   } catch (error) {
     if (error instanceof Error && /could not find account/i.test(error.message)) return 0n;
@@ -220,38 +267,105 @@ async function tokenBalance(connection, tokenAccount) {
   }
 }
 
-async function latestAaplPrice(apiOrigin) {
-  const response = await fetch(`${apiOrigin.replace(/\/$/, '')}/api/rwa/assets?network=devnet`);
-  if (!response.ok) {
-    throw new Error(`RWA assets endpoint failed with HTTP ${response.status}`);
+function readSandboxAssets(sandbox) {
+  if (Array.isArray(sandbox.assets) && sandbox.assets.length > 0) return sandbox.assets;
+  return [
+    {
+      symbol: sandbox.assetSymbol ?? 'AAPLd',
+      name: sandbox.assetName ?? 'Apple Sandbox RWA',
+      mint: sandbox.assetMint,
+      decimals: sandbox.assetDecimals ?? DECIMALS,
+    },
+  ];
+}
+
+function selectSandboxAsset(sandbox) {
+  const assets = readSandboxAssets(sandbox);
+  const assetMint = readArgValue('--asset-mint');
+  if (assetMint != null) {
+    const asset = assets.find((entry) => entry.mint === assetMint);
+    if (asset == null) throw new Error(`No sandbox asset found for mint ${assetMint}.`);
+    return asset;
   }
-  const payload = await response.json();
-  const asset = payload?.assets?.find((entry) => entry?.symbol === 'AAPLd');
+
+  const assetSymbol = readArgValue('--asset-symbol');
+  if (assetSymbol != null) {
+    const normalized = assetSymbol.trim().toUpperCase();
+    const asset = assets.find((entry) => String(entry.symbol).toUpperCase() === normalized);
+    if (asset == null) throw new Error(`No sandbox asset found for symbol ${assetSymbol}.`);
+    return asset;
+  }
+
+  return assets[0];
+}
+
+async function latestAssetPrice(apiOrigin, symbol) {
+  const payload = await withRetry(
+    `RWA assets endpoint for ${symbol}`,
+    async () => {
+      const response = await fetch(`${apiOrigin.replace(/\/$/, '')}/api/rwa/assets?network=devnet`);
+      if (!response.ok) {
+        const error = new Error(`RWA assets endpoint failed with HTTP ${response.status}`);
+        error.retryAfter = response.headers.get('retry-after') ?? undefined;
+        error.retryAfterMs = readRateLimitDelayMs(response.headers) ?? undefined;
+        throw error;
+      }
+      return response.json();
+    },
+    { attempts: 5, baseDelayMs: 1_000 },
+  );
+  const asset = payload?.assets?.find((entry) => entry?.symbol === symbol);
   if (!asset || typeof asset.priceUsd !== 'number' || !Number.isFinite(asset.priceUsd)) {
-    throw new Error('AAPLd devnet sandbox price is unavailable.');
+    throw new Error(`${symbol} devnet sandbox price is unavailable.`);
   }
   return asset.priceUsd;
 }
 
-async function ensureFunding({ connection, payer, recipient, assetMint, settlementMint, cashAtoms }) {
+async function ensureFunding({
+  connection,
+  payer,
+  recipient,
+  assetMint,
+  settlementMint,
+  cashAtoms,
+}) {
   const assetAccount = associatedTokenAddress(recipient, assetMint);
   const settlementAccount = associatedTokenAddress(recipient, settlementMint);
-  const currentSettlement = await tokenBalance(connection, settlementAccount);
+  const currentSettlement = await tokenBalance(connection, settlementAccount, 'RWAUSDC');
   const settlementTopUp = currentSettlement >= cashAtoms ? 0n : cashAtoms - currentSettlement;
-  const transaction = new Transaction().add(
-    createAtaIdempotentInstruction({
-      payer: payer.publicKey,
-      owner: recipient,
-      mint: assetMint,
-      associatedTokenAccount: assetAccount,
-    }),
-    createAtaIdempotentInstruction({
-      payer: payer.publicKey,
-      owner: recipient,
-      mint: settlementMint,
-      associatedTokenAccount: settlementAccount,
-    }),
+  const transaction = new Transaction();
+
+  const assetAccountInfo = await getAccountInfoWithRetry(
+    connection,
+    assetAccount,
+    'user asset ATA',
   );
+  if (assetAccountInfo == null) {
+    transaction.add(
+      createAtaIdempotentInstruction({
+        payer: payer.publicKey,
+        owner: recipient,
+        mint: assetMint,
+        associatedTokenAccount: assetAccount,
+      }),
+    );
+  }
+
+  const settlementAccountInfo = await getAccountInfoWithRetry(
+    connection,
+    settlementAccount,
+    'user settlement ATA',
+  );
+  if (settlementAccountInfo == null) {
+    transaction.add(
+      createAtaIdempotentInstruction({
+        payer: payer.publicKey,
+        owner: recipient,
+        mint: settlementMint,
+        associatedTokenAccount: settlementAccount,
+      }),
+    );
+  }
 
   if (settlementTopUp > 0n) {
     transaction.add(
@@ -264,10 +378,33 @@ async function ensureFunding({ connection, payer, recipient, assetMint, settleme
     );
   }
 
-  const signature = await sendAndConfirmTransaction(connection, transaction, [payer], {
-    commitment: 'confirmed',
-    skipPreflight: false,
-  });
+  let signature = null;
+  try {
+    signature = await send(connection, transaction, [payer], 'fund sandbox wallet');
+  } catch (error) {
+    const assetExistsAfterError =
+      (await getAccountInfoWithRetry(connection, assetAccount, 'user asset ATA post-error')) !=
+      null;
+    const settlementExistsAfterError =
+      (await getAccountInfoWithRetry(
+        connection,
+        settlementAccount,
+        'user settlement ATA post-error',
+      )) != null;
+    const settlementBalanceAfterError = await tokenBalance(
+      connection,
+      settlementAccount,
+      'RWAUSDC post-error',
+    );
+    if (
+      !assetExistsAfterError ||
+      !settlementExistsAfterError ||
+      settlementBalanceAfterError < cashAtoms
+    ) {
+      throw error;
+    }
+    console.log('fund sandbox wallet: satisfied after retryable send error');
+  }
 
   return {
     signature,
@@ -307,7 +444,10 @@ async function sendSandboxTrade({
     quoteExpiresAt,
     nonce,
   });
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash, lastValidBlockHeight } = await getLatestBlockhashWithRetry(
+    connection,
+    `${side} sandbox trade`,
+  );
   const transaction = new Transaction({
     feePayer: owner,
     recentBlockhash: blockhash,
@@ -354,10 +494,7 @@ async function sendSandboxTrade({
   );
   transaction.lastValidBlockHeight = lastValidBlockHeight;
 
-  const signature = await sendAndConfirmTransaction(connection, transaction, [payer], {
-    commitment: 'confirmed',
-    skipPreflight: false,
-  });
+  const signature = await send(connection, transaction, [payer], `${side} sandbox trade`);
 
   return {
     signature,
@@ -370,25 +507,31 @@ async function sendSandboxTrade({
 async function main() {
   const rpcUrl = process.env.SOLANA_DEVNET_RPC_URL || DEFAULT_RPC_URL;
   const apiOrigin = process.env.OFFPAY_API_ORIGIN || DEFAULT_API_ORIGIN;
-  const sandboxPath = readArgValue('--sandbox') ?? process.env.OFFPAY_RWA_DEVNET_SANDBOX_PATH ?? DEFAULT_SANDBOX_PATH;
-  const buyCash = readArgValue('--buy-cash') ?? process.env.OFFPAY_RWA_DEVNET_BUY_CASH ?? DEFAULT_BUY_CASH;
+  const sandboxPath =
+    readArgValue('--sandbox') ?? process.env.OFFPAY_RWA_DEVNET_SANDBOX_PATH ?? DEFAULT_SANDBOX_PATH;
+  const buyCash =
+    readArgValue('--buy-cash') ?? process.env.OFFPAY_RWA_DEVNET_BUY_CASH ?? DEFAULT_BUY_CASH;
   const sandbox = JSON.parse(fs.readFileSync(sandboxPath, 'utf8'));
+  const asset = selectSandboxAsset(sandbox);
   const payer = readKeypair(process.env.SOLANA_KEYPAIR || '~/.config/solana/id.json');
   if (payer.publicKey.toBase58() !== sandbox.admin) {
-    throw new Error(`Configured keypair ${payer.publicKey.toBase58()} is not sandbox admin ${sandbox.admin}.`);
+    throw new Error(
+      `Configured keypair ${payer.publicKey.toBase58()} is not sandbox admin ${sandbox.admin}.`,
+    );
   }
 
   const connection = new Connection(rpcUrl, 'confirmed');
   const owner = payer.publicKey;
   const programId = new PublicKey(sandbox.programId);
-  const assetMint = new PublicKey(sandbox.assetMint);
+  const assetMint = new PublicKey(asset.mint);
+  const assetDecimals = Number.isInteger(asset.decimals) ? Number(asset.decimals) : DECIMALS;
   const settlementMint = new PublicKey(sandbox.settlementMint);
-  const priceUsd = await latestAaplPrice(apiOrigin);
+  const priceUsd = await latestAssetPrice(apiOrigin, asset.symbol);
   const priceMicros = BigInt(Math.round(priceUsd * 1_000_000));
   const cashAtoms = parseUiAmount(buyCash, DECIMALS);
-  const quantityAtoms = (cashAtoms * 10n ** BigInt(DECIMALS)) / priceMicros;
+  const quantityAtoms = (cashAtoms * 10n ** BigInt(assetDecimals)) / priceMicros;
   if (quantityAtoms <= 0n) {
-    throw new Error('Buy amount is too small for the current AAPLd price.');
+    throw new Error(`Buy amount is too small for the current ${asset.symbol} price.`);
   }
 
   const funding = await ensureFunding({
@@ -400,8 +543,8 @@ async function main() {
     cashAtoms,
   });
   const balancesBefore = {
-    asset: await tokenBalance(connection, funding.assetAccount),
-    settlement: await tokenBalance(connection, funding.settlementAccount),
+    asset: await tokenBalance(connection, funding.assetAccount, `${asset.symbol} before buy`),
+    settlement: await tokenBalance(connection, funding.settlementAccount, 'RWAUSDC before buy'),
   };
   const buy = await sendSandboxTrade({
     connection,
@@ -415,7 +558,7 @@ async function main() {
     cashAtoms,
     priceMicros,
   });
-  const sellCashAtoms = (quantityAtoms * priceMicros) / 10n ** BigInt(DECIMALS);
+  const sellCashAtoms = (quantityAtoms * priceMicros) / 10n ** BigInt(assetDecimals);
   const sell = await sendSandboxTrade({
     connection,
     payer,
@@ -429,44 +572,51 @@ async function main() {
     priceMicros,
   });
   const balancesAfter = {
-    asset: await tokenBalance(connection, funding.assetAccount),
-    settlement: await tokenBalance(connection, funding.settlementAccount),
+    asset: await tokenBalance(connection, funding.assetAccount, `${asset.symbol} after sell`),
+    settlement: await tokenBalance(connection, funding.settlementAccount, 'RWAUSDC after sell'),
   };
 
-  console.log(JSON.stringify({
-    network: 'devnet',
-    rpcUrl,
-    apiOrigin,
-    programId: programId.toBase58(),
-    wallet: owner.toBase58(),
-    assetMint: assetMint.toBase58(),
-    settlementMint: settlementMint.toBase58(),
-    priceUsd,
-    funding: {
-      signature: funding.signature,
-      settlementTopUp: formatUiAmount(funding.settlementTopUp, DECIMALS),
-    },
-    buy: {
-      signature: buy.signature,
-      intent: buy.intent,
-      cashAmount: formatUiAmount(cashAtoms, DECIMALS),
-      quantity: formatUiAmount(quantityAtoms, DECIMALS),
-    },
-    sell: {
-      signature: sell.signature,
-      intent: sell.intent,
-      cashAmount: formatUiAmount(sellCashAtoms, DECIMALS),
-      quantity: formatUiAmount(quantityAtoms, DECIMALS),
-    },
-    balancesBefore: {
-      AAPLd: formatUiAmount(balancesBefore.asset, DECIMALS),
-      RWAUSDC: formatUiAmount(balancesBefore.settlement, DECIMALS),
-    },
-    balancesAfter: {
-      AAPLd: formatUiAmount(balancesAfter.asset, DECIMALS),
-      RWAUSDC: formatUiAmount(balancesAfter.settlement, DECIMALS),
-    },
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        network: 'devnet',
+        rpcUrl,
+        apiOrigin,
+        programId: programId.toBase58(),
+        wallet: owner.toBase58(),
+        assetSymbol: asset.symbol,
+        assetMint: assetMint.toBase58(),
+        settlementMint: settlementMint.toBase58(),
+        priceUsd,
+        funding: {
+          signature: funding.signature,
+          settlementTopUp: formatUiAmount(funding.settlementTopUp, DECIMALS),
+        },
+        buy: {
+          signature: buy.signature,
+          intent: buy.intent,
+          cashAmount: formatUiAmount(cashAtoms, DECIMALS),
+          quantity: formatUiAmount(quantityAtoms, assetDecimals),
+        },
+        sell: {
+          signature: sell.signature,
+          intent: sell.intent,
+          cashAmount: formatUiAmount(sellCashAtoms, DECIMALS),
+          quantity: formatUiAmount(quantityAtoms, assetDecimals),
+        },
+        balancesBefore: {
+          [asset.symbol]: formatUiAmount(balancesBefore.asset, assetDecimals),
+          RWAUSDC: formatUiAmount(balancesBefore.settlement, DECIMALS),
+        },
+        balancesAfter: {
+          [asset.symbol]: formatUiAmount(balancesAfter.asset, assetDecimals),
+          RWAUSDC: formatUiAmount(balancesAfter.settlement, DECIMALS),
+        },
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((error) => {

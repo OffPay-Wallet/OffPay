@@ -40,7 +40,10 @@ import {
   getRpcSignatureStatuses,
   getRwaAssets,
 } from '@/lib/api/offpay-api-client';
-import { signSerializedTransactionForWallet } from '@/lib/crypto/solana-transaction-signing';
+import {
+  signSerializedTransactionForWallet,
+  signSerializedTransactionsForWallet,
+} from '@/lib/crypto/solana-transaction-signing';
 import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
 import {
@@ -209,7 +212,7 @@ function shortenSignature(signature: string): string {
 function getRwaErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     if (/transaction simulation failed/i.test(error.message)) {
-      return 'RWA settlement simulation failed. Refresh the quote and make sure this Devnet wallet has RWAUSDC for buys or AAPLd for sells.';
+      return 'RWA settlement simulation failed. Refresh the quote and make sure this Devnet wallet has RWAUSDC for buys or the selected sandbox asset for sells.';
     }
 
     return error.message;
@@ -539,6 +542,7 @@ export default function RwasScreen(): React.JSX.Element {
   const activeWalletId = useWalletStore((state) => state.activeWalletId);
   const { walletAddress, canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
   const [cashAmountInput, setCashAmountInput] = useState('');
+  const [assetSearchInput, setAssetSearchInput] = useState('');
   const [tradeSide, setTradeSide] = useState<RwaTradeSide>('buy');
   const [lastExecution, setLastExecution] = useState<RwaLastExecution | null>(null);
   const [reviewQuote, setReviewQuote] = useState<RwaQuoteReviewState | null>(null);
@@ -609,7 +613,13 @@ export default function RwasScreen(): React.JSX.Element {
 
       let faucetResult: Awaited<ReturnType<typeof requestDevnetSolAirdrop>>;
       try {
-        faucetResult = await requestDevnetSolAirdrop(review.walletAddress);
+        faucetResult = await requestDevnetSolAirdrop(review.walletAddress, {
+          scope: 'rwa_sandbox',
+          rwaAssetMint:
+            review.side === 'sell' && requirement.mint === review.asset.mint
+              ? review.asset.mint
+              : undefined,
+        });
       } catch (error) {
         throw new Error(
           `${requirement.symbol} balance is too low for this Devnet sandbox order. ${getDevnetAirdropErrorMessage(
@@ -690,6 +700,48 @@ export default function RwasScreen(): React.JSX.Element {
   const rwaExecuteMutation = useMutation<RwaBuyExecutionResult, unknown, RwaExecuteMutationInput>({
     mutationFn: async ({ review }) => {
       await ensureDevnetSandboxFunding(review);
+      const unsignedTransactions = review.quote.unsignedTransactions;
+      if (
+        review.network === 'devnet' &&
+        unsignedTransactions != null &&
+        unsignedTransactions.length > 0
+      ) {
+        const signedTransactions = await signSerializedTransactionsForWallet({
+          unsignedTransactions: unsignedTransactions.map((step) => step.unsignedTransaction),
+          walletAddress: review.walletAddress,
+          walletId: review.walletId,
+        });
+        if (signedTransactions.length !== unsignedTransactions.length) {
+          throw new Error(
+            'RWA wallet signing returned an incomplete MagicBlock transaction sequence.',
+          );
+        }
+
+        const execution = await executeRwaQuote({
+          quoteId: review.quote.quoteId,
+          signedTransaction: signedTransactions[0] ?? '',
+          signedTransactions: unsignedTransactions.map((step, index) => {
+            const signedTransaction = signedTransactions[index];
+            if (signedTransaction == null) {
+              throw new Error(
+                'RWA wallet signing returned an incomplete MagicBlock transaction sequence.',
+              );
+            }
+            return {
+              id: step.id,
+              target: step.target,
+              signedTransaction,
+            };
+          }),
+          network: review.network,
+        });
+
+        return {
+          review,
+          execution,
+        };
+      }
+
       const signedTransaction = await signSerializedTransactionForWallet({
         unsignedTransaction: review.quote.unsignedTransaction,
         walletAddress: review.walletAddress,
@@ -746,6 +798,24 @@ export default function RwasScreen(): React.JSX.Element {
   });
 
   const assets = assetsQuery.data?.assets ?? [];
+  const filteredAssets = useMemo(() => {
+    const query = assetSearchInput.trim().toLowerCase();
+    if (query.length === 0) return assets;
+
+    return assets.filter((asset) => {
+      const haystack = [
+        asset.symbol,
+        asset.name,
+        asset.underlyingSymbol,
+        asset.mint,
+        asset.providerLabel,
+      ]
+        .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [assetSearchInput, assets]);
   const tradeStatusMessage = useMemo(() => {
     if (isNetworkSwitching) return 'Switching networks';
     if (!canUseNetwork) return 'Network unavailable';
@@ -1066,35 +1136,73 @@ export default function RwasScreen(): React.JSX.Element {
         ) : null}
 
         {contentState === 'ready' ? (
-          <View style={styles.assetList}>
-            {assets.map((asset) => (
-              <RwaAssetRow
-                key={asset.id}
-                asset={asset}
-                dense={dense}
-                buyDisabledReason={getTradeDisabledReason(asset, 'buy')}
-                sellDisabledReason={getTradeDisabledReason(asset, 'sell')}
-                isBuyPending={
-                  (rwaQuoteMutation.isPending &&
-                    rwaQuoteMutation.variables?.asset.id === asset.id &&
-                    rwaQuoteMutation.variables?.side === 'buy') ||
-                  (rwaExecuteMutation.isPending &&
-                    rwaExecuteMutation.variables?.review.asset.id === asset.id &&
-                    rwaExecuteMutation.variables?.review.side === 'buy')
-                }
-                isSellPending={
-                  (rwaQuoteMutation.isPending &&
-                    rwaQuoteMutation.variables?.asset.id === asset.id &&
-                    rwaQuoteMutation.variables?.side === 'sell') ||
-                  (rwaExecuteMutation.isPending &&
-                    rwaExecuteMutation.variables?.review.asset.id === asset.id &&
-                    rwaExecuteMutation.variables?.review.side === 'sell')
-                }
-                lastExecution={lastExecution?.assetId === asset.id ? lastExecution : null}
-                onBuy={handleBuyAsset}
-                onSell={handleSellAsset}
+          <View style={styles.assetPickerPanel}>
+            <View style={styles.assetSearchShell}>
+              <Ionicons name="search-outline" size={18} color={colors.text.tertiary} />
+              <TextInput
+                value={assetSearchInput}
+                onChangeText={setAssetSearchInput}
+                placeholder="Search stocks or mint"
+                placeholderTextColor={colors.text.placeholder}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                style={styles.assetSearchInput}
+                selectionColor={colors.brand.glossAccent}
               />
-            ))}
+              {assetSearchInput.trim().length > 0 ? (
+                <Pressable
+                  onPress={() => setAssetSearchInput('')}
+                  style={({ pressed }) => [
+                    styles.assetSearchClearButton,
+                    pressed ? styles.actionButtonPressed : null,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear RWA asset search"
+                >
+                  <Ionicons name="close" size={16} color={colors.text.secondary} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            {filteredAssets.length === 0 ? (
+              <View style={styles.emptyFilterPanel}>
+                <Text variant="caption" color={colors.text.secondary} align="center">
+                  No matching RWA assets
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.assetList}>
+                {filteredAssets.map((asset) => (
+                  <RwaAssetRow
+                    key={asset.id}
+                    asset={asset}
+                    dense={dense}
+                    buyDisabledReason={getTradeDisabledReason(asset, 'buy')}
+                    sellDisabledReason={getTradeDisabledReason(asset, 'sell')}
+                    isBuyPending={
+                      (rwaQuoteMutation.isPending &&
+                        rwaQuoteMutation.variables?.asset.id === asset.id &&
+                        rwaQuoteMutation.variables?.side === 'buy') ||
+                      (rwaExecuteMutation.isPending &&
+                        rwaExecuteMutation.variables?.review.asset.id === asset.id &&
+                        rwaExecuteMutation.variables?.review.side === 'buy')
+                    }
+                    isSellPending={
+                      (rwaQuoteMutation.isPending &&
+                        rwaQuoteMutation.variables?.asset.id === asset.id &&
+                        rwaQuoteMutation.variables?.side === 'sell') ||
+                      (rwaExecuteMutation.isPending &&
+                        rwaExecuteMutation.variables?.review.asset.id === asset.id &&
+                        rwaExecuteMutation.variables?.review.side === 'sell')
+                    }
+                    lastExecution={lastExecution?.assetId === asset.id ? lastExecution : null}
+                    onBuy={handleBuyAsset}
+                    onSell={handleSellAsset}
+                  />
+                ))}
+              </View>
+            )}
           </View>
         ) : null}
       </ScrollView>
@@ -1319,6 +1427,46 @@ const styles = StyleSheet.create({
   },
   reviewButtonPressed: {
     backgroundColor: colors.surface.solidControlPressed,
+  },
+  assetPickerPanel: {
+    gap: spacing.md,
+  },
+  assetSearchShell: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.clearFill,
+  },
+  assetSearchInput: {
+    minWidth: 0,
+    flex: 1,
+    color: colors.text.primary,
+    fontFamily: fontFamily.ui,
+    fontSize: 16,
+    paddingVertical: 0,
+  },
+  assetSearchClearButton: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
+    backgroundColor: colors.glass.smokeWash,
+  },
+  emptyFilterPanel: {
+    minHeight: 86,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.glass.clearFill,
   },
   assetList: {
     gap: spacing.md,

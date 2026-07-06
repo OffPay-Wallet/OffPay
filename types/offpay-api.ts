@@ -382,18 +382,35 @@ export interface RwaQuoteResponse {
   providerEnvironment: RwaProviderEnvironment;
   unsignedTransaction: string;
   transactionFormat: 'solana_legacy_transaction_base64' | 'solana_versioned_transaction_base64';
+  unsignedTransactions?: Array<{
+    id: string;
+    label: string;
+    target: 'solana_devnet' | 'magicblock_er_devnet';
+    unsignedTransaction: string;
+    transactionFormat: 'solana_legacy_transaction_base64';
+  }>;
   sandboxIntent?: {
     programId: string;
     intent: string;
     market: string;
     nonce: string;
     quoteHash: string;
+    magicBlock?: {
+      enabled: boolean;
+      erRpcUrl: string;
+      delegatedAccount: string;
+    };
   };
 }
 
 export interface RwaExecuteRequest {
   quoteId: string;
   signedTransaction: string;
+  signedTransactions?: Array<{
+    id: string;
+    target: 'solana_devnet' | 'magicblock_er_devnet';
+    signedTransaction: string;
+  }>;
   network: OffpayNetwork;
 }
 
@@ -401,6 +418,11 @@ export interface RwaExecuteResponse {
   quoteId: string;
   network: OffpayNetwork;
   signature: string;
+  signatures?: Array<{
+    id: string;
+    target: 'solana_devnet' | 'magicblock_er_devnet';
+    signature: string;
+  }>;
   status: 'submitted';
   submittedAt: number;
   provider: RwaProvider;
@@ -700,6 +722,8 @@ export interface RpcBroadcastResponse {
 export interface DevnetAirdropRequest {
   walletAddress: string;
   network: 'devnet';
+  scope?: 'general' | 'rwa_sandbox';
+  rwaAssetMint?: string;
 }
 
 export interface DevnetAirdropResponse {
@@ -710,7 +734,7 @@ export interface DevnetAirdropResponse {
   lamports: string;
   sol: number;
   tokens: Array<{
-    symbol: 'dUSDC' | 'dUSDT' | 'USDC' | 'AAPLd' | 'RWAUSDC';
+    symbol: string;
     name: string;
     mint: string;
     decimals: number;

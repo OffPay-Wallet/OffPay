@@ -34,10 +34,8 @@ const CREATE_ASSOCIATED_TOKEN_ACCOUNT_IDEMPOTENT_INSTRUCTION = 1;
 const TRANSFER_CHECKED_INSTRUCTION = 12;
 const U64_MAX = (1n << 64n) - 1n;
 
-type FaucetTokenSymbol = 'dUSDC' | 'dUSDT' | 'USDC' | 'AAPLd' | 'RWAUSDC';
-
 interface FaucetTokenConfig {
-  symbol: FaucetTokenSymbol;
+  symbol: string;
   name: string;
   mint: string;
   decimals: number;
@@ -45,7 +43,11 @@ interface FaucetTokenConfig {
   capRawAmount: bigint;
 }
 
+export type DevnetTreasuryAirdropScope = 'general' | 'rwa_sandbox';
+
 export interface DevnetTreasuryAirdropRequest {
+  scope?: DevnetTreasuryAirdropScope;
+  rwaAssetMint?: string;
   walletAddress: string;
 }
 
@@ -146,15 +148,84 @@ function assertConfiguredMint(value: string, label: string): string {
   }
 }
 
-function getFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
+function sanitizeSymbol(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim().slice(0, 24)
+    : fallback;
+}
+
+function readTokenDecimals(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 9
+    ? value
+    : TOKEN_DECIMALS;
+}
+
+function capRawAmount(uiAmount: number, decimals: number): bigint {
+  return BigInt(uiAmount) * 10n ** BigInt(decimals);
+}
+
+function readDevnetSandboxAssetTokens(bindings: Bindings): FaucetTokenConfig[] {
+  const rawCatalog = bindings.OFFPAY_RWA_DEVNET_ASSETS_JSON?.trim() ?? '';
+  if (rawCatalog.length === 0) {
+    const rwaAssetMint = bindings.OFFPAY_RWA_DEVNET_SANDBOX_MINT?.trim() ?? '';
+    if (rwaAssetMint.length === 0) return [];
+
+    return [
+      {
+        symbol: sanitizeSymbol(bindings.OFFPAY_RWA_DEVNET_SANDBOX_SYMBOL, 'AAPLd'),
+        name: bindings.OFFPAY_RWA_DEVNET_SANDBOX_NAME?.trim() || 'Apple Sandbox RWA',
+        mint: assertConfiguredMint(rwaAssetMint, 'Devnet RWA sandbox asset'),
+        decimals: TOKEN_DECIMALS,
+        capUiAmount: 10,
+        capRawAmount: capRawAmount(10, TOKEN_DECIMALS),
+      },
+    ];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawCatalog);
+  } catch (error) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Devnet RWA sandbox asset catalog JSON is invalid.',
+      cause: error,
+    });
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed.flatMap((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const record = entry as Record<string, unknown>;
+    const mint = typeof record.mint === 'string' ? record.mint : '';
+    const name =
+      typeof record.name === 'string' && record.name.trim().length > 0
+        ? record.name.trim().slice(0, 80)
+        : `Sandbox RWA ${index + 1}`;
+    const decimals = readTokenDecimals(record.decimals);
+
+    return [
+      {
+        symbol: sanitizeSymbol(record.symbol, `RWA${index + 1}`),
+        name,
+        mint: assertConfiguredMint(mint, `Devnet RWA sandbox asset ${index + 1}`),
+        decimals,
+        capUiAmount: 10,
+        capRawAmount: capRawAmount(10, decimals),
+      },
+    ];
+  });
+}
+
+function getGeneralFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
   const usdcMint = assertConfiguredMint(
     bindings.OFFPAY_DEVNET_USDC_MINT ?? DEVNET_USDC_MINT,
     'Devnet USDC',
   );
-  const rwaAssetMint = bindings.OFFPAY_RWA_DEVNET_SANDBOX_MINT?.trim() ?? '';
-  const rwaSettlementMint = bindings.OFFPAY_RWA_DEVNET_SETTLEMENT_MINT?.trim() ?? '';
 
-  const tokens: FaucetTokenConfig[] = [
+  return [
     {
       symbol: 'dUSDC',
       name: 'Devnet USDC (Umbra test)',
@@ -180,30 +251,57 @@ function getFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
       capRawAmount: 5_000_000n,
     },
   ];
+}
 
-  if (rwaSettlementMint.length > 0) {
-    tokens.push({
+function getRwaSandboxFaucetTokens(
+  bindings: Bindings,
+  request?: DevnetTreasuryAirdropRequest,
+): FaucetTokenConfig[] {
+  const rwaSettlementMint = bindings.OFFPAY_RWA_DEVNET_SETTLEMENT_MINT?.trim() ?? '';
+  if (rwaSettlementMint.length === 0) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Devnet RWA settlement faucet mint is not configured.',
+    });
+  }
+
+  const tokens: FaucetTokenConfig[] = [
+    {
       symbol: 'RWAUSDC',
       name: 'Devnet RWA Settlement USDC',
       mint: assertConfiguredMint(rwaSettlementMint, 'Devnet RWA settlement USDC'),
       decimals: TOKEN_DECIMALS,
       capUiAmount: 1_000,
       capRawAmount: 1_000_000_000n,
-    });
-  }
+    },
+  ];
 
-  if (rwaAssetMint.length > 0) {
-    tokens.push({
-      symbol: 'AAPLd',
-      name: 'Apple Sandbox RWA',
-      mint: assertConfiguredMint(rwaAssetMint, 'Devnet RWA sandbox asset'),
-      decimals: TOKEN_DECIMALS,
-      capUiAmount: 10,
-      capRawAmount: 10_000_000n,
-    });
+  const requestedAssetMint = request?.rwaAssetMint?.trim() ?? '';
+  if (requestedAssetMint.length > 0) {
+    const assetToken = readDevnetSandboxAssetTokens(bindings).find(
+      (token) => token.mint === requestedAssetMint,
+    );
+    if (assetToken == null) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'Requested RWA devnet asset is not configured for the faucet.',
+      });
+    }
+    tokens.push(assetToken);
   }
 
   return tokens;
+}
+
+function getFaucetTokens(
+  bindings: Bindings,
+  request?: DevnetTreasuryAirdropRequest,
+): FaucetTokenConfig[] {
+  const scope = request?.scope ?? (request?.rwaAssetMint ? 'rwa_sandbox' : 'general');
+  if (scope === 'rwa_sandbox') return getRwaSandboxFaucetTokens(bindings, request);
+  return getGeneralFaucetTokens(bindings);
 }
 
 function associatedTokenAddress(owner: string, mint: string): string {
@@ -359,7 +457,7 @@ export async function requestDevnetTreasuryAirdrop(
   const treasuryLamports = BigInt(
     await getWalletLamports(bindings, { address: treasuryAddress, network: 'devnet' }),
   );
-  const faucetTokens = getFaucetTokens(bindings);
+  const faucetTokens = getFaucetTokens(bindings, request);
   const recipientAddress = request.walletAddress;
   const tokenPlans = faucetTokens.map((token) => ({
     token,

@@ -20,6 +20,24 @@ function buildBindings(overrides: Partial<Bindings> = {}): Bindings {
 }
 
 describe('capabilities RWA MagicBlock delegation gates', () => {
+  it('treats wildcard Jupiter stocks catalog config as available on mainnet', async () => {
+    const response = await getCapabilities(
+      buildBindings({
+        OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST: '*',
+      }),
+      'mainnet',
+    );
+
+    expect(response.capabilities.rwa.assets).toMatchObject({
+      available: true,
+      reason: 'available',
+    });
+    expect(response.capabilities.rwa.quote).toMatchObject({
+      available: false,
+      reason: 'not_implemented',
+    });
+  });
+
   it('advertises devnet RWA intent delegation only when the program and router are configured', async () => {
     const response = await getCapabilities(
       buildBindings({
@@ -53,6 +71,28 @@ describe('capabilities RWA MagicBlock delegation gates', () => {
     expect(response.capabilities.rwa.magicBlockIntent).toMatchObject({
       available: false,
       reason: 'not_implemented',
+    });
+  });
+
+  it('treats the multi-asset devnet RWA catalog as sandbox configuration', async () => {
+    const response = await getCapabilities(
+      buildBindings({
+        OFFPAY_RWA_DELEGATE_PROGRAM_ID: PROGRAM_ID,
+        OFFPAY_RWA_DELEGATE_DEVNET_ENABLED: '1',
+        HELIUS_DEVNET_RPC_URL: 'https://rpc.offpay.test',
+        OFFPAY_RWA_DEVNET_ASSETS_JSON:
+          '[{"mint":"CrieBJEXarFm2C7vgPJs9v7M9PLuHV6axkNWhjUTwKZq","symbol":"AAPLd","name":"Apple Sandbox RWA","decimals":6,"priceReferenceMint":"Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"}]',
+      }),
+      'devnet',
+    );
+
+    expect(response.capabilities.rwa.assets).toMatchObject({
+      available: true,
+      reason: 'available',
+    });
+    expect(response.capabilities.rwa.quote).toMatchObject({
+      available: true,
+      reason: 'available',
     });
   });
 

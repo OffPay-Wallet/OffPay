@@ -81,6 +81,7 @@ scripts/*
 !scripts/setup-rwa-devnet-sandbox.mjs
 !scripts/fund-rwa-devnet-wallet.mjs
 !scripts/verify-rwa-devnet-workflow.mjs
+!scripts/rwa-devnet-rate-limit.mjs
 
 # ---------------------------------------------------------------------------
 # TypeScript

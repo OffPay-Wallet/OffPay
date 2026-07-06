@@ -83,6 +83,8 @@ const signaturesForAddressBodySchema = z.object({
 const devnetAirdropBodySchema = z.object({
   walletAddress: z.string().trim().min(1),
   network: z.literal('devnet'),
+  scope: z.enum(['general', 'rwa_sandbox']).optional(),
+  rwaAssetMint: z.string().trim().min(1).optional(),
 });
 
 function assertRequestedNetwork(requestedNetwork: Network, authenticatedNetwork: Network): void {
@@ -429,6 +431,9 @@ rpcRoutes.post('/devnet-airdrop', async (context) => {
 
   assertRequestedNetwork(body.network, authenticatedContext.network);
   assertWalletAddress(body.walletAddress, 'Wallet address is invalid.');
+  if (body.rwaAssetMint != null) {
+    assertWalletAddress(body.rwaAssetMint, 'RWA asset mint is invalid.');
+  }
 
   if (body.walletAddress !== authenticatedContext.wallet) {
     throw new AppError({
@@ -441,6 +446,8 @@ rpcRoutes.post('/devnet-airdrop', async (context) => {
   const response = context.json(
     await requestDevnetTreasuryAirdrop(context.env, {
       walletAddress: body.walletAddress,
+      scope: body.scope,
+      rwaAssetMint: body.rwaAssetMint,
     }),
   );
   response.headers.set('Cache-Control', 'no-store');

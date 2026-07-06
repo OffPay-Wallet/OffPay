@@ -4,17 +4,11 @@ import {
   SystemProgram,
   Transaction,
   TransactionInstruction,
+  type AccountMeta,
 } from '@solana/web3.js';
 import { AppError } from './errors.js';
-import {
-  broadcastRawTransaction,
-  getLatestBlockhash,
-} from './helius.js';
-import {
-  createSwapQuote,
-  executeSwapQuote,
-  type SwapQuoteResponse,
-} from './jupiter.js';
+import { broadcastRawTransaction, getLatestBlockhash, getRpcSignatureStatuses } from './helius.js';
+import { createSwapQuote, executeSwapQuote, type SwapQuoteResponse } from './jupiter.js';
 import {
   getRequiredBinding,
   readFiniteNumber,
@@ -58,7 +52,7 @@ interface RwaAsset {
   devnetSandbox: boolean;
   magicBlockEligible: boolean;
   riskLevel: RwaRiskLevel;
-  logo: string | null;
+  logo?: string | null;
   underlyingSymbol: string | null;
   complianceLabel: string;
   execution: RwaExecutionPolicy;
@@ -114,18 +108,41 @@ interface RwaQuoteResponse {
   providerEnvironment: RwaProviderEnvironment;
   unsignedTransaction: string;
   transactionFormat: 'solana_legacy_transaction_base64' | 'solana_versioned_transaction_base64';
+  unsignedTransactions?: RwaUnsignedTransactionStep[];
   sandboxIntent?: {
     programId: string;
     intent: string;
     market: string;
     nonce: string;
     quoteHash: string;
+    magicBlock?: {
+      enabled: boolean;
+      erRpcUrl: string;
+      delegatedAccount: string;
+    };
   };
+}
+
+type RwaTransactionTarget = 'solana_devnet' | 'magicblock_er_devnet';
+
+interface RwaUnsignedTransactionStep {
+  id: string;
+  label: string;
+  target: RwaTransactionTarget;
+  unsignedTransaction: string;
+  transactionFormat: 'solana_legacy_transaction_base64';
+}
+
+interface RwaSignedTransactionStep {
+  id: string;
+  target: RwaTransactionTarget;
+  signedTransaction: string;
 }
 
 interface RwaExecuteRequest {
   quoteId: string;
   signedTransaction: string;
+  signedTransactions?: RwaSignedTransactionStep[];
   network: Network;
   walletAddress: string;
 }
@@ -134,6 +151,11 @@ interface RwaExecuteResponse {
   quoteId: string;
   network: Network;
   signature: string;
+  signatures?: Array<{
+    id: string;
+    target: RwaTransactionTarget;
+    signature: string;
+  }>;
   status: 'submitted';
   submittedAt: number;
   provider: RwaProvider;
@@ -152,6 +174,7 @@ interface JupiterToken {
   tokenProgram?: unknown;
   isVerified?: unknown;
   tags?: unknown;
+  audit?: unknown;
 }
 
 const DEFAULT_JUPITER_API_BASE_URL = 'https://api.jup.ag';
@@ -159,8 +182,8 @@ const DEFAULT_MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 const DEFAULT_DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const DEFAULT_RWA_DELEGATE_PROGRAM_ID = '4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7';
 const DEFAULT_DEVNET_PRICE_REFERENCE_MINT = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
-const DEFAULT_ASSET_LIMIT = 48;
-const PRICE_LOOKUP_LIMIT = 16;
+const DEFAULT_JUPITER_STOCK_SEARCH_QUERIES = ['xStock'];
+const JUPITER_PRICE_BATCH_SIZE = 50;
 const JUPITER_TIMEOUT_MS = 12_000;
 const USDC_DECIMALS = 6;
 const DEFAULT_MAX_PRICE_IMPACT_BPS = 200;
@@ -170,21 +193,40 @@ const DEVNET_SANDBOX_QUOTE_TTL_MS = 60_000;
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const ASSOCIATED_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const SYSVAR_RENT_PROGRAM_ID = 'SysvarRent111111111111111111111111111111111';
+const MAGIC_PROGRAM_ID = 'Magic11111111111111111111111111111111111111';
+const MAGIC_CONTEXT_ID = 'MagicContext1111111111111111111111111111111';
+const DELEGATION_PROGRAM_ID = 'DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh';
 const CREATE_ASSOCIATED_TOKEN_ACCOUNT_IDEMPOTENT_INSTRUCTION = 1;
 const U64_MAX = (1n << 64n) - 1n;
 const CONFIG_SEED = 'rwa_config';
 const INTENT_SEED = 'rwa_intent';
 const MARKET_SEED = 'rwa_market';
 const VAULT_AUTHORITY_SEED = 'rwa_vault_authority';
+const DELEGATION_BUFFER_SEED = 'buffer';
+const DELEGATION_RECORD_SEED = 'delegation';
+const DELEGATION_METADATA_SEED = 'delegation-metadata';
+const DEFAULT_MAGICBLOCK_ER_DEVNET_RPC_URL = 'https://devnet-as.magicblock.app';
+const MAGICBLOCK_RPC_TIMEOUT_MS = 12_000;
 
 interface DevnetSandboxConfig {
-  assetMint: string;
   settlementMint: string;
-  priceReferenceMint: string;
+  assets: DevnetSandboxAssetConfig[];
+  programId: string;
+}
+
+interface DevnetSandboxAssetConfig {
+  mint: string;
   symbol: string;
   name: string;
   decimals: number;
-  programId: string;
+  priceReferenceMint: string;
+  logo: string | null;
+  underlyingSymbol: string | null;
+}
+
+interface RwaStockCatalogFilter {
+  includeAllVerifiedStocks: boolean;
+  mints: Set<string>;
 }
 
 let rwaFetchImplementation: RwaFetchImplementation = (input, init) => fetch(input, init);
@@ -259,8 +301,8 @@ async function fetchJupiterJson(bindings: Bindings, path: string, init?: Request
 function readTags(value: unknown): string[] {
   return Array.isArray(value)
     ? value
-      .map((entry) => readTrimmedString(entry)?.toLowerCase())
-      .filter((entry): entry is string => entry != null)
+        .map((entry) => readTrimmedString(entry)?.toLowerCase())
+        .filter((entry): entry is string => entry != null)
     : [];
 }
 
@@ -317,47 +359,148 @@ function assertSolanaAddress(value: string, label: string): string {
   return normalized;
 }
 
-function readDevnetSandboxConfig(bindings: Bindings): DevnetSandboxConfig | null {
-  const configuredAssetMint = bindings.OFFPAY_RWA_DEVNET_SANDBOX_MINT?.trim();
-  if (!configuredAssetMint) return null;
+function readDevnetAssetDecimals(value: unknown, label: string): number {
+  const decimals = readFiniteNumber(value);
+  if (decimals == null || !Number.isInteger(decimals) || decimals < 0 || decimals > 9) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: `${label} decimals are misconfigured.`,
+      retryable: true,
+    });
+  }
 
-  const assetMint = assertSolanaAddress(configuredAssetMint, 'Devnet RWA sandbox mint');
+  return decimals;
+}
+
+function parseDevnetSandboxAssetsJson(rawValue: string): DevnetSandboxAssetConfig[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch (error) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Devnet RWA sandbox asset catalog JSON is invalid.',
+      retryable: true,
+      cause: error,
+    });
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Devnet RWA sandbox asset catalog must be an array.',
+      retryable: true,
+    });
+  }
+
+  return parsed.flatMap((entry, index) => {
+    if (!isRecord(entry)) return [];
+
+    const label = `Devnet RWA sandbox asset ${index + 1}`;
+    const mint = assertSolanaAddress(
+      readTrimmedString(entry.mint) ?? readTrimmedString(entry.assetMint) ?? '',
+      `${label} mint`,
+    );
+    const priceReferenceMint = assertSolanaAddress(
+      readTrimmedString(entry.priceReferenceMint) ??
+        readTrimmedString(entry.referenceMint) ??
+        readTrimmedString(entry.mainnetMint) ??
+        '',
+      `${label} price reference mint`,
+    );
+    const symbol = sanitizeText(readTrimmedString(entry.symbol), 24);
+    const name = sanitizeText(readTrimmedString(entry.name), 80);
+    if (!symbol || !name) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: `${label} symbol and name are required.`,
+        retryable: true,
+      });
+    }
+
+    return [
+      {
+        mint,
+        symbol,
+        name,
+        decimals: readDevnetAssetDecimals(entry.decimals, label),
+        priceReferenceMint,
+        logo: readTrimmedString(entry.logo) ?? readTrimmedString(entry.icon),
+        underlyingSymbol:
+          sanitizeText(readTrimmedString(entry.underlyingSymbol), 24) ??
+          inferUnderlyingSymbol(symbol),
+      },
+    ];
+  });
+}
+
+function readDevnetSandboxConfig(bindings: Bindings): DevnetSandboxConfig | null {
+  const configuredAssetsJson = bindings.OFFPAY_RWA_DEVNET_ASSETS_JSON?.trim() ?? '';
+  const configuredAssetMint = bindings.OFFPAY_RWA_DEVNET_SANDBOX_MINT?.trim() ?? '';
+  if (!configuredAssetsJson && !configuredAssetMint) return null;
+
   const settlementMint = assertSolanaAddress(
     bindings.OFFPAY_RWA_DEVNET_SETTLEMENT_MINT?.trim() ||
       bindings.OFFPAY_DEVNET_USDC_MINT?.trim() ||
       DEFAULT_DEVNET_USDC_MINT,
     'Devnet RWA settlement mint',
   );
-  if (assetMint === settlementMint) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: 'Devnet RWA sandbox asset mint must differ from the settlement mint.',
-      retryable: true,
-    });
-  }
 
-  const decimals = readFiniteNumber(bindings.OFFPAY_RWA_DEVNET_SANDBOX_DECIMALS);
-  if (decimals == null || !Number.isInteger(decimals) || decimals < 0 || decimals > 9) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: 'Devnet RWA sandbox mint decimals are misconfigured.',
-      retryable: true,
-    });
+  const assets =
+    configuredAssetsJson.length > 0
+      ? parseDevnetSandboxAssetsJson(configuredAssetsJson)
+      : [
+          {
+            mint: assertSolanaAddress(configuredAssetMint, 'Devnet RWA sandbox mint'),
+            symbol: sanitizeText(bindings.OFFPAY_RWA_DEVNET_SANDBOX_SYMBOL, 24) ?? 'AAPLd',
+            name: sanitizeText(bindings.OFFPAY_RWA_DEVNET_SANDBOX_NAME, 80) ?? 'Apple Sandbox RWA',
+            decimals: readDevnetAssetDecimals(
+              bindings.OFFPAY_RWA_DEVNET_SANDBOX_DECIMALS ?? USDC_DECIMALS,
+              'Devnet RWA sandbox mint',
+            ),
+            priceReferenceMint: assertSolanaAddress(
+              bindings.OFFPAY_RWA_DEVNET_PRICE_REFERENCE_MINT?.trim() ||
+                DEFAULT_DEVNET_PRICE_REFERENCE_MINT,
+              'Devnet RWA price reference mint',
+            ),
+            logo: null,
+            underlyingSymbol:
+              inferUnderlyingSymbol(
+                sanitizeText(bindings.OFFPAY_RWA_DEVNET_SANDBOX_SYMBOL, 24) ?? 'AAPLd',
+              ) ?? 'AAPL',
+          },
+        ];
+
+  if (assets.length === 0) return null;
+
+  const seenMints = new Set<string>();
+  for (const asset of assets) {
+    if (asset.mint === settlementMint) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'Devnet RWA sandbox asset mint must differ from the settlement mint.',
+        retryable: true,
+      });
+    }
+    if (seenMints.has(asset.mint)) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'Devnet RWA sandbox asset catalog contains duplicate mints.',
+        retryable: true,
+      });
+    }
+    seenMints.add(asset.mint);
   }
 
   return {
-    assetMint,
     settlementMint,
-    priceReferenceMint: assertSolanaAddress(
-      bindings.OFFPAY_RWA_DEVNET_PRICE_REFERENCE_MINT?.trim() ||
-        DEFAULT_DEVNET_PRICE_REFERENCE_MINT,
-      'Devnet RWA price reference mint',
-    ),
-    symbol: sanitizeText(bindings.OFFPAY_RWA_DEVNET_SANDBOX_SYMBOL, 24) ?? 'AAPLd',
-    name: sanitizeText(bindings.OFFPAY_RWA_DEVNET_SANDBOX_NAME, 80) ?? 'Apple Sandbox RWA',
-    decimals,
+    assets,
     programId: assertSolanaAddress(
       bindings.OFFPAY_RWA_DELEGATE_PROGRAM_ID?.trim() || DEFAULT_RWA_DELEGATE_PROGRAM_ID,
       'RWA delegate program',
@@ -367,17 +510,29 @@ function readDevnetSandboxConfig(bindings: Bindings): DevnetSandboxConfig | null
 
 function readBooleanFlag(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
-  return (
-    normalized === '1' ||
-    normalized === 'true' ||
-    normalized === 'yes' ||
-    normalized === 'on'
-  );
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
-function readAllowlistedRwaMints(bindings: Bindings): Set<string> {
+function isAllStocksCatalogValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === '*' || normalized === 'all' || normalized === 'jupiter:stocks';
+}
+
+function readRwaStockCatalogFilter(bindings: Bindings): RwaStockCatalogFilter {
   const rawValue = bindings.OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST?.trim() ?? '';
-  if (rawValue.length === 0) return new Set();
+  if (rawValue.length === 0) {
+    return {
+      includeAllVerifiedStocks: false,
+      mints: new Set(),
+    };
+  }
+
+  if (isAllStocksCatalogValue(rawValue)) {
+    return {
+      includeAllVerifiedStocks: true,
+      mints: new Set(),
+    };
+  }
 
   const mints = rawValue
     .split(',')
@@ -395,7 +550,10 @@ function readAllowlistedRwaMints(bindings: Bindings): Set<string> {
     }
   }
 
-  return new Set(mints);
+  return {
+    includeAllVerifiedStocks: false,
+    mints: new Set(mints),
+  };
 }
 
 function readMaxPriceImpactBps(bindings: Bindings): number {
@@ -410,6 +568,36 @@ function readMaxPriceImpactBps(bindings: Bindings): number {
   }
 
   return configured;
+}
+
+function readRwaMagicBlockErRpcUrl(bindings: Bindings, network: Network): string {
+  if (network !== 'devnet') {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_NETWORK',
+      message: 'RWA MagicBlock ER sandbox execution is available only on devnet.',
+    });
+  }
+
+  const configuredUrl =
+    bindings.OFFPAY_RWA_MAGICBLOCK_ER_DEVNET_RPC_URL?.trim() ||
+    bindings.OFFPAY_RWA_MAGICBLOCK_ROUTER_DEVNET_URL?.trim() ||
+    DEFAULT_MAGICBLOCK_ER_DEVNET_RPC_URL;
+  try {
+    const parsed = new URL(configuredUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('Unsupported MagicBlock ER RPC protocol.');
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch (error) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'MagicBlock ER RPC configuration is unavailable.',
+      retryable: true,
+      cause: error,
+    });
+  }
 }
 
 function assertRwaMainnetTradingEnabled(bindings: Bindings): void {
@@ -450,8 +638,7 @@ function buildRwaAsset(params: {
   const name = sanitizeText(readTrimmedString(params.token.name), 80);
   if (!mint || decimals == null || !symbol || !name) return null;
 
-  const tags = readTags(params.token.tags);
-  const verified = params.token.isVerified === true || tags.includes('verified');
+  const verified = isVerifiedJupiterStockToken(params.token);
   const tradable = params.network === 'mainnet';
 
   return {
@@ -487,18 +674,36 @@ function buildRwaAsset(params: {
   };
 }
 
+function isJupiterXStockToken(token: JupiterToken): boolean {
+  const symbol = readTrimmedString(token.symbol) ?? '';
+  const name = readTrimmedString(token.name) ?? '';
+  const icon = readTrimmedString(token.icon) ?? readTrimmedString(token.logoURI) ?? '';
+
+  return /x$/i.test(symbol) && (/xstock/i.test(name) || /xstocks-metadata\.backed\.fi/i.test(icon));
+}
+
+function isVerifiedJupiterStockToken(token: JupiterToken): boolean {
+  const tags = readTags(token.tags);
+  const audit = isRecord(token.audit) ? token.audit : null;
+  return (
+    (token.isVerified === true || tags.includes('verified') || isJupiterXStockToken(token)) &&
+    audit?.isSus !== true
+  );
+}
+
 function buildDevnetSandboxRwaAsset(params: {
   config: DevnetSandboxConfig;
+  assetConfig: DevnetSandboxAssetConfig;
   priceUsd: number | null;
 }): RwaAsset {
   return {
-    id: params.config.assetMint,
-    symbol: params.config.symbol,
-    name: params.config.name,
-    mint: params.config.assetMint,
-    decimals: params.config.decimals,
+    id: params.assetConfig.mint,
+    symbol: params.assetConfig.symbol,
+    name: params.assetConfig.name,
+    mint: params.assetConfig.mint,
+    decimals: params.assetConfig.decimals,
     network: 'devnet',
-    category: inferCategory(params.config.name, params.config.symbol),
+    category: inferCategory(params.assetConfig.name, params.assetConfig.symbol),
     provider: 'offpay_devnet_sandbox',
     providerLabel: 'OffPay devnet sandbox',
     providerEnvironment: 'devnet_sandbox',
@@ -512,8 +717,8 @@ function buildDevnetSandboxRwaAsset(params: {
     devnetSandbox: true,
     magicBlockEligible: true,
     riskLevel: 'sandbox',
-    logo: null,
-    underlyingSymbol: inferUnderlyingSymbol(params.config.symbol),
+    logo: params.assetConfig.logo,
+    underlyingSymbol: params.assetConfig.underlyingSymbol,
     complianceLabel:
       'Devnet sandbox RWA backed by OffPay vault liquidity. Price is read from the configured Jupiter stock reference mint; issuer redemption and compliance are not simulated.',
     execution: {
@@ -525,34 +730,143 @@ function buildDevnetSandboxRwaAsset(params: {
   };
 }
 
-async function fetchJupiterStockTokens(bindings: Bindings, network: Network): Promise<JupiterToken[]> {
-  if (network !== 'mainnet') return [];
+function readJupiterTokenArray(payload: unknown): unknown[] | null {
+  if (Array.isArray(payload)) return payload;
+  if (!isRecord(payload)) return null;
 
-  const payload = await fetchJupiterJson(bindings, '/tokens/v2/tag?query=stocks', {
-    method: 'GET',
-  });
-  if (!Array.isArray(payload)) {
-    throw new AppError({
-      status: 502,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: 'Jupiter RWA token catalog returned an invalid response.',
-      retryable: true,
-    });
+  for (const key of ['tokens', 'data', 'result', 'items']) {
+    const value = payload[key];
+    if (Array.isArray(value)) return value;
+    const nested = readJupiterTokenArray(value);
+    if (nested != null) return nested;
   }
 
-  return payload.filter(isRecord);
+  return null;
+}
+
+function describeJupiterTokenPayload(payload: unknown): string {
+  if (!isRecord(payload)) return `unexpected ${typeof payload} payload`;
+
+  const error = payload.error;
+  if (typeof error === 'string' && error.trim().length > 0) return error.trim();
+  if (isRecord(error)) {
+    const message = sanitizeText(readTrimmedString(error.message), 240);
+    if (message != null) return message;
+  }
+
+  const message = sanitizeText(readTrimmedString(payload.message), 240);
+  if (message != null) return message;
+
+  return `unexpected object payload with keys: ${Object.keys(payload).slice(0, 8).join(', ')}`;
+}
+
+function readJupiterStockSearchQueries(bindings: Bindings): string[] {
+  const configured = bindings.OFFPAY_RWA_JUPITER_STOCK_SEARCH_QUERIES?.trim();
+  if (!configured) return DEFAULT_JUPITER_STOCK_SEARCH_QUERIES;
+
+  const queries = configured
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return queries.length > 0 ? queries : DEFAULT_JUPITER_STOCK_SEARCH_QUERIES;
+}
+
+async function fetchJupiterStockTokensFromSearch(bindings: Bindings): Promise<JupiterToken[]> {
+  const byMint = new Map<string, JupiterToken>();
+  for (const query of readJupiterStockSearchQueries(bindings)) {
+    const payload = await fetchJupiterJson(
+      bindings,
+      `/tokens/v2/search?query=${encodeURIComponent(query)}`,
+      {
+        method: 'GET',
+      },
+    );
+    const tokens = readJupiterTokenArray(payload);
+    if (tokens == null) {
+      throw new AppError({
+        status: 502,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: `Jupiter RWA token search returned an invalid response: ${describeJupiterTokenPayload(payload)}.`,
+        retryable: true,
+      });
+    }
+
+    for (const token of tokens.filter(isRecord).filter(isVerifiedJupiterStockToken)) {
+      const mint = readTokenMint(token);
+      if (mint != null) byMint.set(mint, token);
+    }
+  }
+
+  return Array.from(byMint.values());
+}
+
+async function fetchJupiterStockTokens(
+  bindings: Bindings,
+  network: Network,
+): Promise<JupiterToken[]> {
+  if (network !== 'mainnet') return [];
+
+  let tagFailureReason = 'unknown tag response';
+  try {
+    const payload = await fetchJupiterJson(bindings, '/tokens/v2/tag?query=stocks', {
+      method: 'GET',
+    });
+    const tokens = readJupiterTokenArray(payload);
+    if (tokens != null) {
+      const filtered = tokens.filter(isRecord).filter(isVerifiedJupiterStockToken);
+      if (filtered.length > 0) return filtered;
+    }
+    tagFailureReason = describeJupiterTokenPayload(payload);
+  } catch (error) {
+    tagFailureReason = error instanceof Error ? error.message : String(error);
+  }
+
+  const searchTokens = await fetchJupiterStockTokensFromSearch(bindings);
+  if (searchTokens.length > 0) return searchTokens;
+
+  throw new AppError({
+    status: 502,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message: `Jupiter RWA token catalog is unavailable: ${tagFailureReason}.`,
+    retryable: true,
+  });
 }
 
 async function fetchJupiterPrice(bindings: Bindings, mint: string): Promise<number | null> {
-  const payload = await fetchJupiterJson(
-    bindings,
-    `/price/v3?ids=${encodeURIComponent(mint)}`,
-    { method: 'GET' },
-  );
+  const prices = await fetchJupiterPrices(bindings, [mint]);
+  return prices.get(mint) ?? null;
+}
 
-  if (!isRecord(payload)) return null;
-  const entry = payload[mint];
-  return isRecord(entry) ? readFiniteNumber(entry.usdPrice) : null;
+async function fetchJupiterPrices(
+  bindings: Bindings,
+  mints: string[],
+): Promise<Map<string, number | null>> {
+  const uniqueMints = Array.from(new Set(mints.filter((mint) => isValidSolanaAddress(mint))));
+  if (uniqueMints.length === 0) return new Map();
+
+  const prices = new Map<string, number | null>();
+  for (let index = 0; index < uniqueMints.length; index += JUPITER_PRICE_BATCH_SIZE) {
+    const batch = uniqueMints.slice(index, index + JUPITER_PRICE_BATCH_SIZE);
+    const payload = await fetchJupiterJson(
+      bindings,
+      `/price/v3?ids=${encodeURIComponent(batch.join(','))}`,
+      {
+        method: 'GET',
+      },
+    );
+
+    for (const mint of batch) {
+      if (!isRecord(payload)) {
+        prices.set(mint, null);
+        continue;
+      }
+
+      const entry = payload[mint];
+      prices.set(mint, isRecord(entry) ? readFiniteNumber(entry.usdPrice) : null);
+    }
+  }
+
+  return prices;
 }
 
 async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAssetsResponse> {
@@ -570,26 +884,31 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
       };
     }
 
-    const priceUsd = await fetchJupiterPrice(bindings, config.priceReferenceMint);
+    const assetConfigs = config.assets;
+    const prices = await fetchJupiterPrices(
+      bindings,
+      assetConfigs.map((asset) => asset.priceReferenceMint),
+    );
     return {
       network,
       mode: 'devnet_sandbox',
       provider: 'offpay_devnet_sandbox',
       providerEnvironment: 'devnet_sandbox',
-      assets: [
+      assets: assetConfigs.map((assetConfig) =>
         buildDevnetSandboxRwaAsset({
           config,
-          priceUsd,
+          assetConfig,
+          priceUsd: prices.get(assetConfig.priceReferenceMint) ?? null,
         }),
-      ],
+      ),
       fetchedAt,
     };
   }
 
   const providerEnvironment = getProviderEnvironment();
   const settlementMint = readMainnetUsdcMint(bindings);
-  const allowlist = readAllowlistedRwaMints(bindings);
-  if (allowlist.size === 0) {
+  const catalogFilter = readRwaStockCatalogFilter(bindings);
+  if (!catalogFilter.includeAllVerifiedStocks && catalogFilter.mints.size === 0) {
     return {
       network,
       mode: getCatalogMode(network),
@@ -600,19 +919,17 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
     };
   }
 
-  const tokens = (await fetchJupiterStockTokens(bindings, network))
-    .filter((token) => {
+  const tokens = (await fetchJupiterStockTokens(bindings, network)).filter((token) => {
+    const mint = readTokenMint(token);
+    if (mint == null || !isVerifiedJupiterStockToken(token)) return false;
+    return catalogFilter.includeAllVerifiedStocks || catalogFilter.mints.has(mint);
+  });
+  const prices = await fetchJupiterPrices(
+    bindings,
+    tokens.flatMap((token) => {
       const mint = readTokenMint(token);
-      return mint != null && allowlist.has(mint);
-    })
-    .slice(0, DEFAULT_ASSET_LIMIT);
-  const prices = await Promise.allSettled(
-    tokens
-      .slice(0, PRICE_LOOKUP_LIMIT)
-      .map((token) => {
-        const mint = readTokenMint(token);
-        return mint == null ? Promise.resolve(null) : fetchJupiterPrice(bindings, mint);
-      }),
+      return mint == null ? [] : [mint];
+    }),
   );
 
   return {
@@ -620,14 +937,13 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
     mode: getCatalogMode(network),
     provider: 'jupiter_stocks',
     providerEnvironment,
-    assets: tokens.flatMap((token, index) => {
-      const priceResult = prices[index];
-      const priceUsd = priceResult?.status === 'fulfilled' ? priceResult.value : null;
+    assets: tokens.flatMap((token) => {
+      const mint = readTokenMint(token);
       const asset = buildRwaAsset({
         token,
         network,
         settlementMint,
-        priceUsd,
+        priceUsd: mint == null ? null : (prices.get(mint) ?? null),
       });
       return asset == null ? [] : [asset];
     }),
@@ -666,14 +982,16 @@ async function getRwaPrice(
     mint: request.mint,
     network: request.network,
   });
-  const price = request.network === 'mainnet'
-    ? await fetchJupiterPrice(bindings, asset.mint).catch(() => null)
-    : asset.devnetSandbox
-      ? await fetchJupiterPrice(
-        bindings,
-        readDevnetSandboxConfig(bindings)?.priceReferenceMint ?? asset.mint,
-      ).catch(() => null)
-      : null;
+  const price =
+    request.network === 'mainnet'
+      ? await fetchJupiterPrice(bindings, asset.mint).catch(() => null)
+      : asset.devnetSandbox
+        ? await fetchJupiterPrice(
+            bindings,
+            readDevnetSandboxConfig(bindings)?.assets.find((entry) => entry.mint === asset.mint)
+              ?.priceReferenceMint ?? asset.mint,
+          ).catch(() => null)
+        : null;
 
   return {
     network: request.network,
@@ -785,11 +1103,107 @@ function randomNonce(): Uint8Array {
 }
 
 async function anchorDiscriminator(name: string): Promise<Buffer> {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(`global:${name}`),
-  );
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`global:${name}`));
   return Buffer.from(digest).subarray(0, 8);
+}
+
+async function magicBlockRpcRequest(
+  erRpcUrl: string,
+  method: string,
+  params: unknown[] = [],
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MAGICBLOCK_RPC_TIMEOUT_MS);
+
+  try {
+    const response = await rwaFetchImplementation(erRpcUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: `rwa-magicblock:${method}`,
+        method,
+        params,
+      }),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !isRecord(payload)) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'MagicBlock ER RPC is currently unavailable.',
+        retryable: true,
+      });
+    }
+
+    if (isRecord(payload.error)) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message:
+          sanitizeText(readTrimmedString(payload.error.message), 160) ??
+          'MagicBlock ER transaction failed.',
+      });
+    }
+
+    return payload.result;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'MagicBlock ER RPC is currently unavailable.',
+      retryable: true,
+      cause: error,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function getMagicBlockLatestBlockhash(erRpcUrl: string): Promise<string> {
+  const result = await magicBlockRpcRequest(erRpcUrl, 'getLatestBlockhash', [
+    { commitment: 'confirmed' },
+  ]);
+  const blockhash =
+    isRecord(result) && isRecord(result.value) ? readTrimmedString(result.value.blockhash) : null;
+  if (!blockhash) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'MagicBlock ER blockhash is currently unavailable.',
+      retryable: true,
+    });
+  }
+  return blockhash;
+}
+
+async function broadcastMagicBlockErTransaction(
+  erRpcUrl: string,
+  rawTransaction: string,
+): Promise<{ signature: string }> {
+  const result = await magicBlockRpcRequest(erRpcUrl, 'sendTransaction', [
+    rawTransaction,
+    {
+      encoding: 'base64',
+      skipPreflight: false,
+      maxRetries: 2,
+      preflightCommitment: 'confirmed',
+    },
+  ]);
+  const signature = readTrimmedString(result);
+  if (!signature) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'MagicBlock ER transaction broadcaster is temporarily unavailable.',
+      retryable: true,
+    });
+  }
+  return { signature };
 }
 
 async function quoteHash(params: {
@@ -825,6 +1239,25 @@ function associatedTokenAddress(owner: PublicKey, mint: PublicKey): PublicKey {
   )[0];
 }
 
+function serializeLegacyTransaction(transaction: Transaction): string {
+  return transaction
+    .serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    })
+    .toString('base64');
+}
+
+function readFirstMagicBlockValidator(bindings: Bindings): PublicKey | null {
+  const value = bindings.MAGICBLOCK_DEVNET_VALIDATORS?.trim() ?? '';
+  const firstValidator = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0);
+  if (!firstValidator) return null;
+  return new PublicKey(assertSolanaAddress(firstValidator, 'MagicBlock devnet validator'));
+}
+
 function createAssociatedTokenAccountIdempotentInstruction(params: {
   payer: PublicKey;
   owner: PublicKey;
@@ -846,16 +1279,110 @@ function createAssociatedTokenAccountIdempotentInstruction(params: {
   });
 }
 
+function createDelegateIntentInstruction(params: {
+  programId: PublicKey;
+  payer: PublicKey;
+  intent: PublicKey;
+  ownerKey: PublicKey;
+  nonce: Uint8Array;
+  validator: PublicKey | null;
+  discriminator: Buffer;
+}): TransactionInstruction {
+  const delegationProgram = new PublicKey(DELEGATION_PROGRAM_ID);
+  const [bufferPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from(DELEGATION_BUFFER_SEED), params.intent.toBuffer()],
+    params.programId,
+  );
+  const [delegationRecordPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from(DELEGATION_RECORD_SEED), params.intent.toBuffer()],
+    delegationProgram,
+  );
+  const [delegationMetadataPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from(DELEGATION_METADATA_SEED), params.intent.toBuffer()],
+    delegationProgram,
+  );
+  const data = Buffer.alloc(8 + 32 + 16);
+  params.discriminator.copy(data, 0);
+  params.ownerKey.toBuffer().copy(data, 8);
+  Buffer.from(params.nonce).copy(data, 40);
+  const keys: AccountMeta[] = [
+    { pubkey: params.payer, isSigner: true, isWritable: false },
+    { pubkey: bufferPda, isSigner: false, isWritable: true },
+    { pubkey: delegationRecordPda, isSigner: false, isWritable: true },
+    { pubkey: delegationMetadataPda, isSigner: false, isWritable: true },
+    { pubkey: params.intent, isSigner: false, isWritable: true },
+    { pubkey: params.programId, isSigner: false, isWritable: false },
+    { pubkey: delegationProgram, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+  if (params.validator != null) {
+    keys.push({ pubkey: params.validator, isSigner: false, isWritable: false });
+  }
+
+  return new TransactionInstruction({
+    programId: params.programId,
+    keys,
+    data,
+  });
+}
+
+async function createApproveIntentInstruction(params: {
+  programId: PublicKey;
+  config: PublicKey;
+  intent: PublicKey;
+  owner: PublicKey;
+  ownerKey: PublicKey;
+  nonce: Uint8Array;
+}): Promise<TransactionInstruction> {
+  const data = Buffer.alloc(8 + 32 + 16);
+  (await anchorDiscriminator('approve_intent')).copy(data, 0);
+  params.ownerKey.toBuffer().copy(data, 8);
+  Buffer.from(params.nonce).copy(data, 40);
+
+  return new TransactionInstruction({
+    programId: params.programId,
+    keys: [
+      { pubkey: params.config, isSigner: false, isWritable: false },
+      { pubkey: params.intent, isSigner: false, isWritable: true },
+      { pubkey: params.owner, isSigner: true, isWritable: false },
+    ],
+    data,
+  });
+}
+
+async function createUndelegateIntentInstruction(params: {
+  programId: PublicKey;
+  config: PublicKey;
+  intent: PublicKey;
+  payer: PublicKey;
+  ownerKey: PublicKey;
+  nonce: Uint8Array;
+}): Promise<TransactionInstruction> {
+  const data = Buffer.alloc(8 + 32 + 16);
+  (await anchorDiscriminator('undelegate_intent')).copy(data, 0);
+  params.ownerKey.toBuffer().copy(data, 8);
+  Buffer.from(params.nonce).copy(data, 40);
+
+  return new TransactionInstruction({
+    programId: params.programId,
+    keys: [
+      { pubkey: params.config, isSigner: false, isWritable: false },
+      { pubkey: params.payer, isSigner: true, isWritable: true },
+      { pubkey: params.intent, isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(MAGIC_PROGRAM_ID), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(MAGIC_CONTEXT_ID), isSigner: false, isWritable: true },
+    ],
+    data,
+  });
+}
+
 function deriveRwaPdas(params: {
   programId: PublicKey;
   owner: PublicKey;
   assetMint: PublicKey;
   nonce: Uint8Array;
 }) {
-  const config = PublicKey.findProgramAddressSync(
-    [Buffer.from(CONFIG_SEED)],
-    params.programId,
-  )[0];
+  const config = PublicKey.findProgramAddressSync([Buffer.from(CONFIG_SEED)], params.programId)[0];
   const intent = PublicKey.findProgramAddressSync(
     [Buffer.from(INTENT_SEED), params.owner.toBuffer(), Buffer.from(params.nonce)],
     params.programId,
@@ -963,11 +1490,13 @@ async function buildDevnetSandboxTransaction(params: {
   quoteExpiresAt: number;
 }): Promise<{
   unsignedTransaction: string;
+  unsignedTransactions: RwaUnsignedTransactionStep[];
   quoteId: string;
   intent: string;
   market: string;
   nonce: string;
   quoteHash: string;
+  erRpcUrl: string;
 }> {
   const owner = new PublicKey(params.walletAddress);
   const programId = new PublicKey(params.config.programId);
@@ -991,24 +1520,16 @@ async function buildDevnetSandboxTransaction(params: {
   const assetVault = associatedTokenAddress(pdas.vaultAuthority, assetMint);
   const settlementVault = associatedTokenAddress(pdas.vaultAuthority, settlementMint);
   const { blockhash } = await getLatestBlockhash(params.bindings, 'devnet');
-  const transaction = new Transaction({
+  const erRpcUrl = readRwaMagicBlockErRpcUrl(params.bindings, 'devnet');
+  const erBlockhash = await getMagicBlockLatestBlockhash(erRpcUrl);
+  const validator = readFirstMagicBlockValidator(params.bindings);
+  const delegateDiscriminator = await anchorDiscriminator('delegate_intent');
+  const createAndDelegateTransaction = new Transaction({
     feePayer: owner,
     recentBlockhash: blockhash,
   });
 
-  transaction.add(
-    createAssociatedTokenAccountIdempotentInstruction({
-      payer: owner,
-      owner,
-      mint: assetMint,
-      associatedTokenAccount: userAssetAccount,
-    }),
-    createAssociatedTokenAccountIdempotentInstruction({
-      payer: owner,
-      owner,
-      mint: settlementMint,
-      associatedTokenAccount: userSettlementAccount,
-    }),
+  createAndDelegateTransaction.add(
     await createIntentInstruction({
       programId,
       config: pdas.config,
@@ -1022,6 +1543,57 @@ async function buildDevnetSandboxTransaction(params: {
       cashAtoms: params.cashAtoms,
       hash,
       quoteExpiresAt: params.quoteExpiresAt,
+    }),
+    createDelegateIntentInstruction({
+      programId,
+      payer: owner,
+      intent: pdas.intent,
+      ownerKey: owner,
+      nonce,
+      validator,
+      discriminator: delegateDiscriminator,
+    }),
+  );
+
+  const approveAndUndelegateTransaction = new Transaction({
+    feePayer: owner,
+    recentBlockhash: erBlockhash,
+  });
+  approveAndUndelegateTransaction.add(
+    await createApproveIntentInstruction({
+      programId,
+      config: pdas.config,
+      intent: pdas.intent,
+      owner,
+      ownerKey: owner,
+      nonce,
+    }),
+    await createUndelegateIntentInstruction({
+      programId,
+      config: pdas.config,
+      intent: pdas.intent,
+      payer: owner,
+      ownerKey: owner,
+      nonce,
+    }),
+  );
+
+  const settleTransaction = new Transaction({
+    feePayer: owner,
+    recentBlockhash: blockhash,
+  });
+  settleTransaction.add(
+    createAssociatedTokenAccountIdempotentInstruction({
+      payer: owner,
+      owner,
+      mint: assetMint,
+      associatedTokenAccount: userAssetAccount,
+    }),
+    createAssociatedTokenAccountIdempotentInstruction({
+      payer: owner,
+      owner,
+      mint: settlementMint,
+      associatedTokenAccount: userSettlementAccount,
     }),
     await settleSandboxInstruction({
       programId,
@@ -1038,17 +1610,39 @@ async function buildDevnetSandboxTransaction(params: {
       vaultAuthority: pdas.vaultAuthority,
     }),
   );
+  const unsignedTransactions: RwaUnsignedTransactionStep[] = [
+    {
+      id: 'base-create-delegate',
+      label: 'Create and delegate RWA intent',
+      target: 'solana_devnet',
+      unsignedTransaction: serializeLegacyTransaction(createAndDelegateTransaction),
+      transactionFormat: 'solana_legacy_transaction_base64',
+    },
+    {
+      id: 'er-approve-undelegate',
+      label: 'Approve RWA intent on MagicBlock ER',
+      target: 'magicblock_er_devnet',
+      unsignedTransaction: serializeLegacyTransaction(approveAndUndelegateTransaction),
+      transactionFormat: 'solana_legacy_transaction_base64',
+    },
+    {
+      id: 'base-settle',
+      label: 'Settle RWA vault transfer on Solana devnet',
+      target: 'solana_devnet',
+      unsignedTransaction: serializeLegacyTransaction(settleTransaction),
+      transactionFormat: 'solana_legacy_transaction_base64',
+    },
+  ];
 
   return {
-    unsignedTransaction: transaction.serialize({
-      requireAllSignatures: false,
-      verifySignatures: false,
-    }).toString('base64'),
+    unsignedTransaction: unsignedTransactions[0]!.unsignedTransaction,
+    unsignedTransactions,
     quoteId: `devnet-${toHex(nonce)}`,
     intent: pdas.intent.toBase58(),
     market: pdas.market.toBase58(),
     nonce: toHex(nonce),
     quoteHash: toHex(hash),
+    erRpcUrl,
   };
 }
 
@@ -1057,7 +1651,8 @@ function assertRwaTradingNetwork(network: Network): void {
   throw new AppError({
     status: 400,
     code: 'INVALID_NETWORK',
-    message: 'RWA secondary-market execution is available only on mainnet because Jupiter swap execution is mainnet-only.',
+    message:
+      'RWA secondary-market execution is available only on mainnet because Jupiter swap execution is mainnet-only.',
   });
 }
 
@@ -1147,7 +1742,16 @@ async function createDevnetSandboxQuote(
     });
   }
 
-  const priceUsd = await fetchJupiterPrice(bindings, config.priceReferenceMint);
+  const assetConfig = config.assets.find((entry) => entry.mint === asset.mint);
+  if (assetConfig == null) {
+    throw new AppError({
+      status: 404,
+      code: 'NOT_FOUND',
+      message: 'RWA asset is not available on this network.',
+    });
+  }
+
+  const priceUsd = await fetchJupiterPrice(bindings, assetConfig.priceReferenceMint);
   if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) {
     throw new AppError({
       status: 503,
@@ -1167,12 +1771,14 @@ async function createDevnetSandboxQuote(
     });
   }
 
-  const assetDecimals = asset.decimals ?? config.decimals;
+  const assetDecimals = asset.decimals ?? assetConfig.decimals;
   const assetScale = pow10(assetDecimals);
   let quantityAtoms: bigint;
   let cashAtoms: bigint;
   if (request.side === 'buy') {
-    cashAtoms = BigInt(parseDecimalToAtomic(request.cashAmount ?? '', USDC_DECIMALS, 'Cash amount'));
+    cashAtoms = BigInt(
+      parseDecimalToAtomic(request.cashAmount ?? '', USDC_DECIMALS, 'Cash amount'),
+    );
     quantityAtoms = (cashAtoms * assetScale) / priceMicros;
   } else {
     quantityAtoms = BigInt(parseDecimalToAtomic(request.quantity ?? '', assetDecimals, 'Quantity'));
@@ -1217,12 +1823,18 @@ async function createDevnetSandboxQuote(
     providerEnvironment: 'devnet_sandbox',
     unsignedTransaction: transaction.unsignedTransaction,
     transactionFormat: 'solana_legacy_transaction_base64',
+    unsignedTransactions: transaction.unsignedTransactions,
     sandboxIntent: {
       programId: config.programId,
       intent: transaction.intent,
       market: transaction.market,
       nonce: transaction.nonce,
       quoteHash: transaction.quoteHash,
+      magicBlock: {
+        enabled: true,
+        erRpcUrl: transaction.erRpcUrl,
+        delegatedAccount: transaction.intent,
+      },
     },
   };
 }
@@ -1254,7 +1866,8 @@ async function createRwaQuote(
     throw new AppError({
       status: 400,
       code: 'INVALID_REQUEST',
-      message: 'This RWA asset is not currently tradable through Jupiter secondary-market liquidity.',
+      message:
+        'This RWA asset is not currently tradable through Jupiter secondary-market liquidity.',
     });
   }
 
@@ -1321,6 +1934,112 @@ function buildRwaQuoteResponse(params: {
   };
 }
 
+const DEVNET_RWA_MAGICBLOCK_STEP_IDS = [
+  'base-create-delegate',
+  'er-approve-undelegate',
+  'base-settle',
+] as const;
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function assertDevnetRwaSignedSteps(
+  steps: RwaSignedTransactionStep[] | undefined,
+): RwaSignedTransactionStep[] {
+  if (steps == null || steps.length === 0) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Devnet RWA MagicBlock execution requires signed transaction steps.',
+    });
+  }
+  if (steps.length !== DEVNET_RWA_MAGICBLOCK_STEP_IDS.length) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Devnet RWA MagicBlock execution received an incomplete transaction sequence.',
+    });
+  }
+
+  steps.forEach((step, index) => {
+    const expectedId = DEVNET_RWA_MAGICBLOCK_STEP_IDS[index];
+    const expectedTarget: RwaTransactionTarget =
+      step.id === 'er-approve-undelegate' ? 'magicblock_er_devnet' : 'solana_devnet';
+    if (
+      step.id !== expectedId ||
+      step.target !== expectedTarget ||
+      step.signedTransaction.trim().length === 0
+    ) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'Devnet RWA MagicBlock execution transaction sequence is invalid.',
+      });
+    }
+  });
+
+  return steps;
+}
+
+async function waitForDevnetSignature(bindings: Bindings, signature: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const response = await getRpcSignatureStatuses(bindings, {
+      network: 'devnet',
+      signatures: [signature],
+    });
+    const status = response.statuses[0];
+    if (status?.err != null) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'Devnet RWA transaction failed before the next MagicBlock step.',
+      });
+    }
+    if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') {
+      return;
+    }
+    await delay(500);
+  }
+}
+
+async function broadcastDevnetRwaMagicBlockSequence(
+  bindings: Bindings,
+  signedSteps: RwaSignedTransactionStep[],
+): Promise<NonNullable<RwaExecuteResponse['signatures']>> {
+  const erRpcUrl = readRwaMagicBlockErRpcUrl(bindings, 'devnet');
+  const signatures: NonNullable<RwaExecuteResponse['signatures']> = [];
+
+  for (const step of signedSteps) {
+    const result =
+      step.target === 'magicblock_er_devnet'
+        ? await broadcastMagicBlockErTransaction(erRpcUrl, step.signedTransaction)
+        : await broadcastRawTransaction(bindings, {
+            rawTransaction: step.signedTransaction,
+            network: 'devnet',
+            skipPreflight: false,
+            maxRetries: 2,
+            preflightCommitment: 'confirmed',
+          });
+
+    signatures.push({
+      id: step.id,
+      target: step.target,
+      signature: result.signature,
+    });
+
+    if (step.target === 'solana_devnet') {
+      await waitForDevnetSignature(bindings, result.signature);
+    } else {
+      await delay(750);
+    }
+  }
+
+  return signatures;
+}
+
 async function executeRwaQuote(
   bindings: Bindings,
   request: RwaExecuteRequest,
@@ -1332,6 +2051,24 @@ async function executeRwaQuote(
         code: 'INVALID_REQUEST',
         message: 'Devnet RWA execution requires a devnet sandbox quote.',
       });
+    }
+
+    const signedSteps = request.signedTransactions;
+    if (signedSteps != null && signedSteps.length > 0) {
+      const signatures = await broadcastDevnetRwaMagicBlockSequence(
+        bindings,
+        assertDevnetRwaSignedSteps(signedSteps),
+      );
+
+      return {
+        quoteId: request.quoteId,
+        network: request.network,
+        signature: signatures[signatures.length - 1]!.signature,
+        signatures,
+        status: 'submitted',
+        submittedAt: Date.now(),
+        provider: 'offpay_devnet_sandbox',
+      };
     }
 
     const result = await broadcastRawTransaction(bindings, {
