@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,7 +15,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
-import { PuffyRwaIcon } from '@/components/ui/icons/PuffyRwaIcon';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -34,17 +34,14 @@ import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
-import {
-  createRwaQuote,
-  executeRwaQuote,
-  getRwaAssets,
-} from '@/lib/api/offpay-api-client';
+import { createRwaQuote, executeRwaQuote, getRwaAssets } from '@/lib/api/offpay-api-client';
 import {
   signSerializedTransactionForWallet,
   signSerializedTransactionsForWallet,
 } from '@/lib/crypto/solana-transaction-signing';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
 import { getRwaDevnetSandboxFundingRequirement } from '@/lib/rwa/devnet-sandbox-funding';
+import { TAB_ROUTE_HREFS, useTabHistoryStore } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
 
 import type {
@@ -92,6 +89,21 @@ function getRwaSettlementDisplaySymbol(
   asset: Pick<RwaAsset, 'devnetSandbox' | 'settlementSymbol'>,
 ): string {
   return asset.devnetSandbox ? RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL : asset.settlementSymbol;
+}
+
+function hasPositiveDecimalAmount(value: string | null | undefined): boolean {
+  if (value == null || value.trim().length === 0) return false;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
+}
+
+function findWalletTokenBalance(
+  balance: ReturnType<typeof useOffpayWalletBalance>['data'],
+  mint: string | null | undefined,
+): string | null {
+  if (balance == null || mint == null || mint.trim().length === 0) return null;
+  const token = balance.tokens.find((entry) => !entry.spam && entry.mint === mint);
+  return hasPositiveDecimalAmount(token?.balance) ? token!.balance : null;
 }
 
 function rwaAssetsQueryKey(network: string | null) {
@@ -342,8 +354,7 @@ function RwaAssetRow({
   onSell: (asset: RwaAsset) => void;
 }): React.JSX.Element {
   const positive = asset.change24hPct == null || asset.change24hPct >= 0;
-  const tokenProgramLabel = asset.tokenProgramId?.includes('TokenzQd') ? 'Token-2022' : 'SPL';
-  const executionLabel = asset.devnetSandbox
+  const routeLabel = asset.devnetSandbox
     ? 'Devnet vault'
     : asset.tradable
       ? 'Jupiter'
@@ -378,7 +389,7 @@ function RwaAssetRow({
               {asset.name}
             </Text>
             <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
-              {RWA_CATEGORY_LABELS[asset.category]} · {asset.providerLabel}
+              {RWA_CATEGORY_LABELS[asset.category]} · {asset.underlyingSymbol ?? asset.symbol}
             </Text>
           </View>
         </View>
@@ -396,43 +407,17 @@ function RwaAssetRow({
         </View>
       </View>
 
-      <View style={styles.assetMetaRow}>
-        <View style={styles.metaPill}>
-          <Ionicons name="server-outline" size={14} color={colors.text.secondary} />
-          <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-            {asset.providerEnvironment}
-          </Text>
-        </View>
-        <View style={styles.metaPill}>
-          <Ionicons name="shield-checkmark-outline" size={14} color={colors.text.secondary} />
-          <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-            {executionLabel}
-          </Text>
-        </View>
-        {asset.tokenProgramId != null ? (
-          <View style={styles.metaPill}>
-            <Ionicons name="cube-outline" size={14} color={colors.text.secondary} />
-            <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-              {tokenProgramLabel}
-            </Text>
-          </View>
-        ) : null}
-        <View style={styles.metaPill}>
-          <Ionicons name="logo-usd" size={14} color={colors.text.secondary} />
-          <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-            {getRwaSettlementDisplaySymbol(asset)}
-          </Text>
-        </View>
+      <View style={styles.assetInfoRow}>
+        <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
+          {routeLabel}
+        </Text>
+        <Text variant="caption" color={colors.text.tertiary}>
+          ·
+        </Text>
+        <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
+          {getRwaSettlementDisplaySymbol(asset)}
+        </Text>
       </View>
-
-      <Text
-        variant="caption"
-        color={colors.text.tertiary}
-        style={styles.complianceText}
-        numberOfLines={2}
-      >
-        {asset.complianceLabel}
-      </Text>
 
       {lastExecution != null ? (
         <View style={styles.executionPill}>
@@ -510,6 +495,7 @@ function RwaAssetRow({
 export default function RwasScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const { showToast } = useAppToast();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
@@ -517,6 +503,7 @@ export default function RwasScreen(): React.JSX.Element {
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + layout.tabBarHeight + spacing.xl;
   const { network } = useOffpayNetwork();
+  const previousRoute = useTabHistoryStore((state) => state.previousRoute);
   const { canUseNetwork, isNetworkSwitching } = useOffpayNetworkAccess();
   const activeWalletId = useWalletStore((state) => state.activeWalletId);
   const { walletAddress, canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
@@ -543,6 +530,16 @@ export default function RwasScreen(): React.JSX.Element {
     requestOwner: 'rwa.wallet.balance',
     waitForDashboard: false,
   });
+  const walletBalanceData = walletBalanceQuery.data;
+  const refetchWalletBalance = walletBalanceQuery.refetch;
+
+  const handleBack = useCallback((): void => {
+    const target =
+      previousRoute !== 'rwas' && previousRoute !== 'scanner'
+        ? TAB_ROUTE_HREFS[previousRoute]
+        : TAB_ROUTE_HREFS.index;
+    router.navigate(target);
+  }, [previousRoute, router]);
 
   const invalidateWalletData = useCallback(
     async (address: string, invalidationNetwork: OffpayNetwork): Promise<void> => {
@@ -566,7 +563,7 @@ export default function RwasScreen(): React.JSX.Element {
 
   const assertDevnetSandboxFunding = useCallback(
     async (review: RwaQuoteReviewState): Promise<void> => {
-      const getRequirement = (walletBalance = walletBalanceQuery.data ?? null) =>
+      const getRequirement = (walletBalance = walletBalanceData ?? null) =>
         getRwaDevnetSandboxFundingRequirement({
           asset: review.asset,
           inputAmount: review.inputAmount,
@@ -579,13 +576,13 @@ export default function RwasScreen(): React.JSX.Element {
       let requirement = getRequirement();
       if (requirement == null || requirement.hasEnough) return;
 
-      const refreshedBalance = await walletBalanceQuery.refetch();
-      requirement = getRequirement(refreshedBalance.data ?? walletBalanceQuery.data ?? null);
+      const refreshedBalance = await refetchWalletBalance();
+      requirement = getRequirement(refreshedBalance.data ?? walletBalanceData ?? null);
       if (requirement == null || requirement.hasEnough) return;
 
       throw new Error(formatRwaDevnetSandboxBalanceError(review.side, requirement));
     },
-    [walletBalanceQuery.data, walletBalanceQuery.refetch],
+    [refetchWalletBalance, walletBalanceData],
   );
 
   const assetsQuery = useQuery({
@@ -749,7 +746,7 @@ export default function RwasScreen(): React.JSX.Element {
     },
   });
 
-  const assets = assetsQuery.data?.assets ?? [];
+  const assets = useMemo(() => assetsQuery.data?.assets ?? [], [assetsQuery.data?.assets]);
   const filteredAssets = useMemo(() => {
     const query = assetSearchInput.trim().toLowerCase();
     if (query.length === 0) return assets;
@@ -768,6 +765,58 @@ export default function RwasScreen(): React.JSX.Element {
       return haystack.includes(query);
     });
   }, [assetSearchInput, assets]);
+
+  const resolveMaxTradeAmount = useCallback((): { amount: string; symbol: string } | null => {
+    const balance = walletBalanceData;
+    if (balance == null) return null;
+
+    if (tradeSide === 'buy') {
+      const settlementAsset = assets.find((asset) => asset.tradable) ?? assets[0];
+      const amount = findWalletTokenBalance(balance, settlementAsset?.settlementMint);
+      if (amount == null || settlementAsset == null) return null;
+      return {
+        amount,
+        symbol: getRwaSettlementDisplaySymbol(settlementAsset),
+      };
+    }
+
+    const assetWithBalance = filteredAssets.find((asset) =>
+      hasPositiveDecimalAmount(findWalletTokenBalance(balance, asset.mint)),
+    );
+    if (assetWithBalance == null) return null;
+    const amount = findWalletTokenBalance(balance, assetWithBalance.mint);
+    return amount == null
+      ? null
+      : {
+          amount,
+          symbol: assetWithBalance.symbol,
+        };
+  }, [assets, filteredAssets, tradeSide, walletBalanceData]);
+
+  const handleUseMaxAmount = useCallback((): void => {
+    const max = resolveMaxTradeAmount();
+    if (max == null) {
+      showToast({
+        title: 'No balance',
+        message:
+          tradeSide === 'buy'
+            ? 'No settlement token balance is available for this trade.'
+            : 'No visible RWA token balance is available to sell.',
+        variant: 'warning',
+        persistToNotificationCenter: false,
+      });
+      return;
+    }
+
+    setCashAmountInput(sanitizeTradeAmountInput(max.amount));
+    showToast({
+      title: 'Max selected',
+      message: `${max.amount} ${max.symbol}`,
+      variant: 'info',
+      persistToNotificationCenter: false,
+    });
+  }, [resolveMaxTradeAmount, showToast, tradeSide]);
+
   const tradeStatusMessage = useMemo(() => {
     if (isNetworkSwitching) return 'Switching networks';
     if (!canUseNetwork) return 'Network unavailable';
@@ -907,24 +956,6 @@ export default function RwasScreen(): React.JSX.Element {
     rwaExecuteMutation.mutate({ review: reviewQuote });
   }, [reviewQuote, rwaExecuteMutation, showToast]);
 
-  const statusLabel = useMemo(() => {
-    if (isNetworkSwitching) return 'Switching';
-    if (!canUseNetwork) return 'Offline';
-    if (capabilitiesQuery.isCapabilitiesPending) return 'Loading';
-    if (!assetsCapability.available)
-      return assetsCapability.reason === 'unsupported_network' ? 'Mainnet only' : 'Unavailable';
-    if (assetsQuery.isPending) return 'Loading';
-    return assets.some((asset) => asset.devnetSandbox) ? 'Devnet sandbox' : 'Jupiter stocks';
-  }, [
-    assets,
-    assetsCapability.available,
-    assetsCapability.reason,
-    assetsQuery.isPending,
-    canUseNetwork,
-    capabilitiesQuery.isCapabilitiesPending,
-    isNetworkSwitching,
-  ]);
-
   const contentState = useMemo(() => {
     if (capabilitiesQuery.isCapabilitiesPending || assetsQuery.isPending) return 'loading';
     if (assetsQuery.isError) return 'error';
@@ -953,28 +984,31 @@ export default function RwasScreen(): React.JSX.Element {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <View style={styles.iconShell}>
-            <PuffyRwaIcon size={dense ? 34 : 42} color={colors.text.primary} focused />
-          </View>
-          <View style={styles.headerText}>
-            <Text
-              variant={compact ? 'h3' : 'h2'}
-              color={colors.text.inverse}
-              style={styles.title}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.84}
-            >
-              RWAs
-            </Text>
-            <View style={styles.statusPill}>
-              <View style={styles.statusDot} />
-              <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-                {statusLabel}
-              </Text>
-            </View>
-          </View>
+        <View style={styles.screenHeader}>
+          <Pressable
+            onPress={handleBack}
+            hitSlop={6}
+            style={({ pressed }) => [
+              styles.headerBackButton,
+              pressed ? styles.headerBackButtonPressed : null,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={layout.iconSizeNav} color={colors.text.primary} />
+          </Pressable>
+          <Text
+            variant="h3"
+            color={colors.text.primary}
+            style={[styles.screenTitle, compact && styles.screenTitleCompact]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            maxFontSizeMultiplier={1.05}
+          >
+            RWAs
+          </Text>
+          <View style={styles.headerSpacer} />
         </View>
 
         {contentState === 'loading' ? (
@@ -1024,9 +1058,11 @@ export default function RwasScreen(): React.JSX.Element {
               <Text variant="body" color={colors.text.primary} style={styles.tradePanelTitle}>
                 RWA trade
               </Text>
-              <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
-                {tradeStatusMessage}
-              </Text>
+              {tradeStatusMessage !== 'Ready' ? (
+                <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
+                  {tradeStatusMessage}
+                </Text>
+              ) : null}
             </View>
             <View style={styles.amountSymbolPill}>
               <Text variant="caption" color={colors.text.secondary} style={styles.amountSymbol}>
@@ -1065,17 +1101,29 @@ export default function RwasScreen(): React.JSX.Element {
               );
             })}
           </View>
-          <TextInput
-            value={cashAmountInput}
-            onChangeText={(value) => setCashAmountInput(sanitizeTradeAmountInput(value))}
-            placeholder="0.00"
-            placeholderTextColor={colors.text.placeholder}
-            keyboardType="decimal-pad"
-            inputMode="decimal"
-            returnKeyType="done"
-            style={styles.amountInput}
-            selectionColor={colors.brand.glossAccent}
-          />
+          <View style={styles.amountInputShell}>
+            <TextInput
+              value={cashAmountInput}
+              onChangeText={(value) => setCashAmountInput(sanitizeTradeAmountInput(value))}
+              placeholder="0.00"
+              placeholderTextColor={colors.text.placeholder}
+              keyboardType="decimal-pad"
+              inputMode="decimal"
+              returnKeyType="done"
+              style={styles.amountInput}
+              selectionColor={colors.brand.glossAccent}
+            />
+            <Pressable
+              onPress={handleUseMaxAmount}
+              style={({ pressed }) => [styles.maxButton, pressed ? styles.maxButtonPressed : null]}
+              accessibilityRole="button"
+              accessibilityLabel="Use maximum available RWA trade amount"
+            >
+              <Text variant="caption" color={colors.text.primary} style={styles.maxButtonLabel}>
+                MAX
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {reviewQuote != null ? (
@@ -1094,7 +1142,7 @@ export default function RwasScreen(): React.JSX.Element {
               <TextInput
                 value={assetSearchInput}
                 onChangeText={setAssetSearchInput}
-                placeholder="Search stocks or mint"
+                placeholder="Search RWAs"
                 placeholderTextColor={colors.text.placeholder}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -1174,50 +1222,45 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: RWA_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
-    paddingTop: spacing['2xl'],
+    paddingTop: spacing.lg,
     gap: spacing.lg,
   },
-  header: {
+  screenHeader: {
+    minHeight: layout.minTouchTarget,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
-  iconShell: {
-    width: 68,
-    height: 68,
+  headerBackButton: {
+    width: layout.minTouchTarget,
+    height: layout.minTouchTarget,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 34,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
+    borderRadius: layout.minTouchTarget / 2,
+    backgroundColor: colors.surface.cardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
+    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 8px 18px rgba(0, 0, 0, 0.36)',
   },
-  headerText: {
+  headerBackButtonPressed: {
+    opacity: 0.72,
+  },
+  screenTitle: {
     flex: 1,
     minWidth: 0,
-    gap: spacing.sm,
+    textAlign: 'center',
+    fontFamily: fontFamily.uiSemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
-  title: {
-    fontFamily: fontFamily.display,
+  screenTitleCompact: {
+    fontSize: 19,
+    lineHeight: 25,
   },
-  statusPill: {
-    alignSelf: 'flex-start',
-    minHeight: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.full,
-    backgroundColor: colors.glass.badgeFill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.semantic.receive,
+  headerSpacer: {
+    width: layout.minTouchTarget,
+    height: layout.minTouchTarget,
   },
   statePanel: {
     minHeight: 180,
@@ -1296,16 +1339,41 @@ const styles = StyleSheet.create({
   sideButtonLabel: {
     fontFamily: fontFamily.medium,
   },
-  amountInput: {
-    minHeight: 54,
-    paddingHorizontal: spacing.md,
+  amountInputShell: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.sm,
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border.strong,
     backgroundColor: colors.surface.solidControl,
+  },
+  amountInput: {
+    minWidth: 0,
+    flex: 1,
     color: colors.text.primary,
     fontFamily: fontFamily.display,
     fontSize: 28,
+    paddingVertical: 0,
+  },
+  maxButton: {
+    minWidth: 58,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.full,
+    backgroundColor: colors.glass.smokeWash,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+  },
+  maxButtonPressed: {
+    opacity: 0.76,
+  },
+  maxButtonLabel: {
+    fontFamily: fontFamily.medium,
   },
   reviewPanel: {
     gap: spacing.md,
@@ -1477,24 +1545,11 @@ const styles = StyleSheet.create({
   changeText: {
     fontFamily: fontFamily.medium,
   },
-  assetMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  metaPill: {
-    minHeight: 28,
+  assetInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radii.full,
-    backgroundColor: colors.glass.smokeWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-  },
-  complianceText: {
-    lineHeight: 17,
+    minHeight: 20,
   },
   executionPill: {
     minHeight: 30,
