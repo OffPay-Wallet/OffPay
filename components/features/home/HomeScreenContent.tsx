@@ -31,6 +31,7 @@ import {
   type HomeBalanceMode,
 } from '@/components/features/home/HomeBalanceModeDivider';
 import { HomeHeader } from '@/components/features/home/HomeHeader';
+import { HomeRwaCarousel } from '@/components/features/home/HomeRwaCarousel';
 import { OfflineSlotsPromptModal } from '@/components/features/home/OfflineSlotsPromptModal';
 import { RecentActivityCard } from '@/components/features/home/RecentActivityCard';
 import { TokenHoldingsCard } from '@/components/features/home/TokenHoldingsCard';
@@ -95,6 +96,7 @@ import type { TokenHolding } from '@/components/features/home/TokenHoldingsCard'
 import type { TokenValuationView } from '@/hooks/useOffpayTokenValuations';
 import type { OffpayRecentActivityView } from '@/lib/api/offpay-wallet-data';
 import type { WalletMode } from '@/store/preferencesStore';
+import type { RwaAsset } from '@/types/offpay-api';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1193,6 +1195,35 @@ export function HomeScreenContent(): React.JSX.Element {
     navigateToTab('/(tabs)/history');
   }, [navigateToTab]);
 
+  const handleViewAllRwas = useCallback((): void => {
+    navigateToTab('/(tabs)/rwas');
+  }, [navigateToTab]);
+
+  const handleHomeRwaTrade = useCallback(
+    (asset: RwaAsset, side: 'buy' | 'sell'): void => {
+      const params = new URLSearchParams();
+      params.set('assetId', asset.id);
+      params.set('side', side);
+      params.set('intentId', `${Date.now().toString(36)}-${side}`);
+      navigateToTab(`/(tabs)/rwas?${params.toString()}`);
+    },
+    [navigateToTab],
+  );
+
+  const handleHomeRwaBuy = useCallback(
+    (asset: RwaAsset): void => {
+      handleHomeRwaTrade(asset, 'buy');
+    },
+    [handleHomeRwaTrade],
+  );
+
+  const handleHomeRwaSell = useCallback(
+    (asset: RwaAsset): void => {
+      handleHomeRwaTrade(asset, 'sell');
+    },
+    [handleHomeRwaTrade],
+  );
+
   const bottomPadding = Math.max(insets.bottom, spacing.lg) + layout.tabBarHeight + spacing.md;
   const viewportProfile = getViewportProfile({
     width: windowWidth,
@@ -1294,6 +1325,16 @@ export function HomeScreenContent(): React.JSX.Element {
             balanceLabel={balanceLabel}
             onAction={handleAction}
             disabledActionIds={isOffline ? OFFLINE_DISABLED_ACTION_IDS : EMPTY_DISABLED_ACTION_IDS}
+          />
+
+          <HomeRwaCarousel
+            network={network}
+            canUseNetwork={canUseNetwork}
+            capabilities={capabilitiesQuery.capabilities}
+            capabilitiesPending={capabilitiesQuery.isCapabilitiesPending}
+            onBuy={handleHomeRwaBuy}
+            onSell={handleHomeRwaSell}
+            onViewAll={handleViewAllRwas}
           />
 
           <HomeHoldingsSection

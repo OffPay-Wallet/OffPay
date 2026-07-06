@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router/react-navigation';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   ScrollView,
@@ -52,6 +52,7 @@ import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
+import { useRwaAssets } from '@/hooks/useRwaAssets';
 import {
   offpayWalletBalanceQueryKey,
   offpayWalletDashboardBaseQueryKey,
@@ -60,10 +61,9 @@ import {
 } from '@/lib/api/offpay-wallet-query-keys';
 import {
   getOffpayFeatureCapability,
-  isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
 import { formatTokenBalance } from '@/lib/api/offpay-wallet-data';
-import { createRwaQuote, executeRwaQuote, getRwaAssets } from '@/lib/api/offpay-api-client';
+import { createRwaQuote, executeRwaQuote } from '@/lib/api/offpay-api-client';
 import {
   signSerializedTransactionForWallet,
   signSerializedTransactionsForWallet,
@@ -79,15 +79,18 @@ import type {
   RwaExecuteResponse,
 } from '@/types/offpay-api';
 
-const RWA_ASSETS_STALE_TIME_MS = 20 * 1000;
-const RWA_ASSETS_REFETCH_INTERVAL_MS = 30 * 1000;
-const RWA_ASSETS_GC_TIME_MS = 15 * 60 * 1000;
 const RWA_CONTENT_MAX_WIDTH = 560;
 const RWA_SWAP_IN_PROGRESS_MESSAGE = 'Another RWA swap is in progress.';
 const RWA_REVIEW_CURRENT_QUOTE_MESSAGE = 'Review the current RWA quote first.';
 
-function rwaAssetsQueryKey(network: string | null) {
-  return ['offpay', 'rwa', 'assets', network] as const;
+function getRouteParam(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0]?.trim() || null;
+  return value?.trim() || null;
+}
+
+function getRouteTradeSide(value: string | string[] | undefined): RwaTradeSide | null {
+  const normalized = getRouteParam(value)?.toLowerCase();
+  return normalized === 'buy' || normalized === 'sell' ? normalized : null;
 }
 
 interface RwaQuoteMutationInput {
@@ -112,6 +115,12 @@ export function RwaScreenContent(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    assetId?: string | string[];
+    assetMint?: string | string[];
+    intentId?: string | string[];
+    side?: string | string[];
+  }>();
   const { showToast } = useAppToast();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
@@ -126,13 +135,20 @@ export function RwaScreenContent(): React.JSX.Element {
   const [tradeDraft, setTradeDraft] = useState<RwaTradeDraftState | null>(null);
   const [reviewQuote, setReviewQuote] = useState<RwaQuoteReviewState | null>(null);
   const [processResult, setProcessResult] = useState<RwaProcessResultState | null>(null);
+  const appliedRouteIntentRef = useRef<string | null>(null);
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const capabilities = capabilitiesQuery.capabilities;
   const assetsCapability = getOffpayFeatureCapability(capabilities, 'rwa.assets');
   const quoteCapability = getOffpayFeatureCapability(capabilities, 'rwa.quote');
   const executeCapability = getOffpayFeatureCapability(capabilities, 'rwa.execute');
-  const canLoadAssets =
-    network != null && canUseNetwork && isOffpayFeatureAvailable(capabilities, 'rwa.assets');
+  const rwaAssets = useRwaAssets({
+    network,
+    canUseNetwork,
+    capabilities,
+    requestOwner: 'rwa.assets',
+  });
+  const assetsQuery = rwaAssets.query;
+  const canLoadAssets = rwaAssets.canLoadAssets;
   const draftTradeAmountLabel = tradeDraft?.side === 'sell' ? 'quantity' : 'USDC amount';
   const draftAmountState = useMemo(
     () => parseRwaTradeAmount(tradeDraft?.amountInput ?? '', draftTradeAmountLabel),
@@ -195,27 +211,6 @@ export function RwaScreenContent(): React.JSX.Element {
     [refetchWalletBalance, walletBalanceData],
   );
 
-  const assetsQuery = useQuery({
-    queryKey: rwaAssetsQueryKey(network),
-    queryFn: ({ signal }) => {
-      if (network == null) {
-        throw new Error('RWA assets require a supported OffPay network.');
-      }
-
-      return getRwaAssets(network, {
-        signal,
-        requestOwner: 'rwa.assets',
-      });
-    },
-    enabled: canLoadAssets,
-    staleTime: RWA_ASSETS_STALE_TIME_MS,
-    gcTime: RWA_ASSETS_GC_TIME_MS,
-    refetchOnMount: 'always',
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
-    refetchInterval: canLoadAssets ? RWA_ASSETS_REFETCH_INTERVAL_MS : false,
-    refetchIntervalInBackground: false,
-  });
   const refetchRwaAssets = assetsQuery.refetch;
 
   useFocusEffect(
@@ -376,6 +371,10 @@ export function RwaScreenContent(): React.JSX.Element {
   });
 
   const assets = useMemo(() => assetsQuery.data?.assets ?? [], [assetsQuery.data?.assets]);
+  const routeAssetId = getRouteParam(params.assetId);
+  const routeAssetMint = getRouteParam(params.assetMint);
+  const routeIntentId = getRouteParam(params.intentId);
+  const routeTradeSide = getRouteTradeSide(params.side);
   const filteredAssets = useMemo(() => {
     const query = assetSearchInput.trim().toLowerCase();
     if (query.length === 0) return assets;
@@ -525,6 +524,70 @@ export function RwaScreenContent(): React.JSX.Element {
     },
     [draftAmountState.amount, draftAmountState.message, getStartTradeDisabledReason, tradeDraft],
   );
+
+  useEffect(() => {
+    if (routeTradeSide == null || (routeAssetId == null && routeAssetMint == null)) return;
+
+    const routeIntentKey = [
+      routeIntentId ?? 'direct',
+      routeAssetId ?? '',
+      routeAssetMint ?? '',
+      routeTradeSide,
+    ].join(':');
+    if (appliedRouteIntentRef.current === routeIntentKey) return;
+    if (capabilitiesQuery.isCapabilitiesPending) return;
+    if (canLoadAssets && assetsQuery.isPending && assetsQuery.data == null) return;
+
+    const asset =
+      assets.find(
+        (entry) =>
+          (routeAssetId != null && entry.id === routeAssetId) ||
+          (routeAssetMint != null && entry.mint === routeAssetMint),
+      ) ?? null;
+
+    if (asset == null) {
+      appliedRouteIntentRef.current = routeIntentKey;
+      showToast({
+        title: 'RWA unavailable',
+        message: 'This RWA is no longer available in the current catalog.',
+        variant: 'error',
+      });
+      return;
+    }
+
+    const disabledReason = getStartTradeDisabledReason(asset, routeTradeSide);
+    if (disabledReason != null) {
+      appliedRouteIntentRef.current = routeIntentKey;
+      showToast({
+        title: `${routeTradeSide === 'buy' ? 'Buy' : 'Sell'} unavailable`,
+        message: disabledReason,
+        variant: 'error',
+      });
+      return;
+    }
+
+    appliedRouteIntentRef.current = routeIntentKey;
+    setAssetSearchInput('');
+    setProcessResult(null);
+    setReviewQuote(null);
+    setTradeDraft({
+      assetId: asset.id,
+      side: routeTradeSide,
+      amountInput: '',
+    });
+  }, [
+    assets,
+    assetsQuery.data,
+    assetsQuery.isPending,
+    canLoadAssets,
+    capabilitiesQuery.isCapabilitiesPending,
+    getStartTradeDisabledReason,
+    routeAssetId,
+    routeAssetMint,
+    routeIntentId,
+    routeTradeSide,
+    showToast,
+  ]);
 
   const handleBeginTradeAsset = useCallback(
     (asset: RwaAsset, side: RwaTradeSide) => {
