@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   interpolateColor,
@@ -62,7 +62,6 @@ function RwaTradeActionButton({
   side,
   active,
   disabled,
-  pending,
   label,
   accessibilityLabel,
   accessibilityHint,
@@ -71,7 +70,6 @@ function RwaTradeActionButton({
   side: RwaTradeSide;
   active: boolean;
   disabled: boolean;
-  pending: boolean;
   label: string;
   accessibilityLabel: string;
   accessibilityHint?: string;
@@ -133,7 +131,6 @@ function RwaTradeActionButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
     >
-      {pending ? <ActivityIndicator size="small" color={foregroundColor} /> : null}
       <Text variant="caption" color={foregroundColor} style={styles.actionLabel}>
         {label}
       </Text>
@@ -146,8 +143,6 @@ export function RwaAssetRow({
   dense,
   buyDisabledReason,
   sellDisabledReason,
-  isBuyPending,
-  isSellPending,
   onBuy,
   onSell,
 }: {
@@ -155,15 +150,11 @@ export function RwaAssetRow({
   dense: boolean;
   buyDisabledReason: string | null;
   sellDisabledReason: string | null;
-  isBuyPending: boolean;
-  isSellPending: boolean;
   onBuy: (asset: RwaAsset) => void;
   onSell: (asset: RwaAsset) => void;
 }): React.JSX.Element {
-  const canBuy = buyDisabledReason == null && !isBuyPending;
-  const canSell = sellDisabledReason == null && !isSellPending;
-  const showActiveBuyButton = canBuy || isBuyPending;
-  const showActiveSellButton = canSell || isSellPending;
+  const canBuy = buyDisabledReason == null;
+  const canSell = sellDisabledReason == null;
 
   return (
     <View style={[styles.assetCard, dense && styles.assetCardDense]}>
@@ -202,20 +193,18 @@ export function RwaAssetRow({
       <View style={styles.actionRow}>
         <RwaTradeActionButton
           side="buy"
-          active={showActiveBuyButton}
+          active={canBuy}
           disabled={!canBuy}
-          pending={isBuyPending}
-          label={isBuyPending ? 'Quoting' : 'Buy'}
+          label="Buy"
           accessibilityLabel={`Buy ${asset.symbol}`}
           accessibilityHint={buyDisabledReason ?? undefined}
           onPress={() => onBuy(asset)}
         />
         <RwaTradeActionButton
           side="sell"
-          active={showActiveSellButton}
+          active={canSell}
           disabled={!canSell}
-          pending={isSellPending}
-          label={isSellPending ? 'Quoting' : 'Sell'}
+          label="Sell"
           accessibilityLabel={`Sell ${asset.symbol}`}
           accessibilityHint={sellDisabledReason ?? undefined}
           onPress={() => onSell(asset)}

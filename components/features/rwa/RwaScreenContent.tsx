@@ -46,7 +46,7 @@ import {
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { colors } from '@/constants/colors';
-import { layout, spacing } from '@/constants/spacing';
+import { spacing } from '@/constants/spacing';
 import { useActiveWalletSigningCapability } from '@/hooks/useActiveWalletSigningCapability';
 import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -70,7 +70,7 @@ import {
 } from '@/lib/crypto/solana-transaction-signing';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
 import { getRwaDevnetSandboxFundingRequirement } from '@/lib/rwa/devnet-sandbox-funding';
-import { TAB_ROUTE_HREFS, useTabHistoryStore } from '@/store/tabHistoryStore';
+import { TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
 
 import type {
@@ -83,6 +83,8 @@ const RWA_ASSETS_STALE_TIME_MS = 20 * 1000;
 const RWA_ASSETS_REFETCH_INTERVAL_MS = 30 * 1000;
 const RWA_ASSETS_GC_TIME_MS = 15 * 60 * 1000;
 const RWA_CONTENT_MAX_WIDTH = 560;
+const RWA_SWAP_IN_PROGRESS_MESSAGE = 'Another RWA swap is in progress.';
+const RWA_REVIEW_CURRENT_QUOTE_MESSAGE = 'Review the current RWA quote first.';
 
 function rwaAssetsQueryKey(network: string | null) {
   return ['offpay', 'rwa', 'assets', network] as const;
@@ -115,9 +117,8 @@ export function RwaScreenContent(): React.JSX.Element {
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
-  const bottomPadding = Math.max(insets.bottom, spacing.lg) + layout.tabBarHeight + spacing.xl;
+  const bottomPadding = Math.max(insets.bottom, spacing.lg) + spacing.xl;
   const { network } = useOffpayNetwork();
-  const previousRoute = useTabHistoryStore((state) => state.previousRoute);
   const { canUseNetwork, isNetworkSwitching } = useOffpayNetworkAccess();
   const activeWalletId = useWalletStore((state) => state.activeWalletId);
   const { walletAddress, canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
@@ -147,12 +148,8 @@ export function RwaScreenContent(): React.JSX.Element {
   const refetchWalletBalance = walletBalanceQuery.refetch;
 
   const handleBack = useCallback((): void => {
-    const target =
-      previousRoute !== 'rwas' && previousRoute !== 'scanner'
-        ? TAB_ROUTE_HREFS[previousRoute]
-        : TAB_ROUTE_HREFS.index;
-    router.navigate(target);
-  }, [previousRoute, router]);
+    router.navigate(TAB_ROUTE_HREFS.index);
+  }, [router]);
 
   const invalidateWalletData = useCallback(
     async (address: string, invalidationNetwork: OffpayNetwork): Promise<void> => {
@@ -465,9 +462,9 @@ export function RwaScreenContent(): React.JSX.Element {
   const getStartTradeDisabledReason = useCallback(
     (asset: RwaAsset, side: RwaTradeSide): string | null => {
       if (rwaQuoteMutation.isPending || rwaExecuteMutation.isPending) {
-        return 'Another RWA swap is in progress.';
+        return RWA_SWAP_IN_PROGRESS_MESSAGE;
       }
-      if (reviewQuote != null) return 'Review the current RWA quote first.';
+      if (reviewQuote != null) return RWA_REVIEW_CURRENT_QUOTE_MESSAGE;
       if (network == null) return 'Select a supported Solana network.';
       if (!canUseNetwork) return 'Network unavailable.';
       if (isNetworkSwitching) return 'Wait for the network switch to finish.';
@@ -496,6 +493,19 @@ export function RwaScreenContent(): React.JSX.Element {
       signingBlocker,
       walletAddress,
     ],
+  );
+  const getCatalogTradeDisabledReason = useCallback(
+    (asset: RwaAsset, side: RwaTradeSide): string | null => {
+      const disabledReason = getStartTradeDisabledReason(asset, side);
+      if (
+        disabledReason === RWA_SWAP_IN_PROGRESS_MESSAGE ||
+        disabledReason === RWA_REVIEW_CURRENT_QUOTE_MESSAGE
+      ) {
+        return null;
+      }
+      return disabledReason;
+    },
+    [getStartTradeDisabledReason],
   );
 
   const getReviewTradeDisabledReason = useCallback(
@@ -695,41 +705,6 @@ export function RwaScreenContent(): React.JSX.Element {
   const handleClearAssetSearch = useCallback((): void => {
     setAssetSearchInput('');
   }, []);
-  const getAssetBuyPending = useCallback(
-    (asset: RwaAsset): boolean =>
-      (rwaQuoteMutation.isPending &&
-        rwaQuoteMutation.variables?.asset.id === asset.id &&
-        rwaQuoteMutation.variables?.side === 'buy') ||
-      (rwaExecuteMutation.isPending &&
-        rwaExecuteMutation.variables?.review.asset.id === asset.id &&
-        rwaExecuteMutation.variables?.review.side === 'buy'),
-    [
-      rwaExecuteMutation.isPending,
-      rwaExecuteMutation.variables?.review.asset.id,
-      rwaExecuteMutation.variables?.review.side,
-      rwaQuoteMutation.isPending,
-      rwaQuoteMutation.variables?.asset.id,
-      rwaQuoteMutation.variables?.side,
-    ],
-  );
-  const getAssetSellPending = useCallback(
-    (asset: RwaAsset): boolean =>
-      (rwaQuoteMutation.isPending &&
-        rwaQuoteMutation.variables?.asset.id === asset.id &&
-        rwaQuoteMutation.variables?.side === 'sell') ||
-      (rwaExecuteMutation.isPending &&
-        rwaExecuteMutation.variables?.review.asset.id === asset.id &&
-        rwaExecuteMutation.variables?.review.side === 'sell'),
-    [
-      rwaExecuteMutation.isPending,
-      rwaExecuteMutation.variables?.review.asset.id,
-      rwaExecuteMutation.variables?.review.side,
-      rwaQuoteMutation.isPending,
-      rwaQuoteMutation.variables?.asset.id,
-      rwaQuoteMutation.variables?.side,
-    ],
-  );
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <GradientBackground />
@@ -752,9 +727,7 @@ export function RwaScreenContent(): React.JSX.Element {
           dense={dense}
           errorMessage={rwaAssetsErrorMessage}
           filteredAssets={filteredAssets}
-          getBuyPending={getAssetBuyPending}
-          getSellPending={getAssetSellPending}
-          getStartTradeDisabledReason={getStartTradeDisabledReason}
+          getStartTradeDisabledReason={getCatalogTradeDisabledReason}
           onAssetSearchInputChange={setAssetSearchInput}
           onBuyAsset={handleBuyAsset}
           onClearAssetSearch={handleClearAssetSearch}

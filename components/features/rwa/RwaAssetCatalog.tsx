@@ -1,9 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { RwaAssetRow } from '@/components/features/rwa/RwaAssetRow';
 import { type RwaTradeSide } from '@/components/features/rwa/rwa-trade-utils';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
@@ -25,8 +26,6 @@ interface RwaAssetCatalogProps {
   dense: boolean;
   errorMessage: string;
   filteredAssets: RwaAsset[];
-  getBuyPending: (asset: RwaAsset) => boolean;
-  getSellPending: (asset: RwaAsset) => boolean;
   getStartTradeDisabledReason: (asset: RwaAsset, side: RwaTradeSide) => string | null;
   onAssetSearchInputChange: (value: string) => void;
   onBuyAsset: (asset: RwaAsset) => void;
@@ -41,8 +40,6 @@ export function RwaAssetCatalog({
   dense,
   errorMessage,
   filteredAssets,
-  getBuyPending,
-  getSellPending,
   getStartTradeDisabledReason,
   onAssetSearchInputChange,
   onBuyAsset,
@@ -52,7 +49,7 @@ export function RwaAssetCatalog({
   if (contentState === 'loading') {
     return (
       <View style={styles.statePanel}>
-        <ActivityIndicator color={colors.text.primary} />
+        <LazyLoadingSpinner size={24} color={colors.text.primary} />
         <Text variant="caption" color={colors.text.secondary}>
           Loading RWA assets
         </Text>
@@ -141,8 +138,6 @@ export function RwaAssetCatalog({
               dense={dense}
               buyDisabledReason={getStartTradeDisabledReason(asset, 'buy')}
               sellDisabledReason={getStartTradeDisabledReason(asset, 'sell')}
-              isBuyPending={getBuyPending(asset)}
-              isSellPending={getSellPending(asset)}
               onBuy={onBuyAsset}
               onSell={onSellAsset}
             />

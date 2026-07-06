@@ -19,6 +19,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
@@ -87,7 +88,8 @@ export function RwaTradeAmountSheet({
 
   const buy = side !== 'sell';
   const inputSymbol = buy ? settlementSymbol : assetSymbol;
-  const reviewDisabled = reviewDisabledReason != null || pending;
+  const reviewBlocked = reviewDisabledReason != null && !pending;
+  const reviewDisabled = reviewBlocked || pending;
 
   useEffect(() => {
     if (visible) {
@@ -335,19 +337,24 @@ export function RwaTradeAmountSheet({
             onPress={onReview}
             style={({ pressed }) => [
               styles.actionButton,
-              reviewDisabled ? styles.actionButtonDisabled : styles.actionButtonPrimary,
+              reviewBlocked ? styles.actionButtonDisabled : styles.actionButtonPrimary,
               pressed && !reviewDisabled ? styles.actionButtonPrimaryPressed : null,
             ]}
             accessibilityRole="button"
+            accessibilityState={{ disabled: reviewDisabled, busy: pending }}
             accessibilityLabel={`Review ${buy ? 'buy' : 'sell'} ${assetSymbol}`}
-            accessibilityHint={reviewDisabledReason ?? undefined}
+            accessibilityHint={pending ? undefined : (reviewDisabledReason ?? undefined)}
           >
-            <Text
-              variant="button"
-              color={reviewDisabled ? colors.text.tertiary : colors.text.onAccent}
-            >
-              {pending ? 'Quoting' : 'Review'}
-            </Text>
+            {pending ? (
+              <LazyLoadingSpinner size={22} color={colors.text.onAccent} />
+            ) : (
+              <Text
+                variant="button"
+                color={reviewBlocked ? colors.text.tertiary : colors.text.onAccent}
+              >
+                Review
+              </Text>
+            )}
           </Pressable>
         </View>
       </Animated.View>

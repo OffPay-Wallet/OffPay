@@ -145,9 +145,9 @@ const TAB_LABELS: Record<string, string> = {
   rwas: 'RWAs',
 };
 
-// Swap owns a full-screen send/swap flow with its own footer and review
-// sheets. Scanner/chat/RWAs keep the bottom chrome visible.
-const FULL_SCREEN_TAB_ROUTES = new Set(['swap']);
+// Swap and RWAs own full-screen flows with their own headers/actions.
+// Scanner/chat keep the bottom chrome visible.
+const FULL_SCREEN_TAB_ROUTES = new Set(['swap', 'rwas']);
 
 interface QuickAction {
   id: string;
@@ -283,7 +283,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const isOverlayActive = useOverlayVisibilityStore((s) => s.isOverlayActive);
   const clearOverlays = useOverlayVisibilityStore((s) => s.clearOverlays);
   // Keep the bar persistent across regular tab routes. Only explicit
-  // overlays and the dedicated full-screen swap flow hide the chrome.
+  // overlays and dedicated full-screen tab flows hide the chrome.
   const tabBarHidden = routeUsesFullScreenChrome || isOverlayActive;
   const recordTabSwitch = useTabHistoryStore((s) => s.recordTabSwitch);
   const [offlineSwapNoticeVisible, setOfflineSwapNoticeVisible] = useState(false);
