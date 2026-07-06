@@ -259,25 +259,7 @@ export function SendSummarySheet({
                   </View>
                 </>
               ) : (
-                <Animated.View
-                  key="send-success-lottie"
-                  entering={FadeIn.duration(PHASE_FADE_MS)}
-                  style={styles.statusInner}
-                >
-                  {showSuccessConfetti ? <SuccessConfetti /> : null}
-                  <LottieView
-                    source={whiteSuccessLottie}
-                    autoPlay
-                    loop={false}
-                    style={styles.lottie}
-                  />
-                  <Ionicons
-                    name="checkmark"
-                    size={42}
-                    color={colors.brand.deepShadow}
-                    style={styles.successCheckOverlay}
-                  />
-                </Animated.View>
+                <SendSuccessLottieMark showConfetti={showSuccessConfetti} />
               )}
             </View>
             <Text
@@ -535,6 +517,46 @@ function SuccessConfetti(): React.JSX.Element {
         <ConfettiParticle key={`${particle.x}-${particle.y}-${index}`} particle={particle} />
       ))}
     </View>
+  );
+}
+
+export function SendSuccessLottieMark({
+  showConfetti = true,
+  size = CIRCLE_SIZE,
+}: {
+  showConfetti?: boolean;
+  size?: number;
+}): React.JSX.Element {
+  const innerSize = Math.max(0, size - RING_THICKNESS * 2);
+  const checkSize = Math.max(42, Math.round(size * 0.35));
+
+  return (
+    <Animated.View
+      key="send-success-lottie"
+      entering={FadeIn.duration(PHASE_FADE_MS)}
+      style={[
+        styles.statusInner,
+        {
+          width: innerSize,
+          height: innerSize,
+          borderRadius: innerSize / 2,
+        },
+      ]}
+    >
+      {showConfetti ? <SuccessConfetti /> : null}
+      <LottieView
+        source={whiteSuccessLottie}
+        autoPlay
+        loop={false}
+        style={[styles.lottie, { width: size, height: size }]}
+      />
+      <Ionicons
+        name="checkmark"
+        size={checkSize}
+        color={colors.brand.deepShadow}
+        style={styles.successCheckOverlay}
+      />
+    </Animated.View>
   );
 }
 

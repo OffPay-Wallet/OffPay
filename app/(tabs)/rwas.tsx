@@ -1,9 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect } from 'expo-router/react-navigation';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,11 +13,26 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  RwaSwapReviewScreen,
+  type RwaSwapReviewScreenDetailRow,
+  type RwaSwapReviewScreenPhase,
+  type RwaSwapReviewScreenSide,
+  type RwaSwapReviewScreenTokenLeg,
+} from '@/components/features/rwa/RwaSwapReviewScreen';
+import { RwaTradeAmountSheet } from '@/components/features/rwa/RwaTradeAmountSheet';
 import { useAppToast } from '@/components/ui/AppToast';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { Text } from '@/components/ui/Text';
+import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -34,6 +51,7 @@ import {
   getOffpayFeatureCapability,
   isOffpayFeatureAvailable,
 } from '@/lib/api/offpay-capabilities';
+import { formatTokenBalance } from '@/lib/api/offpay-wallet-data';
 import { createRwaQuote, executeRwaQuote, getRwaAssets } from '@/lib/api/offpay-api-client';
 import {
   signSerializedTransactionForWallet,
@@ -51,14 +69,46 @@ import type {
   RwaQuoteResponse,
 } from '@/types/offpay-api';
 
-const RWA_ASSETS_STALE_TIME_MS = 5 * 60 * 1000;
+const RWA_ASSETS_STALE_TIME_MS = 20 * 1000;
+const RWA_ASSETS_REFETCH_INTERVAL_MS = 30 * 1000;
 const RWA_ASSETS_GC_TIME_MS = 15 * 60 * 1000;
 const RWA_CONTENT_MAX_WIDTH = 560;
 const RWA_CASH_AMOUNT_MAX_LENGTH = 48;
 const RWA_CASH_AMOUNT_DECIMALS = 12;
 const RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL = 'RWAUSDC';
+const XSTOCKS_LOGO_BASE_URL = 'https://xstocks-metadata.backed.fi/logos/tokens';
+const RWA_ACTION_PRESS_SPRING = {
+  damping: 18,
+  mass: 0.55,
+  stiffness: 360,
+} as const;
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 type RwaTradeSide = 'buy' | 'sell';
+
+const RWA_ACTION_BUTTON_TONES: Record<
+  RwaTradeSide,
+  {
+    background: string;
+    backgroundPressed: string;
+    border: string;
+    borderPressed: string;
+  }
+> = {
+  buy: {
+    background: colors.semantic.receiveSoftFill,
+    backgroundPressed: colors.semantic.receiveSoftFillPressed,
+    border: colors.semantic.receiveSoftBorder,
+    borderPressed: colors.semantic.receive,
+  },
+  sell: {
+    background: colors.semantic.errorSoftFill,
+    backgroundPressed: colors.semantic.errorSoftFillPressed,
+    border: colors.semantic.errorSoftBorder,
+    borderPressed: colors.semantic.error,
+  },
+};
 
 const RWA_CATEGORY_LABELS: Record<RwaAsset['category'], string> = {
   equity: 'Equity',
@@ -78,17 +128,47 @@ function formatUsd(value: number | null): string {
   }).format(value);
 }
 
-function formatChange(value: number | null): string {
-  if (value == null) return 'Live provider quote';
-
-  const sign = value > 0 ? '+' : '';
-  return `${sign}${value.toFixed(2)}%`;
+function formatRwaAssetDisplayName(
+  asset: Pick<RwaAsset, 'devnetSandbox' | 'name' | 'symbol'>,
+): string {
+  if (!asset.devnetSandbox) return asset.name;
+  const cleaned = asset.name
+    .replace(/\s+Sandbox(?:\s+RWA)?$/i, '')
+    .replace(/\s+RWA$/i, '')
+    .trim();
+  return cleaned.length > 0 ? cleaned : asset.symbol;
 }
 
 function getRwaSettlementDisplaySymbol(
   asset: Pick<RwaAsset, 'devnetSandbox' | 'settlementSymbol'>,
 ): string {
   return asset.devnetSandbox ? RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL : asset.settlementSymbol;
+}
+
+function normalizeXStocksLogoBaseSymbol(value: string | null | undefined): string | null {
+  const normalized = value
+    ?.trim()
+    .replace(/[^A-Za-z0-9.]/g, '')
+    .toUpperCase();
+  return normalized != null && normalized.length > 0 ? normalized : null;
+}
+
+function getXStocksLogoUri(baseSymbol: string | null | undefined): string | null {
+  const normalized = normalizeXStocksLogoBaseSymbol(baseSymbol);
+  return normalized == null ? null : `${XSTOCKS_LOGO_BASE_URL}/${normalized}x.png`;
+}
+
+function getRwaAssetLogoUri(
+  asset: Pick<RwaAsset, 'devnetSandbox' | 'logo' | 'symbol' | 'underlyingSymbol'>,
+): string | null {
+  const explicitLogo = asset.logo?.trim();
+  if (explicitLogo != null && explicitLogo.length > 0) return explicitLogo;
+
+  if (asset.underlyingSymbol != null) return getXStocksLogoUri(asset.underlyingSymbol);
+  if (!asset.devnetSandbox && /x$/i.test(asset.symbol)) {
+    return getXStocksLogoUri(asset.symbol.replace(/x$/i, ''));
+  }
+  return null;
 }
 
 function hasPositiveDecimalAmount(value: string | null | undefined): boolean {
@@ -104,6 +184,15 @@ function findWalletTokenBalance(
   if (balance == null || mint == null || mint.trim().length === 0) return null;
   const token = balance.tokens.find((entry) => !entry.spam && entry.mint === mint);
   return hasPositiveDecimalAmount(token?.balance) ? token!.balance : null;
+}
+
+function findWalletTokenHolding(
+  balance: ReturnType<typeof useOffpayWalletBalance>['data'],
+  mint: string | null | undefined,
+): string | null {
+  if (balance == null || mint == null || mint.trim().length === 0) return null;
+  const token = balance.tokens.find((entry) => !entry.spam && entry.mint === mint);
+  return token?.balance ?? '0';
 }
 
 function rwaAssetsQueryKey(network: string | null) {
@@ -134,6 +223,12 @@ interface RwaQuoteReviewState {
   walletId: string | null;
 }
 
+interface RwaTradeDraftState {
+  assetId: string;
+  side: RwaTradeSide;
+  amountInput: string;
+}
+
 interface RwaExecuteMutationInput {
   review: RwaQuoteReviewState;
 }
@@ -143,13 +238,10 @@ interface RwaBuyExecutionResult {
   execution: RwaExecuteResponse;
 }
 
-interface RwaLastExecution {
-  assetId: string;
-  symbol: string;
-  side: RwaTradeSide;
-  amount: string;
-  signature: string;
-  submittedAt: number;
+interface RwaProcessResultState {
+  variant: Extract<RwaSwapReviewScreenPhase, 'success' | 'error'>;
+  tokenLegs: RwaSwapReviewScreenTokenLeg[];
+  detailRows: RwaSwapReviewScreenDetailRow[];
 }
 
 function sanitizeTradeAmountInput(value: string): string {
@@ -184,11 +276,6 @@ function parseRwaTradeAmount(input: string, label: string): ParsedRwaCashAmount 
   };
 }
 
-function shortenSignature(signature: string): string {
-  if (signature.length <= 14) return signature;
-  return `${signature.slice(0, 6)}...${signature.slice(-6)}`;
-}
-
 function getRwaErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     if (/transaction simulation failed/i.test(error.message)) {
@@ -197,7 +284,7 @@ function getRwaErrorMessage(error: unknown): string {
 
     return error.message;
   }
-  return 'RWA order failed.';
+  return 'RWA swap failed.';
 }
 
 function formatRwaDevnetSandboxBalanceError(
@@ -231,35 +318,10 @@ function isRwaQuoteStale(quote: RwaQuoteResponse): boolean {
   return quote.expiresAt != null && quote.expiresAt <= Date.now() + 2500;
 }
 
-function ReviewDetailRow({ label, value }: { label: string; value: string }): React.JSX.Element {
-  return (
-    <View style={styles.reviewDetailRow}>
-      <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text
-        variant="caption"
-        color={colors.text.secondary}
-        style={styles.reviewDetailValue}
-        numberOfLines={1}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function RwaQuoteReviewPanel({
-  review,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  review: RwaQuoteReviewState;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}): React.JSX.Element {
+function buildRwaReviewTokenLegs(review: RwaQuoteReviewState): {
+  payLeg: RwaSwapReviewScreenTokenLeg;
+  receiveLeg: RwaSwapReviewScreenTokenLeg;
+} {
   const payAmount =
     review.side === 'buy'
       ? (review.quote.cashAmount ?? review.inputAmount)
@@ -270,65 +332,145 @@ function RwaQuoteReviewPanel({
     review.side === 'buy' ? (review.quote.quantity ?? '—') : (review.quote.cashAmount ?? '—');
   const receiveSymbol =
     review.side === 'buy' ? review.asset.symbol : getRwaSettlementDisplaySymbol(review.asset);
+  const assetName = formatRwaAssetDisplayName(review.asset);
+  const assetLogo = getRwaAssetLogoUri(review.asset);
+
+  return {
+    payLeg: {
+      label: 'You pay',
+      amount: payAmount,
+      symbol: paySymbol,
+      name: review.side === 'buy' ? paySymbol : assetName,
+      logo: review.side === 'buy' ? null : assetLogo,
+    },
+    receiveLeg: {
+      label: 'You receive',
+      amount: receiveAmount,
+      symbol: receiveSymbol,
+      name: review.side === 'buy' ? assetName : receiveSymbol,
+      logo: review.side === 'buy' ? assetLogo : null,
+    },
+  };
+}
+
+function buildRwaReviewDetailRows(review: RwaQuoteReviewState): RwaSwapReviewScreenDetailRow[] {
+  return [
+    { label: 'Route', value: review.quote.routeSummary },
+    { label: 'Impact', value: formatPercent(review.quote.priceImpactPct) },
+    {
+      label: 'Expires',
+      value: formatQuoteExpiry(review.quote.expiresAt),
+      expiresAt: review.quote.expiresAt,
+    },
+  ];
+}
+
+function buildRwaProcessResult({
+  review,
+  variant,
+  extraRows = [],
+}: {
+  review: RwaQuoteReviewState;
+  variant: Extract<RwaSwapReviewScreenPhase, 'success' | 'error'>;
+  extraRows?: RwaSwapReviewScreenDetailRow[];
+}): RwaProcessResultState {
+  const legs = buildRwaReviewTokenLegs(review);
+  const paidLabel = variant === 'success' ? 'Paid' : 'You pay';
+  const receivedLabel = variant === 'success' ? 'Received' : 'You receive';
+
+  return {
+    variant,
+    tokenLegs: [
+      { ...legs.payLeg, label: paidLabel },
+      { ...legs.receiveLeg, label: receivedLabel },
+    ],
+    detailRows: [
+      { label: 'Route', value: review.quote.routeSummary },
+      { label: 'Impact', value: formatPercent(review.quote.priceImpactPct) },
+      ...extraRows,
+    ],
+  };
+}
+
+function RwaTradeActionButton({
+  side,
+  active,
+  disabled,
+  pending,
+  label,
+  accessibilityLabel,
+  accessibilityHint,
+  onPress,
+}: {
+  side: RwaTradeSide;
+  active: boolean;
+  disabled: boolean;
+  pending: boolean;
+  label: string;
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  const pressProgress = useSharedValue(0);
+  const tone = RWA_ACTION_BUTTON_TONES[side];
+
+  const releasePress = useCallback((): void => {
+    pressProgress.value = withSpring(0, RWA_ACTION_PRESS_SPRING);
+  }, [pressProgress]);
+
+  const handlePressIn = useCallback((): void => {
+    if (!disabled && active) {
+      pressProgress.value = withSpring(1, RWA_ACTION_PRESS_SPRING);
+    }
+  }, [active, disabled, pressProgress]);
+
+  const handlePressOut = useCallback((): void => {
+    releasePress();
+  }, [releasePress]);
+
+  const handleResponderTerminate = useCallback((): void => {
+    releasePress();
+  }, [releasePress]);
+
+  useEffect(() => {
+    if (disabled || !active) releasePress();
+  }, [active, disabled, releasePress]);
+
+  const animatedButtonStyle = useAnimatedStyle(() => {
+    const progress = active ? pressProgress.value : 0;
+
+    return {
+      backgroundColor: interpolateColor(
+        progress,
+        [0, 1],
+        [tone.background, tone.backgroundPressed],
+      ),
+      borderColor: interpolateColor(progress, [0, 1], [tone.border, tone.borderPressed]),
+      transform: [{ translateY: progress }, { scale: 1 - progress * 0.012 }],
+    };
+  }, [active, tone.background, tone.backgroundPressed, tone.border, tone.borderPressed]);
+
+  const foregroundColor = active ? colors.text.primary : colors.text.tertiary;
 
   return (
-    <View style={styles.reviewPanel}>
-      <View style={styles.reviewHeader}>
-        <View style={styles.reviewTitleBlock}>
-          <Text variant="body" color={colors.text.primary} style={styles.reviewTitle}>
-            Review order
-          </Text>
-          <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
-            {review.side === 'buy' ? 'Buy' : 'Sell'} {review.asset.symbol} · {review.network}
-          </Text>
-        </View>
-        <View style={styles.reviewIcon}>
-          <Ionicons name="shield-checkmark-outline" size={18} color={colors.text.secondary} />
-        </View>
-      </View>
-
-      <View style={styles.reviewDetailList}>
-        <ReviewDetailRow label="Pay" value={`${payAmount} ${paySymbol}`} />
-        <ReviewDetailRow label="Receive" value={`${receiveAmount} ${receiveSymbol}`} />
-        <ReviewDetailRow label="Route" value={review.quote.routeSummary} />
-        <ReviewDetailRow label="Impact" value={formatPercent(review.quote.priceImpactPct)} />
-        <ReviewDetailRow label="Expires" value={formatQuoteExpiry(review.quote.expiresAt)} />
-      </View>
-
-      <View style={styles.reviewActionRow}>
-        <Pressable
-          disabled={busy}
-          onPress={onCancel}
-          style={({ pressed }) => [
-            styles.reviewButton,
-            styles.reviewButtonSecondary,
-            pressed && !busy ? styles.reviewButtonPressed : null,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Cancel RWA order"
-        >
-          <Text variant="caption" color={colors.text.secondary} style={styles.actionLabel}>
-            Cancel
-          </Text>
-        </Pressable>
-        <Pressable
-          disabled={busy}
-          onPress={onConfirm}
-          style={({ pressed }) => [
-            styles.reviewButton,
-            styles.reviewButtonPrimary,
-            pressed && !busy ? styles.actionButtonPressed : null,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel={`Sign ${review.asset.symbol} RWA order`}
-        >
-          {busy ? <ActivityIndicator size="small" color={colors.text.onAccent} /> : null}
-          <Text variant="caption" color={colors.text.onAccent} style={styles.actionLabel}>
-            {busy ? 'Signing' : 'Sign'}
-          </Text>
-        </Pressable>
-      </View>
-    </View>
+    <AnimatedPressable
+      disabled={disabled}
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      onResponderTerminate={handleResponderTerminate}
+      onResponderTerminationRequest={() => true}
+      unstable_pressDelay={0}
+      style={[styles.actionButton, active ? animatedButtonStyle : styles.actionButtonDisabled]}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+    >
+      {pending ? <ActivityIndicator size="small" color={foregroundColor} /> : null}
+      <Text variant="caption" color={foregroundColor} style={styles.actionLabel}>
+        {label}
+      </Text>
+    </AnimatedPressable>
   );
 }
 
@@ -339,7 +481,6 @@ function RwaAssetRow({
   sellDisabledReason,
   isBuyPending,
   isSellPending,
-  lastExecution,
   onBuy,
   onSell,
 }: {
@@ -349,16 +490,9 @@ function RwaAssetRow({
   sellDisabledReason: string | null;
   isBuyPending: boolean;
   isSellPending: boolean;
-  lastExecution: RwaLastExecution | null;
   onBuy: (asset: RwaAsset) => void;
   onSell: (asset: RwaAsset) => void;
 }): React.JSX.Element {
-  const positive = asset.change24hPct == null || asset.change24hPct >= 0;
-  const routeLabel = asset.devnetSandbox
-    ? 'Devnet vault'
-    : asset.tradable
-      ? 'Jupiter'
-      : 'Read only';
   const canBuy = buyDisabledReason == null && !isBuyPending;
   const canSell = sellDisabledReason == null && !isSellPending;
   const showActiveBuyButton = canBuy || isBuyPending;
@@ -368,16 +502,14 @@ function RwaAssetRow({
     <View style={[styles.assetCard, dense && styles.assetCardDense]}>
       <View style={styles.assetHeader}>
         <View style={styles.assetIdentity}>
-          <View style={styles.symbolBadge}>
-            <Text
-              variant="caption"
-              color={colors.text.onAccent}
-              style={styles.symbolText}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-            >
-              {asset.symbol}
-            </Text>
+          <View style={styles.assetLogoFrame}>
+            <TokenIcon
+              symbol={asset.underlyingSymbol ?? asset.symbol}
+              name={asset.name}
+              logoUri={getRwaAssetLogoUri(asset)}
+              size={dense ? 42 : 48}
+              recyclingKey={asset.mint}
+            />
           </View>
           <View style={styles.assetNameBlock}>
             <Text
@@ -386,7 +518,7 @@ function RwaAssetRow({
               style={styles.assetName}
               numberOfLines={1}
             >
-              {asset.name}
+              {formatRwaAssetDisplayName(asset)}
             </Text>
             <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
               {RWA_CATEGORY_LABELS[asset.category]} · {asset.underlyingSymbol ?? asset.symbol}
@@ -397,96 +529,30 @@ function RwaAssetRow({
           <Text variant="body" color={colors.text.primary} style={styles.priceText}>
             {formatUsd(asset.priceUsd)}
           </Text>
-          <Text
-            variant="caption"
-            color={positive ? colors.semantic.receive : colors.semantic.error}
-            style={styles.changeText}
-          >
-            {formatChange(asset.change24hPct)}
-          </Text>
         </View>
       </View>
-
-      <View style={styles.assetInfoRow}>
-        <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-          {routeLabel}
-        </Text>
-        <Text variant="caption" color={colors.text.tertiary}>
-          ·
-        </Text>
-        <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-          {getRwaSettlementDisplaySymbol(asset)}
-        </Text>
-      </View>
-
-      {lastExecution != null ? (
-        <View style={styles.executionPill}>
-          <Ionicons name="checkmark-circle-outline" size={15} color={colors.semantic.receive} />
-          <Text variant="caption" color={colors.text.secondary} numberOfLines={1}>
-            Submitted {shortenSignature(lastExecution.signature)}
-          </Text>
-        </View>
-      ) : null}
 
       <View style={styles.actionRow}>
-        <Pressable
+        <RwaTradeActionButton
+          side="buy"
+          active={showActiveBuyButton}
           disabled={!canBuy}
-          onPress={() => onBuy(asset)}
-          style={({ pressed }) => [
-            styles.actionButton,
-            showActiveBuyButton ? styles.actionButtonPrimary : styles.actionButtonDisabled,
-            pressed && canBuy ? styles.actionButtonPressed : null,
-          ]}
-          accessibilityRole="button"
+          pending={isBuyPending}
+          label={isBuyPending ? 'Quoting' : 'Buy'}
           accessibilityLabel={`Buy ${asset.symbol}`}
           accessibilityHint={buyDisabledReason ?? undefined}
-        >
-          {isBuyPending ? (
-            <ActivityIndicator size="small" color={colors.text.onAccent} />
-          ) : (
-            <Ionicons
-              name="swap-horizontal-outline"
-              size={16}
-              color={showActiveBuyButton ? colors.text.onAccent : colors.text.tertiary}
-            />
-          )}
-          <Text
-            variant="caption"
-            color={showActiveBuyButton ? colors.text.onAccent : colors.text.tertiary}
-            style={styles.actionLabel}
-          >
-            {isBuyPending ? 'Quoting' : 'Buy'}
-          </Text>
-        </Pressable>
-        <Pressable
+          onPress={() => onBuy(asset)}
+        />
+        <RwaTradeActionButton
+          side="sell"
+          active={showActiveSellButton}
           disabled={!canSell}
-          onPress={() => onSell(asset)}
-          style={({ pressed }) => [
-            styles.actionButton,
-            showActiveSellButton ? styles.actionButtonSecondary : styles.actionButtonDisabled,
-            pressed && canSell ? styles.actionButtonPressed : null,
-          ]}
-          accessibilityRole="button"
+          pending={isSellPending}
+          label={isSellPending ? 'Quoting' : 'Sell'}
           accessibilityLabel={`Sell ${asset.symbol}`}
           accessibilityHint={sellDisabledReason ?? undefined}
-        >
-          {isSellPending ? (
-            <ActivityIndicator size="small" color={colors.text.secondary} />
-          ) : (
-            <Ionicons
-              name="cash-outline"
-              size={16}
-              color={showActiveSellButton ? colors.text.secondary : colors.text.tertiary}
-            />
-          )}
-          <Text
-            variant="caption"
-            color={showActiveSellButton ? colors.text.secondary : colors.text.tertiary}
-            style={styles.actionLabel}
-          >
-            {isSellPending ? 'Quoting' : 'Sell'}
-          </Text>
-        </Pressable>
+          onPress={() => onSell(asset)}
+        />
       </View>
     </View>
   );
@@ -507,11 +573,10 @@ export default function RwasScreen(): React.JSX.Element {
   const { canUseNetwork, isNetworkSwitching } = useOffpayNetworkAccess();
   const activeWalletId = useWalletStore((state) => state.activeWalletId);
   const { walletAddress, canSignWithApp, signingBlocker } = useActiveWalletSigningCapability();
-  const [cashAmountInput, setCashAmountInput] = useState('');
   const [assetSearchInput, setAssetSearchInput] = useState('');
-  const [tradeSide, setTradeSide] = useState<RwaTradeSide>('buy');
-  const [lastExecution, setLastExecution] = useState<RwaLastExecution | null>(null);
+  const [tradeDraft, setTradeDraft] = useState<RwaTradeDraftState | null>(null);
   const [reviewQuote, setReviewQuote] = useState<RwaQuoteReviewState | null>(null);
+  const [processResult, setProcessResult] = useState<RwaProcessResultState | null>(null);
   const capabilitiesQuery = useOffpayCapabilities({ deferUntilAfterInteractions: false });
   const capabilities = capabilitiesQuery.capabilities;
   const assetsCapability = getOffpayFeatureCapability(capabilities, 'rwa.assets');
@@ -519,10 +584,10 @@ export default function RwasScreen(): React.JSX.Element {
   const executeCapability = getOffpayFeatureCapability(capabilities, 'rwa.execute');
   const canLoadAssets =
     network != null && canUseNetwork && isOffpayFeatureAvailable(capabilities, 'rwa.assets');
-  const tradeAmountLabel = tradeSide === 'buy' ? 'USDC amount' : 'quantity';
-  const cashAmountState = useMemo(
-    () => parseRwaTradeAmount(cashAmountInput, tradeAmountLabel),
-    [cashAmountInput, tradeAmountLabel],
+  const draftTradeAmountLabel = tradeDraft?.side === 'sell' ? 'quantity' : 'USDC amount';
+  const draftAmountState = useMemo(
+    () => parseRwaTradeAmount(tradeDraft?.amountInput ?? '', draftTradeAmountLabel),
+    [draftTradeAmountLabel, tradeDraft?.amountInput],
   );
   const walletBalanceQuery = useOffpayWalletBalance(walletAddress, {
     eagerWithoutCapabilities: true,
@@ -600,8 +665,20 @@ export default function RwasScreen(): React.JSX.Element {
     enabled: canLoadAssets,
     staleTime: RWA_ASSETS_STALE_TIME_MS,
     gcTime: RWA_ASSETS_GC_TIME_MS,
-    refetchOnMount: false,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+    refetchInterval: canLoadAssets ? RWA_ASSETS_REFETCH_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
   });
+  const refetchRwaAssets = assetsQuery.refetch;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!canLoadAssets) return;
+      void refetchRwaAssets();
+    }, [canLoadAssets, refetchRwaAssets]),
+  );
 
   const rwaQuoteMutation = useMutation<RwaQuoteReviewState, unknown, RwaQuoteMutationInput>({
     mutationFn: async ({
@@ -712,17 +789,16 @@ export default function RwasScreen(): React.JSX.Element {
       const summaryAmount =
         side === 'buy' ? (quote.cashAmount ?? inputAmount) : (quote.quantity ?? inputAmount);
       const summarySymbol = side === 'buy' ? getRwaSettlementDisplaySymbol(asset) : asset.symbol;
-      setLastExecution({
-        assetId: asset.id,
-        symbol: asset.symbol,
-        side,
-        amount: summaryAmount,
-        signature: execution.signature,
-        submittedAt: execution.submittedAt,
-      });
       setReviewQuote(null);
+      setTradeDraft(null);
+      setProcessResult(
+        buildRwaProcessResult({
+          review,
+          variant: 'success',
+        }),
+      );
       showToast({
-        title: 'RWA order submitted',
+        title: 'RWA swap submitted',
         message: `${asset.symbol} ${side} submitted for ${summaryAmount} ${summarySymbol}.`,
         variant: 'success',
       });
@@ -736,10 +812,18 @@ export default function RwasScreen(): React.JSX.Element {
 
       await invalidateWalletData(review.walletAddress, review.network);
     },
-    onError: (error) => {
+    onError: (error, variables) => {
       const message = getRwaErrorMessage(error);
+      setReviewQuote(null);
+      setProcessResult(
+        buildRwaProcessResult({
+          review: variables.review,
+          variant: 'error',
+          extraRows: [{ label: 'Reason', value: message, selectable: true }],
+        }),
+      );
       showToast({
-        title: 'RWA order failed',
+        title: 'RWA swap failed',
         message,
         variant: 'error',
       });
@@ -766,40 +850,41 @@ export default function RwasScreen(): React.JSX.Element {
     });
   }, [assetSearchInput, assets]);
 
-  const resolveMaxTradeAmount = useCallback((): { amount: string; symbol: string } | null => {
-    const balance = walletBalanceData;
-    if (balance == null) return null;
+  const resolveMaxTradeAmount = useCallback(
+    (draft: RwaTradeDraftState | null): { amount: string; symbol: string } | null => {
+      const balance = walletBalanceData;
+      if (balance == null || draft == null) return null;
 
-    if (tradeSide === 'buy') {
-      const settlementAsset = assets.find((asset) => asset.tradable) ?? assets[0];
-      const amount = findWalletTokenBalance(balance, settlementAsset?.settlementMint);
-      if (amount == null || settlementAsset == null) return null;
-      return {
-        amount,
-        symbol: getRwaSettlementDisplaySymbol(settlementAsset),
-      };
-    }
+      const asset = assets.find((entry) => entry.id === draft.assetId);
+      if (asset == null) return null;
 
-    const assetWithBalance = filteredAssets.find((asset) =>
-      hasPositiveDecimalAmount(findWalletTokenBalance(balance, asset.mint)),
-    );
-    if (assetWithBalance == null) return null;
-    const amount = findWalletTokenBalance(balance, assetWithBalance.mint);
-    return amount == null
-      ? null
-      : {
+      if (draft.side === 'buy') {
+        const amount = findWalletTokenBalance(balance, asset.settlementMint);
+        if (amount == null) return null;
+        return {
           amount,
-          symbol: assetWithBalance.symbol,
+          symbol: getRwaSettlementDisplaySymbol(asset),
         };
-  }, [assets, filteredAssets, tradeSide, walletBalanceData]);
+      }
+
+      const amount = findWalletTokenBalance(balance, asset.mint);
+      return amount == null
+        ? null
+        : {
+            amount,
+            symbol: asset.symbol,
+          };
+    },
+    [assets, walletBalanceData],
+  );
 
   const handleUseMaxAmount = useCallback((): void => {
-    const max = resolveMaxTradeAmount();
+    const max = resolveMaxTradeAmount(tradeDraft);
     if (max == null) {
       showToast({
         title: 'No balance',
         message:
-          tradeSide === 'buy'
+          tradeDraft?.side === 'buy'
             ? 'No settlement token balance is available for this trade.'
             : 'No visible RWA token balance is available to sell.',
         variant: 'warning',
@@ -808,54 +893,31 @@ export default function RwasScreen(): React.JSX.Element {
       return;
     }
 
-    setCashAmountInput(sanitizeTradeAmountInput(max.amount));
+    setTradeDraft((current) =>
+      current == null ? current : { ...current, amountInput: sanitizeTradeAmountInput(max.amount) },
+    );
     showToast({
       title: 'Max selected',
       message: `${max.amount} ${max.symbol}`,
       variant: 'info',
       persistToNotificationCenter: false,
     });
-  }, [resolveMaxTradeAmount, showToast, tradeSide]);
+  }, [resolveMaxTradeAmount, showToast, tradeDraft]);
 
-  const tradeStatusMessage = useMemo(() => {
-    if (isNetworkSwitching) return 'Switching networks';
-    if (!canUseNetwork) return 'Network unavailable';
-    if (rwaExecuteMutation.isPending) return 'Signing order';
-    if (rwaQuoteMutation.isPending) return 'Fetching quote';
-    if (reviewQuote != null) return 'Review quote';
-    if (capabilitiesQuery.isCapabilitiesPending) return 'Loading trading status';
-    if (!quoteCapability.available) return quoteCapability.message;
-    if (!executeCapability.available) return executeCapability.message;
-    if (cashAmountState.message != null) return cashAmountState.message;
-    if (cashAmountState.amount == null) {
-      return tradeSide === 'buy' ? 'Enter USDC amount' : 'Enter quantity';
-    }
-    if (walletAddress == null) return 'Unlock wallet';
-    if (!canSignWithApp) return signingBlocker ?? 'Wallet signing unavailable';
-    return 'Ready';
-  }, [
-    canSignWithApp,
-    canUseNetwork,
-    capabilitiesQuery.isCapabilitiesPending,
-    cashAmountState.amount,
-    cashAmountState.message,
-    executeCapability.available,
-    executeCapability.message,
-    isNetworkSwitching,
-    quoteCapability.available,
-    quoteCapability.message,
-    reviewQuote,
-    rwaExecuteMutation.isPending,
-    rwaQuoteMutation.isPending,
-    signingBlocker,
-    tradeSide,
-    walletAddress,
-  ]);
+  const getDraftHoldingLabel = useCallback(
+    (asset: RwaAsset, side: RwaTradeSide): string | null => {
+      const symbol = side === 'buy' ? getRwaSettlementDisplaySymbol(asset) : asset.symbol;
+      const mint = side === 'buy' ? asset.settlementMint : asset.mint;
+      const holding = findWalletTokenHolding(walletBalanceData, mint);
+      return holding == null ? null : `${formatTokenBalance(holding, 6)} ${symbol}`;
+    },
+    [walletBalanceData],
+  );
 
-  const getTradeDisabledReason = useCallback(
+  const getStartTradeDisabledReason = useCallback(
     (asset: RwaAsset, side: RwaTradeSide): string | null => {
       if (rwaQuoteMutation.isPending || rwaExecuteMutation.isPending) {
-        return 'Another RWA order is in progress.';
+        return 'Another RWA swap is in progress.';
       }
       if (reviewQuote != null) return 'Review the current RWA quote first.';
       if (network == null) return 'Select a supported Solana network.';
@@ -863,10 +925,6 @@ export default function RwasScreen(): React.JSX.Element {
       if (isNetworkSwitching) return 'Wait for the network switch to finish.';
       if (!quoteCapability.available) return quoteCapability.message;
       if (!executeCapability.available) return executeCapability.message;
-      if (cashAmountState.message != null) return cashAmountState.message;
-      if (cashAmountState.amount == null) {
-        return side === 'buy' ? 'Enter USDC amount.' : 'Enter quantity.';
-      }
       if (walletAddress == null) return 'Unlock wallet.';
       if (!canSignWithApp) return signingBlocker ?? 'Wallet signing unavailable.';
       if (!asset.tradable) return 'This asset is read only from the provider.';
@@ -878,8 +936,6 @@ export default function RwasScreen(): React.JSX.Element {
     [
       canSignWithApp,
       canUseNetwork,
-      cashAmountState.amount,
-      cashAmountState.message,
       executeCapability.available,
       executeCapability.message,
       isNetworkSwitching,
@@ -894,9 +950,27 @@ export default function RwasScreen(): React.JSX.Element {
     ],
   );
 
-  const handleTradeAsset = useCallback(
+  const getReviewTradeDisabledReason = useCallback(
+    (asset: RwaAsset, side: RwaTradeSide): string | null => {
+      const disabledReason = getStartTradeDisabledReason(asset, side);
+      if (disabledReason != null) return disabledReason;
+      if (tradeDraft == null || tradeDraft.assetId !== asset.id || tradeDraft.side !== side) {
+        return side === 'buy' ? 'Enter amount.' : 'Enter quantity.';
+      }
+      if (draftAmountState.message != null) return draftAmountState.message;
+      if (draftAmountState.amount == null) {
+        return side === 'buy'
+          ? `Enter ${getRwaSettlementDisplaySymbol(asset)} amount.`
+          : 'Enter quantity.';
+      }
+      return null;
+    },
+    [draftAmountState.amount, draftAmountState.message, getStartTradeDisabledReason, tradeDraft],
+  );
+
+  const handleBeginTradeAsset = useCallback(
     (asset: RwaAsset, side: RwaTradeSide) => {
-      const disabledReason = getTradeDisabledReason(asset, side);
+      const disabledReason = getStartTradeDisabledReason(asset, side);
       if (disabledReason != null) {
         showToast({
           title: `${side === 'buy' ? 'Buy' : 'Sell'} unavailable`,
@@ -905,12 +979,34 @@ export default function RwasScreen(): React.JSX.Element {
         });
         return;
       }
-      if (network == null || walletAddress == null || cashAmountState.amount == null) return;
 
+      setTradeDraft((current) => ({
+        assetId: asset.id,
+        side,
+        amountInput: current?.assetId === asset.id ? current.amountInput : '',
+      }));
+    },
+    [getStartTradeDisabledReason, showToast],
+  );
+
+  const handleReviewTradeAsset = useCallback(
+    (asset: RwaAsset, side: RwaTradeSide) => {
+      const disabledReason = getReviewTradeDisabledReason(asset, side);
+      if (disabledReason != null) {
+        showToast({
+          title: `${side === 'buy' ? 'Buy' : 'Sell'} unavailable`,
+          message: disabledReason,
+          variant: 'error',
+        });
+        return;
+      }
+      if (network == null || walletAddress == null || draftAmountState.amount == null) return;
+
+      Keyboard.dismiss();
       rwaQuoteMutation.mutate({
         asset,
         side,
-        inputAmount: cashAmountState.amount,
+        inputAmount: draftAmountState.amount,
         network,
         walletAddress,
         walletId: activeWalletId,
@@ -918,8 +1014,8 @@ export default function RwasScreen(): React.JSX.Element {
     },
     [
       activeWalletId,
-      cashAmountState.amount,
-      getTradeDisabledReason,
+      draftAmountState.amount,
+      getReviewTradeDisabledReason,
       network,
       rwaQuoteMutation,
       showToast,
@@ -928,14 +1024,83 @@ export default function RwasScreen(): React.JSX.Element {
   );
 
   const handleBuyAsset = useCallback(
-    (asset: RwaAsset) => handleTradeAsset(asset, 'buy'),
-    [handleTradeAsset],
+    (asset: RwaAsset) => handleBeginTradeAsset(asset, 'buy'),
+    [handleBeginTradeAsset],
   );
 
   const handleSellAsset = useCallback(
-    (asset: RwaAsset) => handleTradeAsset(asset, 'sell'),
-    [handleTradeAsset],
+    (asset: RwaAsset) => handleBeginTradeAsset(asset, 'sell'),
+    [handleBeginTradeAsset],
   );
+
+  const handleDraftAmountChange = useCallback((value: string): void => {
+    const sanitized = sanitizeTradeAmountInput(value);
+    setTradeDraft((current) =>
+      current == null ? current : { ...current, amountInput: sanitized },
+    );
+  }, []);
+
+  const handleCancelDraft = useCallback((): void => {
+    if (rwaQuoteMutation.isPending || rwaExecuteMutation.isPending) return;
+    setTradeDraft(null);
+  }, [rwaExecuteMutation.isPending, rwaQuoteMutation.isPending]);
+
+  const handleReviewDraft = useCallback((): void => {
+    if (tradeDraft == null) return;
+    const asset = assets.find((entry) => entry.id === tradeDraft.assetId);
+    if (asset == null) return;
+    handleReviewTradeAsset(asset, tradeDraft.side);
+  }, [assets, handleReviewTradeAsset, tradeDraft]);
+
+  const handleCloseProcessResult = useCallback((): void => {
+    setProcessResult(null);
+  }, []);
+
+  const reviewLegs = useMemo(
+    () => (reviewQuote == null ? null : buildRwaReviewTokenLegs(reviewQuote)),
+    [reviewQuote],
+  );
+  const reviewDetailRows = useMemo(
+    () => (reviewQuote == null ? [] : buildRwaReviewDetailRows(reviewQuote)),
+    [reviewQuote],
+  );
+  const rwaSwapReviewPhase = useMemo<RwaSwapReviewScreenPhase | null>(() => {
+    if (rwaExecuteMutation.isPending) return 'processing';
+    if (processResult != null) return processResult.variant;
+    if (reviewQuote != null) return 'review';
+    return null;
+  }, [processResult, reviewQuote, rwaExecuteMutation.isPending]);
+  const rwaSwapReviewTokenLegs = useMemo(() => {
+    if (processResult != null) {
+      return {
+        payLeg: processResult.tokenLegs[0] ?? null,
+        receiveLeg: processResult.tokenLegs[1] ?? null,
+      };
+    }
+
+    return {
+      payLeg: reviewLegs?.payLeg ?? null,
+      receiveLeg: reviewLegs?.receiveLeg ?? null,
+    };
+  }, [processResult, reviewLegs]);
+  const rwaSwapReviewDetailRows = processResult?.detailRows ?? reviewDetailRows;
+  const rwaSwapReviewSide: RwaSwapReviewScreenSide | null =
+    reviewQuote?.side ?? rwaExecuteMutation.variables?.review.side ?? null;
+
+  const tradeDraftAsset = useMemo(
+    () =>
+      tradeDraft == null
+        ? null
+        : (assets.find((entry) => entry.id === tradeDraft.assetId) ?? null),
+    [assets, tradeDraft],
+  );
+  const tradeAmountSheetVisible =
+    tradeDraft != null && tradeDraftAsset != null && rwaSwapReviewPhase == null;
+  const tradeDraftPending =
+    tradeDraft != null &&
+    rwaQuoteMutation.isPending &&
+    rwaQuoteMutation.variables?.asset.id === tradeDraft.assetId &&
+    rwaQuoteMutation.variables?.side === tradeDraft.side;
 
   const handleCancelReview = useCallback(() => {
     if (rwaExecuteMutation.isPending) return;
@@ -953,6 +1118,12 @@ export default function RwasScreen(): React.JSX.Element {
       setReviewQuote(null);
       return;
     }
+    showToast({
+      title: 'Signing RWA swap',
+      message: 'Approve the wallet request to submit the order.',
+      variant: 'info',
+      persistToNotificationCenter: false,
+    });
     rwaExecuteMutation.mutate({ review: reviewQuote });
   }, [reviewQuote, rwaExecuteMutation, showToast]);
 
@@ -1052,89 +1223,6 @@ export default function RwasScreen(): React.JSX.Element {
           </View>
         ) : null}
 
-        <View style={styles.tradePanel}>
-          <View style={styles.tradePanelHeader}>
-            <View style={styles.tradePanelTitleBlock}>
-              <Text variant="body" color={colors.text.primary} style={styles.tradePanelTitle}>
-                RWA trade
-              </Text>
-              {tradeStatusMessage !== 'Ready' ? (
-                <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
-                  {tradeStatusMessage}
-                </Text>
-              ) : null}
-            </View>
-            <View style={styles.amountSymbolPill}>
-              <Text variant="caption" color={colors.text.secondary} style={styles.amountSymbol}>
-                {tradeSide === 'buy'
-                  ? assets.some((asset) => asset.devnetSandbox)
-                    ? RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL
-                    : 'USDC'
-                  : 'RWA'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.sideControl}>
-            {(['buy', 'sell'] as const).map((side) => {
-              const selected = tradeSide === side;
-              return (
-                <Pressable
-                  key={side}
-                  onPress={() => setTradeSide(side)}
-                  style={({ pressed }) => [
-                    styles.sideButton,
-                    selected ? styles.sideButtonSelected : styles.sideButtonIdle,
-                    pressed ? styles.sideButtonPressed : null,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={`${side === 'buy' ? 'Buy' : 'Sell'} RWA`}
-                >
-                  <Text
-                    variant="caption"
-                    color={selected ? colors.text.onAccent : colors.text.secondary}
-                    style={styles.sideButtonLabel}
-                  >
-                    {side === 'buy' ? 'Buy' : 'Sell'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <View style={styles.amountInputShell}>
-            <TextInput
-              value={cashAmountInput}
-              onChangeText={(value) => setCashAmountInput(sanitizeTradeAmountInput(value))}
-              placeholder="0.00"
-              placeholderTextColor={colors.text.placeholder}
-              keyboardType="decimal-pad"
-              inputMode="decimal"
-              returnKeyType="done"
-              style={styles.amountInput}
-              selectionColor={colors.brand.glossAccent}
-            />
-            <Pressable
-              onPress={handleUseMaxAmount}
-              style={({ pressed }) => [styles.maxButton, pressed ? styles.maxButtonPressed : null]}
-              accessibilityRole="button"
-              accessibilityLabel="Use maximum available RWA trade amount"
-            >
-              <Text variant="caption" color={colors.text.primary} style={styles.maxButtonLabel}>
-                MAX
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {reviewQuote != null ? (
-          <RwaQuoteReviewPanel
-            review={reviewQuote}
-            busy={rwaExecuteMutation.isPending}
-            onCancel={handleCancelReview}
-            onConfirm={handleConfirmReview}
-          />
-        ) : null}
-
         {contentState === 'ready' ? (
           <View style={styles.assetPickerPanel}>
             <View style={styles.assetSearchShell}>
@@ -1178,8 +1266,8 @@ export default function RwasScreen(): React.JSX.Element {
                     key={asset.id}
                     asset={asset}
                     dense={dense}
-                    buyDisabledReason={getTradeDisabledReason(asset, 'buy')}
-                    sellDisabledReason={getTradeDisabledReason(asset, 'sell')}
+                    buyDisabledReason={getStartTradeDisabledReason(asset, 'buy')}
+                    sellDisabledReason={getStartTradeDisabledReason(asset, 'sell')}
                     isBuyPending={
                       (rwaQuoteMutation.isPending &&
                         rwaQuoteMutation.variables?.asset.id === asset.id &&
@@ -1196,7 +1284,6 @@ export default function RwasScreen(): React.JSX.Element {
                         rwaExecuteMutation.variables?.review.asset.id === asset.id &&
                         rwaExecuteMutation.variables?.review.side === 'sell')
                     }
-                    lastExecution={lastExecution?.assetId === asset.id ? lastExecution : null}
                     onBuy={handleBuyAsset}
                     onSell={handleSellAsset}
                   />
@@ -1206,6 +1293,41 @@ export default function RwasScreen(): React.JSX.Element {
           </View>
         ) : null}
       </ScrollView>
+
+      {tradeDraftAsset != null && tradeDraft != null ? (
+        <RwaTradeAmountSheet
+          visible={tradeAmountSheetVisible}
+          side={tradeDraft.side}
+          assetName={formatRwaAssetDisplayName(tradeDraftAsset)}
+          assetCategoryLabel={RWA_CATEGORY_LABELS[tradeDraftAsset.category]}
+          assetSymbol={tradeDraftAsset.underlyingSymbol ?? tradeDraftAsset.symbol}
+          assetLogo={getRwaAssetLogoUri(tradeDraftAsset)}
+          assetPriceLabel={formatUsd(tradeDraftAsset.priceUsd)}
+          settlementSymbol={getRwaSettlementDisplaySymbol(tradeDraftAsset)}
+          amountInput={tradeDraft.amountInput}
+          holdingLabel={getDraftHoldingLabel(tradeDraftAsset, tradeDraft.side)}
+          message={draftAmountState.message}
+          reviewDisabledReason={getReviewTradeDisabledReason(tradeDraftAsset, tradeDraft.side)}
+          pending={tradeDraftPending}
+          onAmountChange={handleDraftAmountChange}
+          onMax={handleUseMaxAmount}
+          onCancel={handleCancelDraft}
+          onReview={handleReviewDraft}
+        />
+      ) : null}
+
+      <RwaSwapReviewScreen
+        visible={rwaSwapReviewPhase != null}
+        phase={rwaSwapReviewPhase ?? 'review'}
+        payLeg={rwaSwapReviewTokenLegs.payLeg}
+        receiveLeg={rwaSwapReviewTokenLegs.receiveLeg}
+        detailRows={rwaSwapReviewDetailRows}
+        side={rwaSwapReviewSide}
+        canSubmit={reviewQuote != null && !rwaExecuteMutation.isPending}
+        onCancel={handleCancelReview}
+        onConfirm={handleConfirmReview}
+        onDone={handleCloseProcessResult}
+      />
     </View>
   );
 }
@@ -1244,7 +1366,7 @@ const styles = StyleSheet.create({
     boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 8px 18px rgba(0, 0, 0, 0.36)',
   },
   headerBackButtonPressed: {
-    opacity: 0.72,
+    backgroundColor: colors.surface.solidControlPressed,
   },
   screenTitle: {
     flex: 1,
@@ -1272,181 +1394,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.glass.clearFill,
-  },
-  tradePanel: {
-    gap: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radii.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-    backgroundColor: colors.glass.clearFill,
-  },
-  tradePanelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  tradePanelTitleBlock: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  tradePanelTitle: {
-    fontFamily: fontFamily.medium,
-  },
-  amountSymbolPill: {
-    minHeight: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.full,
-    backgroundColor: colors.glass.smokeWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-  },
-  amountSymbol: {
-    fontFamily: fontFamily.mono,
-  },
-  sideControl: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    padding: 4,
-    borderRadius: radii.md,
-    backgroundColor: colors.glass.smokeWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-  },
-  sideButton: {
-    minHeight: 34,
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  sideButtonSelected: {
-    backgroundColor: colors.brand.glossAccent,
-    borderColor: colors.brand.glossAccent,
-  },
-  sideButtonIdle: {
-    backgroundColor: colors.surface.solidControl,
-    borderColor: colors.glass.rimSubtle,
-  },
-  sideButtonPressed: {
-    opacity: 0.86,
-  },
-  sideButtonLabel: {
-    fontFamily: fontFamily.medium,
-  },
-  amountInputShell: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingLeft: spacing.md,
-    paddingRight: spacing.sm,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border.strong,
-    backgroundColor: colors.surface.solidControl,
-  },
-  amountInput: {
-    minWidth: 0,
-    flex: 1,
-    color: colors.text.primary,
-    fontFamily: fontFamily.display,
-    fontSize: 28,
-    paddingVertical: 0,
-  },
-  maxButton: {
-    minWidth: 58,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.full,
-    backgroundColor: colors.glass.smokeWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-  },
-  maxButtonPressed: {
-    opacity: 0.76,
-  },
-  maxButtonLabel: {
-    fontFamily: fontFamily.medium,
-  },
-  reviewPanel: {
-    gap: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radii.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border.strong,
-    backgroundColor: colors.glass.frostFill,
-  },
-  reviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  reviewTitleBlock: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  reviewTitle: {
-    fontFamily: fontFamily.medium,
-  },
-  reviewIcon: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 17,
-    backgroundColor: colors.glass.smokeWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-  },
-  reviewDetailList: {
-    gap: spacing.sm,
-  },
-  reviewDetailRow: {
-    minHeight: 26,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  reviewDetailValue: {
-    flex: 1,
-    minWidth: 0,
-    textAlign: 'right',
-    fontFamily: fontFamily.medium,
-  },
-  reviewActionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  reviewButton: {
-    minHeight: layout.buttonHeightSm,
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  reviewButtonPrimary: {
-    backgroundColor: colors.brand.glossAccent,
-    borderColor: colors.brand.glossAccent,
-  },
-  reviewButtonSecondary: {
-    backgroundColor: colors.surface.solidControl,
-    borderColor: colors.glass.rimSubtle,
-  },
-  reviewButtonPressed: {
-    backgroundColor: colors.surface.solidControlPressed,
   },
   assetPickerPanel: {
     gap: spacing.md,
@@ -1515,17 +1462,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
   },
-  symbolBadge: {
+  assetLogoFrame: {
     width: 58,
-    height: 42,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radii.md,
-    backgroundColor: colors.brand.glossAccent,
-  },
-  symbolText: {
-    fontFamily: fontFamily.mono,
-    fontWeight: '800',
   },
   assetNameBlock: {
     flex: 1,
@@ -1542,26 +1483,6 @@ const styles = StyleSheet.create({
   priceText: {
     fontFamily: fontFamily.medium,
   },
-  changeText: {
-    fontFamily: fontFamily.medium,
-  },
-  assetInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    minHeight: 20,
-  },
-  executionPill: {
-    minHeight: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radii.full,
-    backgroundColor: colors.glass.smokeWash,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rimSubtle,
-  },
   actionRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -1575,14 +1496,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
-  },
-  actionButtonPrimary: {
-    backgroundColor: colors.brand.glossAccent,
-    borderColor: colors.brand.glossAccent,
-  },
-  actionButtonSecondary: {
-    backgroundColor: colors.glass.smokeWash,
-    borderColor: colors.glass.rimSubtle,
   },
   actionButtonPressed: {
     backgroundColor: colors.surface.glossPressed,

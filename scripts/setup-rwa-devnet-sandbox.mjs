@@ -151,8 +151,8 @@ function devnetSymbolFor(token, usedSymbols) {
 
 function devnetNameFor(token, underlyingSymbol) {
   const name = sanitizeText(token.name, 64);
-  if (name == null) return `${underlyingSymbol} Sandbox RWA`;
-  return `${name.replace(/\bxStock\b/gi, '').trim() || underlyingSymbol} Sandbox RWA`.slice(0, 80);
+  if (name == null) return underlyingSymbol.slice(0, 80);
+  return (name.replace(/\bxStock\b/gi, '').trim() || underlyingSymbol).slice(0, 80);
 }
 
 function readTags(value) {

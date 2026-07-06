@@ -169,6 +169,7 @@ describe('RWA Jupiter stocks integration', () => {
         return jsonResponse({
           [AAPLX_MAINNET_MINT]: {
             usdPrice: 214.42,
+            priceChange24h: 1.25,
           },
         });
       }
@@ -188,6 +189,7 @@ describe('RWA Jupiter stocks integration', () => {
       settlementMint: USDC_MAINNET_MINT,
       settlementSymbol: 'USDC',
       priceUsd: 214.42,
+      change24hPct: 1.25,
       tradable: true,
       devnetSandbox: false,
       magicBlockEligible: false,
@@ -228,9 +230,11 @@ describe('RWA Jupiter stocks integration', () => {
         return jsonResponse({
           [AAPLX_MAINNET_MINT]: {
             usdPrice: 214.42,
+            priceChange24h: -0.75,
           },
           [TSLAX_MAINNET_MINT]: {
             usdPrice: 322.15,
+            priceChange24h: 2.5,
           },
         });
       }
@@ -340,9 +344,11 @@ describe('RWA Jupiter stocks integration', () => {
         return jsonResponse({
           [AAPLX_MAINNET_MINT]: {
             usdPrice: 214.42,
+            priceChange24h: -0.75,
           },
           [TSLAX_MAINNET_MINT]: {
             usdPrice: 322.15,
+            priceChange24h: 2.5,
           },
         });
       }
@@ -357,12 +363,14 @@ describe('RWA Jupiter stocks integration', () => {
       providerEnvironment: 'devnet_sandbox',
     });
     expect(response.assets.map((asset) => asset.symbol)).toEqual(['AAPLd', 'TSLAd']);
+    expect(response.assets.map((asset) => asset.name)).toEqual(['Apple', 'Tesla']);
     expect(response.assets[0]).toMatchObject({
       symbol: 'AAPLd',
       mint: DEVNET_SANDBOX_RWA_MINT,
       settlementMint: DEVNET_SANDBOX_USDC_MINT,
       provider: 'offpay_devnet_sandbox',
       priceUsd: 214.42,
+      change24hPct: -0.75,
       tradable: true,
       devnetSandbox: true,
       magicBlockEligible: true,
@@ -372,15 +380,22 @@ describe('RWA Jupiter stocks integration', () => {
         magicBlock: 'devnet_sandbox',
       },
     });
+    expect(response.assets[0]?.logo).toBe(
+      'https://xstocks-metadata.backed.fi/logos/tokens/AAPLx.png',
+    );
     expect(response.assets[1]).toMatchObject({
       symbol: 'TSLAd',
       mint: DEVNET_SANDBOX_TSLA_MINT,
       settlementMint: DEVNET_SANDBOX_USDC_MINT,
       provider: 'offpay_devnet_sandbox',
       priceUsd: 322.15,
+      change24hPct: 2.5,
       tradable: true,
       devnetSandbox: true,
     });
+    expect(response.assets[1]?.logo).toBe(
+      'https://xstocks-metadata.backed.fi/logos/tokens/TSLAx.png',
+    );
   });
 
   it('creates devnet sandbox quotes with MagicBlock ER transaction steps', async () => {

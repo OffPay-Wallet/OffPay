@@ -873,8 +873,9 @@ describe('wallet transaction history (standard Solana RPC)', () => {
       spam: false,
     });
     expect(assetToken).toMatchObject({
-      name: 'SPYd',
+      name: 'SP500',
       symbol: 'SPYd',
+      logo: 'https://xstocks-metadata.backed.fi/logos/tokens/SPYx.png',
       balance: '0.00134',
       decimals: 6,
       verified: true,
@@ -917,14 +918,14 @@ describe('wallet transaction history (standard Solana RPC)', () => {
       rawAmount: '1340',
       tokenMint: RWA_ASSET_MINT,
       tokenSymbol: 'SPYd',
-      tokenName: 'SPYd',
+      tokenName: 'SP500',
       tokenDecimals: 6,
       direction: null,
     });
     expect(response.displayTransactions[0]).toMatchObject({
       detailSignature: swapSignature,
       tokenSymbol: 'SPYd',
-      tokenName: 'SPYd',
+      tokenName: 'SP500',
     });
   });
 

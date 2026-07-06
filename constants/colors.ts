@@ -34,8 +34,20 @@ const semantic = {
   success: '#F7F7F2',
   /** Received funds and positive token deltas */
   receive: '#31E981',
+  /** Soft buy action fill */
+  receiveSoftFill: 'rgba(49, 233, 129, 0.22)',
+  /** Soft buy action pressed fill */
+  receiveSoftFillPressed: 'rgba(49, 233, 129, 0.32)',
+  /** Soft buy action rim */
+  receiveSoftBorder: 'rgba(49, 233, 129, 0.34)',
   /** Failed transactions, negative amounts, warnings */
   error: '#FF4D5A',
+  /** Soft sell action fill */
+  errorSoftFill: 'rgba(255, 77, 90, 0.22)',
+  /** Soft sell action pressed fill */
+  errorSoftFillPressed: 'rgba(255, 77, 90, 0.32)',
+  /** Soft sell action rim */
+  errorSoftBorder: 'rgba(255, 77, 90, 0.36)',
   /** Pending states, caution */
   warning: '#D7D7CE',
   /** Info banners, notifications */

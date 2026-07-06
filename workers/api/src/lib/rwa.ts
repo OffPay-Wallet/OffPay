@@ -123,6 +123,12 @@ interface RwaQuoteResponse {
   };
 }
 
+interface JupiterPricePoint {
+  usdPrice: number | null;
+  priceChange24h: number | null;
+  blockId: number | null;
+}
+
 type RwaTransactionTarget = 'solana_devnet' | 'magicblock_er_devnet';
 
 interface RwaUnsignedTransactionStep {
@@ -183,6 +189,7 @@ const DEFAULT_DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const DEFAULT_RWA_DELEGATE_PROGRAM_ID = '4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7';
 const DEFAULT_DEVNET_PRICE_REFERENCE_MINT = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
 const DEFAULT_JUPITER_STOCK_SEARCH_QUERIES = ['xStock'];
+const XSTOCKS_LOGO_BASE_URL = 'https://xstocks-metadata.backed.fi/logos/tokens';
 const JUPITER_PRICE_BATCH_SIZE = 50;
 const JUPITER_TIMEOUT_MS = 12_000;
 const USDC_DECIMALS = 6;
@@ -333,6 +340,60 @@ function inferUnderlyingSymbol(symbol: string): string | null {
   return normalized.length === 0 || normalized === symbol.toUpperCase() ? null : normalized;
 }
 
+function readHttpUrl(value: unknown): string | null {
+  const raw = readTrimmedString(value);
+  if (!raw) return null;
+
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeXStocksLogoBaseSymbol(value: string | null | undefined): string | null {
+  const normalized = value
+    ?.trim()
+    .replace(/[^A-Za-z0-9.]/g, '')
+    .toUpperCase();
+  return normalized != null && normalized.length > 0 ? normalized : null;
+}
+
+function inferDevnetSandboxUnderlyingSymbol(symbol: string): string | null {
+  const withoutDevnetSuffix = symbol.replace(/d$/i, '');
+  return normalizeXStocksLogoBaseSymbol(withoutDevnetSuffix);
+}
+
+function getXStocksLogoUrl(baseSymbol: string | null | undefined): string | null {
+  const normalized = normalizeXStocksLogoBaseSymbol(baseSymbol);
+  return normalized == null ? null : `${XSTOCKS_LOGO_BASE_URL}/${normalized}x.png`;
+}
+
+function readDevnetSandboxAssetLogo(entry: Record<string, unknown>, symbol: string): string | null {
+  const explicitLogo =
+    readHttpUrl(entry.logo) ?? readHttpUrl(entry.icon) ?? readHttpUrl(entry.logoURI);
+  if (explicitLogo != null) return explicitLogo;
+
+  const sourceSymbol = readTrimmedString(entry.sourceSymbol);
+  if (sourceSymbol != null) {
+    return getXStocksLogoUrl(sourceSymbol.replace(/x$/i, ''));
+  }
+
+  const underlyingSymbol =
+    sanitizeText(readTrimmedString(entry.underlyingSymbol), 24) ??
+    inferDevnetSandboxUnderlyingSymbol(symbol);
+  return getXStocksLogoUrl(underlyingSymbol);
+}
+
+function formatDevnetSandboxAssetName(name: string, fallback: string): string {
+  const cleaned = name
+    .replace(/\s+Sandbox(?:\s+RWA)?$/i, '')
+    .replace(/\s+RWA$/i, '')
+    .trim();
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
 function readMainnetUsdcMint(bindings: Bindings): string {
   const mint = bindings.OFFPAY_MAINNET_USDC_MINT?.trim() || DEFAULT_MAINNET_USDC_MINT;
   if (!isValidSolanaAddress(mint)) {
@@ -429,7 +490,7 @@ function parseDevnetSandboxAssetsJson(rawValue: string): DevnetSandboxAssetConfi
         name,
         decimals: readDevnetAssetDecimals(entry.decimals, label),
         priceReferenceMint,
-        logo: readTrimmedString(entry.logo) ?? readTrimmedString(entry.icon),
+        logo: readDevnetSandboxAssetLogo(entry, symbol),
         underlyingSymbol:
           sanitizeText(readTrimmedString(entry.underlyingSymbol), 24) ??
           inferUnderlyingSymbol(symbol),
@@ -631,6 +692,7 @@ function buildRwaAsset(params: {
   network: Network;
   settlementMint: string;
   priceUsd: number | null;
+  priceChange24h: number | null;
 }): RwaAsset | null {
   const mint = readTokenMint(params.token);
   const decimals = readTokenDecimals(params.token);
@@ -656,7 +718,7 @@ function buildRwaAsset(params: {
     settlementMint: params.settlementMint,
     settlementSymbol: 'USDC',
     priceUsd: params.priceUsd,
-    change24hPct: null,
+    change24hPct: params.priceChange24h,
     verified,
     tradable,
     devnetSandbox: false,
@@ -695,15 +757,21 @@ function buildDevnetSandboxRwaAsset(params: {
   config: DevnetSandboxConfig;
   assetConfig: DevnetSandboxAssetConfig;
   priceUsd: number | null;
+  priceChange24h: number | null;
 }): RwaAsset {
+  const displayName = formatDevnetSandboxAssetName(
+    params.assetConfig.name,
+    params.assetConfig.underlyingSymbol ?? params.assetConfig.symbol,
+  );
+
   return {
     id: params.assetConfig.mint,
     symbol: params.assetConfig.symbol,
-    name: params.assetConfig.name,
+    name: displayName,
     mint: params.assetConfig.mint,
     decimals: params.assetConfig.decimals,
     network: 'devnet',
-    category: inferCategory(params.assetConfig.name, params.assetConfig.symbol),
+    category: inferCategory(displayName, params.assetConfig.symbol),
     provider: 'offpay_devnet_sandbox',
     providerLabel: 'OffPay devnet sandbox',
     providerEnvironment: 'devnet_sandbox',
@@ -711,7 +779,7 @@ function buildDevnetSandboxRwaAsset(params: {
     settlementMint: params.config.settlementMint,
     settlementSymbol: 'USDC',
     priceUsd: params.priceUsd,
-    change24hPct: null,
+    change24hPct: params.priceChange24h,
     verified: true,
     tradable: true,
     devnetSandbox: true,
@@ -833,18 +901,42 @@ async function fetchJupiterStockTokens(
 }
 
 async function fetchJupiterPrice(bindings: Bindings, mint: string): Promise<number | null> {
-  const prices = await fetchJupiterPrices(bindings, [mint]);
+  const pricePoint = await fetchJupiterPricePoint(bindings, mint);
+  return pricePoint?.usdPrice ?? null;
+}
+
+async function fetchJupiterPricePoint(
+  bindings: Bindings,
+  mint: string,
+): Promise<JupiterPricePoint | null> {
+  const prices = await fetchJupiterPricePoints(bindings, [mint]);
   return prices.get(mint) ?? null;
 }
 
-async function fetchJupiterPrices(
+function readJupiterPricePoint(value: unknown): JupiterPricePoint {
+  if (!isRecord(value)) {
+    return {
+      usdPrice: null,
+      priceChange24h: null,
+      blockId: null,
+    };
+  }
+
+  return {
+    usdPrice: readFiniteNumber(value.usdPrice),
+    priceChange24h: readFiniteNumber(value.priceChange24h),
+    blockId: readFiniteNumber(value.blockId),
+  };
+}
+
+async function fetchJupiterPricePoints(
   bindings: Bindings,
   mints: string[],
-): Promise<Map<string, number | null>> {
+): Promise<Map<string, JupiterPricePoint>> {
   const uniqueMints = Array.from(new Set(mints.filter((mint) => isValidSolanaAddress(mint))));
   if (uniqueMints.length === 0) return new Map();
 
-  const prices = new Map<string, number | null>();
+  const prices = new Map<string, JupiterPricePoint>();
   for (let index = 0; index < uniqueMints.length; index += JUPITER_PRICE_BATCH_SIZE) {
     const batch = uniqueMints.slice(index, index + JUPITER_PRICE_BATCH_SIZE);
     const payload = await fetchJupiterJson(
@@ -857,12 +949,11 @@ async function fetchJupiterPrices(
 
     for (const mint of batch) {
       if (!isRecord(payload)) {
-        prices.set(mint, null);
+        prices.set(mint, readJupiterPricePoint(null));
         continue;
       }
 
-      const entry = payload[mint];
-      prices.set(mint, isRecord(entry) ? readFiniteNumber(entry.usdPrice) : null);
+      prices.set(mint, readJupiterPricePoint(payload[mint]));
     }
   }
 
@@ -885,7 +976,7 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
     }
 
     const assetConfigs = config.assets;
-    const prices = await fetchJupiterPrices(
+    const prices = await fetchJupiterPricePoints(
       bindings,
       assetConfigs.map((asset) => asset.priceReferenceMint),
     );
@@ -898,7 +989,8 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
         buildDevnetSandboxRwaAsset({
           config,
           assetConfig,
-          priceUsd: prices.get(assetConfig.priceReferenceMint) ?? null,
+          priceUsd: prices.get(assetConfig.priceReferenceMint)?.usdPrice ?? null,
+          priceChange24h: prices.get(assetConfig.priceReferenceMint)?.priceChange24h ?? null,
         }),
       ),
       fetchedAt,
@@ -924,7 +1016,7 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
     if (mint == null || !isVerifiedJupiterStockToken(token)) return false;
     return catalogFilter.includeAllVerifiedStocks || catalogFilter.mints.has(mint);
   });
-  const prices = await fetchJupiterPrices(
+  const prices = await fetchJupiterPricePoints(
     bindings,
     tokens.flatMap((token) => {
       const mint = readTokenMint(token);
@@ -939,11 +1031,13 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
     providerEnvironment,
     assets: tokens.flatMap((token) => {
       const mint = readTokenMint(token);
+      const pricePoint = mint == null ? null : (prices.get(mint) ?? null);
       const asset = buildRwaAsset({
         token,
         network,
         settlementMint,
-        priceUsd: mint == null ? null : (prices.get(mint) ?? null),
+        priceUsd: pricePoint?.usdPrice ?? null,
+        priceChange24h: pricePoint?.priceChange24h ?? null,
       });
       return asset == null ? [] : [asset];
     }),
@@ -982,24 +1076,25 @@ async function getRwaPrice(
     mint: request.mint,
     network: request.network,
   });
-  const price =
+  const priceReferenceMint =
     request.network === 'mainnet'
-      ? await fetchJupiterPrice(bindings, asset.mint).catch(() => null)
+      ? asset.mint
       : asset.devnetSandbox
-        ? await fetchJupiterPrice(
-            bindings,
-            readDevnetSandboxConfig(bindings)?.assets.find((entry) => entry.mint === asset.mint)
-              ?.priceReferenceMint ?? asset.mint,
-          ).catch(() => null)
+        ? (readDevnetSandboxConfig(bindings)?.assets.find((entry) => entry.mint === asset.mint)
+            ?.priceReferenceMint ?? asset.mint)
         : null;
+  const pricePoint =
+    priceReferenceMint == null
+      ? null
+      : await fetchJupiterPricePoint(bindings, priceReferenceMint).catch(() => null);
 
   return {
     network: request.network,
     mint: asset.mint,
     symbol: asset.symbol,
-    price,
+    price: pricePoint?.usdPrice ?? null,
     currency: 'USD',
-    change24hPct: asset.change24hPct,
+    change24hPct: pricePoint?.priceChange24h ?? asset.change24hPct,
     provider: asset.provider,
     providerEnvironment: asset.providerEnvironment,
     fetchedAt: Date.now(),

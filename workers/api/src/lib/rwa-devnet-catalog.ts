@@ -3,6 +3,7 @@ import { isValidSolanaAddress } from './validation.js';
 
 const DEFAULT_DEVNET_PRICE_REFERENCE_MINT = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
 const DEFAULT_TOKEN_DECIMALS = 6;
+const XSTOCKS_LOGO_BASE_URL = 'https://xstocks-metadata.backed.fi/logos/tokens';
 
 interface DevnetRwaCatalogToken {
   mint: string;
@@ -55,6 +56,48 @@ function readHttpUrl(value: unknown): string | null {
   }
 }
 
+function normalizeXStocksLogoBaseSymbol(value: string | null | undefined): string | null {
+  const normalized = value
+    ?.trim()
+    .replace(/[^A-Za-z0-9.]/g, '')
+    .toUpperCase();
+  return normalized != null && normalized.length > 0 ? normalized : null;
+}
+
+function inferDevnetSandboxUnderlyingSymbol(symbol: string): string | null {
+  const withoutDevnetSuffix = symbol.replace(/d$/i, '');
+  return normalizeXStocksLogoBaseSymbol(withoutDevnetSuffix);
+}
+
+function getXStocksLogoUrl(baseSymbol: string | null | undefined): string | null {
+  const normalized = normalizeXStocksLogoBaseSymbol(baseSymbol);
+  return normalized == null ? null : `${XSTOCKS_LOGO_BASE_URL}/${normalized}x.png`;
+}
+
+function readDevnetSandboxAssetLogo(
+  record: Record<string, unknown>,
+  symbol: string,
+): string | null {
+  const explicitLogo =
+    readHttpUrl(record.logo) ?? readHttpUrl(record.icon) ?? readHttpUrl(record.logoURI);
+  if (explicitLogo != null) return explicitLogo;
+
+  const sourceSymbol = readTrimmedString(record.sourceSymbol);
+  if (sourceSymbol != null) return getXStocksLogoUrl(sourceSymbol.replace(/x$/i, ''));
+
+  const underlyingSymbol =
+    sanitizeText(record.underlyingSymbol, 24) ?? inferDevnetSandboxUnderlyingSymbol(symbol);
+  return getXStocksLogoUrl(underlyingSymbol);
+}
+
+function formatDevnetSandboxAssetName(name: string, fallback: string): string {
+  const cleaned = name
+    .replace(/\s+Sandbox(?:\s+RWA)?$/i, '')
+    .replace(/\s+RWA$/i, '')
+    .trim();
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
 function readSolanaAddress(value: unknown): string | null {
   const raw = readTrimmedString(value);
   return raw && isValidSolanaAddress(raw) ? raw : null;
@@ -87,9 +130,12 @@ function readDevnetRwaAssetCatalog(bindings: Bindings): DevnetRwaCatalogToken[] 
         {
           mint,
           symbol,
-          name: symbol,
+          name: formatDevnetSandboxAssetName(
+            sanitizeText(record.name, 80) ?? symbol,
+            sanitizeText(record.underlyingSymbol, 24) ?? symbol,
+          ),
           decimals: readDecimals(record.decimals),
-          logo: readHttpUrl(record.logo ?? record.icon ?? record.logoURI),
+          logo: readDevnetSandboxAssetLogo(record, symbol),
           priceReferenceMint,
           underlyingSymbol: sanitizeText(record.underlyingSymbol, 24),
           settlement: false,
@@ -150,8 +196,4 @@ function readDevnetRwaCatalogTokenMap(bindings: Bindings): Map<string, DevnetRwa
   return tokensByMint;
 }
 
-export {
-  readDevnetRwaCatalogTokenMap,
-  readDevnetRwaCatalogTokens,
-  type DevnetRwaCatalogToken,
-};
+export { readDevnetRwaCatalogTokenMap, readDevnetRwaCatalogTokens, type DevnetRwaCatalogToken };
