@@ -11,6 +11,8 @@ import type { AiChatCreditStatus } from '@/lib/agentic-payments/types';
 
 const CREDIT_RESET_REFRESH_SKEW_MS = 250;
 const CREDIT_RESET_FALLBACK_RETRY_MS = 15_000;
+const CREDIT_STATUS_ACTIVE_POLL_MS = 60_000;
+const CREDIT_STATUS_EXHAUSTED_POLL_MS = 15_000;
 
 interface PrefetchAiChatCreditsOptions {
   signal?: AbortSignal;
@@ -34,6 +36,13 @@ export function shouldRefreshAiChatCreditsFromBackend(
   nowMs = Date.now(),
 ): boolean {
   return credits != null && credits.used > 0 && credits.resetAtMs <= nowMs;
+}
+
+export function getAiChatCreditStatusPollMs(
+  credits: AiChatCreditStatus | null,
+): number | null {
+  if (credits == null || credits.used <= 0) return null;
+  return credits.remaining <= 0 ? CREDIT_STATUS_EXHAUSTED_POLL_MS : CREDIT_STATUS_ACTIVE_POLL_MS;
 }
 
 export async function prefetchAiChatCredits(
@@ -180,6 +189,24 @@ export function useAiChatCredits(scopeKey: string): UseAiChatCreditsResult {
       subscription.remove();
     };
   }, [credits, refresh, scopeKey]);
+
+  useEffect(() => {
+    const pollMs = getAiChatCreditStatusPollMs(credits);
+    if (pollMs == null) return;
+
+    let disposed = false;
+
+    const pollCreditStatus = () => {
+      if (disposed || AppState.currentState !== 'active') return;
+      void refresh();
+    };
+
+    const interval = setInterval(pollCreditStatus, pollMs);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
+  }, [credits, refresh]);
 
   return {
     credits,

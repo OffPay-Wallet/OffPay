@@ -194,7 +194,7 @@ describe('agentic RWA tools', () => {
     mockCreateRwaQuote.mockResolvedValue(quote);
 
     const run = await runAgenticTools(
-      [{ id: 'call-rwa-buy', name: 'prepare_rwa_trade', args: { asset: 'SPY', side: 'buy', amount: '2' } }],
+      [{ id: 'call-rwa-buy', name: 'prepare_rwa_trade', args: { asset: 'SPY', side: 'buy', amount: '2 USDC' } }],
       context,
     );
 
@@ -218,6 +218,28 @@ describe('agentic RWA tools', () => {
     expect(JSON.stringify(run.results[0].result)).not.toContain(spyMint);
     expect(JSON.stringify(run.results[0].result)).not.toContain(settlementMint);
     expect(JSON.stringify(run.results[0].result)).not.toContain('unsigned-base64');
+  });
+
+  it('returns a single sanitized RWA asset when a ticker is requested', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-rwa-asset', name: 'get_rwa_assets', args: { asset: 'the SP500 stocks' } }],
+      context,
+    );
+
+    expect(run.results[0].result).toMatchObject({
+      status: 'ok',
+      mode: 'asset',
+      count: 1,
+      asset: expect.objectContaining({
+        symbol: 'SPYd',
+        name: 'SP500',
+        settlementSymbol: 'RWAUSDC',
+        holding: '0.02',
+      }),
+      assets: [expect.objectContaining({ symbol: 'SPYd' })],
+    });
+    expect(JSON.stringify(run.results[0].result)).not.toContain(spyMint);
+    expect(JSON.stringify(run.results[0].result)).not.toContain(settlementMint);
   });
 
   it('summarizes RWA holdings and history without signatures or mints', async () => {

@@ -2,13 +2,18 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
+import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 
-import type { AgenticChatToolCard, AgenticToolCardTone } from '@/store/agenticChatStore';
+import type {
+  AgenticChatToolCard,
+  AgenticRwaAssetCardPreview,
+  AgenticToolCardTone,
+} from '@/store/agenticChatStore';
 
 interface AgenticToolResultCardProps {
   card: AgenticChatToolCard;
@@ -24,6 +29,10 @@ function colorForTone(tone: AgenticToolCardTone | undefined): string {
 export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): React.JSX.Element {
   const rows = card.rows ?? [];
   const items = card.items ?? [];
+
+  if (card.rwaAsset != null) {
+    return <RwaAssetPreviewToolCard asset={card.rwaAsset} />;
+  }
 
   return (
     <ConfirmationCardSurface>
@@ -100,6 +109,66 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
   );
 }
 
+function RwaAssetPreviewToolCard({
+  asset,
+}: {
+  asset: AgenticRwaAssetCardPreview;
+}): React.JSX.Element {
+  const detail = [asset.categoryLabel, asset.underlyingSymbol ?? asset.symbol]
+    .filter((value) => value.length > 0)
+    .join(' · ');
+
+  return (
+    <ConfirmationCardSurface>
+      <View style={styles.rwaAssetHeader}>
+        <View style={styles.rwaAssetIdentity}>
+          <View style={styles.rwaAssetLogoFrame}>
+            <TokenIcon
+              symbol={asset.underlyingSymbol ?? asset.symbol}
+              name={asset.name}
+              logoUri={asset.logoUri}
+              size={48}
+              recyclingKey={asset.symbol}
+            />
+          </View>
+          <View style={styles.rwaAssetNameBlock}>
+            <Text
+              variant="body"
+              color={colors.text.primary}
+              style={styles.rwaAssetName}
+              numberOfLines={1}
+            >
+              {asset.displayName}
+            </Text>
+            <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
+              {detail}
+            </Text>
+          </View>
+        </View>
+        <Text variant="body" color={colors.text.primary} style={styles.rwaAssetPrice}>
+          {asset.priceLabel}
+        </Text>
+      </View>
+
+      <View style={styles.rwaAssetMetaRow}>
+        <Text variant="small" color={colors.text.tertiary} numberOfLines={1}>
+          Trades with {asset.settlementSymbol}
+        </Text>
+        {asset.holding != null ? (
+          <Text
+            variant="captionBold"
+            color={colors.text.secondary}
+            style={styles.rwaAssetHolding}
+            numberOfLines={1}
+          >
+            {asset.holding} held
+          </Text>
+        ) : null}
+      </View>
+    </ConfirmationCardSurface>
+  );
+}
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -167,5 +236,48 @@ const styles = StyleSheet.create({
   },
   footer: {
     lineHeight: 16,
+  },
+  rwaAssetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  rwaAssetIdentity: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  rwaAssetLogoFrame: {
+    width: 58,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rwaAssetNameBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  rwaAssetName: {
+    fontFamily: fontFamily.medium,
+  },
+  rwaAssetPrice: {
+    flexShrink: 0,
+    fontFamily: fontFamily.medium,
+    textAlign: 'right',
+  },
+  rwaAssetMetaRow: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  rwaAssetHolding: {
+    flexShrink: 0,
+    fontFamily: fontFamily.uiSemiBold,
   },
 });

@@ -47,7 +47,7 @@ function getSettlementDisplaySymbol(asset: Pick<RwaAsset, 'devnetSandbox' | 'set
 }
 
 function readRwaAssetArg(call: Parameters<AgenticToolDefinition['run']>[0]): string {
-  for (const key of ['asset', 'ticker', 'symbol', 'stock', 'rwa']) {
+  for (const key of ['asset', 'ticker', 'symbol', 'stock', 'rwa', 'name', 'query']) {
     const value = readStringArg(call, key);
     if (value != null && value.length > 0) return value;
   }
@@ -71,7 +71,12 @@ function readRwaAmountArg(call: Parameters<AgenticToolDefinition['run']>[0]): st
 }
 
 function normalizeAssetReference(value: string): string {
-  return normalizeTokenReference(value);
+  return normalizeTokenReference(
+    value.replace(
+      /\b(?:a|an|the|tokenized|stock|stocks|share|shares|equity|etf|rwa|xstock|xstocks)\b/gi,
+      ' ',
+    ),
+  );
 }
 
 function assetReferenceCandidates(asset: RwaAsset): string[] {
@@ -121,12 +126,13 @@ function parseRwaAmount(value: string): { ok: true; amount: string } | { ok: fal
   if (trimmed.length === 0) return { ok: false, code: 'amount_missing' };
   if (/^(max|all)$/i.test(trimmed)) return { ok: true, amount: 'max' };
 
-  const normalized = trimmed.replace(/[$,]/g, '');
-  if (!/^\d+(?:\.\d{1,12})?$/.test(normalized)) {
+  const normalized = trimmed.replace(/[$,]/g, '').replace(/\s+/g, ' ').trim();
+  const amountMatch = normalized.match(/^(\d+(?:\.\d{1,12})?)(?:\s*(?:RWAUSDC|USDC|USD))?$/i);
+  if (amountMatch == null) {
     return { ok: false, code: 'amount_invalid' };
   }
 
-  const [whole, fraction] = normalized.split('.');
+  const [whole, fraction] = amountMatch[1].split('.');
   const hasNonZeroWhole = (whole ?? '').replace(/^0+/, '').length > 0;
   const hasNonZeroFraction = fraction != null && /[1-9]/.test(fraction);
   if (!hasNonZeroWhole && !hasNonZeroFraction) return { ok: false, code: 'amount_invalid' };
@@ -181,6 +187,8 @@ function summarizeAsset(asset: RwaAsset, balance: WalletBalanceResponse | null |
     underlyingSymbol: asset.underlyingSymbol,
     name: asset.name,
     category: asset.category,
+    devnetSandbox: asset.devnetSandbox,
+    logo: asset.logo,
     priceUsd: asset.priceUsd,
     change24hPct: asset.change24hPct,
     tradable: asset.tradable,
@@ -326,13 +334,19 @@ export const getRwaAssetsTool: AgenticToolDefinition = {
   schema: {
     name: 'get_rwa_assets',
     description:
-      'Lists tokenized stocks, ETFs, and RWA assets available for OffPay RWA trading on the active Solana network. Returns sanitized ticker, price, tradability, and optional holding summaries. No mints or signatures.',
+      'Lists tokenized stocks, ETFs, and RWA assets available for OffPay RWA trading on the active Solana network. For a specific stock/ticker question, pass asset so the app returns that asset only. Returns sanitized ticker, price, tradability, and optional holding summaries. No mints or signatures.',
     parameters: {
       type: 'object',
       properties: {
+        asset: {
+          type: 'string',
+          description:
+            'Optional RWA ticker/name, e.g. SPY, TSLA, SpaceX, Apple, SP500. Use this for specific-stock details or availability.',
+        },
         limit: {
           type: 'number',
-          description: 'How many RWA assets to summarize. Capped at 30.',
+          description:
+            'How many RWA assets to summarize when asset is omitted. Capped at 30.',
         },
       },
     },
@@ -343,6 +357,12 @@ export const getRwaAssetsTool: AgenticToolDefinition = {
     if (context.capabilities == null) return { result: { status: 'loading' } };
     if (!canReadRwa(context)) return { error: { code: 'feature_unavailable' } };
 
+    const assetText = hydrateStringArg(
+      { ...call, args: { asset: readRwaAssetArg(call) } },
+      'asset',
+      context.redactions,
+    );
+    const hasSpecificAssetRequest = assetText.trim().length > 0;
     const limit = readCappedInteger({
       call,
       key: 'limit',
@@ -353,6 +373,23 @@ export const getRwaAssetsTool: AgenticToolDefinition = {
 
     try {
       const assets = await readRwaAssets({ network: context.scope.network, signal: context.signal });
+      if (hasSpecificAssetRequest) {
+        const resolved = resolveRwaAssetReference({ assets, value: assetText });
+        if (!resolved.ok) return { error: { code: resolved.code } };
+        const asset = summarizeAsset(resolved.asset, context.balance);
+        return {
+          result: {
+            status: 'ok',
+            mode: 'asset',
+            network: context.scope.network,
+            asset,
+            assets: [asset],
+            count: 1,
+            truncated: false,
+          },
+        };
+      }
+
       return {
         result: {
           status: assets.length === 0 ? 'empty' : 'ok',

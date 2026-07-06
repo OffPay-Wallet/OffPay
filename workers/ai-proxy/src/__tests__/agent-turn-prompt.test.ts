@@ -5,5 +5,8 @@ describe('agent turn prompt', () => {
     expect(OFFPAY_AGENT_TURN_PROMPT).toContain('Natural commands like "buy me 5 Tesla"');
     expect(OFFPAY_AGENT_TURN_PROMPT).toContain('Treat company-name trade phrases');
     expect(OFFPAY_AGENT_TURN_PROMPT).toContain('Do not use prepare_swap_quote for RWA stocks.');
+    expect(OFFPAY_AGENT_TURN_PROMPT).toContain('pass asset and do not request the full catalog');
+    expect(OFFPAY_AGENT_TURN_PROMPT).toContain('interpret it as RWAUSDC');
+    expect(OFFPAY_AGENT_TURN_PROMPT).toContain('For follow-up replies after you asked for a missing RWA amount');
   });
 });

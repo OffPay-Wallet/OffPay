@@ -17,12 +17,13 @@ import React, { type RefObject } from 'react';
 import { type LayoutChangeEvent, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Animated, {
   Easing,
+  Extrapolation,
   FadeIn,
   FadeOut,
+  interpolate,
   LinearTransition,
+  useAnimatedKeyboard,
   useAnimatedStyle,
-  useDerivedValue,
-  withTiming,
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -53,10 +54,7 @@ const VOICE_CARD_ENTERING = FadeIn.duration(240)
 const VOICE_CARD_EXITING = FadeOut.duration(180).easing(VOICE_CARD_EASE);
 const COMPOSER_CARD_ENTERING = FadeIn.duration(180).easing(VOICE_CARD_EASE);
 const COMPOSER_CARD_EXITING = FadeOut.duration(160).easing(VOICE_CARD_EASE);
-const KEYBOARD_DOCK_TIMING = {
-  duration: 220,
-  easing: Easing.out(Easing.cubic),
-} as const;
+const KEYBOARD_PADDING_BLEND_DISTANCE = 72;
 
 export type ChatVoiceState = 'idle' | 'recording' | 'transcribing' | 'review';
 
@@ -87,7 +85,6 @@ interface ChatPromptDockProps {
   busy: boolean;
   canSubmit: boolean;
   bottomInset: number;
-  keyboardOffset?: number;
   horizontalPadding: number;
   onLayout?: (event: LayoutChangeEvent) => void;
   onChangeText: (next: string) => void;
@@ -116,7 +113,6 @@ export function ChatPromptDock({
   busy,
   canSubmit,
   bottomInset,
-  keyboardOffset = 0,
   horizontalPadding,
   onLayout,
   onChangeText,
@@ -131,13 +127,16 @@ export function ChatPromptDock({
 }: ChatPromptDockProps): React.JSX.Element {
   const voiceCardActive =
     voice != null && (voice.state === 'recording' || voice.state === 'review');
-  const keyboardShift = useDerivedValue(
-    () => withTiming(keyboardOffset, KEYBOARD_DOCK_TIMING),
-    [keyboardOffset],
-  );
+  const keyboard = useAnimatedKeyboard();
 
   const dockStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: -keyboardShift.value }],
+    paddingBottom: interpolate(
+      keyboard.height.value,
+      [0, KEYBOARD_PADDING_BLEND_DISTANCE],
+      [Math.max(bottomInset, spacing.lg), spacing.lg],
+      Extrapolation.CLAMP,
+    ),
+    transform: [{ translateY: -keyboard.height.value }],
   }));
 
   return (
@@ -149,7 +148,6 @@ export function ChatPromptDock({
         {
           bottom: 0,
           paddingHorizontal: horizontalPadding,
-          paddingBottom: Math.max(bottomInset, spacing.lg),
         },
         dockStyle,
       ]}

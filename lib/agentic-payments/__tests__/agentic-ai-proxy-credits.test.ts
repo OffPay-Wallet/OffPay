@@ -19,6 +19,7 @@ function loadClient(): typeof import('@/lib/agentic-payments/ai-proxy-client') {
 }
 
 function loadCreditPreloadModules(): {
+  getAiChatCreditStatusPollMs: typeof import('@/hooks/agentic-chat/useAiChatCredits').getAiChatCreditStatusPollMs;
   prefetchAiChatCredits: typeof import('@/hooks/agentic-chat/useAiChatCredits').prefetchAiChatCredits;
   shouldRefreshAiChatCreditsFromBackend: typeof import('@/hooks/agentic-chat/useAiChatCredits').shouldRefreshAiChatCreditsFromBackend;
   useAiChatCreditsStore: typeof import('@/store/aiChatCreditsStore').useAiChatCreditsStore;
@@ -29,6 +30,7 @@ function loadCreditPreloadModules(): {
   const creditsHook =
     require('@/hooks/agentic-chat/useAiChatCredits') as typeof import('@/hooks/agentic-chat/useAiChatCredits');
   return {
+    getAiChatCreditStatusPollMs: creditsHook.getAiChatCreditStatusPollMs,
     prefetchAiChatCredits: creditsHook.prefetchAiChatCredits,
     shouldRefreshAiChatCreditsFromBackend: creditsHook.shouldRefreshAiChatCreditsFromBackend,
     useAiChatCreditsStore: require('@/store/aiChatCreditsStore').useAiChatCreditsStore,
@@ -229,5 +231,45 @@ describe('AI proxy credit request identity', () => {
       remaining: 5,
       resetAtMs: backendResetAtMs,
     });
+  });
+
+  it('polls backend credit status faster while the chat UI is blocked', () => {
+    const { getAiChatCreditStatusPollMs } = loadCreditPreloadModules();
+    const resetAtMs = Date.now() + 60 * 60 * 1000;
+
+    expect(getAiChatCreditStatusPollMs(null)).toBeNull();
+    expect(
+      getAiChatCreditStatusPollMs({
+        kind: 'ai_chat_credits',
+        limit: 5,
+        used: 0,
+        remaining: 5,
+        resetAtMs,
+        windowMs: 60 * 60 * 1000,
+        subjectType: 'wallet',
+      }),
+    ).toBeNull();
+    expect(
+      getAiChatCreditStatusPollMs({
+        kind: 'ai_chat_credits',
+        limit: 5,
+        used: 1,
+        remaining: 4,
+        resetAtMs,
+        windowMs: 60 * 60 * 1000,
+        subjectType: 'wallet',
+      }),
+    ).toBe(60_000);
+    expect(
+      getAiChatCreditStatusPollMs({
+        kind: 'ai_chat_credits',
+        limit: 5,
+        used: 5,
+        remaining: 0,
+        resetAtMs,
+        windowMs: 60 * 60 * 1000,
+        subjectType: 'wallet',
+      }),
+    ).toBe(15_000);
   });
 });

@@ -107,6 +107,7 @@ export const AGENTIC_TOOL_METADATA = {
     parallelSafe: true,
     modelInstructions: [
       'Use when the user asks which tokenized stocks, ETFs, xStocks, or RWA assets are available.',
+      'For one stock/ticker/name, pass the asset argument and return only that asset instead of a full catalog.',
       'Use this before answering RWA catalog or stock ticker availability questions.',
       'Do not use normal swap tools for tokenized stocks or RWAs.',
     ],
@@ -139,6 +140,7 @@ export const AGENTIC_TOOL_METADATA = {
     modelInstructions: [
       'Use when the user asks to buy or sell a tokenized stock, ETF, xStock, or RWA and provides asset, side, and amount.',
       'Buy amount is settlement cash amount. Sell amount is the RWA token quantity.',
+      'On devnet, RWA buy settlement is RWAUSDC. If the user says USDC in an RWA buy, treat it as RWAUSDC and correct the pair in the reply.',
       'Ask one short clarification if asset, side, or amount is missing. Never submit; the app confirmation card handles signing.',
     ],
   },

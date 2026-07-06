@@ -149,9 +149,9 @@ const TAB_LABELS: Record<string, string> = {
   rwas: 'RWAs',
 };
 
-// Swap and RWAs own full-screen flows with their own headers/actions.
-// Scanner/chat keep the bottom chrome visible.
-const FULL_SCREEN_TAB_ROUTES = new Set(['swap', 'rwas']);
+// Full-screen flows own their own bottom actions/composer and must not sit
+// underneath the global tab/FAB chrome.
+const FULL_SCREEN_TAB_ROUTES = new Set(['swap', 'rwas', 'chat']);
 
 interface QuickAction {
   id: string;

@@ -158,6 +158,49 @@ describe('buildAgenticToolResultCards', () => {
     });
   });
 
+  it('builds a single RWA stock preview card for specific asset results', () => {
+    const cards = buildAgenticToolResultCards([
+      {
+        toolCallId: 'call-rwa-asset',
+        name: 'get_rwa_assets',
+        result: {
+          status: 'ok',
+          mode: 'asset',
+          asset: {
+            symbol: 'SPCXd',
+            underlyingSymbol: 'SPCX',
+            name: 'SpaceX Sandbox RWA',
+            category: 'equity',
+            devnetSandbox: true,
+            logo: null,
+            priceUsd: 12.34,
+            tradable: true,
+            settlementSymbol: 'RWAUSDC',
+            holding: '0.1',
+          },
+          assets: [],
+        },
+      },
+    ]);
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      title: 'SpaceX',
+      subtitle: 'SPCXd $12.34',
+      rwaAsset: {
+        kind: 'rwa_asset',
+        symbol: 'SPCXd',
+        displayName: 'SpaceX',
+        categoryLabel: 'Equity',
+        underlyingSymbol: 'SPCX',
+        priceLabel: '$12.34',
+        settlementSymbol: 'RWAUSDC',
+        holding: '0.1',
+      },
+    });
+    expect(cards[0].items).toBeUndefined();
+  });
+
   it('skips successful draft tools because confirmation cards cover them', () => {
     const cards = buildAgenticToolResultCards([
       {

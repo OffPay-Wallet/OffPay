@@ -247,6 +247,20 @@ export interface AgenticToolCardItem {
   tone?: AgenticToolCardTone;
 }
 
+export interface AgenticRwaAssetCardPreview {
+  kind: 'rwa_asset';
+  symbol: string;
+  name: string;
+  displayName: string;
+  categoryLabel: string;
+  underlyingSymbol: string | null;
+  priceLabel: string;
+  logoUri: string | null;
+  tradable: boolean;
+  settlementSymbol: string;
+  holding: string | null;
+}
+
 export interface AgenticChatToolCard {
   id: string;
   toolName: string;
@@ -255,6 +269,7 @@ export interface AgenticChatToolCard {
   tone?: AgenticToolCardTone;
   rows?: AgenticToolCardRow[];
   items?: AgenticToolCardItem[];
+  rwaAsset?: AgenticRwaAssetCardPreview;
   footer?: string | null;
 }
 

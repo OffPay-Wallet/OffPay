@@ -1,6 +1,7 @@
 import type { AgentToolResult } from '@/lib/agentic-payments/types';
 import type {
   AgenticChatToolCard,
+  AgenticRwaAssetCardPreview,
   AgenticToolCardItem,
   AgenticToolCardRow,
   AgenticToolCardTone,
@@ -9,6 +10,7 @@ import type {
 const MAX_TOOL_CARDS = 3;
 const MAX_ITEMS_PER_CARD = 5;
 const MAX_ROWS_PER_CARD = 5;
+const XSTOCKS_LOGO_BASE_URL = 'https://xstocks-metadata.backed.fi/logos/tokens';
 
 const BACKGROUND_TOOL_NAMES = new Set(['resolve_recipient', 'list_local_contacts']);
 
@@ -379,6 +381,11 @@ function buildRwaAssetsCard(
   toolResult: AgentToolResult,
   result: Record<string, unknown>,
 ): AgenticChatToolCard {
+  const specificAsset = asRecord(result.asset);
+  if (specificAsset != null) {
+    return buildRwaAssetPreviewCard(toolResult, specificAsset);
+  }
+
   const assets = arrayOfRecords(result.assets);
   return {
     id: `${toolResult.toolCallId}:rwa-assets`,
@@ -392,6 +399,42 @@ function buildRwaAssetsCard(
       tone: asset.tradable === false ? 'warning' : 'default',
     })),
     footer: result.truncated === true ? 'More RWAs are available.' : null,
+  };
+}
+
+function buildRwaAssetPreviewCard(
+  toolResult: AgentToolResult,
+  asset: Record<string, unknown>,
+): AgenticChatToolCard {
+  const preview = buildRwaAssetPreview(asset);
+  return {
+    id: `${toolResult.toolCallId}:rwa-asset`,
+    toolName: toolResult.name,
+    title: preview.displayName,
+    subtitle: `${preview.symbol} ${preview.priceLabel}`,
+    tone: preview.tradable ? 'success' : 'warning',
+    rwaAsset: preview,
+  };
+}
+
+function buildRwaAssetPreview(asset: Record<string, unknown>): AgenticRwaAssetCardPreview {
+  const symbol = readString(asset.symbol) ?? 'RWA';
+  const name = readString(asset.name) ?? symbol;
+  const underlyingSymbol = readString(asset.underlyingSymbol);
+  const devnetSandbox = asset.devnetSandbox === true;
+  const explicitLogo = readString(asset.logo);
+  return {
+    kind: 'rwa_asset',
+    symbol,
+    name,
+    displayName: formatRwaDisplayName({ devnetSandbox, name, symbol }),
+    categoryLabel: formatRwaCategory(readString(asset.category)),
+    underlyingSymbol,
+    priceLabel: formatMoney(asset.priceUsd),
+    logoUri: explicitLogo ?? getXStocksLogoUri(underlyingSymbol ?? symbol),
+    tradable: asset.tradable !== false,
+    settlementSymbol: readString(asset.settlementSymbol) ?? 'USDC',
+    holding: readString(asset.holding),
   };
 }
 
@@ -641,6 +684,38 @@ function formatMoney(value: unknown): string {
   const number = readNumber(value);
   if (number == null) return '--';
   return formatCurrency(number, 'USD');
+}
+
+function formatRwaCategory(value: string | null): string {
+  if (value === 'equity') return 'Equity';
+  if (value === 'etf') return 'ETF';
+  if (value === 'treasury') return 'Treasury';
+  if (value === 'commodity') return 'Commodity';
+  return 'RWA';
+}
+
+function formatRwaDisplayName(asset: {
+  devnetSandbox: boolean;
+  name: string;
+  symbol: string;
+}): string {
+  if (!asset.devnetSandbox) return asset.name;
+  const cleaned = asset.name
+    .replace(/\s+Sandbox(?:\s+RWA)?$/i, '')
+    .replace(/\s+RWA$/i, '')
+    .trim();
+  return cleaned.length > 0 ? cleaned : asset.symbol;
+}
+
+function getXStocksLogoUri(value: string | null | undefined): string | null {
+  const normalized = value
+    ?.trim()
+    .replace(/[^A-Za-z0-9.]/g, '')
+    .replace(/d$/i, '')
+    .toUpperCase();
+  return normalized != null && normalized.length > 0
+    ? `${XSTOCKS_LOGO_BASE_URL}/${normalized}x.png`
+    : null;
 }
 
 function formatCurrency(value: number, currency: string): string {

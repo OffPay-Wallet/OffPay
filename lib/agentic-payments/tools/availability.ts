@@ -10,7 +10,6 @@ export type AgenticChatCtaId =
   | 'balance'
   | 'activity'
   | 'send'
-  | 'private-send'
   | 'swap'
   | 'rwa'
   | 'payroll'
@@ -92,7 +91,6 @@ export function getAvailableAgenticChatCtaIds(
   if (canUseWalletBalanceTools(params)) ctas.push('balance');
   if (canUseWalletActivityTools(params)) ctas.push('activity');
   if (canUseNormalSendTools(params)) ctas.push('send');
-  if (canUseUmbraVaultActionTools(params)) ctas.push('private-send');
   if (canUseSwapTools(params)) ctas.push('swap');
   if (canUseRwaReadTools(params)) ctas.push('rwa');
   if (canUsePayrollTools(params)) ctas.push('payroll');

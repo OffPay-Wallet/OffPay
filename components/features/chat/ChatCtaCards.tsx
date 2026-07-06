@@ -52,13 +52,6 @@ const CHAT_CTAS: readonly ChatCta[] = [
     prompt: 'I want to send money',
   },
   {
-    id: 'private-send',
-    title: 'Private',
-    caption: 'Shield balance',
-    icon: 'lock-closed-outline',
-    prompt: 'Shield funds into my Umbra vault',
-  },
-  {
     id: 'swap',
     title: 'Swap',
     caption: 'Quote tokens',
@@ -234,7 +227,8 @@ const styles = StyleSheet.create({
     minHeight: 72,
     minWidth: 132,
     flexBasis: '47%',
-    flexGrow: 1,
+    flexGrow: 0,
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,

@@ -19,6 +19,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router/react-navigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -59,6 +60,12 @@ import { ChatMessageList } from './ChatMessageList';
 import { ChatPromptDock } from './ChatPromptDock';
 import { AgenticActionDraftSheet } from './AgenticActionDraftSheet';
 import { isAgenticDraftSheetAction } from './AgenticActionCard';
+import {
+  AI_CREDITS_UNKNOWN_LABEL,
+  buildCreditIndicator,
+  formatCreditResetLabel,
+  type ChatCreditIndicator,
+} from './chat-credit-label';
 import { CHAT_DRAWER_MAX_WIDTH, PROMPT_DOCK_COLLAPSED_BASE_HEIGHT } from './constants';
 import { headerStyles } from './styles/header';
 import {
@@ -89,12 +96,6 @@ import type { PayrollStageOutcome } from '@/hooks/payroll/usePayrollChatIntake';
 import type { PayrollRoutePolicy } from '@/lib/payroll/payroll-types';
 import type { AiChatCreditStatus } from '@/lib/agentic-payments/types';
 
-interface ChatCreditIndicator {
-  label: string;
-  tone: 'ready' | 'low' | 'empty' | 'loading' | 'error';
-  resetLabel?: string | null;
-}
-
 function payrollActionId(runId: string): string {
   return `payroll-action-${runId}`;
 }
@@ -108,53 +109,6 @@ function isCompletePortfolioValuation(
   );
 }
 
-function buildCreditIndicator(
-  credits: AiChatCreditStatus | null,
-  loading: boolean,
-  error: string | null,
-  nowMs: number,
-): ChatCreditIndicator | null {
-  if (credits == null) {
-    if (loading) {
-      return { label: AI_CREDITS_UNKNOWN_LABEL, tone: 'loading' };
-    }
-    if (error != null) {
-      return { label: AI_CREDITS_UNKNOWN_LABEL, tone: 'error' };
-    }
-    return null;
-  }
-
-  const remaining = credits.remaining;
-  const tone: ChatCreditIndicator['tone'] =
-    remaining <= 0 ? 'empty' : remaining <= 1 ? 'low' : 'ready';
-
-  return {
-    label: `${remaining}/${credits.limit}`,
-    tone,
-    resetLabel:
-      remaining <= 0
-        ? credits.resetAtMs <= nowMs && loading
-          ? 'syncing reset'
-          : `resets ${formatCompactCreditResetLabel(credits.resetAtMs, nowMs)}`
-        : null,
-  };
-}
-
-function formatCreditResetLabel(resetAtMs: number, nowMs: number): string {
-  const remainingMs = Math.max(0, resetAtMs - nowMs);
-  if (remainingMs <= 1_000) return 'now';
-
-  const minutes = Math.ceil(remainingMs / 60_000);
-  if (minutes < 60) return `in ${minutes}m`;
-
-  const hours = Math.ceil(minutes / 60);
-  return `in ${hours}h`;
-}
-
-function formatCompactCreditResetLabel(resetAtMs: number, nowMs: number): string {
-  return formatCreditResetLabel(resetAtMs, nowMs).replace(/^in\s+/, '');
-}
-
 function formatHeaderCreditLabel(creditIndicator: ChatCreditIndicator | null): string {
   if (creditIndicator == null) return AI_CREDITS_UNKNOWN_LABEL;
   return creditIndicator.label;
@@ -166,7 +120,6 @@ function areCreditsExhausted(credits: AiChatCreditStatus | null, nowMs = Date.no
 
 const EMPTY_CHAT_MESSAGES: readonly AgenticChatMessage[] = [];
 const EMPTY_CHAT_ACTIONS: readonly AgenticChatAction[] = [];
-const AI_CREDITS_UNKNOWN_LABEL = '--/5';
 const CREDIT_CLOCK_TICK_MS = 30_000;
 const CREDIT_RESET_CLOCK_SKEW_MS = 250;
 
@@ -192,6 +145,14 @@ export function ChatScreen(): React.JSX.Element {
   const { scope, scopeKey } = useAgenticChatScope();
   useAgenticPendingSweep(scope);
   const aiCredits = useAiChatCredits(scopeKey);
+  const refreshAiCredits = aiCredits.refresh;
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshAiCredits();
+      return undefined;
+    }, [refreshAiCredits]),
+  );
 
   const setActiveConversation = useAgenticChatStore((s) => s.setActiveConversation);
   const deleteConversation = useAgenticChatStore((s) => s.deleteConversation);
@@ -275,7 +236,11 @@ export function ChatScreen(): React.JSX.Element {
     const resetLabel =
       aiCredits.credits == null
         ? 'Try again after the credit window resets.'
-        : `Resets ${formatCreditResetLabel(aiCredits.credits.resetAtMs, Date.now())}.`;
+        : `Resets ${formatCreditResetLabel(
+            aiCredits.credits.resetAtMs,
+            Date.now(),
+            aiCredits.credits.windowMs,
+          )}.`;
     showToast({
       title: 'Yuga credits used',
       message: resetLabel,
@@ -1152,8 +1117,7 @@ export function ChatScreen(): React.JSX.Element {
           prompt={prompt}
           busy={agentBusy}
           canSubmit={canSubmit}
-          bottomInset={promptBottomInset}
-          keyboardOffset={keyboardOffset}
+          bottomInset={insets.bottom}
           horizontalPadding={horizontalPadding}
           onLayout={handlePromptDockLayout}
           onChangeText={setPrompt}
