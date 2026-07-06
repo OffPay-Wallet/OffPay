@@ -12,6 +12,7 @@ export interface DevnetAirdropResult {
     capRawAmount: string;
     capAmount: number;
     recipientTokenAccount: string;
+    status: 'sent' | 'already_at_cap';
   }>;
   nextEligibleAt: number;
 }
@@ -73,6 +74,11 @@ export async function requestDevnetSolAirdrop(
       capRawAmount: token.capRawAmount,
       capAmount: token.capAmount,
       recipientTokenAccount: token.recipientTokenAccount,
+      status:
+        token.status ??
+        (/^\d+$/.test(token.rawAmount) && BigInt(token.rawAmount) > 0n
+          ? 'sent'
+          : 'already_at_cap'),
     })),
     nextEligibleAt: result.nextEligibleAt,
   };

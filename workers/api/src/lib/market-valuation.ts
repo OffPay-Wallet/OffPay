@@ -2,14 +2,17 @@ import { fetchAlchemyTokenUsdPrice, type AlchemyTokenPriceIdentifier } from './a
 import { createCacheKey, memoryCache } from './cache.js';
 import { fetchUsdToCurrencyRate } from './fx-rates.js';
 import { HOT_PRICE_CACHE_KEY, type HotTokenPrices } from './hot-cache.js';
+import { readDevnetRwaCatalogTokenMap } from './rwa-devnet-catalog.js';
 import type { Bindings, Network } from './types.js';
 import { isValidSolanaAddress } from './validation.js';
 
 const ALCHEMY_SOLANA_MAINNET_NETWORK = 'solana-mainnet';
+const DEFAULT_JUPITER_API_BASE_URL = 'https://api.jup.ag';
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_PRICE_CACHE_TTL_MS = 60_000;
 const TOKEN_PRICE_BATCH_CONCURRENCY = 6;
-const USD_STABLE_PRICE_SYMBOLS = new Set(['USDC', 'USDT', 'DUSDC', 'DUSDT']);
+const JUPITER_PRICE_TIMEOUT_MS = 12_000;
+const USD_STABLE_PRICE_SYMBOLS = new Set(['USDC', 'USDT', 'DUSDC', 'DUSDT', 'RWAUSDC']);
 
 interface TokenPriceBatchInput {
   mint: string;
@@ -111,6 +114,88 @@ function priceLookupCacheKey(lookup: AlchemyTokenPriceIdentifier): string {
     : createCacheKey('alchemy-token-price', ['address', lookup.network, lookup.address]);
 }
 
+function jupiterReferencePriceCacheKey(referenceMint: string): string {
+  return createCacheKey('jupiter-reference-token-price', [referenceMint]);
+}
+
+function readJupiterApiBaseUrl(bindings: Bindings): string | null {
+  const configuredUrl = bindings.JUPITER_API_BASE_URL?.trim() || DEFAULT_JUPITER_API_BASE_URL;
+
+  try {
+    const parsed = new URL(configuredUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+async function fetchJupiterReferenceUsdPrice(
+  bindings: Bindings,
+  referenceMint: string,
+): Promise<number | null> {
+  const baseUrl = readJupiterApiBaseUrl(bindings);
+  const apiKey = bindings.JUPITER_API_KEY?.trim();
+  if (!baseUrl || !apiKey || !isValidSolanaAddress(referenceMint)) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), JUPITER_PRICE_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/price/v3?ids=${encodeURIComponent(referenceMint)}`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'x-api-key': apiKey,
+        },
+        signal: controller.signal,
+      },
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as Record<string, unknown>;
+    const entry = payload[referenceMint];
+    const price =
+      typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>).usdPrice
+        : null;
+    return isPositiveUsdPrice(price) ? price : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchCachedJupiterReferenceUsdPrice(
+  bindings: Bindings,
+  referenceMint: string,
+): Promise<number | null> {
+  const cached = await memoryCache.getOrSet<CachedUsdPrice>(
+    jupiterReferencePriceCacheKey(referenceMint),
+    TOKEN_PRICE_CACHE_TTL_MS,
+    async () => ({
+      value: await fetchJupiterReferenceUsdPrice(bindings, referenceMint),
+    }),
+  );
+
+  return cached.value;
+}
+
+async function resolveDevnetRwaUsdPrice(
+  bindings: Bindings,
+  network: Network,
+  token: TokenPriceBatchInput,
+): Promise<number | null> {
+  if (network !== 'devnet') return null;
+  const catalogToken = readDevnetRwaCatalogTokenMap(bindings).get(token.mint.trim());
+  if (catalogToken == null) return null;
+  if (catalogToken.settlement) return 1;
+  if (catalogToken.priceReferenceMint == null) return null;
+  return fetchCachedJupiterReferenceUsdPrice(bindings, catalogToken.priceReferenceMint);
+}
+
 async function fetchCachedLookupUsdPrice(
   bindings: Bindings,
   lookup: AlchemyTokenPriceIdentifier,
@@ -135,6 +220,9 @@ async function resolveTokenUsdPrice(
   if (isUsdStablePriceSymbol(token.priceSymbol)) {
     return 1;
   }
+
+  const devnetRwaPrice = await resolveDevnetRwaUsdPrice(bindings, network, token);
+  if (devnetRwaPrice != null) return devnetRwaPrice;
 
   const hotPrice = await readHotUsdPrice(
     bindings,

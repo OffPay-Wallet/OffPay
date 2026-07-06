@@ -743,6 +743,7 @@ export interface DevnetAirdropResponse {
     capRawAmount: string;
     capAmount: number;
     recipientTokenAccount: string;
+    status?: 'sent' | 'already_at_cap';
   }>;
   nextEligibleAt: number;
 }

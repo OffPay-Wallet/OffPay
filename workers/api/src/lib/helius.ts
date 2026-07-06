@@ -6,6 +6,10 @@ import {
   getRpcHttpUrlCandidates,
   type RpcProviderEndpoint,
 } from './solana-rpc-providers.js';
+import {
+  readDevnetRwaCatalogTokenMap,
+  type DevnetRwaCatalogToken,
+} from './rwa-devnet-catalog.js';
 import type { Bindings, Network } from './types.js';
 import { isRecord, isValidSolanaAddress } from './validation.js';
 
@@ -1899,16 +1903,41 @@ function parseTokenMetadataFromAsset(
   };
 }
 
+function parseTokenMetadataFromDevnetRwaCatalog(token: DevnetRwaCatalogToken): TokenMetadata {
+  return {
+    name: token.name,
+    symbol: token.symbol,
+    logo: token.logo,
+    decimals: token.decimals,
+    verified: true,
+    spam: false,
+  };
+}
+
 async function fetchTokenMetadataMap(
   bindings: Bindings,
   network: Network,
   mints: readonly string[],
 ): Promise<Map<string, TokenMetadata>> {
   const uniqueMints = Array.from(new Set(mints.filter((mint) => isValidSolanaAddress(mint))));
+  const devnetRwaTokens =
+    network === 'devnet' ? readDevnetRwaCatalogTokenMap(bindings) : new Map();
   const metadataByMint = new Map<string, TokenMetadata>();
   const missingMints: string[] = [];
 
   for (const mint of uniqueMints) {
+    const devnetRwaToken = devnetRwaTokens.get(mint);
+    if (devnetRwaToken != null) {
+      const metadata = parseTokenMetadataFromDevnetRwaCatalog(devnetRwaToken);
+      metadataByMint.set(mint, metadata);
+      memoryCache.set(
+        createNetworkCacheKey(network, 'token-metadata', [mint]),
+        metadata,
+        TOKEN_METADATA_CACHE_TTL_MS,
+      );
+      continue;
+    }
+
     const cachedMetadata = memoryCache.get<TokenMetadata>(
       createNetworkCacheKey(network, 'token-metadata', [mint]),
     );
@@ -2970,7 +2999,7 @@ const DISPLAY_SWAP_SIGNAL_PATTERN =
 
 function normalizeDisplayTokenSymbol(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
-  return trimmed ? trimmed.toUpperCase() : null;
+  return trimmed ? trimmed.slice(0, 24) : null;
 }
 
 function normalizeDisplayTokenMint(value: string | null | undefined): string | null {

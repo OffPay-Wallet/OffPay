@@ -61,6 +61,7 @@ export interface DevnetTreasuryTokenAirdrop {
   capRawAmount: string;
   capAmount: number;
   recipientTokenAccount: string;
+  status: 'sent' | 'already_at_cap';
 }
 
 export interface DevnetTreasuryAirdropResponse {
@@ -164,6 +165,20 @@ function capRawAmount(uiAmount: number, decimals: number): bigint {
   return BigInt(uiAmount) * 10n ** BigInt(decimals);
 }
 
+function readRwaSettlementFaucetToken(bindings: Bindings): FaucetTokenConfig | null {
+  const rwaSettlementMint = bindings.OFFPAY_RWA_DEVNET_SETTLEMENT_MINT?.trim() ?? '';
+  if (rwaSettlementMint.length === 0) return null;
+
+  return {
+    symbol: 'RWAUSDC',
+    name: 'Devnet RWA Settlement USDC',
+    mint: assertConfiguredMint(rwaSettlementMint, 'Devnet RWA settlement USDC'),
+    decimals: TOKEN_DECIMALS,
+    capUiAmount: 1_000,
+    capRawAmount: 1_000_000_000n,
+  };
+}
+
 function readDevnetSandboxAssetTokens(bindings: Bindings): FaucetTokenConfig[] {
   const rawCatalog = bindings.OFFPAY_RWA_DEVNET_ASSETS_JSON?.trim() ?? '';
   if (rawCatalog.length === 0) {
@@ -224,8 +239,9 @@ function getGeneralFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
     bindings.OFFPAY_DEVNET_USDC_MINT ?? DEVNET_USDC_MINT,
     'Devnet USDC',
   );
+  const rwaSettlementToken = readRwaSettlementFaucetToken(bindings);
 
-  return [
+  const tokens: FaucetTokenConfig[] = [
     {
       symbol: 'dUSDC',
       name: 'Devnet USDC (Umbra test)',
@@ -251,14 +267,20 @@ function getGeneralFaucetTokens(bindings: Bindings): FaucetTokenConfig[] {
       capRawAmount: 5_000_000n,
     },
   ];
+
+  if (rwaSettlementToken != null) {
+    tokens.push(rwaSettlementToken);
+  }
+
+  return tokens;
 }
 
 function getRwaSandboxFaucetTokens(
   bindings: Bindings,
   request?: DevnetTreasuryAirdropRequest,
 ): FaucetTokenConfig[] {
-  const rwaSettlementMint = bindings.OFFPAY_RWA_DEVNET_SETTLEMENT_MINT?.trim() ?? '';
-  if (rwaSettlementMint.length === 0) {
+  const rwaSettlementToken = readRwaSettlementFaucetToken(bindings);
+  if (rwaSettlementToken == null) {
     throw new AppError({
       status: 503,
       code: 'UPSTREAM_UNAVAILABLE',
@@ -266,16 +288,7 @@ function getRwaSandboxFaucetTokens(
     });
   }
 
-  const tokens: FaucetTokenConfig[] = [
-    {
-      symbol: 'RWAUSDC',
-      name: 'Devnet RWA Settlement USDC',
-      mint: assertConfiguredMint(rwaSettlementMint, 'Devnet RWA settlement USDC'),
-      decimals: TOKEN_DECIMALS,
-      capUiAmount: 1_000,
-      capRawAmount: 1_000_000_000n,
-    },
-  ];
+  const tokens: FaucetTokenConfig[] = [rwaSettlementToken];
 
   const requestedAssetMint = request?.rwaAssetMint?.trim() ?? '';
   if (requestedAssetMint.length > 0) {
@@ -523,6 +536,7 @@ export async function requestDevnetTreasuryAirdrop(
       capRawAmount: plan.token.capRawAmount.toString(),
       capAmount: plan.token.capUiAmount,
       recipientTokenAccount: plan.recipientTokenAccount,
+      status: transferRawAmount > 0n ? 'sent' : 'already_at_cap',
     });
   }
 

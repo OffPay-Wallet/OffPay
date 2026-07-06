@@ -1,13 +1,15 @@
 import { Buffer } from 'buffer';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { Keypair } from '@solana/web3.js';
+import { Keypair, Transaction } from '@solana/web3.js';
 
+import { memoryCache } from '../cache';
 import { requestDevnetTreasuryAirdrop } from '../devnet-faucet';
 import { resetHeliusFetchImplementation, setHeliusFetchImplementation } from '../helius';
 
 import type { Bindings } from '../types';
 
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const TRANSFER_CHECKED_INSTRUCTION = 12;
 const RWA_ASSET_MINT = 'CrieBJEXarFm2C7vgPJs9v7M9PLuHV6axkNWhjUTwKZq';
 const RWA_SETTLEMENT_MINT = 'GN2nuuhUG2PnG6RsdGEcucuu1Ev2HRaacmrprVWBmKdE';
 
@@ -60,6 +62,7 @@ describe('requestDevnetTreasuryAirdrop', () => {
   let kvStore: Map<string, string>;
 
   beforeEach(() => {
+    memoryCache.clear();
     originalFetch = globalThis.fetch;
     kvStore = new Map<string, string>();
     globalThis.fetch = jest.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -97,6 +100,7 @@ describe('requestDevnetTreasuryAirdrop', () => {
   });
 
   afterEach(() => {
+    memoryCache.clear();
     globalThis.fetch = originalFetch;
     resetHeliusFetchImplementation();
     jest.restoreAllMocks();
@@ -183,7 +187,8 @@ describe('requestDevnetTreasuryAirdrop', () => {
     });
   });
 
-  it('omits RWA sandbox tokens from default faucet calls', async () => {
+  it('includes RWAUSDC but omits individual RWA assets from default faucet calls', async () => {
+    let broadcastTransaction: Transaction | null = null;
     setHeliusFetchImplementation(
       jest.fn(async (_input: string, init: RequestInit) => {
         const request = JSON.parse(String(init.body)) as {
@@ -227,6 +232,8 @@ describe('requestDevnetTreasuryAirdrop', () => {
         }
 
         if (request.method === 'sendTransaction') {
+          const rawTransaction = Array.isArray(request.params) ? String(request.params[0]) : '';
+          broadcastTransaction = Transaction.from(Buffer.from(rawTransaction, 'base64'));
           return jsonRpcResponse(
             request.id,
             '2UV7CJH8ocFrkEQe8yRE2PW8ckZjsJdKqeGhBmjowwkgTKRJuRvy58aZnqQq9QfF87hbHDLpKfJ9kvCYXx1ji5a1',
@@ -248,7 +255,108 @@ describe('requestDevnetTreasuryAirdrop', () => {
       },
     );
 
-    expect(result.tokens.map((token) => token.symbol)).toEqual(['dUSDC', 'dUSDT', 'USDC']);
+    expect(result.tokens.map((token) => token.symbol)).toEqual([
+      'dUSDC',
+      'dUSDT',
+      'USDC',
+      'RWAUSDC',
+    ]);
+    expect(result.tokens.every((token) => token.status === 'sent')).toBe(true);
+    const tokenTransferInstructionCount =
+      broadcastTransaction == null
+        ? 0
+        : (broadcastTransaction as Transaction).instructions.filter((instruction) =>
+          instruction.programId.toBase58() === TOKEN_PROGRAM_ID &&
+          instruction.data[0] === TRANSFER_CHECKED_INSTRUCTION,
+        ).length;
+    expect(tokenTransferInstructionCount).toBe(4);
+  });
+
+  it('marks already funded tokens without adding token transfer instructions', async () => {
+    let broadcastTransaction: Transaction | null = null;
+    setHeliusFetchImplementation(
+      jest.fn(async (_input: string, init: RequestInit) => {
+        const request = JSON.parse(String(init.body)) as {
+          id: unknown;
+          method: string;
+          params: unknown[];
+        };
+
+        if (request.method === 'getBalance') {
+          return jsonRpcResponse(request.id, { value: 10_000_000_000 });
+        }
+
+        if (request.method === 'getMultipleAccounts') {
+          const addresses = Array.isArray(request.params[0]) ? (request.params[0] as string[]) : [];
+          return jsonRpcResponse(request.id, {
+            value: addresses.map((_, index) => {
+              const isTreasuryAccount = index % 2 === 0;
+              const tokenIndex = Math.floor(index / 2);
+              const recipientCap =
+                tokenIndex === 2
+                  ? 5_000_000n
+                  : tokenIndex === 3
+                    ? 1_000_000_000n
+                    : 100_000_000n;
+              return {
+                data: [
+                  tokenAccountDataBase64(isTreasuryAccount ? 1_000_000_000n : recipientCap),
+                  'base64',
+                ],
+                executable: false,
+                lamports: 2_039_280,
+                owner: TOKEN_PROGRAM_ID,
+                rentEpoch: 0,
+              };
+            }),
+          });
+        }
+
+        if (request.method === 'getLatestBlockhash') {
+          return jsonRpcResponse(request.id, {
+            value: {
+              blockhash: '11111111111111111111111111111111',
+              lastValidBlockHeight: 1_000,
+            },
+          });
+        }
+
+        if (request.method === 'sendTransaction') {
+          const rawTransaction = Array.isArray(request.params) ? String(request.params[0]) : '';
+          broadcastTransaction = Transaction.from(Buffer.from(rawTransaction, 'base64'));
+          return jsonRpcResponse(
+            request.id,
+            '2UV7CJH8ocFrkEQe8yRE2PW8ckZjsJdKqeGhBmjowwkgTKRJuRvy58aZnqQq9QfF87hbHDLpKfJ9kvCYXx1ji5a1',
+          );
+        }
+
+        throw new Error(`Unexpected RPC method ${request.method}`);
+      }),
+    );
+
+    const result = await requestDevnetTreasuryAirdrop(
+      {
+        ...bindings,
+        OFFPAY_DEVNET_USDC_MINT: RWA_ASSET_MINT,
+      },
+      {
+        walletAddress: recipientKeypair.publicKey.toBase58(),
+      },
+    );
+
+    expect(result.tokens.map((token) => token.status)).toEqual([
+      'already_at_cap',
+      'already_at_cap',
+      'already_at_cap',
+    ]);
+    const tokenTransferInstructionCount =
+      broadcastTransaction == null
+        ? 0
+        : (broadcastTransaction as Transaction).instructions.filter((instruction) =>
+          instruction.programId.toBase58() === TOKEN_PROGRAM_ID &&
+          instruction.data[0] === TRANSFER_CHECKED_INSTRUCTION,
+        ).length;
+    expect(tokenTransferInstructionCount).toBe(0);
   });
 
   it('releases the faucet cooldown when transaction broadcast fails', async () => {

@@ -30,6 +30,7 @@ import {
   offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
+import { prefetchOffpayWalletDashboard } from '@/lib/api/offpay-dashboard-cache';
 import {
   getDevnetAirdropErrorMessage,
   getDevnetAirdropRetryAfterMs,
@@ -45,12 +46,43 @@ import { useAppStore } from '@/store/app';
 import { useNotificationStore } from '@/store/notificationStore';
 import { useWalletStore } from '@/store/walletStore';
 
+import type { DevnetAirdropResult } from '@/lib/faucet/devnet-airdrop';
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const TOGGLE_TIMING = { duration: 150, easing: Easing.out(Easing.cubic) };
 const WALLET_PROFILE_ICON = require('../../../assets/AppIcons/playstore.png') as number;
+const FAUCET_SETTLEMENT_REFRESH_DELAY_MS = 2_500;
+
+function hasPositiveRawTokenAmount(rawAmount: string): boolean {
+  return /^\d+$/.test(rawAmount) && BigInt(rawAmount) > 0n;
+}
+
+function formatTokenSymbolList(symbols: readonly string[]): string {
+  if (symbols.length === 0) return 'test tokens';
+  if (symbols.length <= 3) return symbols.join(', ');
+  return `${symbols.slice(0, 3).join(', ')} +${symbols.length - 3} more`;
+}
+
+function buildFaucetSuccessMessage(result: DevnetAirdropResult): string {
+  const sentSymbols = result.tokens
+    .filter((token) => token.status === 'sent' && hasPositiveRawTokenAmount(token.rawAmount))
+    .map((token) => token.symbol);
+  const cappedSymbols = result.tokens
+    .filter((token) => token.status === 'already_at_cap')
+    .map((token) => token.symbol);
+
+  if (sentSymbols.length === 0) {
+    return `${result.sol} SOL sent. Test tokens are already at faucet caps.`;
+  }
+
+  const sentMessage = `${result.sol} SOL and ${formatTokenSymbolList(sentSymbols)} sent to your wallet.`;
+  if (cappedSymbols.length === 0) return sentMessage;
+
+  return `${sentMessage} Already funded: ${formatTokenSymbolList(cappedSymbols)}.`;
+}
 
 function formatFaucetCooldown(milliseconds: number): string {
   const totalMinutes = Math.max(1, Math.ceil(milliseconds / 60_000));
@@ -286,7 +318,7 @@ function HomeHeaderComponent({
     setFaucetBusy(true);
     showToast({
       title: 'Airdrop requested',
-      message: 'Requesting 0.25 Devnet SOL and test tokens.',
+      message: 'Requesting 0.25 Devnet SOL, RWAUSDC, and test tokens.',
       variant: 'info',
       persistToNotificationCenter: false,
     });
@@ -297,8 +329,8 @@ function HomeHeaderComponent({
       setFaucetNow(Date.now());
 
       showToast({
-        title: 'Devnet SOL added',
-        message: `${result.sol} SOL plus test tokens sent to your wallet.`,
+        title: 'Devnet faucet complete',
+        message: buildFaucetSuccessMessage(result),
         variant: 'success',
         persistToNotificationCenter: false,
       });
@@ -315,6 +347,20 @@ function HomeHeaderComponent({
       void queryClient.invalidateQueries({
         queryKey: offpayWalletTokenTransactionsBaseQueryKey(publicKey, 'devnet'),
       });
+
+      const refreshWalletSnapshot = (): void => {
+        void prefetchOffpayWalletDashboard({
+          queryClient,
+          walletAddress: publicKey,
+          network: 'devnet',
+          useCache: false,
+          includeTransactions: true,
+          requestOwner: 'home.faucet.refresh',
+        });
+      };
+
+      refreshWalletSnapshot();
+      setTimeout(refreshWalletSnapshot, FAUCET_SETTLEMENT_REFRESH_DELAY_MS);
     } catch (error) {
       const retryAfterMs = getDevnetAirdropRetryAfterMs(error);
       if (retryAfterMs > 0) {
@@ -573,7 +619,7 @@ function HomeHeaderComponent({
               accessibilityRole="button"
               accessibilityLabel={
                 faucetCooldownLabel == null
-                  ? 'Airdrop Devnet SOL and test tokens'
+                  ? 'Airdrop Devnet SOL, RWAUSDC, and test tokens'
                   : `Devnet faucet available in ${faucetCooldownLabel}`
               }
               accessibilityState={{ busy: faucetBusy, disabled: faucetDisabled }}

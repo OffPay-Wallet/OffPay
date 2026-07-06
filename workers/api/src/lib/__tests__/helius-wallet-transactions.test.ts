@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
+  getWalletBalance,
   getWalletTokenTransactions,
   getWalletTransactions,
   resetHeliusFetchImplementation,
@@ -15,6 +16,9 @@ const SIGNATURE = '5JEBA3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9A3C9';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_ACCOUNT = '8Huh8yL4uY8r4nHkFiXLpFZ6LbWyKqVgL4PBYiX8FWXG';
 const OTHER_TOKEN_MINT = 'DezXAZ8z7PnrnRJjz3mP8cB1sMiBw1ZbrGdNd4T5wwf';
+const RWA_ASSET_MINT = '5yeucZisKb3uKCywapDwkZZr3YDeaQ71tu9YoTrD5WNC';
+const RWA_SETTLEMENT_MINT = 'GN2nuuhUG2PnG6RsdGEcucuu1Ev2HRaacmrprVWBmKdE';
+const RWA_PRICE_REFERENCE_MINT = 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W';
 const DEVNET_UMBRA_PROGRAM = 'DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ';
 const UMBRA_POOL = '9B5mqKTY4N6mNLLbnVMXg67thA6Z6hVSY8FzN4JNYqgd';
 
@@ -46,6 +50,24 @@ function withAlchemyRpc(
   } as Bindings;
 }
 
+function withDevnetRwaCatalog(overrides: Partial<Bindings> = {}): Bindings {
+  return {
+    ...bindings,
+    OFFPAY_RWA_DEVNET_SETTLEMENT_MINT: RWA_SETTLEMENT_MINT,
+    OFFPAY_RWA_DEVNET_ASSETS_JSON: JSON.stringify([
+      {
+        mint: RWA_ASSET_MINT,
+        symbol: 'SPYd',
+        name: 'SP500 Sandbox RWA',
+        decimals: 6,
+        priceReferenceMint: RWA_PRICE_REFERENCE_MINT,
+        underlyingSymbol: 'SPY',
+      },
+    ]),
+    ...overrides,
+  } as Bindings;
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -53,6 +75,30 @@ function jsonResponse(body: unknown): Response {
       'Content-Type': 'application/json',
     },
   });
+}
+
+function rpcTokenAccountEntry(params: {
+  pubkey: string;
+  mint: string;
+  amount: string;
+  decimals: number;
+}): Record<string, unknown> {
+  return {
+    pubkey: params.pubkey,
+    account: {
+      data: {
+        parsed: {
+          info: {
+            mint: params.mint,
+            tokenAmount: {
+              amount: params.amount,
+              decimals: params.decimals,
+            },
+          },
+        },
+      },
+    },
+  };
 }
 
 // Parsed getTransaction-style item for a native SOL transfer from WALLET to
@@ -166,6 +212,61 @@ function rawRpcSolToTokenSwapItem(params: {
           accountIndex: 1,
           mint: params.tokenMint,
           uiTokenAmount: { amount: params.tokenRawAmount, decimals: params.tokenDecimals },
+        },
+      ],
+    },
+  };
+}
+
+function rawRpcTokenToTokenSwapItem(params: {
+  signature: string;
+  blockTime: number;
+  debitMint: string;
+  debitRawAmount: string;
+  debitDecimals: number;
+  creditMint: string;
+  creditRawAmount: string;
+  creditDecimals: number;
+}): Record<string, unknown> {
+  return {
+    slot: 1000,
+    transactionIndex: 0,
+    blockTime: params.blockTime,
+    transaction: {
+      signatures: [params.signature],
+      message: { accountKeys: [{ pubkey: WALLET }], instructions: [] },
+    },
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [1_000_000_000],
+      postBalances: [999_995_000],
+      preTokenBalances: [
+        {
+          owner: WALLET,
+          accountIndex: 0,
+          mint: params.debitMint,
+          uiTokenAmount: { amount: params.debitRawAmount, decimals: params.debitDecimals },
+        },
+        {
+          owner: WALLET,
+          accountIndex: 1,
+          mint: params.creditMint,
+          uiTokenAmount: { amount: '0', decimals: params.creditDecimals },
+        },
+      ],
+      postTokenBalances: [
+        {
+          owner: WALLET,
+          accountIndex: 0,
+          mint: params.debitMint,
+          uiTokenAmount: { amount: '0', decimals: params.debitDecimals },
+        },
+        {
+          owner: WALLET,
+          accountIndex: 1,
+          mint: params.creditMint,
+          uiTokenAmount: { amount: params.creditRawAmount, decimals: params.creditDecimals },
         },
       ],
     },
@@ -686,6 +787,145 @@ function createGetTransactionsForAddressMock(
 describe('wallet transaction history (standard Solana RPC)', () => {
   afterEach(() => {
     resetHeliusFetchImplementation();
+  });
+
+  it('labels devnet RWA sandbox balances from the configured catalog', async () => {
+    const assetBatchIds: string[] = [];
+    const fetchMock = jest.fn(async (_input: string, init: RequestInit) => {
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getBalance') {
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { value: 3_996_460_000 },
+          };
+        }
+
+        if (request.method === 'getTokenAccountsByOwner') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const ownerConfig = (params[1] ?? {}) as Record<string, unknown>;
+          const programId = String(ownerConfig.programId ?? '');
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              value:
+                programId === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+                  ? [
+                      rpcTokenAccountEntry({
+                        pubkey: UMBRA_POOL,
+                        mint: RWA_SETTLEMENT_MINT,
+                        amount: '999000000',
+                        decimals: 6,
+                      }),
+                      rpcTokenAccountEntry({
+                        pubkey: TOKEN_ACCOUNT,
+                        mint: RWA_ASSET_MINT,
+                        amount: '1340',
+                        decimals: 6,
+                      }),
+                    ]
+                  : [],
+            },
+          };
+        }
+
+        if (request.method === 'getAssetBatch') {
+          const params = request.params as Record<string, unknown>;
+          const ids = Array.isArray(params.ids) ? params.ids : [];
+          assetBatchIds.push(...ids.map(String));
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: [],
+          };
+        }
+
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletBalance(withDevnetRwaCatalog(), {
+      address: WALLET,
+      network: 'devnet',
+      useCache: false,
+    });
+
+    const settlementToken = response.tokens.find((token) => token.mint === RWA_SETTLEMENT_MINT);
+    const assetToken = response.tokens.find((token) => token.mint === RWA_ASSET_MINT);
+
+    expect(settlementToken).toMatchObject({
+      name: 'RWAUSDC',
+      symbol: 'RWAUSDC',
+      balance: '999',
+      decimals: 6,
+      verified: true,
+      spam: false,
+    });
+    expect(assetToken).toMatchObject({
+      name: 'SPYd',
+      symbol: 'SPYd',
+      balance: '0.00134',
+      decimals: 6,
+      verified: true,
+      spam: false,
+    });
+    expect(assetBatchIds).not.toContain(RWA_SETTLEMENT_MINT);
+    expect(assetBatchIds).not.toContain(RWA_ASSET_MINT);
+  });
+
+  it('labels devnet RWA swap history from the configured catalog', async () => {
+    const swapSignature = `${SIGNATURE}rwa-swap`;
+    const fetchMock = createGetTransactionsForAddressMock([
+      rawRpcTokenToTokenSwapItem({
+        signature: swapSignature,
+        blockTime: 1781800500,
+        debitMint: RWA_SETTLEMENT_MINT,
+        debitRawAmount: '1000000',
+        debitDecimals: 6,
+        creditMint: RWA_ASSET_MINT,
+        creditRawAmount: '1340',
+        creditDecimals: 6,
+      }),
+    ]);
+
+    setHeliusFetchImplementation(fetchMock);
+
+    const response = await getWalletTransactions(withDevnetRwaCatalog(), {
+      address: WALLET,
+      network: 'devnet',
+      limit: 5,
+      useCache: false,
+    });
+
+    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions[0]).toMatchObject({
+      signature: swapSignature,
+      type: 'SWAP',
+      description: 'Swapped 1 RWAUSDC to 0.00134 SPYd',
+      amount: '0.00134',
+      rawAmount: '1340',
+      tokenMint: RWA_ASSET_MINT,
+      tokenSymbol: 'SPYd',
+      tokenName: 'SPYd',
+      tokenDecimals: 6,
+      direction: null,
+    });
+    expect(response.displayTransactions[0]).toMatchObject({
+      detailSignature: swapSignature,
+      tokenSymbol: 'SPYd',
+      tokenName: 'SPYd',
+    });
   });
 
   it('recovers native SOL amount and recipient from sparse parsed transfer records', async () => {

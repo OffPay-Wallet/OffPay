@@ -37,20 +37,14 @@ import {
 import {
   createRwaQuote,
   executeRwaQuote,
-  getRpcSignatureStatuses,
   getRwaAssets,
 } from '@/lib/api/offpay-api-client';
 import {
   signSerializedTransactionForWallet,
   signSerializedTransactionsForWallet,
 } from '@/lib/crypto/solana-transaction-signing';
-import { getDevnetAirdropErrorMessage, requestDevnetSolAirdrop } from '@/lib/faucet/devnet-airdrop';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
-import {
-  assertRwaDevnetSandboxFaucetCoversRequirement,
-  formatRwaDevnetSandboxFundingMessage,
-  getRwaDevnetSandboxFundingRequirement,
-} from '@/lib/rwa/devnet-sandbox-funding';
+import { getRwaDevnetSandboxFundingRequirement } from '@/lib/rwa/devnet-sandbox-funding';
 import { useWalletStore } from '@/store/walletStore';
 
 import type {
@@ -65,8 +59,6 @@ const RWA_ASSETS_GC_TIME_MS = 15 * 60 * 1000;
 const RWA_CONTENT_MAX_WIDTH = 560;
 const RWA_CASH_AMOUNT_MAX_LENGTH = 48;
 const RWA_CASH_AMOUNT_DECIMALS = 12;
-const RWA_DEVNET_FAUCET_CONFIRMATION_ATTEMPTS = 8;
-const RWA_DEVNET_FAUCET_CONFIRMATION_DELAY_MS = 750;
 const RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL = 'RWAUSDC';
 
 type RwaTradeSide = 'buy' | 'sell';
@@ -104,30 +96,6 @@ function getRwaSettlementDisplaySymbol(
 
 function rwaAssetsQueryKey(network: string | null) {
   return ['offpay', 'rwa', 'assets', network] as const;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForRwaDevnetFaucetConfirmation(signature: string): Promise<void> {
-  for (let attempt = 0; attempt < RWA_DEVNET_FAUCET_CONFIRMATION_ATTEMPTS; attempt += 1) {
-    const response = await getRpcSignatureStatuses({
-      network: 'devnet',
-      signatures: [signature],
-    });
-    const status = response.statuses[0];
-    if (status?.err != null) {
-      throw new Error('Devnet faucet transaction failed on-chain.');
-    }
-    if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') {
-      return;
-    }
-
-    await delay(RWA_DEVNET_FAUCET_CONFIRMATION_DELAY_MS);
-  }
-
-  throw new Error('Devnet faucet transaction is still pending. Wait a moment and retry signing.');
 }
 
 interface ParsedRwaCashAmount {
@@ -218,6 +186,17 @@ function getRwaErrorMessage(error: unknown): string {
     return error.message;
   }
   return 'RWA order failed.';
+}
+
+function formatRwaDevnetSandboxBalanceError(
+  side: RwaTradeSide,
+  requirement: NonNullable<ReturnType<typeof getRwaDevnetSandboxFundingRequirement>>,
+): string {
+  if (side === 'buy' && requirement.symbol === RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL) {
+    return `This Devnet buy needs ${requirement.amount} ${RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL}; wallet has ${requirement.balanceAmount}. Tap the gift faucet on Home to add ${RWA_DEVNET_SETTLEMENT_DISPLAY_SYMBOL}, then retry.`;
+  }
+
+  return `This Devnet sell needs ${requirement.amount} ${requirement.symbol}; wallet has ${requirement.balanceAmount}. Buy ${requirement.symbol} first or reduce the sell amount.`;
 }
 
 function formatPercent(value: number | null | undefined): string {
@@ -585,7 +564,7 @@ export default function RwasScreen(): React.JSX.Element {
     [queryClient],
   );
 
-  const ensureDevnetSandboxFunding = useCallback(
+  const assertDevnetSandboxFunding = useCallback(
     async (review: RwaQuoteReviewState): Promise<void> => {
       const getRequirement = (walletBalance = walletBalanceQuery.data ?? null) =>
         getRwaDevnetSandboxFundingRequirement({
@@ -604,36 +583,9 @@ export default function RwasScreen(): React.JSX.Element {
       requirement = getRequirement(refreshedBalance.data ?? walletBalanceQuery.data ?? null);
       if (requirement == null || requirement.hasEnough) return;
 
-      showToast({
-        title: 'Funding sandbox wallet',
-        message: formatRwaDevnetSandboxFundingMessage(requirement),
-        variant: 'info',
-        persistToNotificationCenter: false,
-      });
-
-      let faucetResult: Awaited<ReturnType<typeof requestDevnetSolAirdrop>>;
-      try {
-        faucetResult = await requestDevnetSolAirdrop(review.walletAddress, {
-          scope: 'rwa_sandbox',
-          rwaAssetMint:
-            review.side === 'sell' && requirement.mint === review.asset.mint
-              ? review.asset.mint
-              : undefined,
-        });
-      } catch (error) {
-        throw new Error(
-          `${requirement.symbol} balance is too low for this Devnet sandbox order. ${getDevnetAirdropErrorMessage(
-            error,
-          )}`,
-        );
-      }
-
-      assertRwaDevnetSandboxFaucetCoversRequirement(requirement, faucetResult);
-      await waitForRwaDevnetFaucetConfirmation(faucetResult.signature);
-      await invalidateWalletData(review.walletAddress, review.network);
-      void walletBalanceQuery.refetch();
+      throw new Error(formatRwaDevnetSandboxBalanceError(review.side, requirement));
     },
-    [invalidateWalletData, showToast, walletBalanceQuery.data, walletBalanceQuery.refetch],
+    [walletBalanceQuery.data, walletBalanceQuery.refetch],
   );
 
   const assetsQuery = useQuery({
@@ -699,7 +651,7 @@ export default function RwasScreen(): React.JSX.Element {
 
   const rwaExecuteMutation = useMutation<RwaBuyExecutionResult, unknown, RwaExecuteMutationInput>({
     mutationFn: async ({ review }) => {
-      await ensureDevnetSandboxFunding(review);
+      await assertDevnetSandboxFunding(review);
       const unsignedTransactions = review.quote.unsignedTransactions;
       if (
         review.network === 'devnet' &&
