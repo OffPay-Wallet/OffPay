@@ -21,6 +21,7 @@ interface OverlayVisibilityState {
   isOverlayActive: boolean;
   showOverlay: (id: string) => void;
   hideOverlay: (id: string) => void;
+  clearOverlays: () => void;
 }
 
 export const useOverlayVisibilityStore = create<OverlayVisibilityState>((set) => ({
@@ -37,5 +38,10 @@ export const useOverlayVisibilityStore = create<OverlayVisibilityState>((set) =>
       if (!state.activeOverlayIds.includes(id)) return state;
       const activeOverlayIds = state.activeOverlayIds.filter((value) => value !== id);
       return { activeOverlayIds, isOverlayActive: activeOverlayIds.length > 0 };
+    }),
+  clearOverlays: () =>
+    set((state) => {
+      if (state.activeOverlayIds.length === 0) return state;
+      return { activeOverlayIds: [], isOverlayActive: false };
     }),
 }));

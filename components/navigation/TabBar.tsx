@@ -17,7 +17,6 @@ import { PuffyHistoryIcon } from '@/components/ui/icons/PuffyHistoryIcon';
 import { PuffyHomeIcon } from '@/components/ui/icons/PuffyHomeIcon';
 import { PuffyRwaIcon } from '@/components/ui/icons/PuffyRwaIcon';
 import { PuffySettingsIcon } from '@/components/ui/icons/PuffySettingsIcon';
-import { PuffyShoppingIcon } from '@/components/ui/icons/PuffyShoppingIcon';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
@@ -144,13 +143,11 @@ const TAB_LABELS: Record<string, string> = {
   settings: 'Settings',
   chat: 'Chat',
   rwas: 'RWAs',
-  shopping: 'Shopping',
 };
 
-// Routes that exist in the (tabs) group but should not be shown in the
-// bar. The screens still exist and are reachable through deep links or
-// in-app navigation; they just don't take up a slot here.
-const HIDDEN_ROUTES = new Set(['swap', 'scanner', 'chat']);
+// Swap owns a full-screen send/swap flow with its own footer and review
+// sheets. Scanner/chat/RWAs keep the bottom chrome visible.
+const FULL_SCREEN_TAB_ROUTES = new Set(['swap']);
 
 interface QuickAction {
   id: string;
@@ -166,13 +163,6 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'RWAs',
     routeName: 'rwas',
     Icon: PuffyRwaIcon,
-    tint: colors.brand.deepShadow,
-  },
-  {
-    id: 'shopping',
-    label: 'Shop',
-    routeName: 'shopping',
-    Icon: PuffyShoppingIcon,
     tint: colors.brand.deepShadow,
   },
   {
@@ -289,11 +279,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const isOffline = effectiveWalletMode === 'offline';
   const committedActiveIndex = state.index;
   const activeRouteName = state.routes[committedActiveIndex]?.name ?? '';
-  const routeHidesTabBar = HIDDEN_ROUTES.has(activeRouteName);
+  const routeUsesFullScreenChrome = FULL_SCREEN_TAB_ROUTES.has(activeRouteName);
   const isOverlayActive = useOverlayVisibilityStore((s) => s.isOverlayActive);
-  // Hide the bar when the active route opts out OR when a full-screen
-  // overlay (settings bottom-sheet) is open over the tabs.
-  const tabBarHidden = routeHidesTabBar || isOverlayActive;
+  const clearOverlays = useOverlayVisibilityStore((s) => s.clearOverlays);
+  // Keep the bar persistent across regular tab routes. Only explicit
+  // overlays and the dedicated full-screen swap flow hide the chrome.
+  const tabBarHidden = routeUsesFullScreenChrome || isOverlayActive;
   const recordTabSwitch = useTabHistoryStore((s) => s.recordTabSwitch);
   const [offlineSwapNoticeVisible, setOfflineSwapNoticeVisible] = useState(false);
   const [fabMenuInteractive, setFabMenuInteractive] = useState(false);
@@ -322,7 +313,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     (entry) => entry.originalIndex === visualActiveOriginalIndex,
   );
   // Active route lives in the bar's primary set when this is true.
-  // Routes like `chat` / `shopping` / `rwas` (reachable via the FAB stack) are
+  // Routes like `chat` / `rwas` (reachable via the FAB stack) are
   // not in the primary set, so the slider pill should fade away and
   // every primary tab should render in its inactive style.
   const hasPrimaryActiveRoute = visualActivePrimaryIndex >= 0;
@@ -344,6 +335,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const closeFabMenu = useCallback(() => {
     setFabMenuExpanded(false);
   }, [setFabMenuExpanded]);
+
+  useEffect(() => {
+    clearOverlays();
+  }, [activeRouteName, clearOverlays]);
 
   useEffect(() => {
     if (tabBarHidden) return;
@@ -699,7 +694,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
         </View>
       </Animated.View>
 
-      {/* Quick-action stack — labelled rows ("RWAs", "Shopping", "Chat") that
+      {/* Quick-action stack — labelled rows ("RWAs", "Chat") that
           fade in/out together with the FAB toggle. */}
       <Animated.View
         pointerEvents={fabMenuInteractive ? 'auto' : 'none'}

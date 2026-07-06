@@ -76,7 +76,6 @@ function SheetDetailValue({
   visible: boolean;
 }): React.JSX.Element {
   const value = useQuoteExpiryDetailLabel(row.value, row.expiresAt, { enabled: visible });
-  const route = row.label === 'Route';
 
   return (
     <Text
@@ -84,9 +83,9 @@ function SheetDetailValue({
       color={colors.text.primary}
       numberOfLines={row.selectable ? 2 : 1}
       adjustsFontSizeToFit
-      minimumFontScale={route ? 0.52 : 0.64}
+      minimumFontScale={0.64}
       selectable={row.selectable}
-      style={[styles.detailValue, route && styles.routeDetailValue]}
+      style={styles.detailValue}
     >
       {value}
     </Text>
@@ -596,10 +595,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontSize: 13,
     lineHeight: 17,
-  },
-  routeDetailValue: {
-    fontSize: 10,
-    lineHeight: 12,
   },
   textButton: {
     minHeight: 44,

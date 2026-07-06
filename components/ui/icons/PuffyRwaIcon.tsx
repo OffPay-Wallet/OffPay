@@ -11,7 +11,7 @@ export interface PuffyRwaIconProps {
 
 /**
  * Filled RWA document + coin glyph from the supplied asset. The caller controls
- * the ink color, matching the shopping quick-action icon.
+ * the ink color so it can share the same treatment as the other quick actions.
  */
 export function PuffyRwaIcon({
   size = 24,

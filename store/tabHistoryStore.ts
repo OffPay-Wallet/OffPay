@@ -29,7 +29,6 @@ export const TAB_ROUTE_HREFS = {
   rwas: '/(tabs)/rwas',
   scanner: '/(tabs)/scanner',
   settings: '/(tabs)/settings',
-  shopping: '/(tabs)/shopping',
   swap: '/(tabs)/swap',
 } as const satisfies Record<string, Href>;
 
