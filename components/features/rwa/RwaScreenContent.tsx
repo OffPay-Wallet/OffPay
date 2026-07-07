@@ -256,11 +256,19 @@ export function RwaScreenContent(): React.JSX.Element {
         buildRwaProcessResult({
           review,
           variant: 'success',
+          extraRows: [
+            {
+              label: 'Tx',
+              value: execution.signature,
+              signature: execution.signature,
+              network: review.network,
+            },
+          ],
         }),
       );
       showToast({
-        title: 'RWA swap submitted',
-        message: `${asset.symbol} ${side} submitted for ${summaryAmount} ${summarySymbol}.`,
+        title: 'RWA swap succeeded',
+        message: `${asset.symbol} ${side} completed for ${summaryAmount} ${summarySymbol}.`,
         variant: 'success',
       });
       void presentWalletTransactionNotification({

@@ -57,28 +57,6 @@ export const confirmationStyles = StyleSheet.create({
   confirmationRowLinkPressed: {
     opacity: 0.6,
   },
-  transactionHashLink: {
-    minWidth: 156,
-    maxWidth: 236,
-    minHeight: 36,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    paddingHorizontal: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.surface.solidControl,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-  },
-  transactionHashLinkPressed: {
-    backgroundColor: colors.surface.solidControlPressed,
-  },
-  transactionHashText: {
-    flexShrink: 1,
-    textAlign: 'center',
-  },
   monoText: {
     fontFamily: fontFamily.mono,
   },

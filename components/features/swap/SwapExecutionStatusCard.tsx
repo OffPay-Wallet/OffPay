@@ -1,7 +1,8 @@
 import React from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { SolscanTransactionLink } from '@/components/ui/SolscanTransactionLink';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -16,23 +17,11 @@ interface SwapExecutionStatusCardProps {
   refreshedQuote: boolean;
 }
 
-function buildExplorerUrl(signature: string, network: OffpayNetwork): string {
-  const cluster = network === 'devnet' ? '?cluster=devnet' : '';
-  return `https://solscan.io/tx/${signature}${cluster}`;
-}
-
-function shortenSignature(signature: string): string {
-  if (signature.length <= 18) return signature;
-  return `${signature.slice(0, 8)}...${signature.slice(-8)}`;
-}
-
 export function SwapExecutionStatusCard({
   signature,
   network,
   refreshedQuote,
 }: SwapExecutionStatusCardProps): React.JSX.Element {
-  const url = buildExplorerUrl(signature, network);
-
   return (
     <View style={[{ backgroundColor: colors.surface.cardElevated }, styles.card]}>
       <View style={styles.iconWrap}>
@@ -40,31 +29,24 @@ export function SwapExecutionStatusCard({
       </View>
       <View style={styles.content}>
         <Text variant="bodyBold" color={colors.text.primary} style={styles.title}>
-          Swap submitted
+          Swap succeeded
         </Text>
-        <Text variant="small" color={colors.text.secondary} style={styles.description}>
-          Signature {shortenSignature(signature)}
-        </Text>
+        <View style={styles.signatureRow}>
+          <Text variant="small" color={colors.text.secondary} style={styles.signatureLabel}>
+            Tx
+          </Text>
+          <SolscanTransactionLink
+            signature={signature}
+            network={network}
+            accessibilityLabel="Open swap in explorer"
+          />
+        </View>
         {refreshedQuote ? (
           <Text variant="small" color={colors.text.tertiary} style={styles.description}>
             A fresh quote was signed automatically after the original quote expired.
           </Text>
         ) : null}
       </View>
-      <Pressable
-        style={styles.openButton}
-        onPress={() => {
-          void Linking.openURL(url);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Open swap in explorer"
-      >
-        <Ionicons
-          name="open-outline"
-          size={layout.iconSizeInline}
-          color={colors.brand.glossAccent}
-        />
-      </Pressable>
     </View>
   );
 }
@@ -111,19 +93,14 @@ const styles = StyleSheet.create({
   description: {
     lineHeight: 18,
   },
-  openButton: {
-    minWidth: layout.minTouchTarget,
-    minHeight: layout.minTouchTarget,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glass.strongFill,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
+  signatureRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: SWAP_CONTROL_SHADOW,
+    gap: spacing.sm,
+    minWidth: 0,
+  },
+  signatureLabel: {
+    flexShrink: 0,
+    lineHeight: 18,
   },
 });

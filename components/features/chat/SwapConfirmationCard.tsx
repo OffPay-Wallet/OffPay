@@ -27,6 +27,7 @@ export function SwapConfirmationCard({
   const submitting = action.status === 'submitting';
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const statusLabel = formatPrivateSendStatus(action.status);
 
   return (
     <ConfirmationCardSurface>
@@ -35,9 +36,11 @@ export function SwapConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             Swap
           </Text>
-          <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
-            {formatPrivateSendStatus(action.status)}
-          </Text>
+          {statusLabel != null ? (
+            <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+              {statusLabel}
+            </Text>
+          ) : null}
         </View>
       </View>
 

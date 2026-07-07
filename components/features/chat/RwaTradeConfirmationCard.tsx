@@ -8,6 +8,7 @@ import type { AgenticRwaTradeAction } from '@/store/agenticChatStore';
 
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 import { ConfirmationRow } from './ConfirmationRow';
+import { TransactionHashLinkRow } from './TransactionHashLinkRow';
 import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
@@ -31,6 +32,7 @@ export function RwaTradeConfirmationCard({
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
   const title = `${action.side === 'buy' ? 'Buy' : 'Sell'} ${action.asset.symbol}`;
+  const statusLabel = formatPrivateSendStatus(action.status);
 
   return (
     <ConfirmationCardSurface>
@@ -39,9 +41,11 @@ export function RwaTradeConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             {title}
           </Text>
-          <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
-            {formatPrivateSendStatus(action.status)}
-          </Text>
+          {statusLabel != null ? (
+            <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+              {statusLabel}
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -54,6 +58,13 @@ export function RwaTradeConfirmationCard({
         <ConfirmationRow label="Network" value={formatNetwork(action.network)} />
         <ConfirmationRow label="Price impact" value={`${action.priceImpactPct}%`} />
         <ConfirmationRow label="Quote fee" value={action.fee} />
+        {action.signature != null ? (
+          <TransactionHashLinkRow
+            signature={action.signature}
+            network={action.network}
+            accessibilityLabel="View RWA transaction on Solscan"
+          />
+        ) : null}
       </View>
 
       {failed && action.errorMessage != null ? (

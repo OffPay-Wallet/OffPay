@@ -12,7 +12,7 @@ export function agenticSendOutcomeSpeech(
 ): string {
   switch (outcome) {
     case 'submitted':
-      return route === 'normal' ? 'Payment submitted.' : 'Private payment submitted.';
+      return route === 'normal' ? 'Payment succeeded.' : 'Private payment succeeded.';
     case 'queued':
       return 'Payment queued.';
     case 'failed':

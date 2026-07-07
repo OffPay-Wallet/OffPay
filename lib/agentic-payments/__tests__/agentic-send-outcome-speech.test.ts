@@ -5,9 +5,9 @@ import {
 import { canUseCloudTtsForText } from '@/lib/agentic-payments/voice-privacy';
 
 describe('agenticSendOutcomeSpeech', () => {
-  it('distinguishes normal vs private submitted', () => {
-    expect(agenticSendOutcomeSpeech('submitted', 'normal')).toBe('Payment submitted.');
-    expect(agenticSendOutcomeSpeech('submitted', 'magicblock')).toBe('Private payment submitted.');
+  it('distinguishes normal vs private success', () => {
+    expect(agenticSendOutcomeSpeech('submitted', 'normal')).toBe('Payment succeeded.');
+    expect(agenticSendOutcomeSpeech('submitted', 'magicblock')).toBe('Private payment succeeded.');
   });
 
   it('covers queued and failed', () => {

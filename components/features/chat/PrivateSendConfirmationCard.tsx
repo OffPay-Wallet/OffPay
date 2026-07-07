@@ -55,6 +55,7 @@ export function PrivateSendConfirmationCard({
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
   const { showToast } = useAppToast();
+  const statusLabel = formatPrivateSendStatus(action.status);
   const copyHash = useCallback(
     async (value: string, label: string) => {
       await Clipboard.setStringAsync(value);
@@ -70,9 +71,11 @@ export function PrivateSendConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             Transfer
           </Text>
-          <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
-            {formatPrivateSendStatus(action.status)}
-          </Text>
+          {statusLabel != null ? (
+            <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+              {statusLabel}
+            </Text>
+          ) : null}
         </View>
       </View>
 

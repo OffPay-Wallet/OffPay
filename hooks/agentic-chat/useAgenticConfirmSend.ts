@@ -284,11 +284,11 @@ export function useAgenticConfirmSend({
         }
         const message =
           action.route === 'normal'
-            ? 'Yuga normal payment submitted'
+            ? 'Yuga normal payment succeeded'
             : action.route === 'umbra'
-              ? 'Yuga Umbra private payment submitted'
+              ? 'Yuga Umbra private payment succeeded'
               : result.status === 'submitted'
-                ? 'Yuga private payment submitted'
+                ? 'Yuga private payment succeeded'
                 : 'Yuga private payment queued';
 
         const submittedAt = Date.now();
@@ -333,7 +333,7 @@ export function useAgenticConfirmSend({
           errorMessage: null,
         });
         showToast({
-          title: result.status === 'submitted' ? 'Yuga transfer submitted' : 'Yuga transfer queued',
+          title: result.status === 'submitted' ? 'Yuga transfer succeeded' : 'Yuga transfer queued',
           message: `${validation.draft.amount} ${validation.draft.tokenSymbol}`,
           variant: 'success',
         });
@@ -653,12 +653,12 @@ async function confirmUmbraVaultAction(params: {
       errorMessage: null,
     });
     showToast({
-      title: action.operation === 'shield' ? 'Umbra shield submitted' : 'Umbra withdraw submitted',
+      title: action.operation === 'shield' ? 'Umbra shield succeeded' : 'Umbra withdraw succeeded',
       message: amountLabel,
       variant: 'success',
     });
     onSpeakOutcome?.(
-      action.operation === 'shield' ? 'Umbra shield submitted.' : 'Umbra withdraw submitted.',
+      action.operation === 'shield' ? 'Umbra shield succeeded.' : 'Umbra withdraw succeeded.',
     );
   } catch (error) {
     const fallback =
@@ -926,7 +926,7 @@ async function confirmSwapAction(params: {
       slippageMode: quote.slippageMode ?? null,
     });
     showToast({
-      title: 'Yuga swap submitted',
+      title: 'Yuga swap succeeded',
       message: `${action.inputAmount} ${action.inputSymbol} → ${action.outputSymbol}`,
       variant: 'success',
     });
@@ -1054,7 +1054,7 @@ async function confirmRwaTradeAction(params: {
       providerEnvironment: quote.providerEnvironment,
     });
     showToast({
-      title: 'RWA trade submitted',
+      title: 'RWA trade succeeded',
       message: `${action.side === 'buy' ? 'Buy' : 'Sell'} ${action.asset.symbol}`,
       variant: 'success',
     });
@@ -1135,7 +1135,7 @@ async function confirmFlashPositionAction(params: {
     });
 
     showToast({
-      title: 'Flash Trade submitted',
+      title: 'Flash Trade succeeded',
       message: `${action.actionLabel}: ${action.marketSymbol}`,
       variant: 'success',
     });

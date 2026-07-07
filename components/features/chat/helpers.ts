@@ -16,7 +16,6 @@ import {
 import type {
   AgenticActionStatus,
   AgenticChatMessage,
-  AgenticPrivateSendAction,
 } from '@/store/agenticChatStore';
 
 export function createAgenticId(prefix: string): string {
@@ -29,10 +28,10 @@ export function getProxyErrorMessage(error: unknown): string {
   return 'Yuga could not complete that request.';
 }
 
-export function formatPrivateSendStatus(status: AgenticActionStatus): string {
+export function formatPrivateSendStatus(status: AgenticActionStatus): string | null {
   if (status === 'needs_confirmation') return 'Needs confirmation';
   if (status === 'submitting') return 'Submitting';
-  if (status === 'submitted') return 'Submitted';
+  if (status === 'submitted') return null;
   if (status === 'queued') return 'Queued';
   if (status === 'cancelled') return 'Cancelled';
   return 'Failed';
@@ -40,19 +39,6 @@ export function formatPrivateSendStatus(status: AgenticActionStatus): string {
 
 export function isFinalPrivateSendStatus(status: AgenticActionStatus): boolean {
   return status === 'submitted' || status === 'queued' || status === 'cancelled';
-}
-
-/**
- * Build a Solscan transaction URL with the correct cluster query for devnet
- * vs. mainnet. Mirrors the helpers used elsewhere in the app
- * (TransactionDetailsSheet, PrivatePaymentSendFlow, SwapExecutionStatusCard).
- */
-export function buildSolscanTxUrl(
-  signature: string,
-  network: AgenticPrivateSendAction['network'],
-): string {
-  const cluster = network === 'devnet' ? '?cluster=devnet' : '';
-  return `https://solscan.io/tx/${signature}${cluster}`;
 }
 
 /**

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import cancelLottie from '@/assets/lotties/Cancel.json';
 import { SendSuccessLottieMark } from '@/components/features/private-payment/send-flow/SendSummarySheet';
 import { GlassSliderButton } from '@/components/ui/glass-slider-button';
+import { SolscanTransactionLink } from '@/components/ui/SolscanTransactionLink';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
@@ -26,6 +27,8 @@ import { fontFamily } from '@/constants/typography';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 
 import { useQuoteExpiryDetailLabel } from '@/components/features/swap/quote-expiry-label';
+
+import type { OffpayNetwork } from '@/types/offpay-api';
 
 export type RwaSwapReviewScreenPhase = 'review' | 'processing' | 'success' | 'error';
 export type RwaSwapReviewScreenSide = 'buy' | 'sell';
@@ -43,6 +46,8 @@ export interface RwaSwapReviewScreenDetailRow {
   value: string;
   expiresAt?: number | null;
   selectable?: boolean;
+  signature?: string | null;
+  network?: OffpayNetwork | null;
 }
 
 interface RwaSwapReviewScreenProps {
@@ -66,6 +71,7 @@ const CIRCLE_SIZE = 112;
 const RESULT_MARK_SIZE = 156;
 const RING_THICKNESS = 4;
 const RESULT_AUTO_DISMISS_MS = 2200;
+const RESULT_LINK_AUTO_DISMISS_MS = 8000;
 const OVERLAY_ID = 'rwa-swap-review';
 
 function SheetDetailValue({
@@ -76,6 +82,18 @@ function SheetDetailValue({
   visible: boolean;
 }): React.JSX.Element {
   const value = useQuoteExpiryDetailLabel(row.value, row.expiresAt, { enabled: visible });
+
+  if (row.signature != null && row.network != null) {
+    return (
+      <SolscanTransactionLink
+        signature={row.signature}
+        network={row.network}
+        accessibilityLabel="View RWA transaction on Solscan"
+        style={styles.detailLink}
+        textStyle={styles.detailValue}
+      />
+    );
+  }
 
   return (
     <Text
@@ -204,6 +222,9 @@ export function RwaSwapReviewScreen({
   const statusLeg =
     receiveLeg?.logo != null ? receiveLeg : payLeg?.logo != null ? payLeg : (receiveLeg ?? payLeg);
   const sliderLabel = side === 'sell' ? 'Slide to Sell' : 'Slide to Buy';
+  const resultLinkRows = result
+    ? detailRows.filter((row) => row.signature != null && row.network != null)
+    : [];
 
   const ringSpin = useDerivedValue(
     () =>
@@ -245,9 +266,12 @@ export function RwaSwapReviewScreen({
 
   useEffect(() => {
     if (!visible || !result) return undefined;
-    const timeout = setTimeout(onDone, RESULT_AUTO_DISMISS_MS);
+    const timeout = setTimeout(
+      onDone,
+      resultLinkRows.length > 0 ? RESULT_LINK_AUTO_DISMISS_MS : RESULT_AUTO_DISMISS_MS,
+    );
     return () => clearTimeout(timeout);
-  }, [onDone, result, visible]);
+  }, [onDone, result, resultLinkRows.length, visible]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -336,6 +360,18 @@ export function RwaSwapReviewScreen({
                 <ResultLottie phase={phase} />
               )}
             </View>
+            {resultLinkRows.length > 0 ? (
+              <View style={styles.resultDetailCard}>
+                {resultLinkRows.map((row, index) => (
+                  <DetailRow
+                    key={`${row.label}-${index}`}
+                    row={row}
+                    last={index === resultLinkRows.length - 1}
+                    visible={visible}
+                  />
+                ))}
+              </View>
+            ) : null}
           </Animated.View>
         ) : (
           <>
@@ -454,6 +490,7 @@ const styles = StyleSheet.create({
     minHeight: 176,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.md,
   },
   statusCircle: {
     width: CIRCLE_SIZE,
@@ -595,6 +632,19 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontSize: 13,
     lineHeight: 17,
+  },
+  detailLink: {
+    flex: 1,
+    minWidth: 0,
+  },
+  resultDetailCard: {
+    alignSelf: 'stretch',
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+    backgroundColor: colors.brand.glassTint,
+    overflow: 'hidden',
   },
   textButton: {
     minHeight: 44,
