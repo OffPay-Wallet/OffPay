@@ -45,6 +45,7 @@ import {
   privatePaymentScreenOptions,
 } from '@/constants/navigation';
 import { formatOffpayUsername } from '@/lib/api/offpay-username';
+import { isInviteAccessGateEnabled } from '@/lib/invite/invite-gate';
 import {
   firstRouteParam,
   isWalletFlowInviteFresh,
@@ -266,6 +267,8 @@ export default function RootLayout(): React.JSX.Element | null {
       : 'create-wallet';
 
   const storedWalletCount = walletHydrated && walletCount > 0;
+  const inviteAccessGateEnabled = isInviteAccessGateEnabled();
+  const effectiveInviteAccessVerified = inviteAccessGateEnabled ? inviteAccessVerified : true;
   const restoredUsernameCandidate =
     storedWalletCount && !isGeneratedAccountName(accountName)
       ? formatOffpayUsername(accountName)
@@ -287,7 +290,7 @@ export default function RootLayout(): React.JSX.Element | null {
     ? segments.length > 0 &&
       (!inInviteCode || isWalletFlowInviteRoute) &&
       (!inOnboarding || isAccountWalletChooser)
-    : inviteAccessVerified || needsUsernameSetup
+    : effectiveInviteAccessVerified || needsUsernameSetup
       ? inAuthFlow || inUsernameSetup || inWalletFlow || inSecuritySetup
       : inInviteCode;
 
@@ -368,7 +371,12 @@ export default function RootLayout(): React.JSX.Element | null {
         pathname: '/username-setup',
         params: { source: 'onboarding' },
       });
-    } else if (hasCompletedOnboarding && inWalletFlow && !walletFlowInviteFresh) {
+    } else if (
+      inviteAccessGateEnabled &&
+      hasCompletedOnboarding &&
+      inWalletFlow &&
+      !walletFlowInviteFresh
+    ) {
       router.replace({
         pathname: '/invite-code',
         params: {
@@ -384,13 +392,13 @@ export default function RootLayout(): React.JSX.Element | null {
       !walletFlowInviteFresh
     ) {
       router.replace('/accounts');
-    } else if (!hasCompletedOnboarding && !inviteAccessVerified && !inInviteCode) {
+    } else if (!hasCompletedOnboarding && !effectiveInviteAccessVerified && !inInviteCode) {
       router.replace('/invite-code');
-    } else if (!hasCompletedOnboarding && inviteAccessVerified && inInviteCode) {
+    } else if (!hasCompletedOnboarding && effectiveInviteAccessVerified && inInviteCode) {
       router.replace('/onboarding');
     } else if (
       !hasCompletedOnboarding &&
-      inviteAccessVerified &&
+      effectiveInviteAccessVerified &&
       !inAuthFlow &&
       !inUsernameSetup &&
       !inWalletFlow &&
@@ -399,7 +407,8 @@ export default function RootLayout(): React.JSX.Element | null {
       router.replace('/onboarding');
     } else if (
       hasCompletedOnboarding &&
-      ((inInviteCode && !isWalletFlowInviteRoute) || (inOnboarding && !isAccountWalletChooser))
+      ((inInviteCode && (!inviteAccessGateEnabled || !isWalletFlowInviteRoute)) ||
+        (inOnboarding && !isAccountWalletChooser))
     ) {
       router.replace('/');
     } else if (shouldShowAppLockRoute && !inAppLock) {
@@ -411,6 +420,7 @@ export default function RootLayout(): React.JSX.Element | null {
     appLockChecking,
     appLockSuppressed,
     appStoreHydrated,
+    effectiveInviteAccessVerified,
     hasCompletedOnboarding,
     hasRepairedOnboardingFlag,
     inAppLock,
@@ -422,7 +432,7 @@ export default function RootLayout(): React.JSX.Element | null {
     inSecuritySetup,
     inUsernameSetup,
     inWalletFlow,
-    inviteAccessVerified,
+    inviteAccessGateEnabled,
     mmkvReady,
     needsUsernameSetup,
     preferencesHydrated,

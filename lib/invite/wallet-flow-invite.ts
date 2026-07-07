@@ -1,3 +1,5 @@
+import { isInviteAccessGateEnabled } from '@/lib/invite/invite-gate';
+
 export const WALLET_FLOW_INVITE_PURPOSE = 'add-wallet';
 export const WALLET_FLOW_INVITE_TTL_MS = 10 * 60 * 1000;
 
@@ -51,6 +53,8 @@ export function isWalletFlowInviteFresh(
   verifiedAt: number | null | undefined,
   now = Date.now(),
 ): boolean {
+  if (!isInviteAccessGateEnabled()) return true;
+
   return (
     typeof verifiedAt === 'number' &&
     now - verifiedAt >= 0 &&

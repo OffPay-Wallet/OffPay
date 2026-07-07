@@ -25,6 +25,7 @@ node_modules/
 # Generated native/build output
 android/
 ios/
+target/
 dist/
 web-build/
 coverage/

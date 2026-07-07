@@ -9,6 +9,7 @@
     "web": "expo start --web",
     "postinstall": "patch-package",
     "build:android:apk": "cd android && ./gradlew :app:assembleRelease --build-cache --configure-on-demand -PreactNativeArchitectures=armeabi-v7a,arm64-v8a",
+    "build:android:apk:invite-bypass": "EXPO_PUBLIC_OFFPAY_INVITE_GATE_MODE=disabled npm run build:android:apk",
     "build:android:apk:arm64": "cd android && ./gradlew :app:assembleRelease --build-cache --configure-on-demand -PreactNativeArchitectures=arm64-v8a",
     "build:android:apk:size": "ls -lh android/app/build/outputs/apk/release/*.apk",
     "build:android:aab": "cd android && ./gradlew :app:bundleRelease --build-cache --configure-on-demand -PreactNativeArchitectures=armeabi-v7a,arm64-v8a",

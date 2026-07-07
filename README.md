@@ -89,7 +89,9 @@ flowchart TB
 ## Environment
 
 - Local environment values live in `.env`, which is ignored by git.
-- EAS builds need the public client config used by the app: `EXPO_PUBLIC_OFFPAY_API_ORIGIN`, `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_URL`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE`, `EXPO_PUBLIC_PRIVY_APP_ID`, and `EXPO_PUBLIC_PRIVY_CLIENT_ID`.
+- EAS builds need the public client config used by the app: `EXPO_PUBLIC_OFFPAY_API_ORIGIN`, `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_URL`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE`, `EXPO_PUBLIC_OFFPAY_INVITE_GATE_MODE`, `EXPO_PUBLIC_PRIVY_APP_ID`, and `EXPO_PUBLIC_PRIVY_CLIENT_ID`.
+- Invite access is required by default. Set `EXPO_PUBLIC_OFFPAY_INVITE_GATE_MODE=disabled` for an APK that skips the client-side invite screens and wallet-add invite checks. The API Worker must also run with `OFFPAY_INVITE_GATE_MODE=disabled`; otherwise bootstrap provisioning for transactions still rejects users without invite access.
+- Local bypass APK builds can use `npm run build:android:apk:invite-bypass`. EAS bypass APK builds can use `eas build --profile previewInviteBypass --platform android`.
 
 ## Backend And Provider Surfaces Used
 

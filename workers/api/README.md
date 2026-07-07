@@ -38,6 +38,7 @@ Use `workers/api/wrangler.toml` for non-secret Worker vars:
 MIN_APP_VERSION = "1.0.0"
 BOOTSTRAP_SECRET_VERSION = "1"
 OFFPAY_PROTOTYPE_MODE = "true"
+OFFPAY_INVITE_GATE_MODE = "required"
 OFFPAY_ANDROID_PACKAGE_NAME = "com.offpay.app"
 OFFPAY_ANDROID_ATTESTATION_MODE = "prototype_bypass"
 OFFPAY_IOS_BUNDLE_ID = "com.offpay.app"
@@ -48,6 +49,8 @@ MAGICBLOCK_MAINNET_VALIDATORS = "VALIDATOR_PUBKEY_1,VALIDATOR_PUBKEY_2"
 JUPITER_API_BASE_URL = "https://api.jup.ag"
 JUPITER_TRIGGER_API_BASE_URL = "https://api.jup.ag/trigger/v2"
 ```
+
+`OFFPAY_INVITE_GATE_MODE` defaults to the invite-gated path. Set it to `disabled` only for builds that should let new installs provision without invite access, and ship the matching client build with `EXPO_PUBLIC_OFFPAY_INVITE_GATE_MODE=disabled`.
 
 Set credentials with Cloudflare Worker secrets:
 

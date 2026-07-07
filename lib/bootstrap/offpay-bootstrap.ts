@@ -1,7 +1,4 @@
-import {
-  provisionBootstrap,
-  requestBootstrapNonce,
-} from '@/lib/api/offpay-api-client';
+import { provisionBootstrap, requestBootstrapNonce } from '@/lib/api/offpay-api-client';
 import {
   getOffpayBootstrapVersion,
   getOffpayRequestSecret,
@@ -12,6 +9,7 @@ import {
   getBootstrapPlatform,
   unsupportedOffpayAttestationAdapter,
 } from '@/lib/bootstrap/attestation';
+import { isInviteAccessGateEnabled } from '@/lib/invite/invite-gate';
 import { getStoredInviteCode, getStoredInviteEmail } from '@/lib/invite/invite-access';
 
 import type {
@@ -146,8 +144,11 @@ async function bootstrapOffpayRequestSecretOnce(
     nonceHashBase64Url: buildAndroidIntegrityNonceHash(nonceResponse.nonce),
     platform,
   });
-  const inviteCode = params.inviteCode ?? (await getStoredInviteCode());
-  const email = await getStoredInviteEmail();
+  const inviteAccessGateEnabled = isInviteAccessGateEnabled();
+  const inviteCode = inviteAccessGateEnabled
+    ? (params.inviteCode ?? (await getStoredInviteCode()))
+    : null;
+  const email = inviteAccessGateEnabled ? await getStoredInviteEmail() : null;
 
   const response = await provisionBootstrap(
     buildProvisionBody(params.walletAddress, nonceResponse.nonce, attestation, inviteCode, email),

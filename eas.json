@@ -22,6 +22,17 @@
         "buildType": "apk"
       }
     },
+    "previewInviteBypass": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_ROUTER_DISABLE_NATIVE_TABS_MD": "1",
+        "EXPO_PUBLIC_OFFPAY_INVITE_GATE_MODE": "disabled"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "environment": "production",
       "env": {
