@@ -684,6 +684,7 @@ function buildRwaDraftOutcome(params: {
         providerEnvironment: params.quote.providerEnvironment,
         walletId: params.walletId,
         signature: null,
+        signatures: null,
         errorMessage: null,
       },
     },

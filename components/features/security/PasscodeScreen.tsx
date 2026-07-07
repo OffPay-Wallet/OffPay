@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
+  type AppStateStatus,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,10 +25,12 @@ import { PuffyFingerprintIcon } from '@/components/ui/icons/PuffyFingerprintIcon
 import { colors } from '@/constants/colors';
 import { layout, spacing } from '@/constants/spacing';
 import { authenticateWithBiometrics } from '@/lib/wallet/biometric-auth';
+import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { getPasscodeResponsiveLayout } from '@/lib/ui/passcode-responsive-layout';
 import {
   getCachedSecuritySettings,
   getSecuritySettings,
+  hasCachedPasscodeMaterial,
   preloadPasscodeMaterial,
   setWalletLocked,
   verifyPasscode,
@@ -36,6 +39,19 @@ import { getStoredWalletInfo } from '@/lib/wallet/secure-wallet-store';
 import { useWalletStore } from '@/store/walletStore';
 
 const PASSCODE_AUTO_BIOMETRIC_PROMPT_DELAY_MS = 750;
+const PASSCODE_RESUME_READY_DELAY_MS = 120;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function settlePasscodeReadyFrame(delayMs: number): Promise<void> {
+  await yieldToUi();
+  if (delayMs > 0) {
+    await delay(delayMs);
+    await yieldToUi();
+  }
+}
 
 const SimpleDot = memo(function SimpleDot({
   filled,
@@ -94,6 +110,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     if (initialFingerprintEnabled != null) return initialFingerprintEnabled;
     return getCachedSecuritySettings()?.fingerprintEnabled === true;
   });
+  const [passcodeReady, setPasscodeReady] = useState(() => hasCachedPasscodeMaterial());
 
   const unlockingRef = useRef(false);
   const inputDisabledRef = useRef(false);
@@ -112,28 +129,9 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, [unlocking]);
 
   useEffect(() => {
-    void preloadPasscodeMaterial();
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
     if (initialFingerprintEnabled != null) {
       setFingerprintEnabled(initialFingerprintEnabled);
-      return () => {
-        cancelled = true;
-      };
     }
-
-    void getSecuritySettings()
-      .then((settings) => {
-        if (!cancelled) setFingerprintEnabled(settings.fingerprintEnabled);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
   }, [initialFingerprintEnabled]);
 
   useEffect(() => {
@@ -152,6 +150,13 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   const keyLabelStyle = useMemo(
     () => [styles.keyLabel, { fontSize: passcodeLayout.keyFontSize }],
     [passcodeLayout.keyFontSize],
+  );
+  const keypadFrameStyle = useMemo(
+    () => ({
+      width: passcodeLayout.keySize * 3 + keypadGap * 2,
+      minHeight: passcodeLayout.keySize * 4 + keypadGap * 3,
+    }),
+    [keypadGap, passcodeLayout.keySize],
   );
 
   const setPasscodeValue = useCallback((nextPasscode: string): void => {
@@ -174,6 +179,42 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     cancelAnimationFrame(unlockFrameRef.current);
     unlockFrameRef.current = null;
   }, []);
+
+  const prepareRequestIdRef = useRef(0);
+
+  const preparePasscodeEntry = useCallback(
+    async (options?: { resume?: boolean }): Promise<void> => {
+      const requestId = prepareRequestIdRef.current + 1;
+      prepareRequestIdRef.current = requestId;
+
+      const shouldHoldInput = options?.resume === true || !hasCachedPasscodeMaterial();
+      if (shouldHoldInput) {
+        inputDisabledRef.current = true;
+        setPasscodeReady(false);
+      }
+
+      try {
+        const [settings] = await Promise.all([getSecuritySettings(), preloadPasscodeMaterial()]);
+        await settlePasscodeReadyFrame(
+          options?.resume === true ? PASSCODE_RESUME_READY_DELAY_MS : 0,
+        );
+
+        if (requestId !== prepareRequestIdRef.current) return;
+
+        if (initialFingerprintEnabled == null) {
+          setFingerprintEnabled(settings.fingerprintEnabled);
+        }
+        setPasscodeReady(true);
+        inputDisabledRef.current = unlockingRef.current || resetting || showingReset;
+      } catch {
+        if (requestId !== prepareRequestIdRef.current) return;
+
+        setPasscodeReady(true);
+        inputDisabledRef.current = unlockingRef.current || resetting || showingReset;
+      }
+    },
+    [initialFingerprintEnabled, resetting, showingReset],
+  );
 
   const unlockWallet = useCallback(async (): Promise<void> => {
     const walletStoreState = useWalletStore.getState();
@@ -203,7 +244,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   }, [onUnlock, router, setPasscodeValue]);
 
   const handleBiometricUnlock = useCallback(async (): Promise<void> => {
-    if (unlockingRef.current || !fingerprintEnabled) return;
+    if (unlockingRef.current || !passcodeReady || !fingerprintEnabled) return;
 
     unlockingRef.current = true;
     inputDisabledRef.current = true;
@@ -224,13 +265,14 @@ export const PasscodeScreen = memo(function PasscodeScreen({
       setToast('Could not unlock with fingerprint.');
     } finally {
       unlockingRef.current = false;
-      inputDisabledRef.current = resetting || showingReset;
+      inputDisabledRef.current = !passcodeReady || resetting || showingReset;
       setUnlocking(false);
     }
-  }, [fingerprintEnabled, resetting, showingReset, unlockWallet]);
+  }, [fingerprintEnabled, passcodeReady, resetting, showingReset, unlockWallet]);
 
   useEffect(() => {
     if (
+      !passcodeReady ||
       !fingerprintEnabled ||
       unlocking ||
       AppState.currentState !== 'active' ||
@@ -246,7 +288,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     }, PASSCODE_AUTO_BIOMETRIC_PROMPT_DELAY_MS);
 
     return () => clearTimeout(timeout);
-  }, [fingerprintEnabled, handleBiometricUnlock, unlocking]);
+  }, [fingerprintEnabled, handleBiometricUnlock, passcodeReady, unlocking]);
 
   const handlePasscodeUnlock = useCallback(
     async (candidate: string): Promise<void> => {
@@ -281,12 +323,12 @@ export const PasscodeScreen = memo(function PasscodeScreen({
       } finally {
         if (attemptId === unlockAttemptIdRef.current) {
           unlockingRef.current = false;
-          inputDisabledRef.current = resetting || showingReset;
+          inputDisabledRef.current = !passcodeReady || resetting || showingReset;
           setUnlocking(false);
         }
       }
     },
-    [resetting, setPasscodeValue, showingReset, triggerShake, unlockWallet],
+    [passcodeReady, resetting, setPasscodeValue, showingReset, triggerShake, unlockWallet],
   );
 
   const schedulePasscodeUnlock = useCallback(
@@ -304,6 +346,7 @@ export const PasscodeScreen = memo(function PasscodeScreen({
   const handleDigit = useCallback(
     (digit: string): void => {
       if (inputDisabledRef.current) return;
+      if (!passcodeReady) return;
       if (passcodeRef.current.length >= 6) return;
       autoBiometricPromptedRef.current = true;
       const next = `${passcodeRef.current}${digit}`.slice(0, 6);
@@ -312,30 +355,59 @@ export const PasscodeScreen = memo(function PasscodeScreen({
         schedulePasscodeUnlock(next);
       }
     },
-    [schedulePasscodeUnlock, setPasscodeValue],
+    [passcodeReady, schedulePasscodeUnlock, setPasscodeValue],
   );
 
   const handleDelete = useCallback((): void => {
     if (inputDisabledRef.current) return;
+    if (!passcodeReady) return;
     unlockAttemptIdRef.current += 1;
     cancelScheduledUnlock();
     setPasscodeValue(passcodeRef.current.slice(0, -1));
-  }, [cancelScheduledUnlock, setPasscodeValue]);
+  }, [cancelScheduledUnlock, passcodeReady, setPasscodeValue]);
 
   const handleClear = useCallback((): void => {
     if (inputDisabledRef.current) return;
+    if (!passcodeReady) return;
     unlockAttemptIdRef.current += 1;
     cancelScheduledUnlock();
     setPasscodeValue('');
-  }, [cancelScheduledUnlock, setPasscodeValue]);
+  }, [cancelScheduledUnlock, passcodeReady, setPasscodeValue]);
 
   useEffect(() => {
-    inputDisabledRef.current = unlocking || resetting || showingReset;
-  }, [resetting, showingReset, unlocking]);
+    inputDisabledRef.current = !passcodeReady || unlocking || resetting || showingReset;
+  }, [passcodeReady, resetting, showingReset, unlocking]);
 
   useEffect(() => {
     return () => cancelScheduledUnlock();
   }, [cancelScheduledUnlock]);
+
+  useEffect(() => {
+    void preparePasscodeEntry();
+
+    const handleAppStateChange = (nextState: AppStateStatus): void => {
+      if (nextState === 'active') {
+        autoBiometricPromptedRef.current = false;
+        void preparePasscodeEntry({ resume: true });
+        return;
+      }
+
+      prepareRequestIdRef.current += 1;
+      autoBiometricPromptedRef.current = false;
+      unlockAttemptIdRef.current += 1;
+      cancelScheduledUnlock();
+      setPasscodeValue('');
+      inputDisabledRef.current = true;
+      setPasscodeReady(false);
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      prepareRequestIdRef.current += 1;
+      subscription.remove();
+    };
+  }, [cancelScheduledUnlock, preparePasscodeEntry, setPasscodeValue]);
 
   const handleForgotPasswordReset = useCallback(async (): Promise<void> => {
     if (resetting) return;
@@ -406,6 +478,8 @@ export const PasscodeScreen = memo(function PasscodeScreen({
     void handleBiometricUnlock();
   }, [handleBiometricUnlock]);
 
+  const keypadDisabled = !passcodeReady || resetting;
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -462,80 +536,88 @@ export const PasscodeScreen = memo(function PasscodeScreen({
             <SimpleDot filled={passcodeLength > 5} size={passcodeLayout.dotSize} />
           </Animated.View>
 
-          <View style={[styles.keypad, { gap: keypadGap }]}>
-            {keypadRows.map((row, rowIndex) => (
-              <View key={rowIndex} style={[styles.keyRow, { gap: keypadGap }]}>
-                {row.map((key) => {
-                  if (key === 'fingerprint') {
-                    return (
-                      <LightweightKeypadButton
-                        key={key}
-                        frameStyle={keyFrameStyle}
-                        onPress={fingerprintPress}
-                        disabled={resetting}
-                        activateOnPressIn
-                        accessibilityRole="button"
-                        accessibilityLabel="Unlock with fingerprint"
-                      >
-                        <PuffyFingerprintIcon
-                          size={layout.iconSizeInline}
-                          color={colors.text.primary}
-                          focused
-                        />
-                      </LightweightKeypadButton>
-                    );
-                  }
+          <View style={[styles.keypadFrame, keypadFrameStyle]}>
+            {passcodeReady ? (
+              <View style={[styles.keypad, { gap: keypadGap }]}>
+                {keypadRows.map((row, rowIndex) => (
+                  <View key={rowIndex} style={[styles.keyRow, { gap: keypadGap }]}>
+                    {row.map((key) => {
+                      if (key === 'fingerprint') {
+                        return (
+                          <LightweightKeypadButton
+                            key={key}
+                            frameStyle={keyFrameStyle}
+                            onPress={fingerprintPress}
+                            disabled={keypadDisabled}
+                            activateOnPressIn
+                            accessibilityRole="button"
+                            accessibilityLabel="Unlock with fingerprint"
+                          >
+                            <PuffyFingerprintIcon
+                              size={layout.iconSizeInline}
+                              color={colors.text.primary}
+                              focused
+                            />
+                          </LightweightKeypadButton>
+                        );
+                      }
 
-                  if (key === 'clear') {
-                    return (
-                      <LightweightKeypadButton
-                        key={key}
-                        frameStyle={keyFrameStyle}
-                        onPress={handleClear}
-                        disabled={passcodeLength === 0 || resetting}
-                        muted={passcodeLength === 0}
-                        activateOnPressIn
-                        accessibilityRole="button"
-                        accessibilityLabel="Clear passcode"
-                      >
-                        <RNText style={keyLabelStyle}>x</RNText>
-                      </LightweightKeypadButton>
-                    );
-                  }
+                      if (key === 'clear') {
+                        return (
+                          <LightweightKeypadButton
+                            key={key}
+                            frameStyle={keyFrameStyle}
+                            onPress={handleClear}
+                            disabled={passcodeLength === 0 || keypadDisabled}
+                            muted={passcodeLength === 0}
+                            activateOnPressIn
+                            accessibilityRole="button"
+                            accessibilityLabel="Clear passcode"
+                          >
+                            <RNText style={keyLabelStyle}>x</RNText>
+                          </LightweightKeypadButton>
+                        );
+                      }
 
-                  if (key === 'delete') {
-                    return (
-                      <LightweightKeypadButton
-                        key={key}
-                        frameStyle={keyFrameStyle}
-                        onPress={handleDelete}
-                        disabled={passcodeLength === 0 || resetting}
-                        muted={passcodeLength === 0}
-                        activateOnPressIn
-                        accessibilityRole="button"
-                        accessibilityLabel="Delete last digit"
-                      >
-                        <RNText style={keyLabelStyle}>{'<'}</RNText>
-                      </LightweightKeypadButton>
-                    );
-                  }
+                      if (key === 'delete') {
+                        return (
+                          <LightweightKeypadButton
+                            key={key}
+                            frameStyle={keyFrameStyle}
+                            onPress={handleDelete}
+                            disabled={passcodeLength === 0 || keypadDisabled}
+                            muted={passcodeLength === 0}
+                            activateOnPressIn
+                            accessibilityRole="button"
+                            accessibilityLabel="Delete last digit"
+                          >
+                            <RNText style={keyLabelStyle}>{'<'}</RNText>
+                          </LightweightKeypadButton>
+                        );
+                      }
 
-                  return (
-                    <LightweightKeypadButton
-                      key={key}
-                      frameStyle={keyFrameStyle}
-                      onPress={digitHandlers[key as keyof typeof digitHandlers]}
-                      disabled={resetting}
-                      activateOnPressIn
-                      accessibilityRole="keyboardkey"
-                      accessibilityLabel={`Digit ${key}`}
-                    >
-                      <RNText style={keyLabelStyle}>{key}</RNText>
-                    </LightweightKeypadButton>
-                  );
-                })}
+                      return (
+                        <LightweightKeypadButton
+                          key={key}
+                          frameStyle={keyFrameStyle}
+                          onPress={digitHandlers[key as keyof typeof digitHandlers]}
+                          disabled={keypadDisabled}
+                          activateOnPressIn
+                          accessibilityRole="keyboardkey"
+                          accessibilityLabel={`Digit ${key}`}
+                        >
+                          <RNText style={keyLabelStyle}>{key}</RNText>
+                        </LightweightKeypadButton>
+                      );
+                    })}
+                  </View>
+                ))}
               </View>
-            ))}
+            ) : (
+              <View style={styles.keypadPreparing}>
+                <LazyLoadingSpinner size={28} color={colors.brand.glossAccent} />
+              </View>
+            )}
           </View>
 
           <Pressable
@@ -635,6 +717,15 @@ const styles = StyleSheet.create({
   },
   keypad: {
     gap: spacing.lg,
+  },
+  keypadFrame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keypadPreparing: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   keyRow: {
     flexDirection: 'row',

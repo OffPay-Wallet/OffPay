@@ -4,6 +4,7 @@ import { Pressable, View } from 'react-native';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
+import { buildRwaExecutionSignatureLinks } from '@/lib/rwa/rwa-execution-signatures';
 import type { AgenticRwaTradeAction } from '@/store/agenticChatStore';
 
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
@@ -33,6 +34,20 @@ export function RwaTradeConfirmationCard({
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
   const title = `${action.side === 'buy' ? 'Buy' : 'Sell'} ${action.asset.symbol}`;
   const statusLabel = formatPrivateSendStatus(action.status);
+  const signatureLinks =
+    action.signatures != null && action.signatures.length > 0
+      ? buildRwaExecutionSignatureLinks({
+          quoteId: action.quoteId,
+          network: action.network,
+          signature: action.signature ?? action.signatures[action.signatures.length - 1]!.signature,
+          signatures: action.signatures,
+          status: 'submitted',
+          submittedAt: action.updatedAt,
+          provider: action.provider,
+        })
+      : action.signature != null
+        ? [{ label: 'Tx', signature: action.signature, network: action.network }]
+        : [];
 
   return (
     <ConfirmationCardSurface>
@@ -58,13 +73,15 @@ export function RwaTradeConfirmationCard({
         <ConfirmationRow label="Network" value={formatNetwork(action.network)} />
         <ConfirmationRow label="Price impact" value={`${action.priceImpactPct}%`} />
         <ConfirmationRow label="Quote fee" value={action.fee} />
-        {action.signature != null ? (
+        {signatureLinks.map((item) => (
           <TransactionHashLinkRow
-            signature={action.signature}
-            network={action.network}
+            key={`${item.label}-${item.signature}`}
+            label={item.label}
+            signature={item.signature}
+            network={item.network}
             accessibilityLabel="View RWA transaction on Solscan"
           />
-        ) : null}
+        ))}
       </View>
 
       {failed && action.errorMessage != null ? (

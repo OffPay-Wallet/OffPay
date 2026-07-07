@@ -1036,6 +1036,7 @@ async function confirmRwaTradeAction(params: {
     updateAction(action.id, {
       status: 'submitted',
       signature: execution.execution.signature,
+      signatures: execution.execution.signatures ?? null,
       errorMessage: null,
       quoteId: quote.quoteId,
       unsignedTransaction: quote.unsignedTransaction,

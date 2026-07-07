@@ -1,7 +1,13 @@
+import * as SecureStore from 'expo-secure-store';
+
 import {
   getSecuritySettings,
+  hasCachedPasscodeMaterial,
+  preloadPasscodeMaterial,
   setFingerprintEnabled,
   setPasscode,
+  setWalletLocked,
+  warmSecuritySettings,
   verifyPasscode,
 } from '@/lib/wallet/security-settings';
 
@@ -57,5 +63,34 @@ describe('security-settings', () => {
 
     await setFingerprintEnabled(false);
     await expect(getSecuritySettings()).resolves.toMatchObject({ fingerprintEnabled: false });
+  });
+
+  it('coalesces concurrent security settings warm-up reads', async () => {
+    await setPasscode('123456');
+    await setFingerprintEnabled(true);
+    await setWalletLocked(true);
+    jest.clearAllMocks();
+
+    await expect(
+      Promise.all([getSecuritySettings(), getSecuritySettings(), warmSecuritySettings()]),
+    ).resolves.toEqual([
+      { fingerprintEnabled: true, hasPasscode: true, walletLocked: true },
+      { fingerprintEnabled: true, hasPasscode: true, walletLocked: true },
+      { fingerprintEnabled: true, hasPasscode: true, walletLocked: true },
+    ]);
+
+    expect(SecureStore.getItemAsync).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps passcode verification on warmed material after preload', async () => {
+    await setPasscode('123456');
+    expect(hasCachedPasscodeMaterial()).toBe(false);
+    jest.clearAllMocks();
+
+    await preloadPasscodeMaterial();
+    expect(hasCachedPasscodeMaterial()).toBe(true);
+
+    await expect(verifyPasscode('123456')).resolves.toBe(true);
+    expect(SecureStore.getItemAsync).toHaveBeenCalledTimes(2);
   });
 });

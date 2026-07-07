@@ -64,6 +64,7 @@ import {
 import { formatTokenBalance } from '@/lib/api/offpay-wallet-data';
 import { createRwaQuote } from '@/lib/api/offpay-api-client';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
+import { buildRwaExecutionSignatureLinks } from '@/lib/rwa/rwa-execution-signatures';
 import { executeRwaTradeReview } from '@/lib/rwa/rwa-trade-execution';
 import { TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -247,6 +248,7 @@ export function RwaScreenContent(): React.JSX.Element {
     },
     onSuccess: async ({ review, execution }) => {
       const { asset, side, inputAmount, quote } = review;
+      const executionSignatureLinks = buildRwaExecutionSignatureLinks(execution);
       const summaryAmount =
         side === 'buy' ? (quote.cashAmount ?? inputAmount) : (quote.quantity ?? inputAmount);
       const summarySymbol = side === 'buy' ? getRwaSettlementDisplaySymbol(asset) : asset.symbol;
@@ -256,14 +258,12 @@ export function RwaScreenContent(): React.JSX.Element {
         buildRwaProcessResult({
           review,
           variant: 'success',
-          extraRows: [
-            {
-              label: 'Tx',
-              value: execution.signature,
-              signature: execution.signature,
-              network: review.network,
-            },
-          ],
+          extraRows: executionSignatureLinks.map((item) => ({
+            label: item.label,
+            value: item.signature,
+            signature: item.signature,
+            network: item.network,
+          })),
         }),
       );
       showToast({

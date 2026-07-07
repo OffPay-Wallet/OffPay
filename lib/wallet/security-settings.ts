@@ -65,8 +65,10 @@ export interface SecuritySettingsSnapshot {
 const SECURITY_SETTINGS_TTL_MS = 5_000;
 let cachedSecuritySettings: { value: SecuritySettingsSnapshot; expiresAt: number } | null = null;
 let securitySettingsPreload: Promise<SecuritySettingsSnapshot> | null = null;
+let securitySettingsCacheVersion = 0;
 
 function invalidateSecuritySettingsCache(): void {
+  securitySettingsCacheVersion += 1;
   cachedSecuritySettings = null;
   securitySettingsPreload = null;
 }
@@ -82,19 +84,38 @@ export async function getSecuritySettings(): Promise<SecuritySettingsSnapshot> {
     return cachedSecuritySettings.value;
   }
 
-  const [fingerprintRaw, hash, lockedRaw] = await Promise.all([
+  if (securitySettingsPreload != null) {
+    return await securitySettingsPreload;
+  }
+
+  const startedAt = now;
+  const cacheVersion = securitySettingsCacheVersion;
+  const preload = Promise.all([
     SecureStore.getItemAsync(KEYS.FINGERPRINT_ENABLED),
     SecureStore.getItemAsync(KEYS.PASSCODE_HASH_HEX),
     SecureStore.getItemAsync(KEYS.WALLET_LOCKED),
-  ]);
+  ])
+    .then(([fingerprintRaw, hash, lockedRaw]) => {
+      const value: SecuritySettingsSnapshot = {
+        fingerprintEnabled: fingerprintRaw === '1',
+        hasPasscode: hash != null && hash.length > 0,
+        walletLocked: lockedRaw === '1',
+      };
 
-  const value: SecuritySettingsSnapshot = {
-    fingerprintEnabled: fingerprintRaw === '1',
-    hasPasscode: hash != null && hash.length > 0,
-    walletLocked: lockedRaw === '1',
-  };
-  cachedSecuritySettings = { value, expiresAt: now + SECURITY_SETTINGS_TTL_MS };
-  return value;
+      if (cacheVersion === securitySettingsCacheVersion) {
+        cachedSecuritySettings = { value, expiresAt: startedAt + SECURITY_SETTINGS_TTL_MS };
+      }
+
+      return value;
+    })
+    .finally(() => {
+      if (securitySettingsPreload === preload) {
+        securitySettingsPreload = null;
+      }
+    });
+
+  securitySettingsPreload = preload;
+  return await preload;
 }
 
 export async function setFingerprintEnabled(enabled: boolean): Promise<void> {
@@ -151,11 +172,17 @@ let cachedPasscodeMaterial: {
 } | null = null;
 let passcodeMaterialLoad: Promise<{ saltHex: string; storedHash: string } | null> | null = null;
 let passcodeMaterialPreload: Promise<void> | null = null;
+let passcodeMaterialCacheVersion = 0;
 
 function invalidatePasscodeCache(): void {
+  passcodeMaterialCacheVersion += 1;
   cachedPasscodeMaterial = null;
   passcodeMaterialLoad = null;
   passcodeMaterialPreload = null;
+}
+
+export function hasCachedPasscodeMaterial(now = Date.now()): boolean {
+  return cachedPasscodeMaterial != null && now < cachedPasscodeMaterial.expiresAt;
 }
 
 async function getPasscodeMaterial(): Promise<{ saltHex: string; storedHash: string } | null> {
@@ -171,44 +198,52 @@ async function getPasscodeMaterial(): Promise<{ saltHex: string; storedHash: str
     return await passcodeMaterialLoad;
   }
 
-  passcodeMaterialLoad = Promise.all([
+  const startedAt = now;
+  const cacheVersion = passcodeMaterialCacheVersion;
+  const load = Promise.all([
     SecureStore.getItemAsync(KEYS.PASSCODE_SALT_HEX),
     SecureStore.getItemAsync(KEYS.PASSCODE_HASH_HEX),
   ])
     .then(([saltHex, storedHash]) => {
       if (saltHex == null || storedHash == null) return null;
 
-      cachedPasscodeMaterial = {
-        saltHex,
-        storedHash,
-        expiresAt: now + PASSCODE_CACHE_TTL_MS,
-      };
+      if (cacheVersion === passcodeMaterialCacheVersion) {
+        cachedPasscodeMaterial = {
+          saltHex,
+          storedHash,
+          expiresAt: startedAt + PASSCODE_CACHE_TTL_MS,
+        };
+      }
+
       return { saltHex, storedHash };
     })
     .finally(() => {
-      passcodeMaterialLoad = null;
+      if (passcodeMaterialLoad === load) {
+        passcodeMaterialLoad = null;
+      }
     });
 
-  return await passcodeMaterialLoad;
+  passcodeMaterialLoad = load;
+  return await load;
 }
 
 export async function preloadPasscodeMaterial(): Promise<void> {
   if (passcodeMaterialPreload == null) {
-    passcodeMaterialPreload = getPasscodeMaterial()
+    const preload = getPasscodeMaterial()
       .then(() => undefined)
       .finally(() => {
-        passcodeMaterialPreload = null;
+        if (passcodeMaterialPreload === preload) {
+          passcodeMaterialPreload = null;
+        }
       });
+    passcodeMaterialPreload = preload;
   }
 
   await passcodeMaterialPreload;
 }
 
 export function warmSecuritySettings(): Promise<SecuritySettingsSnapshot> {
-  if (securitySettingsPreload == null) {
-    securitySettingsPreload = getSecuritySettings();
-  }
-  return securitySettingsPreload;
+  return getSecuritySettings();
 }
 
 export function useWarmSecuritySettings(): void {

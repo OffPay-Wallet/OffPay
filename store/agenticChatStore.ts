@@ -5,7 +5,13 @@ import { mmkvStorage } from '@/lib/cache/mmkv-storage';
 import { usePayrollStore } from '@/store/payrollStore';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
-import type { OffpayNetwork, RwaAsset, RwaProvider, RwaProviderEnvironment } from '@/types/offpay-api';
+import type {
+  OffpayNetwork,
+  RwaAsset,
+  RwaExecuteResponse,
+  RwaProvider,
+  RwaProviderEnvironment,
+} from '@/types/offpay-api';
 
 export type AgenticChatRole = 'user' | 'assistant';
 
@@ -215,6 +221,7 @@ export interface AgenticRwaTradeAction {
   createdAt: number;
   updatedAt: number;
   signature?: string | null;
+  signatures?: RwaExecuteResponse['signatures'] | null;
   errorMessage?: string | null;
 }
 
