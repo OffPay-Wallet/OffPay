@@ -9,7 +9,7 @@
  * Network selection updates the OffPay backend network used by API-backed
  * wallet, swap, and payment modules.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Pressable,
@@ -20,19 +20,22 @@ import {
   View,
 } from 'react-native';
 
-import type { LayoutChangeEvent } from 'react-native';
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_BACKDROP_EXITING,
+  SETTINGS_BACK_ENTERING,
+  SETTINGS_BACK_EXITING,
+  SETTINGS_FORWARD_ENTERING,
+  SETTINGS_FORWARD_EXITING,
+  SETTINGS_SURFACE_ENTERING,
+  SETTINGS_SURFACE_EXITING,
+} from '@/components/ui/settings-motion';
 import { SettingsLineItem } from '@/components/features/settings/SettingsLineItem';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { NetworkStep } from '@/components/features/preferences/NetworkStep';
@@ -44,7 +47,6 @@ import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
 import { colors } from '@/constants/colors';
 import { SOLANA_NETWORKS, isSolanaNetworkSelectable } from '@/constants/networks';
 import { layout, radii, spacing } from '@/constants/spacing';
-import { scheduleUiWorkAfterFirstPaint, yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransitionStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 
@@ -52,6 +54,10 @@ import type { SolanaNetworkId } from '@/constants/networks';
 import type { WalletMode } from '@/store/preferencesStore';
 
 type Step = 'root' | 'walletMode' | 'offlinePayments' | 'network';
+interface StepState {
+  value: Step;
+  direction: 'back' | 'forward';
+}
 
 interface PreferencesModalProps {
   visible: boolean;
@@ -61,8 +67,6 @@ interface PreferencesModalProps {
 const PREFERENCE_MENU_DIVIDER_INSET = spacing.lg + 40 + spacing.md;
 const SHEET_CHROME_PADDING = spacing.md;
 const HEADER_FALLBACK_HEIGHT = layout.minTouchTarget + spacing.lg + spacing.md;
-const SHEET_MIN_HEIGHT = layout.buttonHeightLg * 2 + spacing['3xl'];
-const NETWORK_STEP_CONTENT_ESTIMATE = 280;
 
 const HEADER_TITLES: Record<Step, string> = {
   root: 'Preferences',
@@ -77,26 +81,10 @@ const SHEET_SHADOW = [
   'inset 0 0 16px rgba(255, 255, 255, 0.03)',
   'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
 ].join(', ');
-const NAV_TIMING = { duration: 180, easing: Easing.out(Easing.cubic) } as const;
-const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
-const NAV_EXIT_TIMING = { duration: 90, easing: Easing.out(Easing.cubic) } as const;
 const NETWORK_SWITCH_SETTLE_OPTIONS = {
   timeoutMs: 3000,
-  fallbackDelayMs: 650,
+  fallbackDelayMs: 0,
 } as const;
-
-/**
- * How long the action-button lockout (`isNetworkSwitching`) holds after
- * a switch is committed. Long enough for the WS reconnect, balance
- * refetch, and capability re-query to land in most environments;
- * short enough that the user doesn't feel locked out.
- *
- * Picked at the midpoint of the agreed 600-800ms range. Bumping this
- * up smooths slow networks but extends the visible "Switching network…"
- * label; bumping it down makes the app feel snappier but risks
- * unblocking action buttons before the new network's data settles.
- */
-const NETWORK_SWITCH_FINISH_DELAY_MS = 700;
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -108,8 +96,8 @@ export function PreferencesModal({
 }: PreferencesModalProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
-  const [mounted, setMounted] = useState(visible);
-  const [step, setStep] = useState<Step>('root');
+  const [stepState, setStepState] = useState<StepState>({ value: 'root', direction: 'forward' });
+  const step = stepState.value;
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
   const horizontalPadding = dense ? spacing.md : compact ? spacing.lg : spacing['2xl'];
@@ -121,12 +109,6 @@ export function PreferencesModal({
   const offlinePaymentsEnabled = usePreferencesStore((s) => s.offlinePaymentsEnabled);
   const offlinePaymentPoolSize = usePreferencesStore((s) => s.offlinePaymentPoolSize);
   const network = usePreferencesStore((s) => s.network);
-  const [optimisticWalletMode, setOptimisticWalletMode] = useState(walletMode);
-  const [optimisticNetwork, setOptimisticNetwork] = useState(network);
-  const [headerHeight, setHeaderHeight] = useState(HEADER_FALLBACK_HEIGHT);
-  const [contentHeight, setContentHeight] = useState(0);
-  const [stepNetworkReadsEnabled, setStepNetworkReadsEnabled] = useState(true);
-  const stepTransitionIdRef = React.useRef(0);
 
   const setWalletMode = usePreferencesStore((s) => s.setWalletMode);
   const setOfflinePaymentsEnabled = usePreferencesStore((s) => s.setOfflinePaymentsEnabled);
@@ -136,110 +118,19 @@ export function PreferencesModal({
   const finishNetworkSwitch = useOffpayNetworkTransitionStore((s) => s.finishNetworkSwitch);
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    setOptimisticWalletMode(walletMode);
-  }, [walletMode]);
-
-  useEffect(() => {
-    setOptimisticNetwork(network);
-  }, [network]);
-
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const resolvedHeaderHeight = headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
-  const bodyMaxHeight = Math.max(120, maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING);
-  const scrollOverflows = contentHeight > bodyMaxHeight;
-  const sheetHeight = useMemo(() => {
-    const chromeHeight = resolvedHeaderHeight + SHEET_CHROME_PADDING;
-
-    if (contentHeight <= 0) {
-      const stepEstimate = step === 'offlinePayments' ? 520 : SHEET_MIN_HEIGHT;
-      return Math.min(
-        maxSheetHeight,
-        chromeHeight + (step === 'network' ? NETWORK_STEP_CONTENT_ESTIMATE : stepEstimate),
-      );
-    }
-
-    if (scrollOverflows) {
-      return maxSheetHeight;
-    }
-
-    const stableContentHeight =
-      step === 'network' ? Math.max(contentHeight, NETWORK_STEP_CONTENT_ESTIMATE) : contentHeight;
-    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + stableContentHeight));
-  }, [contentHeight, maxSheetHeight, resolvedHeaderHeight, scrollOverflows, step]);
-
-  const translateY = useSharedValue(windowHeight);
-  const opacity = useSharedValue(0);
-  const animatedSheetHeight = useSharedValue(sheetHeight);
-  const contentProgress = useSharedValue(1);
-  const contentDirection = useSharedValue(1);
-
-  // Animation
-  useEffect(() => {
-    if (visible) {
-      stepTransitionIdRef.current += 1;
-      setContentHeight(0);
-      setStepNetworkReadsEnabled(true);
-      setMounted(true);
-      opacity.value = withTiming(1, { duration: 220 });
-      translateY.value = withTiming(0, {
-        duration: 280,
-        easing: Easing.out(Easing.cubic),
-      });
-    } else {
-      translateY.value = withTiming(
-        windowHeight,
-        {
-          duration: 220,
-          easing: Easing.in(Easing.cubic),
-        },
-        (finished) => {
-          if (finished) runOnJS(setMounted)(false);
-        },
-      );
-      opacity.value = withTiming(0, { duration: 220 });
-      stepTransitionIdRef.current += 1;
-      setStep('root');
-      setStepNetworkReadsEnabled(true);
-    }
-  }, [opacity, translateY, visible, windowHeight]);
-
-  useEffect(() => {
-    animatedSheetHeight.value = withTiming(sheetHeight, SHEET_SIZE_TIMING);
-  }, [animatedSheetHeight, sheetHeight]);
-
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    height: animatedSheetHeight.value,
-    transform: [{ translateY: translateY.value }],
-  }));
-  const contentStyle = useAnimatedStyle(() => ({
-    opacity: contentProgress.value,
-    transform: [
-      {
-        translateX: (1 - contentProgress.value) * contentDirection.value * (dense ? 8 : 14),
-      },
-    ],
-  }));
+  const bodyMaxHeight = Math.max(
+    120,
+    maxSheetHeight - HEADER_FALLBACK_HEIGHT - SHEET_CHROME_PADDING,
+  );
 
   const handleClose = useCallback(
     (afterClose?: () => void): void => {
-      const finishClose = (): void => {
-        onClose();
-        afterClose?.();
-      };
-
-      translateY.value = withTiming(
-        windowHeight,
-        { duration: 220, easing: Easing.in(Easing.cubic) },
-        (finished) => {
-          if (finished) runOnJS(finishClose)();
-        },
-      );
-      opacity.value = withTiming(0, { duration: 220 });
+      onClose();
+      afterClose?.();
     },
-    [onClose, opacity, translateY, windowHeight],
+    [onClose],
   );
 
   // ---------------------------------------------------------------------------
@@ -247,140 +138,48 @@ export function PreferencesModal({
   // ---------------------------------------------------------------------------
 
   const networkLabel = useMemo(() => {
-    const found = SOLANA_NETWORKS.find((n) => n.id === optimisticNetwork);
+    const found = SOLANA_NETWORKS.find((n) => n.id === network);
     return found?.label ?? 'Mainnet';
-  }, [optimisticNetwork]);
+  }, [network]);
 
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
 
-  const handleHeaderLayout = useCallback((event: LayoutChangeEvent): void => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setHeaderHeight((current) => (current === nextHeight ? current : nextHeight));
-  }, []);
-
-  const handleContentLayout = useCallback((event: LayoutChangeEvent): void => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setContentHeight((current) => (current === nextHeight ? current : nextHeight));
-  }, []);
-
-  const enableDeferredStepReads = useCallback((transitionId: number): void => {
-    if (stepTransitionIdRef.current !== transitionId) return;
-    setStepNetworkReadsEnabled(true);
-  }, []);
-
-  const commitStepNavigation = useCallback(
-    (nextStep: Step, transitionId: number): void => {
-      if (stepTransitionIdRef.current !== transitionId) return;
-
-      setContentHeight(0);
-      setStepNetworkReadsEnabled(nextStep !== 'offlinePayments');
-      setStep(nextStep);
-
-      requestAnimationFrame(() => {
-        if (stepTransitionIdRef.current !== transitionId) return;
-        contentProgress.value = withTiming(1, NAV_TIMING, (finished) => {
-          if (finished && nextStep === 'offlinePayments') {
-            runOnJS(enableDeferredStepReads)(transitionId);
-          }
-        });
-      });
-    },
-    [contentProgress, enableDeferredStepReads],
-  );
-
   const navigateToStep = useCallback(
     (nextStep: Step): void => {
       if (nextStep === step) return;
-
-      const transitionId = stepTransitionIdRef.current + 1;
-      stepTransitionIdRef.current = transitionId;
-      contentDirection.value = nextStep === 'root' ? -1 : 1;
-      contentProgress.value = withTiming(0, NAV_EXIT_TIMING, (finished) => {
-        if (finished) {
-          runOnJS(commitStepNavigation)(nextStep, transitionId);
-        }
-      });
+      setStepState({ value: nextStep, direction: nextStep === 'root' ? 'back' : 'forward' });
     },
-    [commitStepNavigation, contentDirection, contentProgress, step],
+    [step],
   );
 
   const handleWalletModeSelect = useCallback(
     (mode: WalletMode): void => {
-      if (mode === optimisticWalletMode) return;
-
-      setOptimisticWalletMode(mode);
+      if (mode === walletMode) return;
       setWalletMode(mode);
     },
-    [optimisticWalletMode, setWalletMode],
+    [setWalletMode, walletMode],
   );
 
   const handleNetworkSelect = useCallback(
     (id: SolanaNetworkId): void => {
       if (!isSolanaNetworkSelectable(id)) return;
-      if (id === optimisticNetwork) return;
-
-      setOptimisticNetwork(id);
+      if (id === network) return;
 
       handleClose(() => {
-        scheduleUiWorkAfterFirstPaint(
-          async () => {
-            // Order matters here:
-            //   1. `beginNetworkSwitch` flips the suspension + switching
-            //      flags BEFORE we touch `queryClient`. Read-only hooks
-            //      gate on `canUseNetwork` so they stop fanning out
-            //      immediately. Action buttons gate on
-            //      `isNetworkSwitching` for visible "Switching
-            //      network…" feedback.
-            //   2. `cancelQueries` runs while the OLD network is still
-            //      committed in `preferencesStore`. This drops in-flight
-            //      requests against the old endpoint without racing the
-            //      new-network queries that would otherwise have started
-            //      had we already flipped the network.
-            //   3. `await yieldToUi()` lets the cancellation actually
-            //      land before we rotate to the new network.
-            //   4. `setNetwork(id)` rotates the network. New-network
-            //      queries with the same key shape will re-key and
-            //      mount fresh. The awaited promise only covers the
-            //      critical recovery mirror, not the visible state
-            //      change.
-            //   5. `finishNetworkSwitch(epoch)` re-enables action
-            //      buttons after a fixed 700ms. The epoch guard means
-            //      a stale finish from a superseded switch (rapid
-            //      double-toggle) is silently ignored.
-            const { epoch } = beginNetworkSwitch(NETWORK_SWITCH_SETTLE_OPTIONS);
-
-            // Cancel old-network in-flight queries. Mutations are NOT
-            // touched: `cancelQueries` only affects queries, so a
-            // running swap/send mutation completes against the old
-            // network's RPC and the user's pending money flow is
-            // unaffected. Every OffPay query keys with `['offpay', ...]`
-            // (verified via grep across the codebase), so a single
-            // prefix match is exhaustive.
+        const { epoch } = beginNetworkSwitch(NETWORK_SWITCH_SETTLE_OPTIONS);
+        void (async () => {
+          try {
             await queryClient.cancelQueries({ queryKey: ['offpay'] });
-            await yieldToUi();
             await setNetwork(id);
-
-            setTimeout(() => {
-              finishNetworkSwitch(epoch);
-            }, NETWORK_SWITCH_FINISH_DELAY_MS);
-          },
-          {
-            timeoutMs: 1600,
-            fallbackDelayMs: 240,
-          },
-        );
+          } finally {
+            finishNetworkSwitch(epoch);
+          }
+        })();
       });
     },
-    [
-      beginNetworkSwitch,
-      finishNetworkSwitch,
-      handleClose,
-      optimisticNetwork,
-      queryClient,
-      setNetwork,
-    ],
+    [beginNetworkSwitch, finishNetworkSwitch, handleClose, network, queryClient, setNetwork],
   );
 
   const stepBody = (
@@ -394,12 +193,12 @@ export function PreferencesModal({
                   size={rootIconSize}
                   color={colors.text.primary}
                   focused
-                  off={optimisticWalletMode === 'offline'}
+                  off={walletMode === 'offline'}
                 />
               }
               title="Wallet Mode"
               subtitle={
-                optimisticWalletMode === 'online'
+                walletMode === 'online'
                   ? 'Live OffPay services while connected'
                   : 'Offline tools stay available even when online'
               }
@@ -414,7 +213,7 @@ export function PreferencesModal({
                   minimumFontScale={0.78}
                   maxFontSizeMultiplier={1}
                 >
-                  {optimisticWalletMode === 'online' ? 'Online' : 'Offline'}
+                  {walletMode === 'online' ? 'Online' : 'Offline'}
                 </Text>
               }
               compact={compact}
@@ -474,7 +273,7 @@ export function PreferencesModal({
       ) : null}
 
       {step === 'walletMode' ? (
-        <WalletModeStep walletMode={optimisticWalletMode} onSelect={handleWalletModeSelect} />
+        <WalletModeStep walletMode={walletMode} onSelect={handleWalletModeSelect} />
       ) : null}
 
       {step === 'offlinePayments' ? (
@@ -483,22 +282,34 @@ export function PreferencesModal({
           poolSize={offlinePaymentPoolSize}
           onEnabledChange={setOfflinePaymentsEnabled}
           onPoolSizeChange={setOfflinePaymentPoolSize}
-          networkReadsEnabled={stepNetworkReadsEnabled}
+          networkReadsEnabled
         />
       ) : null}
 
       {step === 'network' ? (
-        <NetworkStep selectedNetwork={optimisticNetwork} onSelect={handleNetworkSelect} />
+        <NetworkStep selectedNetwork={network} onSelect={handleNetworkSelect} />
       ) : null}
     </>
   );
 
-  if (!mounted) return null;
+  if (!visible) return null;
+
+  const contentEntering =
+    stepState.direction === 'back' ? SETTINGS_BACK_ENTERING : SETTINGS_FORWARD_ENTERING;
+  const contentExiting =
+    stepState.direction === 'back' ? SETTINGS_BACK_EXITING : SETTINGS_FORWARD_EXITING;
 
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}>
+    <View
+      style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}
+      accessibilityViewIsModal
+    >
       {/* Backdrop */}
-      <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
+      <Animated.View
+        entering={SETTINGS_BACKDROP_ENTERING}
+        exiting={SETTINGS_BACKDROP_EXITING}
+        style={StyleSheet.absoluteFill}
+      >
         <ModalBackdropScrim />
         <TouchableWithoutFeedback onPress={() => handleClose()}>
           <View style={StyleSheet.absoluteFill} />
@@ -513,13 +324,15 @@ export function PreferencesModal({
         ]}
       >
         <Animated.View
-          style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
+          entering={SETTINGS_SURFACE_ENTERING}
+          exiting={SETTINGS_SURFACE_EXITING}
+          style={[
+            styles.sheet,
+            { width: '100%', maxWidth: sheetMaxWidth, maxHeight: maxSheetHeight },
+          ]}
         >
           {/* Header */}
-          <View
-            style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}
-            onLayout={handleHeaderLayout}
-          >
+          <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
             <View style={styles.headerLeft}>
               {step !== 'root' ? (
                 <Pressable
@@ -563,27 +376,23 @@ export function PreferencesModal({
             </View>
           </View>
 
-          {/* Body — sheet height follows content; scroll only when offline step overflows. */}
-          {scrollOverflows ? (
-            <ScrollView
-              style={[styles.bodyScroll, { maxHeight: bodyMaxHeight }]}
-              contentContainerStyle={styles.bodyContent}
-              contentInsetAdjustmentBehavior="automatic"
-              showsVerticalScrollIndicator={false}
-              bounces={false}
-              keyboardShouldPersistTaps="handled"
-              onContentSizeChange={(_width, height) => {
-                const nextHeight = Math.ceil(height);
-                setContentHeight((current) => (current === nextHeight ? current : nextHeight));
-              }}
+          <ScrollView
+            style={[styles.bodyScroll, { maxHeight: bodyMaxHeight }]}
+            contentContainerStyle={styles.bodyContent}
+            contentInsetAdjustmentBehavior="automatic"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Animated.View
+              key={step}
+              entering={contentEntering}
+              exiting={contentExiting}
+              style={styles.stepContent}
             >
-              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
-            </ScrollView>
-          ) : (
-            <View style={styles.bodyStatic} onLayout={handleContentLayout}>
-              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
-            </View>
-          )}
+              {stepBody}
+            </Animated.View>
+          </ScrollView>
         </Animated.View>
       </View>
     </View>

@@ -115,10 +115,17 @@ export async function pickAndPersistLocalProfileImage(): Promise<string | null> 
       profileImageDirectory,
       `profile-avatar-${Date.now()}.${extension}`,
     );
-    sourceFile.copy(destinationFile);
-    pruneManagedProfileImages(destinationFile.uri);
-
-    return destinationFile.uri;
+    try {
+      await sourceFile.copy(destinationFile);
+      return destinationFile.uri;
+    } catch (error: unknown) {
+      try {
+        if (destinationFile.exists) destinationFile.delete();
+      } catch {
+        // Best-effort cleanup for a failed or partial copy.
+      }
+      throw error;
+    }
   } finally {
     releaseAppLockSuppression();
   }

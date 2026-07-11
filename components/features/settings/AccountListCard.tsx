@@ -1,17 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Animated, {
-  Easing,
-  interpolate,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { WalletAvatar } from '@/components/features/settings/WalletAvatar';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { Text } from '@/components/ui/Text';
+import {
+  SETTINGS_SURFACE_ENTERING,
+  SETTINGS_SURFACE_EXITING,
+} from '@/components/ui/settings-motion';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
@@ -22,11 +20,11 @@ import type { WalletAccount } from '@/store/walletStore';
 interface AccountListCardProps {
   wallet: WalletAccount;
   isPrimary: boolean;
-  isOnlyWallet: boolean;
+  primaryChangePending?: boolean;
   compact?: boolean;
   dense?: boolean;
   actionsMenuOpen?: boolean;
-  onActionsMenuOpenChange?: (open: boolean) => void;
+  onActionsMenuOpenChange?: (walletId: string, open: boolean) => void;
   onRequestExportKeys?: (wallet: WalletAccount) => void;
   onRequestRemoveWallet?: (wallet: WalletAccount) => void;
   onRequestSetPrimary?: (wallet: WalletAccount) => void;
@@ -38,118 +36,55 @@ const ACCOUNT_CARD_SHADOW = [
   'inset 0 0 14px rgba(255, 255, 255, 0.03)',
   'inset 0 -1px 3px rgba(0, 0, 0, 0.3)',
 ].join(', ');
-const MENU_ANIMATION_CONFIG = {
-  duration: 120,
-  easing: Easing.out(Easing.cubic),
-} as const;
 const ACTION_BUTTON_SURFACE = colors.surface.cardElevated;
 const ACTION_BUTTON_BORDER = colors.glass.rim;
 
-export function AccountListCard({
+export const AccountListCard = React.memo(function AccountListCard({
   wallet,
   isPrimary,
+  primaryChangePending = false,
   compact = false,
   dense = false,
-  actionsMenuOpen,
+  actionsMenuOpen = false,
   onActionsMenuOpenChange,
   onRequestExportKeys,
   onRequestRemoveWallet,
   onRequestSetPrimary,
 }: AccountListCardProps): React.JSX.Element {
-  const balanceQuery = useOffpayWalletBalance(wallet.publicKey);
+  const balanceQuery = useOffpayWalletBalance(wallet.publicKey, {
+    requestOwner: `settings.accounts.balance.${wallet.id}`,
+  });
 
-  const [localActionsMenuOpen, setLocalActionsMenuOpen] = useState(Boolean(actionsMenuOpen));
-  const menuAnim = useSharedValue(actionsMenuOpen ? 1 : 0);
-  const parentNotifyFrameRef = useRef<number | null>(null);
-  const openedFromPressInRef = useRef(false);
   const avatarSize = dense ? 44 : compact ? 50 : layout.avatarLg;
   const actionButtonSize = dense ? 38 : compact ? 40 : 42;
   const actionIconSize = dense ? 18 : layout.iconSizeInline;
-  const isMenuOpen = localActionsMenuOpen;
-
-  const animateMenu = useCallback(
-    (open: boolean): void => {
-      menuAnim.value = withTiming(open ? 1 : 0, MENU_ANIMATION_CONFIG);
-    },
-    [menuAnim],
-  );
+  const isMenuOpen = actionsMenuOpen;
 
   const setActionsMenuOpen = useCallback(
     (open: boolean): void => {
-      setLocalActionsMenuOpen(open);
-      animateMenu(open);
-
-      if (parentNotifyFrameRef.current != null) {
-        cancelAnimationFrame(parentNotifyFrameRef.current);
-        parentNotifyFrameRef.current = null;
-      }
-
-      if (open) {
-        parentNotifyFrameRef.current = requestAnimationFrame(() => {
-          parentNotifyFrameRef.current = null;
-          onActionsMenuOpenChange?.(true);
-        });
-        return;
-      }
-
-      onActionsMenuOpenChange?.(false);
+      onActionsMenuOpenChange?.(wallet.id, open);
     },
-    [animateMenu, onActionsMenuOpenChange],
+    [onActionsMenuOpenChange, wallet.id],
   );
 
-  useEffect(() => {
-    if (actionsMenuOpen == null) return;
-
-    setLocalActionsMenuOpen(actionsMenuOpen);
-    animateMenu(actionsMenuOpen);
-  }, [actionsMenuOpen, animateMenu]);
-
-  useEffect(
-    () => () => {
-      if (parentNotifyFrameRef.current != null) {
-        cancelAnimationFrame(parentNotifyFrameRef.current);
-      }
-    },
-    [],
-  );
-
-  const menuStyle = useAnimatedStyle(() => ({
-    opacity: menuAnim.value,
-    transform: [
-      { translateY: interpolate(menuAnim.value, [0, 1], [-4, 0]) },
-      { scale: interpolate(menuAnim.value, [0, 1], [0.98, 1]) },
-    ],
-  }));
-
-  const handleSetPrimary = (): void => {
-    if (isPrimary) return;
+  const handleSetPrimary = useCallback((): void => {
+    if (isPrimary || primaryChangePending) return;
     onRequestSetPrimary?.(wallet);
-  };
+  }, [isPrimary, onRequestSetPrimary, primaryChangePending, wallet]);
 
-  const handleExportKeys = (): void => {
+  const handleExportKeys = useCallback((): void => {
     setActionsMenuOpen(false);
     onRequestExportKeys?.(wallet);
-  };
+  }, [onRequestExportKeys, setActionsMenuOpen, wallet]);
 
-  const handleRemoveWallet = (): void => {
+  const handleRemoveWallet = useCallback((): void => {
     setActionsMenuOpen(false);
     onRequestRemoveWallet?.(wallet);
-  };
+  }, [onRequestRemoveWallet, setActionsMenuOpen, wallet]);
 
-  const handleActionsPressIn = (): void => {
-    if (isMenuOpen) return;
-    openedFromPressInRef.current = true;
-    setActionsMenuOpen(true);
-  };
-
-  const handleActionsPress = (): void => {
-    if (openedFromPressInRef.current) {
-      openedFromPressInRef.current = false;
-      return;
-    }
-
+  const handleActionsPress = useCallback((): void => {
     setActionsMenuOpen(!isMenuOpen);
-  };
+  }, [isMenuOpen, setActionsMenuOpen]);
 
   const liveBalanceLabel =
     balanceQuery.data != null
@@ -220,8 +155,10 @@ export function AccountListCard({
               isPrimary ? styles.actionRoundButtonActive : null,
             ]}
             onPress={handleSetPrimary}
+            disabled={isPrimary || primaryChangePending}
             accessibilityRole="button"
             accessibilityLabel={isPrimary ? 'Primary wallet' : 'Set as primary wallet'}
+            accessibilityState={{ disabled: isPrimary || primaryChangePending }}
             hitSlop={6}
           >
             <Ionicons
@@ -237,7 +174,6 @@ export function AccountListCard({
                 styles.actionRoundButton,
                 { width: actionButtonSize, height: actionButtonSize },
               ]}
-              onPressIn={handleActionsPressIn}
               onPress={handleActionsPress}
               accessibilityRole="button"
               accessibilityLabel={isMenuOpen ? 'Close wallet actions' : 'Open wallet actions'}
@@ -250,39 +186,42 @@ export function AccountListCard({
               />
             </Pressable>
 
-            <Animated.View
-              pointerEvents={isMenuOpen ? 'auto' : 'none'}
-              style={[styles.dropdownMenu, { top: actionButtonSize + spacing.sm }, menuStyle]}
-            >
-              <View style={styles.dropdownContent}>
-                <Pressable style={styles.dropdownItem} onPress={handleExportKeys}>
-                  <Ionicons
-                    name="key-outline"
-                    size={layout.iconSizeInline}
-                    color={colors.text.primary}
-                  />
-                  <Text variant="body" color={colors.text.primary}>
-                    Export Keys
-                  </Text>
-                </Pressable>
-                <Pressable style={styles.dropdownItem} onPress={handleRemoveWallet}>
-                  <Ionicons
-                    name="trash-outline"
-                    size={layout.iconSizeInline}
-                    color={colors.semantic.error}
-                  />
-                  <Text variant="body" color={colors.semantic.error}>
-                    Remove
-                  </Text>
-                </Pressable>
-              </View>
-            </Animated.View>
+            {isMenuOpen ? (
+              <Animated.View
+                entering={SETTINGS_SURFACE_ENTERING}
+                exiting={SETTINGS_SURFACE_EXITING}
+                style={[styles.dropdownMenu, { top: actionButtonSize + spacing.sm }]}
+              >
+                <View style={styles.dropdownContent}>
+                  <Pressable style={styles.dropdownItem} onPress={handleExportKeys}>
+                    <Ionicons
+                      name="key-outline"
+                      size={layout.iconSizeInline}
+                      color={colors.text.primary}
+                    />
+                    <Text variant="body" color={colors.text.primary}>
+                      Export Keys
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.dropdownItem} onPress={handleRemoveWallet}>
+                    <Ionicons
+                      name="trash-outline"
+                      size={layout.iconSizeInline}
+                      color={colors.semantic.error}
+                    />
+                    <Text variant="body" color={colors.semantic.error}>
+                      Remove
+                    </Text>
+                  </Pressable>
+                </View>
+              </Animated.View>
+            ) : null}
           </View>
         </View>
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   shell: {

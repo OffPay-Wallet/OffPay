@@ -2,13 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
-  useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
   withSpring,
   type SharedValue,
-  type WithSpringConfig,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,6 +17,7 @@ import { PuffyHomeIcon } from '@/components/ui/icons/PuffyHomeIcon';
 import { PuffyRwaIcon } from '@/components/ui/icons/PuffyRwaIcon';
 import { PuffySettingsIcon } from '@/components/ui/icons/PuffySettingsIcon';
 import { Text } from '@/components/ui/Text';
+import { SETTINGS_PRESS_SPRING, SETTINGS_SPRING } from '@/components/ui/settings-motion';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -100,31 +99,11 @@ const QUICK_ACTION_SHADOW = '0 8px 20px rgba(16, 16, 16, 0.16)';
 // Animations — fast UI-thread transforms/opacity. FAB expansion is driven
 // directly from a shared value in the press handler so it does not wait for a
 // React render before opening or closing.
-const TAB_VISIBILITY_SPRING: WithSpringConfig = {
-  damping: 28,
-  stiffness: 420,
-  mass: 0.4,
-};
-const FAB_EXPANSION_SPRING: WithSpringConfig = {
-  damping: 18,
-  stiffness: 420,
-  mass: 0.55,
-};
-const TAB_PILL_FEEDBACK_SPRING: WithSpringConfig = {
-  damping: 22,
-  stiffness: 520,
-  mass: 0.45,
-};
-const TAB_PILL_SLIDE_SPRING: WithSpringConfig = {
-  damping: 30,
-  stiffness: 620,
-  mass: 0.42,
-};
-const TAB_ITEM_STATE_SPRING: WithSpringConfig = {
-  damping: 24,
-  stiffness: 560,
-  mass: 0.36,
-};
+const TAB_VISIBILITY_SPRING = SETTINGS_SPRING;
+const FAB_EXPANSION_SPRING = SETTINGS_SPRING;
+const TAB_PILL_FEEDBACK_SPRING = SETTINGS_PRESS_SPRING;
+const TAB_PILL_SLIDE_SPRING = SETTINGS_SPRING;
+const TAB_ITEM_STATE_SPRING = SETTINGS_SPRING;
 const TAB_PILL_PRESS_SCALE = 0.96;
 const HISTORY_PRELOAD_FALLBACK_DELAY_MS = 180;
 const HISTORY_PRELOAD_TIMEOUT_MS = 1600;
@@ -197,6 +176,7 @@ function renderRouteIcon(
 
 interface PrimaryTabContentProps {
   activePrimaryIndexValue: SharedValue<number>;
+  focused: boolean;
   iconSize: number;
   label: string;
   labelFontSize: number;
@@ -207,6 +187,7 @@ interface PrimaryTabContentProps {
 
 function PrimaryTabContent({
   activePrimaryIndexValue,
+  focused,
   iconSize,
   label,
   labelFontSize,
@@ -217,13 +198,9 @@ function PrimaryTabContent({
   const activeProgress = useDerivedValue(() =>
     withSpring(activePrimaryIndexValue.value === primaryIndex ? 1 : 0, TAB_ITEM_STATE_SPRING),
   );
-  const activeLayerStyle = useAnimatedStyle(() => ({
-    opacity: activeProgress.value,
-    transform: [{ scale: 0.95 + activeProgress.value * 0.05 }],
-  }));
-  const inactiveLayerStyle = useAnimatedStyle(() => ({
-    opacity: 1 - activeProgress.value,
-    transform: [{ scale: 1 - activeProgress.value * 0.04 }],
+  const contentStyle = useAnimatedStyle(() => ({
+    opacity: 0.72 + activeProgress.value * 0.28,
+    transform: [{ scale: 0.96 + activeProgress.value * 0.04 }],
   }));
   const labelMetrics = {
     fontSize: labelFontSize,
@@ -236,31 +213,17 @@ function PrimaryTabContent({
         pointerEvents="none"
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={[styles.tabVisualLayer, inactiveLayerStyle]}
+        style={[styles.tabVisualLayer, contentStyle]}
       >
         <View style={styles.tabVisualContent}>
-          {renderRouteIcon(routeName, TAB_INACTIVE_TINT, iconSize)}
+          {renderRouteIcon(routeName, focused ? TAB_ACTIVE_TINT : TAB_INACTIVE_TINT, iconSize)}
           <Text
-            color={TAB_INACTIVE_LABEL}
-            style={[styles.tabLabel, labelMetrics, { fontFamily: fontFamily.uiMedium }]}
-            numberOfLines={1}
-            maxFontSizeMultiplier={1}
-          >
-            {label}
-          </Text>
-        </View>
-      </Animated.View>
-      <Animated.View
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={[styles.tabVisualLayer, activeLayerStyle]}
-      >
-        <View style={styles.tabVisualContent}>
-          {renderRouteIcon(routeName, TAB_ACTIVE_TINT, iconSize)}
-          <Text
-            color={TAB_ACTIVE_LABEL}
-            style={[styles.tabLabel, labelMetrics, { fontFamily: fontFamily.uiSemiBold }]}
+            color={focused ? TAB_ACTIVE_LABEL : TAB_INACTIVE_LABEL}
+            style={[
+              styles.tabLabel,
+              labelMetrics,
+              { fontFamily: focused ? fontFamily.uiSemiBold : fontFamily.uiMedium },
+            ]}
             numberOfLines={1}
             maxFontSizeMultiplier={1}
           >
@@ -464,21 +427,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   // toward the FAB column (label on the left, puck on the right).
   const actionRowRight = windowWidth - (fabCenterX + QUICK_ACTION_PUCK_SIZE / 2);
   const actionStackBottom = bottomGap + barHeight + QUICK_ACTION_ROW_GAP;
-  const activePillTranslateX = useSharedValue(activePillX);
-  const activePrimaryIndexValue = useSharedValue(visualActivePrimaryIndex);
-
-  useAnimatedReaction(
-    () => activePillX,
-    (currentPillX) => {
-      activePillTranslateX.value = withSpring(currentPillX, TAB_PILL_SLIDE_SPRING);
-    },
+  const activePillTranslateX = useDerivedValue(
+    () => withSpring(activePillX, TAB_PILL_SLIDE_SPRING),
     [activePillX],
   );
-  useAnimatedReaction(
+  const activePrimaryIndexValue = useDerivedValue(
     () => visualActivePrimaryIndex,
-    (currentPrimaryIndex) => {
-      activePrimaryIndexValue.value = currentPrimaryIndex;
-    },
     [visualActivePrimaryIndex],
   );
 
@@ -499,13 +453,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [handleTabLongPress],
   );
 
-  const primePrimaryTabFeedback = useCallback(
-    () => {
-      activePillFeedback.value = TAB_PILL_PRESS_SCALE;
-      activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
-    },
-    [activePillFeedback],
-  );
+  const primePrimaryTabFeedback = useCallback(() => {
+    activePillFeedback.value = TAB_PILL_PRESS_SCALE;
+    activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
+  }, [activePillFeedback]);
 
   const recordTabSwitchAfterNavigation = useCallback(
     (fromIndex: number, fromRoute: string): void => {
@@ -697,6 +648,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
               >
                 <PrimaryTabContent
                   activePrimaryIndexValue={activePrimaryIndexValue}
+                  focused={visuallyFocused}
                   iconSize={iconSize}
                   label={label}
                   labelFontSize={labelFontSize}

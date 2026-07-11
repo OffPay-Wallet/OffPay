@@ -1,13 +1,11 @@
 import { StyleSheet } from 'react-native';
 import Animated, {
-  cancelAnimation,
   Easing,
   useAnimatedStyle,
-  useSharedValue,
+  useDerivedValue,
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { useEffect } from 'react';
 import Svg, { Line } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
@@ -65,23 +63,18 @@ export function LazyLoadingSpinner({
   size = 32,
   color = colors.text.primary,
 }: LazyLoadingSpinnerProps): React.JSX.Element {
-  const rotation = useSharedValue(0);
-
-  useEffect(() => {
-    rotation.value = 0;
-    rotation.value = withRepeat(
-      withTiming(1, {
-        duration: SPIN_DURATION_MS,
-        easing: Easing.linear,
-      }),
-      -1,
-      false,
-    );
-
-    return () => {
-      cancelAnimation(rotation);
-    };
-  }, [rotation]);
+  const rotation = useDerivedValue(
+    () =>
+      withRepeat(
+        withTiming(1, {
+          duration: SPIN_DURATION_MS,
+          easing: Easing.linear,
+        }),
+        -1,
+        false,
+      ),
+    [],
+  );
 
   const rotateStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value * 360}deg` }],

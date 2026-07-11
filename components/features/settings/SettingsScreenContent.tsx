@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   Linking,
   Modal,
@@ -8,23 +8,12 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Animated, {
-  Easing,
-  FadeIn,
-  interpolate,
-  LinearTransition,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIsFocused } from 'expo-router/react-navigation';
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
@@ -34,7 +23,12 @@ import { PreferencesModal } from '@/components/features/settings/PreferencesModa
 import { ProfileSettingsModal } from '@/components/features/settings/ProfileSettingsModal';
 import { SecuritySettingsModal } from '@/components/features/settings/SecuritySettingsModal';
 import { useAppToast } from '@/components/ui/AppToast';
+import { NativeSettingsResetActions } from '@/components/ui/NativeSettingsResetActions';
 import { Text } from '@/components/ui/Text';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_SURFACE_ENTERING,
+} from '@/components/ui/settings-motion';
 import { PuffyAddContactIcon } from '@/components/ui/icons/PuffyAddContactIcon';
 import { PuffyTwitterXIcon } from '@/components/ui/icons/PuffyTwitterXIcon';
 import { colors } from '@/constants/colors';
@@ -49,25 +43,13 @@ const SUPPORT_EMAIL = 'hello@offpay.app';
 const SUPPORT_EMAIL_URL = `mailto:${SUPPORT_EMAIL}`;
 const X_HANDLE = '@OffPaySolana';
 const X_PROFILE_URL = 'https://x.com/OffPaySolana';
-const RESET_CONFIRM_SCRIM_DURATION_MS = 360;
-const RESET_CONFIRM_CARD_DURATION_MS = 560;
-const RESET_CONFIRM_CONTENT_DURATION_MS = 460;
-const RESET_CONFIRM_BLUR_DURATION_MS = 300;
-const RESET_CONFIRM_CONTENT_DELAY_MS = 24;
-const RESET_CONFIRM_IOS_EASING = Easing.bezier(0.2, 0.82, 0.2, 1);
-const RESET_CONFIRM_CLOSE_DURATION_MS = 340;
-const RESET_CONFIRM_CLOSE_EASING = Easing.bezier(0.36, 0, 0.66, 1);
-const SETTINGS_CARD_ENTERING = FadeIn.duration(140)
-  .easing(Easing.out(Easing.cubic))
-  .withInitialValues({
-    opacity: 0,
-    transform: [{ translateY: 4 }],
-  });
-const SETTINGS_CARD_LAYOUT = LinearTransition.duration(180).easing(Easing.out(Easing.cubic));
+const SETTINGS_SHEET_OVERLAY_ID = 'settings-sheet';
 
 interface SettingsScreenContentProps {
   bottomPadding: number;
 }
+
+type SettingsSheet = 'contacts' | 'preferences' | 'profile' | 'security';
 
 export function SettingsScreenContent({
   bottomPadding,
@@ -95,178 +77,39 @@ export function SettingsScreenContent({
   // modal reads as a balanced two-column layout regardless of the
   // device. The "compact" tier collapses padding so dialog height
   // does not exceed ~210dp on small phones (Galaxy A14 etc).
-  const dialogButtonHeight = dense ? 44 : compact ? 46 : 48;
-  const dialogButtonPaddingY = dense ? spacing.xs : spacing.sm;
-  const dialogIconSize = dense ? 16 : 17;
   const dialogTitleFontSize = dense ? 18 : compact ? 20 : 22;
   const dialogTitleLineHeight = dialogTitleFontSize + 6;
   const dialogBodyFontSize = dense ? 13 : compact ? 14 : 15;
   const dialogBodyLineHeight = dialogBodyFontSize + 6;
-  const resetConfirmInitialTranslateY = Math.min(220, Math.max(128, windowHeight * 0.24));
-
   const [confirmVisible, setConfirmVisible] = useState(false);
-  const [confirmClosing, setConfirmClosing] = useState(false);
   const [destroying, setDestroying] = useState(false);
-  const confirmClosingRef = useRef(false);
+  const destroyingRef = useRef(false);
   // Preferences & Security open as inline bottom sheets layered over
   // the settings screen — not as separate routes — so tapping a card
   // slides the sheet up over the dimmed settings list instead of
   // pushing a new screen (which flashed the navigator backdrop).
-  const [preferencesVisible, setPreferencesVisible] = useState(false);
-  const [profileVisible, setProfileVisible] = useState(false);
-  const [contactsVisible, setContactsVisible] = useState(false);
-  const [securityVisible, setSecurityVisible] = useState(false);
-  const resetConfirmScrim = useSharedValue(0);
-  const resetConfirmMotion = useSharedValue(0);
-  const resetConfirmContent = useSharedValue(0);
-  const resetConfirmBlur = useSharedValue(0);
+  const [activeSheet, setActiveSheet] = useState<SettingsSheet | null>(null);
   const showOverlay = useOverlayVisibilityStore((s) => s.showOverlay);
   const hideOverlay = useOverlayVisibilityStore((s) => s.hideOverlay);
 
-  const resetConfirmScrimStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(resetConfirmScrim.value, [0, 1], [0, 1]),
-  }));
-
-  const resetConfirmCardStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(resetConfirmContent.value, [0, 0.22, 1], [0, 1, 1]),
-    transform: [
-      {
-        translateY: interpolate(
-          resetConfirmMotion.value,
-          [0, 1],
-          [resetConfirmInitialTranslateY, 0],
-        ),
-      },
-      { scale: interpolate(resetConfirmMotion.value, [0, 1], [0.9, 1]) },
-    ],
-  }));
-
-  const resetConfirmBlurStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(resetConfirmBlur.value, [0, 1], [1, 0]),
-    filter: [{ blur: interpolate(resetConfirmBlur.value, [0, 1], [3.5, 0]) }],
-  }));
-
-  // Hide the floating tab bar while a settings sheet is open. Keyed by a
-  // stable overlay id so overlapping opens/closes stay consistent, and
-  // the cleanup always releases the flag if this screen unmounts while a
-  // sheet is still open (no stuck-hidden tab bar).
-  const anySettingsSheetOpen =
-    preferencesVisible || profileVisible || contactsVisible || securityVisible;
-  useEffect(() => {
-    const overlayId = 'settings-sheet';
-    if (anySettingsSheetOpen) {
-      showOverlay(overlayId);
-    } else {
-      hideOverlay(overlayId);
-    }
-    return () => hideOverlay(overlayId);
-  }, [anySettingsSheetOpen, showOverlay, hideOverlay]);
-
-  useEffect(() => {
-    if (!confirmVisible) {
-      resetConfirmScrim.value = 0;
-      resetConfirmMotion.value = 0;
-      resetConfirmContent.value = 0;
-      resetConfirmBlur.value = 0;
-      return;
-    }
-
-    resetConfirmScrim.value = 0;
-    resetConfirmMotion.value = 0;
-    resetConfirmContent.value = 0;
-    resetConfirmBlur.value = 0;
-    confirmClosingRef.current = false;
-    setConfirmClosing(false);
-
-    resetConfirmScrim.value = withTiming(1, {
-      duration: RESET_CONFIRM_SCRIM_DURATION_MS,
-      easing: RESET_CONFIRM_IOS_EASING,
-    });
-    resetConfirmContent.value = withDelay(
-      RESET_CONFIRM_CONTENT_DELAY_MS,
-      withTiming(1, {
-        duration: RESET_CONFIRM_CONTENT_DURATION_MS,
-        easing: RESET_CONFIRM_IOS_EASING,
-      }),
-    );
-    resetConfirmMotion.value = withDelay(
-      RESET_CONFIRM_CONTENT_DELAY_MS,
-      withTiming(1, {
-        duration: RESET_CONFIRM_CARD_DURATION_MS,
-        easing: RESET_CONFIRM_IOS_EASING,
-      }),
-    );
-    resetConfirmBlur.value = withDelay(
-      RESET_CONFIRM_CONTENT_DELAY_MS,
-      withTiming(1, {
-        duration: RESET_CONFIRM_BLUR_DURATION_MS,
-        easing: RESET_CONFIRM_IOS_EASING,
-      }),
-    );
-  }, [
-    confirmVisible,
-    resetConfirmBlur,
-    resetConfirmContent,
-    resetConfirmMotion,
-    resetConfirmScrim,
-  ]);
-
   const handleOpenConfirm = useCallback((): void => {
-    if (destroying) return;
-    confirmClosingRef.current = false;
-    setConfirmClosing(false);
+    if (destroyingRef.current) return;
     setConfirmVisible(true);
-  }, [destroying]);
+  }, []);
 
   const handleOpenAccounts = useCallback((): void => {
     if (!isFocused) return;
     router.push('/accounts');
   }, [isFocused, router]);
 
-  const finishConfirmClose = useCallback((): void => {
-    confirmClosingRef.current = false;
-    setConfirmClosing(false);
+  const handleCancelConfirm = useCallback((): void => {
+    if (destroyingRef.current) return;
     setConfirmVisible(false);
   }, []);
 
-  const handleCancelConfirm = useCallback((): void => {
-    if (destroying || confirmClosingRef.current) return;
-
-    confirmClosingRef.current = true;
-    setConfirmClosing(true);
-    resetConfirmScrim.value = withTiming(0, {
-      duration: RESET_CONFIRM_CLOSE_DURATION_MS,
-      easing: RESET_CONFIRM_CLOSE_EASING,
-    });
-    resetConfirmContent.value = withTiming(0, {
-      duration: RESET_CONFIRM_CLOSE_DURATION_MS,
-      easing: RESET_CONFIRM_CLOSE_EASING,
-    });
-    resetConfirmBlur.value = withTiming(0, {
-      duration: RESET_CONFIRM_CLOSE_DURATION_MS,
-      easing: RESET_CONFIRM_CLOSE_EASING,
-    });
-    resetConfirmMotion.value = withTiming(
-      0,
-      {
-        duration: RESET_CONFIRM_CLOSE_DURATION_MS,
-        easing: RESET_CONFIRM_CLOSE_EASING,
-      },
-      (finished) => {
-        if (finished) runOnJS(finishConfirmClose)();
-      },
-    );
-  }, [
-    destroying,
-    finishConfirmClose,
-    resetConfirmBlur,
-    resetConfirmContent,
-    resetConfirmMotion,
-    resetConfirmScrim,
-  ]);
-
   const handleConfirmDestroy = useCallback((): void => {
-    if (destroying) return;
+    if (destroyingRef.current) return;
+    destroyingRef.current = true;
     setDestroying(true);
     void (async () => {
       try {
@@ -286,10 +129,24 @@ export function SettingsScreenContent({
           variant: 'error',
         });
       } finally {
+        destroyingRef.current = false;
         setDestroying(false);
       }
     })();
-  }, [destroying, queryClient, router, showToast]);
+  }, [queryClient, router, showToast]);
+
+  const openSettingsSheet = useCallback(
+    (sheet: SettingsSheet): void => {
+      showOverlay(SETTINGS_SHEET_OVERLAY_ID);
+      setActiveSheet(sheet);
+    },
+    [showOverlay],
+  );
+
+  const closeSettingsSheet = useCallback((): void => {
+    setActiveSheet(null);
+    hideOverlay(SETTINGS_SHEET_OVERLAY_ID);
+  }, [hideOverlay]);
 
   return (
     <>
@@ -308,7 +165,7 @@ export function SettingsScreenContent({
       >
         <View style={[styles.contentFrame, { width: contentFrameWidth, gap: sectionGap }]}>
           <View style={[styles.sections, { gap: sectionGap }]}>
-            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
+            <View>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -341,7 +198,7 @@ export function SettingsScreenContent({
                     rightValue={usernameLabel}
                     compact={compact}
                     dense={dense}
-                    onPress={() => setProfileVisible(true)}
+                    onPress={() => openSettingsSheet('profile')}
                   />
                   <SettingsRow
                     iconNode={
@@ -350,7 +207,7 @@ export function SettingsScreenContent({
                     label="Preferences"
                     compact={compact}
                     dense={dense}
-                    onPress={() => setPreferencesVisible(true)}
+                    onPress={() => openSettingsSheet('preferences')}
                   />
                   <SettingsRow
                     iconNode={
@@ -364,13 +221,13 @@ export function SettingsScreenContent({
                     badgeCount={contactCount > 0 ? contactCount : undefined}
                     compact={compact}
                     dense={dense}
-                    onPress={() => setContactsVisible(true)}
+                    onPress={() => openSettingsSheet('contacts')}
                   />
                 </SettingsSectionCard>
               </View>
-            </Animated.View>
+            </View>
 
-            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
+            <View>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -393,13 +250,13 @@ export function SettingsScreenContent({
                     label="Security"
                     compact={compact}
                     dense={dense}
-                    onPress={() => setSecurityVisible(true)}
+                    onPress={() => openSettingsSheet('security')}
                   />
                 </SettingsSectionCard>
               </View>
-            </Animated.View>
+            </View>
 
-            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
+            <View>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -438,9 +295,9 @@ export function SettingsScreenContent({
                   />
                 </SettingsSectionCard>
               </View>
-            </Animated.View>
+            </View>
 
-            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
+            <View>
               <View style={styles.sectionBlock}>
                 <Text
                   variant="captionBold"
@@ -457,11 +314,6 @@ export function SettingsScreenContent({
                       <Ionicons name="trash" size={rowIconSize} color={colors.semantic.error} />
                     }
                     label={destroying ? 'Resetting wallet' : 'Reset wallet'}
-                    rightNode={
-                      destroying ? (
-                        <LazyLoadingSpinner size={18} color={colors.semantic.error} />
-                      ) : undefined
-                    }
                     destructive
                     disabled={destroying}
                     compact={compact}
@@ -470,9 +322,9 @@ export function SettingsScreenContent({
                   />
                 </SettingsSectionCard>
               </View>
-            </Animated.View>
+            </View>
 
-            <Animated.View entering={SETTINGS_CARD_ENTERING} layout={SETTINGS_CARD_LAYOUT}>
+            <View>
               <View style={styles.versionFooter}>
                 <Text
                   variant="small"
@@ -484,7 +336,7 @@ export function SettingsScreenContent({
                   {versionLabel}
                 </Text>
               </View>
-            </Animated.View>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -501,22 +353,19 @@ export function SettingsScreenContent({
           accessibilityViewIsModal
           accessibilityLabel="Reset wallet confirmation"
         >
-          <Animated.View style={[styles.confirmScrim, resetConfirmScrimStyle]}>
+          <Animated.View entering={SETTINGS_BACKDROP_ENTERING} style={styles.confirmScrim}>
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={handleCancelConfirm}
-              disabled={destroying || confirmClosing}
+              disabled={destroying}
               accessibilityRole="button"
               accessibilityLabel="Cancel reset"
             />
           </Animated.View>
           <Animated.View
-            style={[styles.confirmCard, { maxWidth: dialogMaxWidth }, resetConfirmCardStyle]}
+            entering={SETTINGS_SURFACE_ENTERING}
+            style={[styles.confirmCard, { maxWidth: dialogMaxWidth }]}
           >
-            <Animated.View
-              pointerEvents="none"
-              style={[styles.confirmCardBlurVeil, resetConfirmBlurStyle]}
-            />
             <View pointerEvents="none" style={styles.confirmCardGloss} />
             <Text
               variant="h3"
@@ -547,79 +396,34 @@ export function SettingsScreenContent({
               Wipes wallets, keys, and history. This can&apos;t be undone.
             </Text>
             <View style={styles.confirmActions}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.confirmDialogButton,
-                  styles.confirmCancelButton,
-                  {
-                    minHeight: dialogButtonHeight,
-                    paddingVertical: dialogButtonPaddingY,
-                  },
-                  pressed ? styles.confirmCancelButtonPressed : null,
-                ]}
-                onPress={handleCancelConfirm}
-                disabled={destroying || confirmClosing}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel reset"
-              >
-                <Text
-                  variant="button"
-                  color={colors.text.primary}
-                  align="center"
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={1.05}
-                  style={styles.confirmButtonLabel}
-                >
-                  Cancel
-                </Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.confirmDialogButton,
-                  styles.confirmResetButton,
-                  {
-                    minHeight: dialogButtonHeight,
-                    paddingVertical: dialogButtonPaddingY,
-                  },
-                  pressed && !destroying ? styles.resetButtonPressed : null,
-                  destroying ? styles.resetButtonDisabled : null,
-                ]}
-                onPress={handleConfirmDestroy}
-                disabled={destroying || confirmClosing}
-                accessibilityRole="button"
-                accessibilityLabel="Confirm reset and erase this device"
-                accessibilityState={{ busy: destroying, disabled: destroying || confirmClosing }}
-              >
-                {destroying ? (
-                  <LazyLoadingSpinner size={18} color={colors.brand.whiteStream} />
-                ) : (
-                  <View style={styles.confirmResetContent}>
-                    <Ionicons name="trash" size={dialogIconSize} color={colors.brand.whiteStream} />
-                    <Text
-                      variant="button"
-                      color={colors.brand.whiteStream}
-                      align="center"
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={1.05}
-                      style={styles.confirmButtonLabel}
-                    >
-                      Reset
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
+              <NativeSettingsResetActions
+                busy={destroying}
+                cancelBackgroundColor={colors.surface.cardElevated}
+                cancelBorderColor={colors.glass.rim}
+                cancelTextColor={colors.text.primary}
+                confirmBackgroundColor={colors.semantic.error}
+                confirmTextColor={colors.brand.whiteStream}
+                onCancel={handleCancelConfirm}
+                onConfirm={handleConfirmDestroy}
+              />
             </View>
           </Animated.View>
         </View>
       </Modal>
 
-      <PreferencesModal visible={preferencesVisible} onClose={() => setPreferencesVisible(false)} />
+      {activeSheet === 'preferences' ? (
+        <PreferencesModal visible onClose={closeSettingsSheet} />
+      ) : null}
 
-      <ProfileSettingsModal visible={profileVisible} onClose={() => setProfileVisible(false)} />
+      {activeSheet === 'profile' ? (
+        <ProfileSettingsModal visible onClose={closeSettingsSheet} />
+      ) : null}
 
-      <ContactsModal visible={contactsVisible} onClose={() => setContactsVisible(false)} />
+      {activeSheet === 'contacts' ? <ContactsModal visible onClose={closeSettingsSheet} /> : null}
 
-      <SecuritySettingsModal visible={securityVisible} onClose={() => setSecurityVisible(false)} />
+      {activeSheet === 'security' ? (
+        <SecuritySettingsModal visible onClose={closeSettingsSheet} />
+      ) : null}
     </>
   );
 }
@@ -651,13 +455,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     alignItems: 'center',
   },
-  resetButtonPressed: {
-    backgroundColor: colors.semantic.error,
-  },
-  resetButtonDisabled: {
-    backgroundColor: colors.semantic.error,
-  },
-
   // Confirm modal.
   confirmLayer: {
     flex: 1,
@@ -698,11 +495,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glass.smokeWash,
     opacity: 0.86,
   },
-  confirmCardBlurVeil: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: colors.brand.graphiteDepth,
-    zIndex: 2,
-  },
   confirmTitle: {
     textAlign: 'center',
   },
@@ -715,44 +507,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.md,
     marginTop: spacing.xs,
-  },
-  // Shared base — both dialog buttons stretch to equal width via
-  // flex: 1 so the layout reads symmetric on every screen size.
-  confirmDialogButton: {
-    flex: 1,
-    flexBasis: 0,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radii.full,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmCancelButton: {
-    backgroundColor: colors.brand.glassTint,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glass.rim,
-    boxShadow: [
-      '0 10px 22px rgba(0, 0, 0, 0.28)',
-      'inset 0 1px 1px rgba(255, 255, 255, 0.14)',
-    ].join(', '),
-  },
-  confirmCancelButtonPressed: {
-    opacity: 0.82,
-  },
-  confirmResetButton: {
-    backgroundColor: colors.semantic.error,
-    boxShadow: [
-      '0 12px 28px rgba(255, 77, 90, 0.24)',
-      'inset 0 1px 1px rgba(255, 255, 255, 0.24)',
-    ].join(', '),
-  },
-  confirmButtonLabel: {
-    fontFamily: fontFamily.uiSemiBold,
-  },
-  confirmResetContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
   },
 });

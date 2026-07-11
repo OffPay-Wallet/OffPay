@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import Animated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -11,6 +12,12 @@ import {
 } from '@/components/features/settings/AccountActionDialog';
 import { AccountListCard } from '@/components/features/settings/AccountListCard';
 import { Text } from '@/components/ui/Text';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_BACKDROP_EXITING,
+  SETTINGS_SURFACE_ENTERING,
+  SETTINGS_SURFACE_EXITING,
+} from '@/components/ui/settings-motion';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { WALLET_FLOW_INVITE_PURPOSE } from '@/lib/invite/wallet-flow-invite';
@@ -19,9 +26,6 @@ import { useWalletStore } from '@/store/walletStore';
 
 import type { WalletAccount } from '@/store/walletStore';
 
-const WALLET_REORDER_TRANSITION = LinearTransition.duration(460).easing(
-  Easing.bezier(0.16, 1, 0.3, 1),
-);
 const SCREEN_MAX_WIDTH = 640;
 const ADD_WALLET_CARD_MAX_WIDTH = 520;
 const CONTROL_SURFACE = colors.surface.cardElevated;
@@ -31,6 +35,8 @@ const HEADER_BUTTON_SHADOW = [
   'inset 0 -1px 2px rgba(0, 0, 0, 0.25)',
   '0 3px 8px rgba(0, 0, 0, 0.18)',
 ].join(', ');
+
+const walletKeyExtractor = (wallet: WalletAccount): string => wallet.id;
 const MODAL_CARD_SHADOW = [
   '0 12px 28px rgba(0, 0, 0, 0.44)',
   'inset 0 1px 2px rgba(255, 255, 255, 0.16)',
@@ -52,6 +58,9 @@ export function AccountsScreenContent(): React.JSX.Element {
   const [openActionWalletId, setOpenActionWalletId] = useState<string | null>(null);
   const [actionDialog, setActionDialog] = useState<AccountActionDialogState | null>(null);
   const [removingWallet, setRemovingWallet] = useState(false);
+  const [settingPrimaryWalletId, setSettingPrimaryWalletId] = useState<string | null>(null);
+  const primaryRequestWalletIdRef = useRef<string | null>(null);
+  const removingWalletIdRef = useRef<string | null>(null);
 
   const compact = width < 390 || height < 760 || fontScale > 1.08;
   const dense = width < 340 || height < 700 || fontScale > 1.18;
@@ -70,14 +79,16 @@ export function AccountsScreenContent(): React.JSX.Element {
     return [primaryWallet, ...wallets.filter((wallet) => wallet.id !== effectivePrimaryWalletId)];
   }, [effectivePrimaryWalletId, wallets]);
 
-  useEffect(() => {
-    if (optimisticPrimaryWalletId != null && activeWalletId === optimisticPrimaryWalletId) {
-      setOptimisticPrimaryWalletId(null);
-    }
-  }, [activeWalletId, optimisticPrimaryWalletId]);
+  const openAddWalletCard = useCallback((): void => {
+    setIsAddWalletCardOpen(true);
+  }, []);
+
+  const closeAddWalletCard = useCallback((): void => {
+    setIsAddWalletCardOpen(false);
+  }, []);
 
   const navigateWithTransition = useCallback((): void => {
-    setIsAddWalletCardOpen(false);
+    closeAddWalletCard();
     clearWalletFlowInviteVerification();
     router.push({
       pathname: '/invite-code',
@@ -87,16 +98,27 @@ export function AccountsScreenContent(): React.JSX.Element {
         source: 'accounts',
       },
     });
-  }, [clearWalletFlowInviteVerification, router]);
+  }, [clearWalletFlowInviteVerification, closeAddWalletCard, router]);
 
   const handleBack = useCallback((): void => {
     router.back();
   }, [router]);
 
   const closeActionDialog = useCallback((): void => {
-    if (removingWallet) return;
+    if (removingWalletIdRef.current != null) return;
     setActionDialog(null);
-  }, [removingWallet]);
+  }, []);
+
+  const handleActionsMenuOpenChange = useCallback((walletId: string, open: boolean): void => {
+    setOpenActionWalletId((current) => {
+      if (open) return walletId;
+      return current === walletId ? null : current;
+    });
+  }, []);
+
+  const closeActionsMenu = useCallback((): void => {
+    setOpenActionWalletId(null);
+  }, []);
 
   const handleRequestExportKeys = useCallback(
     (wallet: WalletAccount): void => {
@@ -114,16 +136,26 @@ export function AccountsScreenContent(): React.JSX.Element {
 
   const handleSetPrimaryWallet = useCallback(
     (wallet: WalletAccount): void => {
-      if (wallet.id === effectivePrimaryWalletId) return;
+      if (wallet.id === effectivePrimaryWalletId || primaryRequestWalletIdRef.current != null) {
+        return;
+      }
 
       setOpenActionWalletId(null);
+      primaryRequestWalletIdRef.current = wallet.id;
       setOptimisticPrimaryWalletId(wallet.id);
+      setSettingPrimaryWalletId(wallet.id);
 
-      void setPrimaryWallet(wallet.id).catch((error: unknown) => {
-        setOptimisticPrimaryWalletId(null);
-        const message = error instanceof Error ? error.message : 'Failed to set primary wallet';
-        Alert.alert('Unable to update wallet', message);
-      });
+      void setPrimaryWallet(wallet.id)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : 'Failed to set primary wallet';
+          Alert.alert('Unable to update wallet', message);
+        })
+        .finally(() => {
+          if (primaryRequestWalletIdRef.current !== wallet.id) return;
+          primaryRequestWalletIdRef.current = null;
+          setOptimisticPrimaryWalletId(null);
+          setSettingPrimaryWalletId(null);
+        });
     },
     [effectivePrimaryWalletId, setPrimaryWallet],
   );
@@ -140,9 +172,10 @@ export function AccountsScreenContent(): React.JSX.Element {
   );
 
   const handleConfirmRemoveWallet = useCallback((): void => {
-    if (actionDialog?.type !== 'remove-wallet' || removingWallet) return;
+    if (actionDialog?.type !== 'remove-wallet' || removingWalletIdRef.current != null) return;
 
     const { wallet } = actionDialog;
+    removingWalletIdRef.current = wallet.id;
     setRemovingWallet(true);
 
     void removeWallet(wallet.id)
@@ -154,9 +187,90 @@ export function AccountsScreenContent(): React.JSX.Element {
         setActionDialog({ type: 'remove-error', wallet, message });
       })
       .finally(() => {
+        if (removingWalletIdRef.current !== wallet.id) return;
+        removingWalletIdRef.current = null;
         setRemovingWallet(false);
       });
-  }, [actionDialog, removeWallet, removingWallet]);
+  }, [actionDialog, removeWallet]);
+
+  const walletListHeader = useMemo(
+    () => (
+      <View style={styles.sectionHeader}>
+        <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
+          Wallets
+        </Text>
+        <View style={styles.walletCountPill}>
+          <Text variant="small" color={colors.text.primary}>
+            {wallets.length}
+          </Text>
+        </View>
+      </View>
+    ),
+    [wallets.length],
+  );
+
+  const renderEmptyWallets = useCallback(
+    (): React.JSX.Element => (
+      <View style={styles.emptyState}>
+        <Ionicons name="wallet-outline" size={layout.iconSizeTab} color={colors.text.secondary} />
+        <Text variant="bodyBold" color={colors.text.primary}>
+          No wallets yet
+        </Text>
+        <Pressable
+          style={({ pressed }) => [styles.emptyAddButton, pressed && styles.emptyAddButtonPressed]}
+          onPress={openAddWalletCard}
+          accessibilityRole="button"
+          accessibilityLabel="Add wallet"
+        >
+          <Ionicons name="add" size={layout.iconSizeInline} color={colors.text.onAccent} />
+          <Text variant="buttonSmall" color={colors.text.onAccent}>
+            Add wallet
+          </Text>
+        </Pressable>
+      </View>
+    ),
+    [openAddWalletCard],
+  );
+
+  const renderWallet = useCallback(
+    ({ item: wallet, index }: ListRenderItemInfo<WalletAccount>): React.JSX.Element => {
+      const actionsOpen = openActionWalletId === wallet.id;
+
+      return (
+        <View
+          style={[
+            styles.walletCardLayer,
+            { zIndex: actionsOpen ? 40 : displayedWallets.length - index },
+          ]}
+        >
+          <AccountListCard
+            wallet={wallet}
+            isPrimary={wallet.id === effectivePrimaryWalletId}
+            primaryChangePending={settingPrimaryWalletId != null}
+            compact={compact}
+            dense={dense}
+            actionsMenuOpen={actionsOpen}
+            onActionsMenuOpenChange={handleActionsMenuOpenChange}
+            onRequestExportKeys={handleRequestExportKeys}
+            onRequestRemoveWallet={handleRequestRemoveWallet}
+            onRequestSetPrimary={handleSetPrimaryWallet}
+          />
+        </View>
+      );
+    },
+    [
+      compact,
+      dense,
+      displayedWallets.length,
+      effectivePrimaryWalletId,
+      handleActionsMenuOpenChange,
+      handleRequestExportKeys,
+      handleRequestRemoveWallet,
+      handleSetPrimaryWallet,
+      openActionWalletId,
+      settingPrimaryWalletId,
+    ],
+  );
 
   return (
     <View style={styles.container}>
@@ -199,7 +313,7 @@ export function AccountsScreenContent(): React.JSX.Element {
               { width: headerButtonSize, height: headerButtonSize },
               pressed && styles.iconBtnPressed,
             ]}
-            onPress={() => setIsAddWalletCardOpen(true)}
+            onPress={openAddWalletCard}
             accessibilityRole="button"
             accessibilityLabel="Add wallet"
             hitSlop={6}
@@ -208,120 +322,62 @@ export function AccountsScreenContent(): React.JSX.Element {
           </Pressable>
         </View>
 
-        <ScrollView
+        <FlashList<WalletAccount>
           style={styles.content}
+          data={displayedWallets}
+          renderItem={renderWallet}
+          keyExtractor={walletKeyExtractor}
+          ListHeaderComponent={walletListHeader}
+          ListEmptyComponent={renderEmptyWallets}
           contentContainerStyle={[
             styles.contentContainer,
             { paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing['2xl'] },
           ]}
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.sectionHeader}>
-            <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
-              Wallets
-            </Text>
-            <View style={styles.walletCountPill}>
-              <Text variant="small" color={colors.text.primary}>
-                {wallets.length}
-              </Text>
-            </View>
-          </View>
-
-          {wallets.length > 0 ? (
-            displayedWallets.map((wallet, index) => {
-              const actionsOpen = openActionWalletId === wallet.id;
-
-              return (
-                <Animated.View
-                  key={wallet.id}
-                  entering={FadeIn.duration(180).easing(Easing.out(Easing.cubic))}
-                  layout={WALLET_REORDER_TRANSITION}
-                  style={[
-                    styles.walletCardLayer,
-                    {
-                      zIndex: actionsOpen ? 40 : wallets.length - index,
-                    },
-                  ]}
-                >
-                  <AccountListCard
-                    wallet={wallet}
-                    isPrimary={wallet.id === effectivePrimaryWalletId}
-                    isOnlyWallet={displayedWallets.length === 1}
-                    compact={compact}
-                    dense={dense}
-                    actionsMenuOpen={actionsOpen}
-                    onActionsMenuOpenChange={(open) =>
-                      setOpenActionWalletId(open ? wallet.id : null)
-                    }
-                    onRequestExportKeys={handleRequestExportKeys}
-                    onRequestRemoveWallet={handleRequestRemoveWallet}
-                    onRequestSetPrimary={handleSetPrimaryWallet}
-                  />
-                </Animated.View>
-              );
-            })
-          ) : (
-            <View style={styles.emptyState}>
-              <Ionicons
-                name="wallet-outline"
-                size={layout.iconSizeTab}
-                color={colors.text.secondary}
-              />
-              <Text variant="bodyBold" color={colors.text.primary}>
-                No wallets yet
-              </Text>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.emptyAddButton,
-                  pressed && styles.emptyAddButtonPressed,
-                ]}
-                onPress={() => setIsAddWalletCardOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Add wallet"
-              >
-                <Ionicons name="add" size={layout.iconSizeInline} color={colors.text.onAccent} />
-                <Text variant="buttonSmall" color={colors.text.onAccent}>
-                  Add wallet
-                </Text>
-              </Pressable>
-            </View>
-          )}
-        </ScrollView>
+          onScrollBeginDrag={closeActionsMenu}
+          drawDistance={320}
+        />
       </View>
 
       {isAddWalletCardOpen ? (
-        <Animated.View
-          entering={FadeIn.duration(160).easing(Easing.out(Easing.cubic))}
-          exiting={FadeOut.duration(120).easing(Easing.out(Easing.cubic))}
-          style={[
-            styles.addWalletOverlay,
-            {
-              paddingTop: insets.top + spacing.lg,
-              paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.lg,
-              paddingHorizontal: horizontalPadding,
-            },
-          ]}
-        >
-          <Pressable
-            style={styles.addWalletBackdrop}
-            onPress={() => setIsAddWalletCardOpen(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Close add wallet options"
-          />
+        <>
           <Animated.View
-            entering={FadeIn.duration(220).easing(Easing.out(Easing.cubic))}
-            exiting={FadeOut.duration(120).easing(Easing.out(Easing.cubic))}
-            style={{ width: modalCardWidth }}
+            entering={SETTINGS_BACKDROP_ENTERING}
+            exiting={SETTINGS_BACKDROP_EXITING}
+            style={styles.addWalletBackdropLayer}
           >
-            <View style={styles.addWalletCard}>
+            <Pressable
+              style={styles.addWalletBackdrop}
+              onPress={closeAddWalletCard}
+              accessibilityRole="button"
+              accessibilityLabel="Close add wallet options"
+            />
+          </Animated.View>
+
+          <Animated.View
+            entering={SETTINGS_SURFACE_ENTERING}
+            exiting={SETTINGS_SURFACE_EXITING}
+            pointerEvents="box-none"
+            style={[
+              styles.addWalletOverlay,
+              {
+                paddingTop: insets.top + spacing.lg,
+                paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.lg,
+                paddingHorizontal: horizontalPadding,
+              },
+            ]}
+            accessibilityViewIsModal
+            accessibilityLabel="Add wallet"
+          >
+            <View style={[styles.addWalletCard, { width: modalCardWidth }]}>
               <View style={styles.addWalletHeader}>
                 <Text variant="h3" color={colors.text.primary} numberOfLines={1}>
                   Add Wallet
                 </Text>
                 <Pressable
                   style={({ pressed }) => [styles.addWalletClose, pressed && styles.iconBtnPressed]}
-                  onPress={() => setIsAddWalletCardOpen(false)}
+                  onPress={closeAddWalletCard}
                   accessibilityRole="button"
                   accessibilityLabel="Close"
                   hitSlop={8}
@@ -368,7 +424,7 @@ export function AccountsScreenContent(): React.JSX.Element {
               </View>
             </View>
           </Animated.View>
-        </Animated.View>
+        </>
       ) : null}
 
       <AccountActionDialog
@@ -431,7 +487,6 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     paddingTop: spacing.sm,
-    gap: spacing.sm,
   },
   walletCardLayer: {
     position: 'relative',
@@ -441,7 +496,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   walletCountPill: {
     minWidth: 28,
@@ -491,6 +546,10 @@ const styles = StyleSheet.create({
     zIndex: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addWalletBackdropLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 39,
   },
   addWalletBackdrop: {
     ...StyleSheet.absoluteFill,

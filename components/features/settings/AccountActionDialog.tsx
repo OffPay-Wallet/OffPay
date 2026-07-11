@@ -1,10 +1,16 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import Animated, { Easing, FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_BACKDROP_EXITING,
+  SETTINGS_SURFACE_ENTERING,
+  SETTINGS_SURFACE_EXITING,
+} from '@/components/ui/settings-motion';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 
@@ -85,31 +91,34 @@ export function AccountActionDialog({
   const removeDialogOpen = dialog.type === 'remove-wallet';
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(160).easing(Easing.out(Easing.cubic))}
-      exiting={FadeOut.duration(120).easing(Easing.out(Easing.cubic))}
-      style={[
-        styles.overlay,
-        {
-          paddingTop: insets.top + spacing.lg,
-          paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.lg,
-          paddingHorizontal: horizontalPadding,
-        },
-      ]}
-    >
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Close wallet action"
-      />
+    <>
+      <Animated.View
+        entering={SETTINGS_BACKDROP_ENTERING}
+        exiting={SETTINGS_BACKDROP_EXITING}
+        style={styles.backdropLayer}
+      >
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close wallet action"
+        />
+      </Animated.View>
 
       <Animated.View
-        entering={FadeIn.duration(220).easing(Easing.out(Easing.cubic))}
-        exiting={FadeOut.duration(120).easing(Easing.out(Easing.cubic))}
-        style={{ width: cardWidth }}
+        entering={SETTINGS_SURFACE_ENTERING}
+        exiting={SETTINGS_SURFACE_EXITING}
+        pointerEvents="box-none"
+        style={[
+          styles.overlay,
+          {
+            paddingTop: insets.top + spacing.lg,
+            paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.lg,
+            paddingHorizontal: horizontalPadding,
+          },
+        ]}
       >
-        <View style={styles.card}>
+        <View style={[styles.card, { width: cardWidth }]}>
           <View style={styles.header}>
             <View style={styles.iconBubble}>
               <Ionicons name={copy.icon} size={layout.iconSizeInline} color={copy.iconColor} />
@@ -130,6 +139,8 @@ export function AccountActionDialog({
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel remove wallet"
+                accessibilityState={{ disabled: removing }}
+                disabled={removing}
               >
                 <Text variant="buttonSmall" color={colors.text.primary}>
                   Cancel
@@ -146,6 +157,7 @@ export function AccountActionDialog({
               onPress={removeDialogOpen ? onConfirmRemove : onClose}
               accessibilityRole="button"
               accessibilityLabel={removeDialogOpen ? 'Remove wallet' : 'Close'}
+              accessibilityState={{ disabled: removing }}
               disabled={removing}
             >
               <Text
@@ -158,11 +170,15 @@ export function AccountActionDialog({
           </View>
         </View>
       </Animated.View>
-    </Animated.View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  backdropLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 59,
+  },
   overlay: {
     ...StyleSheet.absoluteFill,
     zIndex: 60,

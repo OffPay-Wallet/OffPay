@@ -3,11 +3,13 @@
  * Shows fingerprint toggle, passcode, and wallet keys rows.
  */
 import React from 'react';
+import { StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SettingsRow } from '@/components/features/settings/SettingsRow';
 import { SettingsSectionCard } from '@/components/features/settings/SettingsSectionCard';
 import { GlassToggle } from '@/components/ui/GlassToggle';
+import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 
@@ -16,6 +18,8 @@ const SECURITY_MENU_DIVIDER_INSET = spacing.lg + 28 + spacing.md;
 
 interface SecurityRootStepProps {
   fingerprintEnabled: boolean;
+  fingerprintBusy: boolean;
+  loading: boolean;
   hasPasscode: boolean;
   canReveal: boolean;
   compact?: boolean;
@@ -28,6 +32,8 @@ interface SecurityRootStepProps {
 
 export function SecurityRootStep({
   fingerprintEnabled,
+  fingerprintBusy,
+  loading,
   hasPasscode,
   canReveal,
   compact = false,
@@ -38,23 +44,39 @@ export function SecurityRootStep({
   onGoWalletKeys,
 }: SecurityRootStepProps): React.JSX.Element {
   const iconColor = colors.text.primary;
+  const fingerprintUnavailable = loading || fingerprintBusy;
 
   return (
     <SettingsSectionCard dividerInset={SECURITY_MENU_DIVIDER_INSET}>
       <SettingsRow
         iconNode={<Ionicons name="finger-print" size={iconSize} color={iconColor} />}
         label="Fingerprint"
-        subtitle={fingerprintEnabled ? 'Enabled for wallet unlock' : 'Set up fingerprint unlock'}
+        subtitle={
+          loading
+            ? 'Loading security settings'
+            : fingerprintBusy
+              ? 'Updating fingerprint setting'
+              : fingerprintEnabled
+                ? 'Enabled for wallet unlock'
+                : 'Set up fingerprint unlock'
+        }
         rightNode={
-          <GlassToggle
-            value={fingerprintEnabled}
-            onValueChange={onToggleFingerprint}
-            accessibilityLabel="Fingerprint toggle"
-          />
+          <View style={styles.fingerprintAction}>
+            {fingerprintUnavailable ? (
+              <LazyLoadingSpinner size={16} color={colors.text.secondary} />
+            ) : null}
+            <GlassToggle
+              value={fingerprintEnabled}
+              onValueChange={onToggleFingerprint}
+              disabled={fingerprintUnavailable}
+              accessibilityLabel="Fingerprint toggle"
+            />
+          </View>
         }
         compact={compact}
         dense={dense}
         onPress={onToggleFingerprint}
+        disabled={fingerprintUnavailable}
       />
 
       <SettingsRow
@@ -64,6 +86,7 @@ export function SecurityRootStep({
         compact={compact}
         dense={dense}
         onPress={onGoPasscode}
+        disabled={loading}
       />
 
       <SettingsRow
@@ -73,8 +96,16 @@ export function SecurityRootStep({
         compact={compact}
         dense={dense}
         onPress={onGoWalletKeys}
-        disabled={!canReveal}
+        disabled={loading || !canReveal}
       />
     </SettingsSectionCard>
   );
 }
+
+const styles = StyleSheet.create({
+  fingerprintAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+});

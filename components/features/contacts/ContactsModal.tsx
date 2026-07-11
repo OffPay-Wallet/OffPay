@@ -1,22 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Keyboard,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
   TouchableWithoutFeedback,
   useWindowDimensions,
   View,
 } from 'react-native';
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppToast } from '@/components/ui/AppToast';
@@ -24,6 +18,12 @@ import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
 import { Text } from '@/components/ui/Text';
 import { PuffyAddContactIcon } from '@/components/ui/icons/PuffyAddContactIcon';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_BACKDROP_EXITING,
+  SETTINGS_SURFACE_ENTERING,
+  SETTINGS_SURFACE_EXITING,
+} from '@/components/ui/settings-motion';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -44,8 +44,12 @@ interface ContactsModalProps {
 type ContactEditorMode = 'add' | 'edit' | null;
 
 const SHEET_SHADOW = '0 18px 36px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
-const SHEET_TIMING = { duration: 260, easing: Easing.out(Easing.cubic) } as const;
-const FADE_TIMING = { duration: 200 } as const;
+
+const contactKeyExtractor = (contact: SavedContact): string => contact.address;
+
+function ContactSeparator(): React.JSX.Element {
+  return <View style={styles.contactSeparator} />;
+}
 
 export function ContactsModal({ visible, onClose }: ContactsModalProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
@@ -54,7 +58,6 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
   const contacts = useContactsStore((s) => s.contacts);
   const upsertContact = useContactsStore((s) => s.upsertContact);
   const deleteContact = useContactsStore((s) => s.deleteContact);
-  const [mounted, setMounted] = useState(visible);
   const [editorMode, setEditorMode] = useState<ContactEditorMode>(null);
   const [editingAddress, setEditingAddress] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
@@ -67,7 +70,7 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
   const sheetMaxWidth = 430;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
   const listMaxHeight = Math.max(160, maxSheetHeight - (editorMode == null ? 160 : 340));
-  const normalizedName = useMemo(() => normalizeContactName(draftName), [draftName]);
+  const normalizedName = normalizeContactName(draftName);
   const normalizedAddress = draftAddress.trim();
   const existingContact = getContactByAddress(contacts, normalizedAddress);
   const duplicateContact =
@@ -82,43 +85,10 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
     [contacts],
   );
 
-  const opacity = useSharedValue(0);
-  const translateY = useSharedValue(windowHeight);
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      opacity.value = withTiming(1, FADE_TIMING);
-      translateY.value = withTiming(0, SHEET_TIMING);
-      return;
-    }
-
-    opacity.value = withTiming(0, FADE_TIMING);
-    translateY.value = withTiming(
-      windowHeight,
-      { duration: 220, easing: Easing.in(Easing.cubic) },
-      (finished) => {
-        if (finished) runOnJS(setMounted)(false);
-      },
-    );
-  }, [opacity, translateY, visible, windowHeight]);
-
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-  }));
-
-  const closeWithAnimation = useCallback((): void => {
+  const close = useCallback((): void => {
     Keyboard.dismiss();
-    opacity.value = withTiming(0, FADE_TIMING);
-    translateY.value = withTiming(
-      windowHeight,
-      { duration: 220, easing: Easing.in(Easing.cubic) },
-      (finished) => {
-        if (finished) runOnJS(onClose)();
-      },
-    );
-  }, [onClose, opacity, translateY, windowHeight]);
+    onClose();
+  }, [onClose]);
 
   const resetEditor = useCallback((): void => {
     setEditorMode(null);
@@ -193,18 +163,37 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
     [deleteContact, editingAddress, resetEditor, showToast],
   );
 
-  if (!mounted) return null;
+  const renderContact = useCallback(
+    ({ item }: ListRenderItemInfo<SavedContact>): React.JSX.Element => (
+      <ContactRow contact={item} onEdit={openEditEditor} onDelete={handleDelete} />
+    ),
+    [handleDelete, openEditEditor],
+  );
+
+  if (!visible) return null;
+
+  const contactListHeight = Math.min(
+    listMaxHeight,
+    sortedContacts.length * 68 + Math.max(0, sortedContacts.length - 1) * spacing.sm,
+  );
 
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}>
-      <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
+    <>
+      <Animated.View
+        entering={SETTINGS_BACKDROP_ENTERING}
+        exiting={SETTINGS_BACKDROP_EXITING}
+        style={styles.backdropLayer}
+      >
         <ModalBackdropScrim />
-        <TouchableWithoutFeedback onPress={closeWithAnimation}>
+        <TouchableWithoutFeedback onPress={close}>
           <View style={StyleSheet.absoluteFill} />
         </TouchableWithoutFeedback>
       </Animated.View>
 
-      <View
+      <Animated.View
+        entering={SETTINGS_SURFACE_ENTERING}
+        exiting={SETTINGS_SURFACE_EXITING}
+        pointerEvents="box-none"
         style={[
           styles.overlay,
           { paddingBottom: overlayPaddingBottom, paddingHorizontal: horizontalPadding },
@@ -212,7 +201,7 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
         accessibilityViewIsModal
         accessibilityLabel="Contacts"
       >
-        <Animated.View
+        <View
           style={[
             styles.sheet,
             {
@@ -220,7 +209,6 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
               maxWidth: sheetMaxWidth,
               maxHeight: maxSheetHeight,
             },
-            sheetStyle,
           ]}
         >
           <View style={[styles.header, compact && styles.headerCompact]}>
@@ -240,7 +228,7 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
             <View style={[styles.headerSide, styles.headerRight]}>
               <Pressable
                 style={({ pressed }) => [styles.headerIconBtn, pressed && styles.pressed]}
-                onPress={closeWithAnimation}
+                onPress={close}
                 accessibilityRole="button"
                 accessibilityLabel="Close contacts"
                 hitSlop={6}
@@ -361,27 +349,23 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
                 </Text>
               </View>
             ) : (
-              <ScrollView
-                style={{ maxHeight: listMaxHeight }}
+              <FlashList<SavedContact>
+                data={sortedContacts}
+                renderItem={renderContact}
+                keyExtractor={contactKeyExtractor}
+                ItemSeparatorComponent={ContactSeparator}
+                style={{ height: contactListHeight }}
                 contentContainerStyle={styles.contactList}
                 contentInsetAdjustmentBehavior="automatic"
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
-              >
-                {sortedContacts.map((contact) => (
-                  <ContactRow
-                    key={contact.address}
-                    contact={contact}
-                    onEdit={openEditEditor}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </ScrollView>
+                drawDistance={240}
+              />
             )}
           </View>
-        </Animated.View>
-      </View>
-    </View>
+        </View>
+      </Animated.View>
+    </>
   );
 }
 
@@ -453,8 +437,15 @@ const ContactRow = React.memo(function ContactRow({
 });
 
 const styles = StyleSheet.create({
+  backdropLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 9998,
+    elevation: 9998,
+  },
   overlay: {
     ...StyleSheet.absoluteFill,
+    zIndex: 9999,
+    elevation: 9999,
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
@@ -592,8 +583,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.glossPressed,
   },
   contactList: {
-    gap: spacing.sm,
     paddingBottom: spacing.sm,
+  },
+  contactSeparator: {
+    height: spacing.sm,
   },
   contactRow: {
     minHeight: 68,

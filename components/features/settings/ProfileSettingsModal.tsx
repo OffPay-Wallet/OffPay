@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Keyboard,
   Pressable,
@@ -9,14 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import type { LayoutChangeEvent } from 'react-native';
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,6 +18,12 @@ import { SettingsSectionCard } from '@/components/features/settings/SettingsSect
 import { useAppToast } from '@/components/ui/AppToast';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_BACKDROP_EXITING,
+  SETTINGS_SURFACE_ENTERING,
+  SETTINGS_SURFACE_EXITING,
+} from '@/components/ui/settings-motion';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
@@ -51,13 +50,7 @@ const SHEET_SHADOW = [
   'inset 0 -1px 3px rgba(0, 0, 0, 0.35)',
 ].join(', ');
 const SHEET_CHROME_PADDING = spacing.md;
-const HEADER_FALLBACK_HEIGHT = layout.minTouchTarget + spacing.lg + spacing.sm;
-const FOOTER_FALLBACK_HEIGHT = layout.buttonHeightMd + spacing.sm + spacing.lg;
 const SHEET_MIN_HEIGHT = layout.buttonHeightLg * 2 + spacing['3xl'];
-const SHEET_OPEN_TIMING = { duration: 320, easing: Easing.out(Easing.poly(4)) } as const;
-const SHEET_CLOSE_TIMING = { duration: 220, easing: Easing.in(Easing.ease) } as const;
-const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
-const FADE_TIMING = { duration: 220 } as const;
 
 export function ProfileSettingsModal({
   visible,
@@ -71,14 +64,11 @@ export function ProfileSettingsModal({
   const setActiveWalletName = useWalletStore((state) => state.setActiveWalletName);
   const { profileImageUri, pickingProfileImage, pickProfileImage, clearProfileImage } =
     useLocalProfileImageManager();
-  const [mounted, setMounted] = useState(visible);
   const [draftUsername, setDraftUsername] = useState(() =>
     sanitizeOffpayUsernameInput(username ?? ''),
   );
   const [saving, setSaving] = useState(false);
-  const [headerHeight, setHeaderHeight] = useState(HEADER_FALLBACK_HEIGHT);
-  const [footerHeight, setFooterHeight] = useState(FOOTER_FALLBACK_HEIGHT);
-  const [formHeight, setFormHeight] = useState(0);
+  const saveLockRef = useRef(false);
 
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
@@ -86,148 +76,64 @@ export function ProfileSettingsModal({
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const sheetMaxWidth = 430;
   const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const resolvedHeaderHeight = headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
-  const resolvedFooterHeight = footerHeight > 0 ? footerHeight : FOOTER_FALLBACK_HEIGHT;
-  const bodyMaxHeight = Math.max(
-    120,
-    maxSheetHeight - resolvedHeaderHeight - resolvedFooterHeight - SHEET_CHROME_PADDING,
-  );
-  const scrollOverflows = formHeight > bodyMaxHeight;
-  const sheetHeight = useMemo(() => {
-    const chromeHeight = resolvedHeaderHeight + resolvedFooterHeight + SHEET_CHROME_PADDING;
-    const contentBlockHeight = formHeight > 0 ? formHeight : 280;
-
-    if (scrollOverflows) {
-      return maxSheetHeight;
-    }
-
-    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentBlockHeight));
-  }, [formHeight, maxSheetHeight, resolvedFooterHeight, resolvedHeaderHeight, scrollOverflows]);
   const avatarSize = dense ? 56 : compact ? 62 : 68;
   const usernameError = draftUsername.length > 0 ? getOffpayUsernameError(draftUsername) : null;
-  const normalizedUsername = useMemo(
-    () => sanitizeOffpayUsernameInput(draftUsername),
-    [draftUsername],
-  );
+  const normalizedUsername = sanitizeOffpayUsernameInput(draftUsername);
   const formattedUsername = formatOffpayUsername(draftUsername);
-  const canSave = formattedUsername != null && !saving;
+  const canSave = formattedUsername != null && !saving && !pickingProfileImage;
 
-  const translateY = useSharedValue(windowHeight);
-  const opacity = useSharedValue(0);
-  const animatedSheetHeight = useSharedValue(sheetHeight);
+  const closeImmediately = (): void => {
+    Keyboard.dismiss();
+    onClose();
+  };
 
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      setFormHeight(0);
-      setDraftUsername(sanitizeOffpayUsernameInput(username ?? ''));
-      setSaving(false);
-      opacity.value = withTiming(1, FADE_TIMING);
-      translateY.value = withTiming(0, SHEET_OPEN_TIMING);
-      return;
-    }
+  const handleClose = (): void => {
+    if (saveLockRef.current || pickingProfileImage) return;
+    closeImmediately();
+  };
 
-    translateY.value = withTiming(windowHeight, SHEET_CLOSE_TIMING, (finished) => {
-      if (finished) runOnJS(setMounted)(false);
-    });
-    opacity.value = withTiming(0, FADE_TIMING);
-  }, [opacity, translateY, username, visible, windowHeight]);
-
-  useEffect(() => {
-    animatedSheetHeight.value = withTiming(sheetHeight, SHEET_SIZE_TIMING);
-  }, [animatedSheetHeight, sheetHeight]);
-
-  const handleHeaderLayout = useCallback((event: LayoutChangeEvent): void => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setHeaderHeight((current) => (current === nextHeight ? current : nextHeight));
-  }, []);
-
-  const handleFooterLayout = useCallback((event: LayoutChangeEvent): void => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setFooterHeight((current) => (current === nextHeight ? current : nextHeight));
-  }, []);
-
-  const handleFormLayout = useCallback((event: LayoutChangeEvent): void => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setFormHeight((current) => (current === nextHeight ? current : nextHeight));
-  }, []);
-
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    height: animatedSheetHeight.value,
-    transform: [{ translateY: translateY.value }],
-  }));
-  const contentStyle = useAnimatedStyle(() => ({
-    opacity: 0.78 + opacity.value * 0.22,
-    transform: [{ translateY: (1 - opacity.value) * 8 }],
-  }));
-
-  const closeWithAnimation = useCallback(
-    (afterClose?: () => void): void => {
-      Keyboard.dismiss();
-
-      const finishClose = (): void => {
-        onClose();
-        afterClose?.();
-      };
-
-      translateY.value = withTiming(windowHeight, SHEET_CLOSE_TIMING, (finished) => {
-        if (finished) runOnJS(finishClose)();
-      });
-      opacity.value = withTiming(0, FADE_TIMING);
-    },
-    [onClose, opacity, translateY, windowHeight],
-  );
-
-  const handleClose = useCallback((): void => {
-    if (saving) return;
-    closeWithAnimation();
-  }, [closeWithAnimation, saving]);
-
-  const handleChangeUsername = useCallback((value: string): void => {
+  const handleChangeUsername = (value: string): void => {
     setDraftUsername(sanitizeOffpayUsernameInput(value));
-  }, []);
+  };
 
-  const handleSave = useCallback((): void => {
-    if (formattedUsername == null || saving) return;
+  const handleSave = async (): Promise<void> => {
+    if (formattedUsername == null || saveLockRef.current || pickingProfileImage) return;
 
+    saveLockRef.current = true;
     Keyboard.dismiss();
     setSaving(true);
     setUsername(formattedUsername);
-    void (async () => {
-      let walletNameSyncFailed = false;
 
-      try {
-        await setActiveWalletName(formattedUsername);
-      } catch (error: unknown) {
-        walletNameSyncFailed = true;
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'Profile was saved, but wallet name sync failed.';
-        showToast({
-          title: 'Wallet name sync failed',
-          message,
-          variant: 'warning',
-        });
-      } finally {
-        setSaving(false);
-        if (!walletNameSyncFailed) {
-          showToast({
-            title: 'Profile updated',
-            variant: 'success',
-          });
-        }
-        closeWithAnimation();
-      }
-    })();
-  }, [closeWithAnimation, formattedUsername, saving, setActiveWalletName, setUsername, showToast]);
+    try {
+      await setActiveWalletName(formattedUsername);
+      showToast({
+        title: 'Profile updated',
+        variant: 'success',
+      });
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Profile was saved, but wallet name sync failed.';
+      showToast({
+        title: 'Wallet name sync failed',
+        message,
+        variant: 'warning',
+      });
+    } finally {
+      saveLockRef.current = false;
+      setSaving(false);
+      closeImmediately();
+    }
+  };
 
-  if (!mounted) return null;
+  if (!visible) return null;
 
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}>
-      <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
+    <View collapsable={false} style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}>
+      <Animated.View
+        entering={SETTINGS_BACKDROP_ENTERING}
+        exiting={SETTINGS_BACKDROP_EXITING}
+        style={StyleSheet.absoluteFill}
+      >
         <ModalBackdropScrim />
         <TouchableWithoutFeedback onPress={handleClose}>
           <View style={StyleSheet.absoluteFill} />
@@ -243,12 +149,14 @@ export function ProfileSettingsModal({
         accessibilityLabel="Profile settings"
       >
         <Animated.View
-          style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
+          entering={SETTINGS_SURFACE_ENTERING}
+          exiting={SETTINGS_SURFACE_EXITING}
+          style={[
+            styles.sheet,
+            { width: '100%', maxWidth: sheetMaxWidth, maxHeight: maxSheetHeight },
+          ]}
         >
-          <View
-            style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}
-            onLayout={handleHeaderLayout}
-          >
+          <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
             <View style={styles.headerSide}>
               <View style={styles.headerIconPlaceholder} />
             </View>
@@ -267,12 +175,13 @@ export function ProfileSettingsModal({
               <Pressable
                 style={({ pressed }) => [
                   styles.headerIconBtn,
-                  pressed && !saving ? styles.headerIconBtnPressed : null,
+                  pressed && !saving && !pickingProfileImage ? styles.headerIconBtnPressed : null,
                 ]}
                 onPress={handleClose}
-                disabled={saving}
+                disabled={saving || pickingProfileImage}
                 accessibilityRole="button"
                 accessibilityLabel="Close"
+                accessibilityState={{ disabled: saving || pickingProfileImage }}
                 hitSlop={6}
               >
                 <Ionicons name="close" size={layout.iconSizeInline} color={colors.text.primary} />
@@ -280,81 +189,47 @@ export function ProfileSettingsModal({
             </View>
           </View>
 
-          {scrollOverflows ? (
-            <ScrollView
-              style={[styles.bodyScroll, { maxHeight: bodyMaxHeight }]}
-              contentContainerStyle={[
-                styles.bodyContent,
-                compact ? styles.bodyContentCompact : undefined,
-              ]}
-              contentInsetAdjustmentBehavior="automatic"
-              showsVerticalScrollIndicator={false}
-              bounces={false}
-              keyboardShouldPersistTaps="handled"
-              onContentSizeChange={(_width, height) => {
-                const nextHeight = Math.ceil(height);
-                setFormHeight((current) => (current === nextHeight ? current : nextHeight));
-              }}
-            >
-              <Animated.View style={[styles.form, contentStyle]}>
-                <ProfileFormFields
-                  avatarSize={avatarSize}
-                  dense={dense}
-                  pickingProfileImage={pickingProfileImage}
-                  saving={saving}
-                  profileImageUri={profileImageUri}
-                  pickProfileImage={pickProfileImage}
-                  clearProfileImage={clearProfileImage}
-                  draftUsername={draftUsername}
-                  handleChangeUsername={handleChangeUsername}
-                  handleSave={handleSave}
-                  usernameError={usernameError}
-                  normalizedUsername={normalizedUsername}
-                />
-              </Animated.View>
-            </ScrollView>
-          ) : (
-            <View
-              style={[
-                styles.bodyStatic,
-                styles.bodyContent,
-                compact ? styles.bodyContentCompact : undefined,
-              ]}
-              onLayout={handleFormLayout}
-            >
-              <Animated.View style={[styles.form, contentStyle]}>
-                <ProfileFormFields
-                  avatarSize={avatarSize}
-                  dense={dense}
-                  pickingProfileImage={pickingProfileImage}
-                  saving={saving}
-                  profileImageUri={profileImageUri}
-                  pickProfileImage={pickProfileImage}
-                  clearProfileImage={clearProfileImage}
-                  draftUsername={draftUsername}
-                  handleChangeUsername={handleChangeUsername}
-                  handleSave={handleSave}
-                  usernameError={usernameError}
-                  normalizedUsername={normalizedUsername}
-                />
-              </Animated.View>
-            </View>
-          )}
-
-          <View
-            style={[styles.footer, compact && styles.footerCompact]}
-            onLayout={handleFooterLayout}
+          <ScrollView
+            style={styles.bodyScroll}
+            contentContainerStyle={[
+              styles.bodyContent,
+              compact ? styles.bodyContentCompact : undefined,
+            ]}
+            contentInsetAdjustmentBehavior="automatic"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
           >
+            <View style={styles.form}>
+              <ProfileFormFields
+                avatarSize={avatarSize}
+                dense={dense}
+                pickingProfileImage={pickingProfileImage}
+                saving={saving}
+                profileImageUri={profileImageUri}
+                pickProfileImage={pickProfileImage}
+                clearProfileImage={clearProfileImage}
+                draftUsername={draftUsername}
+                handleChangeUsername={handleChangeUsername}
+                handleSave={handleSave}
+                usernameError={usernameError}
+                normalizedUsername={normalizedUsername}
+              />
+            </View>
+          </ScrollView>
+
+          <View style={[styles.footer, compact && styles.footerCompact]}>
             <Pressable
               style={({ pressed }) => [
                 styles.dialogButton,
                 styles.cancelButton,
-                pressed && !saving ? styles.cancelButtonPressed : null,
+                pressed && !saving && !pickingProfileImage ? styles.cancelButtonPressed : null,
               ]}
               onPress={handleClose}
-              disabled={saving}
+              disabled={saving || pickingProfileImage}
               accessibilityRole="button"
               accessibilityLabel="Cancel profile changes"
+              accessibilityState={{ disabled: saving || pickingProfileImage }}
             >
               <Text
                 variant="buttonSmall"
@@ -438,6 +313,10 @@ function ProfileFormFields({
             disabled={pickingProfileImage || saving}
             accessibilityRole="button"
             accessibilityLabel="Change profile photo"
+            accessibilityState={{
+              busy: pickingProfileImage,
+              disabled: pickingProfileImage || saving,
+            }}
           >
             <WalletAvatar size={avatarSize} solidFill />
             <View style={styles.avatarBadge}>
@@ -481,16 +360,16 @@ function ProfileFormFields({
             disabled={pickingProfileImage || saving}
             accessibilityRole="button"
             accessibilityLabel="Change profile photo"
+            accessibilityState={{
+              busy: pickingProfileImage,
+              disabled: pickingProfileImage || saving,
+            }}
           >
-            {pickingProfileImage ? (
-              <LazyLoadingSpinner size={18} color={colors.text.primary} />
-            ) : (
-              <Ionicons
-                name="image-outline"
-                size={layout.iconSizeInline}
-                color={colors.text.primary}
-              />
-            )}
+            <Ionicons
+              name="image-outline"
+              size={layout.iconSizeInline}
+              color={colors.text.primary}
+            />
           </Pressable>
         </View>
       </SettingsSectionCard>
@@ -504,9 +383,10 @@ function ProfileFormFields({
           onPress={() => {
             void clearProfileImage();
           }}
-          disabled={saving}
+          disabled={pickingProfileImage || saving}
           accessibilityRole="button"
           accessibilityLabel="Remove profile photo"
+          accessibilityState={{ disabled: pickingProfileImage || saving }}
         >
           <Ionicons
             name="trash-outline"
@@ -552,6 +432,7 @@ function ProfileFormFields({
               textContentType="username"
               maxLength={OFFPAY_USERNAME_MAX_LENGTH}
               style={styles.input}
+              editable={!saving && !pickingProfileImage}
               returnKeyType="done"
               onSubmitEditing={handleSave}
             />
@@ -579,6 +460,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sheet: {
+    minHeight: SHEET_MIN_HEIGHT,
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -646,10 +528,6 @@ const styles = StyleSheet.create({
   bodyScroll: {
     flexGrow: 0,
     flexShrink: 1,
-  },
-  bodyStatic: {
-    flexGrow: 0,
-    flexShrink: 0,
   },
   bodyContent: {
     flexGrow: 0,

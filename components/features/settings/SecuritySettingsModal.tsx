@@ -7,7 +7,7 @@
  * - AuthGateStep — fingerprint/passcode gate
  * - WalletKeysStep — reveal mnemonic + private key
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -18,14 +18,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import type { LayoutChangeEvent } from 'react-native';
-import Animated, {
-  Easing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import * as Clipboard from 'expo-clipboard';
 import { Directory, File, Paths } from 'expo-file-system';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -33,6 +26,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
 import { ModalBackdropScrim } from '@/components/ui/ModalBackdropScrim';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_BACKDROP_EXITING,
+  SETTINGS_BACK_ENTERING,
+  SETTINGS_BACK_EXITING,
+  SETTINGS_FORWARD_ENTERING,
+  SETTINGS_FORWARD_EXITING,
+  SETTINGS_SURFACE_ENTERING,
+  SETTINGS_SURFACE_EXITING,
+} from '@/components/ui/settings-motion';
 import { PreferenceStepLayout } from '@/components/features/preferences/PreferenceStepLayout';
 import { AuthGateStep } from '@/components/features/security/AuthGateStep';
 import { PasscodeStep } from '@/components/features/security/PasscodeStep';
@@ -48,11 +51,8 @@ import {
   verifyPasscode,
 } from '@/lib/wallet/security-settings';
 import {
-  getStoredMnemonicWithAuth,
-  getStoredMnemonic,
-  getStoredPrivateKey,
-  getStoredPrivateKeyWithAuth,
-  getStoredWalletInfo,
+  getStoredWalletExportMaterial,
+  getStoredWalletExportMaterialWithAuth,
 } from '@/lib/wallet/secure-wallet-store';
 import { deriveSecretKeyBase58FromMnemonic } from '@/lib/wallet/wallet';
 
@@ -70,14 +70,6 @@ interface SecuritySettingsModalProps {
 const CLIPBOARD_CLEAR_MS = 60_000;
 
 const SHEET_CHROME_PADDING = spacing.md;
-const HEADER_FALLBACK_HEIGHT = layout.minTouchTarget + spacing.lg + spacing.xs;
-const SHEET_MIN_HEIGHT = layout.buttonHeightLg * 2 + spacing['3xl'];
-const STEP_CONTENT_ESTIMATES: Record<Step, number> = {
-  root: 240,
-  passcode: 500,
-  revealGate: 440,
-  walletKeys: 420,
-};
 
 const HEADER_TITLES: Record<Step, string> = {
   root: 'Security',
@@ -87,8 +79,6 @@ const HEADER_TITLES: Record<Step, string> = {
 };
 
 const SHEET_SHADOW = '0 18px 36px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
-const NAV_TIMING = { duration: 180, easing: Easing.out(Easing.cubic) } as const;
-const SHEET_SIZE_TIMING = { duration: 220, easing: Easing.out(Easing.cubic) } as const;
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -196,13 +186,28 @@ export function SecuritySettingsModal({
   onClose,
   initialAction,
 }: SecuritySettingsModalProps): React.JSX.Element | null {
+  if (!visible) return null;
+
+  return <SecuritySettingsSheet onClose={onClose} initialAction={initialAction} />;
+}
+
+type SecuritySettingsSheetProps = Omit<SecuritySettingsModalProps, 'visible'>;
+
+function SecuritySettingsSheet({
+  onClose,
+  initialAction,
+}: SecuritySettingsSheetProps): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
-  const [mounted, setMounted] = useState(visible);
   const [step, setStep] = useState<Step>('root');
+  const [stepDirection, setStepDirection] = useState<'forward' | 'back'>('forward');
+  const [settingsBusy, setSettingsBusy] = useState(true);
   const [fingerprintEnabled, setFingerprintEnabledState] = useState(false);
+  const [fingerprintBusy, setFingerprintBusy] = useState(false);
   const [hasPasscode, setHasPasscode] = useState(false);
   const [editingPasscode, setEditingPasscode] = useState(false);
+  const [passcodeBusy, setPasscodeBusy] = useState(false);
+  const [revealBusy, setRevealBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const [passcodeA, setPasscodeA] = useState('');
@@ -212,8 +217,6 @@ export function SecuritySettingsModal({
   const [revealPrivateKey, setRevealPrivateKey] = useState<string | null>(null);
   const [walletImportMethod, setWalletImportMethod] = useState<WalletImportMethod>('generated');
   const [visibleSecret, setVisibleSecret] = useState<VisibleSecret>(null);
-  const [headerHeight, setHeaderHeight] = useState(HEADER_FALLBACK_HEIGHT);
-  const [contentHeight, setContentHeight] = useState(0);
 
   const compactViewport = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
@@ -221,19 +224,32 @@ export function SecuritySettingsModal({
   const sheetMaxWidth = 430;
   const rowIconSize = dense ? 18 : 20;
 
-  const translateY = useSharedValue(windowHeight);
-  const opacity = useSharedValue(0);
-  const animatedSheetHeight = useSharedValue(layout.buttonHeightLg * 4 + spacing['3xl']);
-  const contentProgress = useSharedValue(1);
-  const contentDirection = useSharedValue(1);
+  const activeRef = useRef(true);
+  const fingerprintLockRef = useRef(false);
+  const passcodeLockRef = useRef(false);
+  const revealLockRef = useRef(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clipboardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const clearToast = useCallback((): void => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
+    setToast(null);
+  }, []);
+
+  const showToast = useCallback((message: string): void => {
+    if (!activeRef.current) return;
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(message);
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      if (activeRef.current) setToast(null);
+    }, 2200);
+  }, []);
+
   const navigateToStep = useCallback(
     (nextStep: Step, options: { clearToast?: boolean } = {}): void => {
-      contentDirection.value = nextStep === 'root' ? -1 : 1;
-      contentProgress.value = 0;
-      setContentHeight(0);
+      setStepDirection(nextStep === 'root' ? 'back' : 'forward');
       setStep(nextStep);
       if (nextStep === 'root') {
         setEditingPasscode(false);
@@ -241,13 +257,10 @@ export function SecuritySettingsModal({
         setPasscodeB('');
       }
       if (options.clearToast ?? true) {
-        setToast(null);
+        clearToast();
       }
-      requestAnimationFrame(() => {
-        contentProgress.value = withTiming(1, NAV_TIMING);
-      });
     },
-    [contentDirection, contentProgress],
+    [clearToast],
   );
 
   // ---------------------------------------------------------------------------
@@ -270,176 +283,112 @@ export function SecuritySettingsModal({
       if (authEnabled) {
         navigateToStep('revealGate');
       } else {
-        setToast('Set a passcode or enable fingerprint first');
+        showToast('Set a passcode or enable fingerprint first');
       }
     },
-    [navigateToStep],
+    [navigateToStep, showToast],
   );
 
   useEffect(() => {
     let cancelled = false;
-    if (!visible) return;
+    activeRef.current = true;
     void (async () => {
       try {
         const snap = await getSecuritySettings();
+        if (cancelled) return;
         setFingerprintEnabledState(snap.fingerprintEnabled);
         setHasPasscode(snap.hasPasscode);
-        const info = await getStoredWalletInfo();
-        if (!cancelled) {
-          setWalletImportMethod(info?.importMethod ?? 'generated');
-          if (initialAction === 'exportKeys') {
-            const authEnabled = snap.fingerprintEnabled || snap.hasPasscode;
-            goWalletKeys(authEnabled);
-          }
+        if (initialAction === 'exportKeys') {
+          const authEnabled = snap.fingerprintEnabled || snap.hasPasscode;
+          goWalletKeys(authEnabled);
         }
       } catch {
         // non-fatal for UI
+      } finally {
+        if (!cancelled) setSettingsBusy(false);
       }
     })();
     return () => {
       cancelled = true;
-    };
-  }, [visible, initialAction, goWalletKeys]);
-
-  useEffect(() => {
-    return () => {
+      activeRef.current = false;
+      fingerprintLockRef.current = false;
+      passcodeLockRef.current = false;
+      revealLockRef.current = false;
       clearTimers();
       void Clipboard.setStringAsync('');
     };
-  }, [clearTimers]);
-
-  // Animation
-  useEffect(() => {
-    if (visible) {
-      setContentHeight(0);
-      setMounted(true);
-      opacity.value = withTiming(1, { duration: 220 });
-      translateY.value = withTiming(0, {
-        duration: 280,
-        easing: Easing.out(Easing.cubic),
-      });
-    } else {
-      translateY.value = withTiming(
-        windowHeight,
-        {
-          duration: 220,
-          easing: Easing.in(Easing.cubic),
-        },
-        (finished) => {
-          if (finished) runOnJS(setMounted)(false);
-        },
-      );
-      opacity.value = withTiming(0, { duration: 220 });
-      setStep('root');
-      setToast(null);
-      setPasscodeA('');
-      setPasscodeB('');
-      setEditingPasscode(false);
-      setGatePasscode('');
-      setRevealMnemonic(null);
-      setRevealPrivateKey(null);
-      setVisibleSecret(null);
-    }
-  }, [opacity, translateY, visible, windowHeight]);
-
-  // Toast auto-dismiss
-  useEffect(() => {
-    if (toast == null) return;
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
-    return () => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = null;
-    };
-  }, [toast]);
-
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  const sheetStyle = useAnimatedStyle(() => ({
-    height: animatedSheetHeight.value,
-    transform: [{ translateY: translateY.value }],
-  }));
-  const contentStyle = useAnimatedStyle(() => ({
-    opacity: 0.74 + contentProgress.value * 0.26,
-    transform: [
-      {
-        translateX: (1 - contentProgress.value) * contentDirection.value * (dense ? 8 : 14),
-      },
-    ],
-  }));
+  }, [clearTimers, goWalletKeys, initialAction]);
 
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
 
   const handleClose = useCallback((): void => {
-    translateY.value = withTiming(
-      windowHeight,
-      { duration: 220, easing: Easing.in(Easing.cubic) },
-      (finished) => {
-        if (finished) runOnJS(onClose)();
-      },
-    );
-    opacity.value = withTiming(0, { duration: 220 });
-  }, [onClose, opacity, translateY, windowHeight]);
+    onClose();
+  }, [onClose]);
 
-  const canReveal = useMemo(
-    () => fingerprintEnabled || hasPasscode,
-    [fingerprintEnabled, hasPasscode],
-  );
+  const canReveal = !settingsBusy && (fingerprintEnabled || hasPasscode);
 
   const toggleFingerprint = useCallback(async (): Promise<void> => {
+    if (settingsBusy || fingerprintLockRef.current) return;
     const next = !fingerprintEnabled;
-    if (!next) {
-      setFingerprintEnabledState(false);
-      try {
-        await setFingerprintEnabled(false);
-      } catch (error: unknown) {
-        console.error('[SecuritySettings] fingerprint disable failed:', error);
-        setFingerprintEnabledState(true);
-        setToast('Failed to update fingerprint setting');
-      }
+
+    if (next && !hasPasscode) {
+      showToast('Set an app passcode before enabling fingerprint');
+      navigateToStep('passcode', { clearToast: false });
       return;
     }
 
+    fingerprintLockRef.current = true;
+    setFingerprintBusy(true);
     try {
-      if (!hasPasscode) {
-        setToast('Set an app passcode before enabling fingerprint');
-        navigateToStep('passcode', { clearToast: false });
-        return;
+      if (next) {
+        const availability = await getBiometricAvailability();
+        if (!availability.isAvailable) {
+          showToast(availability.unavailableReason ?? 'Fingerprint unlock is not available');
+          return;
+        }
+
+        const result = await authenticateWithBiometrics({
+          promptMessage: 'Enable OffPay fingerprint unlock',
+          promptSubtitle: 'Authenticate once to confirm this fingerprint.',
+          promptDescription: 'OffPay keeps your passcode as backup.',
+        });
+        if (!result.success) {
+          showToast(result.message ?? 'Fingerprint unlock failed');
+          return;
+        }
       }
 
-      const availability = await getBiometricAvailability();
-      if (!availability.isAvailable) {
-        setToast(availability.unavailableReason ?? 'Fingerprint unlock is not available');
-        return;
-      }
-
-      const result = await authenticateWithBiometrics({
-        promptMessage: 'Enable OffPay fingerprint unlock',
-        promptSubtitle: 'Authenticate once to confirm this fingerprint.',
-        promptDescription: 'OffPay keeps your passcode as backup.',
-      });
-      if (!result.success) {
-        setToast(result.message ?? 'Fingerprint unlock failed');
-        return;
-      }
-
-      setFingerprintEnabledState(true);
-      await setFingerprintEnabled(true);
+      await setFingerprintEnabled(next);
+      if (activeRef.current) setFingerprintEnabledState(next);
     } catch (error: unknown) {
-      console.error('[SecuritySettings] fingerprint enable failed:', error);
-      setToast('Failed to update fingerprint setting');
+      console.error('[SecuritySettings] fingerprint update failed:', error);
+      showToast('Failed to update fingerprint setting');
+    } finally {
+      fingerprintLockRef.current = false;
+      if (activeRef.current) setFingerprintBusy(false);
     }
-  }, [fingerprintEnabled, hasPasscode, navigateToStep]);
+  }, [fingerprintEnabled, hasPasscode, navigateToStep, settingsBusy, showToast]);
 
-  const handleCopy = useCallback((value: string): void => {
-    void Clipboard.setStringAsync(value);
-    setToast('Copied to clipboard');
-    if (clipboardTimerRef.current) clearTimeout(clipboardTimerRef.current);
-    clipboardTimerRef.current = setTimeout(() => {
-      void Clipboard.setStringAsync('');
-    }, CLIPBOARD_CLEAR_MS);
-  }, []);
+  const handleCopy = useCallback(
+    async (value: string): Promise<void> => {
+      try {
+        await Clipboard.setStringAsync(value);
+        if (!activeRef.current) return;
+
+        showToast('Copied to clipboard');
+        if (clipboardTimerRef.current) clearTimeout(clipboardTimerRef.current);
+        clipboardTimerRef.current = setTimeout(() => {
+          clipboardTimerRef.current = null;
+          if (activeRef.current) void Clipboard.setStringAsync('');
+        }, CLIPBOARD_CLEAR_MS);
+      } catch {
+        showToast('Could not copy to clipboard');
+      }
+    },
+    [showToast],
+  );
 
   const handleExportSecrets = useCallback(
     async (payload: WalletSecretsExportPayload): Promise<void> => {
@@ -447,7 +396,7 @@ export function SecuritySettingsModal({
       const privateKey = payload.privateKey.trim();
 
       if (recoveryPhrase.length === 0 || privateKey.length === 0) {
-        setToast('Wallet secrets are not ready to export');
+        showToast('Wallet secrets are not ready to export');
         return;
       }
 
@@ -456,7 +405,7 @@ export function SecuritySettingsModal({
 
       try {
         if (Platform.OS === 'web' && downloadTextFileOnWeb(fileName, contents)) {
-          setToast('Export downloaded');
+          showToast('Export downloaded');
           return;
         }
 
@@ -469,121 +418,119 @@ export function SecuritySettingsModal({
           },
           { dialogTitle: 'Export wallet secrets' },
         );
-        setToast('Export file ready');
+        showToast('Export file ready');
       } catch {
-        setToast('Could not export wallet secrets');
+        showToast('Could not export wallet secrets');
       }
     },
-    [],
+    [showToast],
   );
 
-  const revealWithDeviceAuth = useCallback(async (): Promise<boolean> => {
-    try {
-      const [mn, pk] = await Promise.all([
-        getStoredMnemonicWithAuth(),
-        getStoredPrivateKeyWithAuth(),
-      ]);
-      const mnemonic = mn != null ? formatMnemonicWords(mn) : null;
-      const privateKey = pk != null ? pk.trim() : null;
-      const derived =
-        mnemonic != null && (privateKey == null || privateKey.length === 0)
-          ? await deriveSecretKeyBase58FromMnemonic(mnemonic)
-          : null;
-      setRevealMnemonic(mnemonic);
-      setRevealPrivateKey(privateKey ?? derived);
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
+  const revealWalletMaterial = useCallback(async (requireDeviceAuth: boolean): Promise<boolean> => {
+    const material = requireDeviceAuth
+      ? await getStoredWalletExportMaterialWithAuth()
+      : await getStoredWalletExportMaterial();
+    if (material == null) return false;
 
-  const revealWithPasscode = useCallback(async (): Promise<boolean> => {
-    const ok = await verifyPasscode(gatePasscode);
-    if (!ok) {
-      setToast('Incorrect passcode');
-      return false;
-    }
-    const [mn, pk] = await Promise.all([getStoredMnemonic(), getStoredPrivateKey()]);
-    const mnemonic = mn != null ? formatMnemonicWords(mn) : null;
-    const privateKey = pk != null ? pk.trim() : null;
+    const formattedMnemonic =
+      material.mnemonic != null ? formatMnemonicWords(material.mnemonic) : '';
+    const mnemonic = formattedMnemonic.length > 0 ? formattedMnemonic : null;
+    const privateKey = material.privateKey?.trim() || null;
     const derived =
-      mnemonic != null && (privateKey == null || privateKey.length === 0)
+      mnemonic != null && privateKey == null
         ? await deriveSecretKeyBase58FromMnemonic(mnemonic)
         : null;
+
+    if (!activeRef.current) return false;
+    setWalletImportMethod(material.importMethod);
     setRevealMnemonic(mnemonic);
     setRevealPrivateKey(privateKey ?? derived);
     return true;
-  }, [gatePasscode]);
+  }, []);
 
   const handleGateContinue = useCallback(async (): Promise<void> => {
+    if (revealLockRef.current) return;
     if (hasPasscode && gatePasscode.length > 0) {
       if (!isValidPasscode(gatePasscode)) {
-        setToast('Enter your 6-digit passcode');
+        showToast('Enter your 6-digit passcode');
         return;
       }
-      const ok = await revealWithPasscode();
-      if (ok) {
-        try {
-          const info = await getStoredWalletInfo();
-          if (info) setWalletImportMethod(info.importMethod);
-        } catch {
-          /* non-fatal */
-        }
-        navigateToStep('walletKeys');
-      }
-      if (!ok) {
-        setGatePasscode('');
-      }
-      return;
     }
 
-    if (fingerprintEnabled) {
-      const ok = await revealWithDeviceAuth();
-      if (!ok) {
-        setToast('Authentication cancelled or failed');
+    revealLockRef.current = true;
+    setRevealBusy(true);
+    try {
+      if (hasPasscode && gatePasscode.length > 0) {
+        const verified = await verifyPasscode(gatePasscode);
+        if (!verified) {
+          showToast('Incorrect passcode');
+          if (activeRef.current) setGatePasscode('');
+          return;
+        }
+
+        const revealed = await revealWalletMaterial(false);
+        if (!revealed) {
+          showToast('Wallet secrets are unavailable');
+          return;
+        }
+        if (activeRef.current) navigateToStep('walletKeys');
         return;
       }
-      try {
-        const info = await getStoredWalletInfo();
-        if (info) setWalletImportMethod(info.importMethod);
-      } catch {
-        /* non-fatal */
+
+      if (fingerprintEnabled) {
+        const revealed = await revealWalletMaterial(true);
+        if (!revealed) {
+          showToast('Authentication cancelled or failed');
+          return;
+        }
+        if (activeRef.current) navigateToStep('walletKeys');
       }
-      navigateToStep('walletKeys');
-      return;
+    } catch (error: unknown) {
+      console.error('[SecuritySettings] wallet reveal failed:', error);
+      showToast('Could not reveal wallet secrets');
+    } finally {
+      revealLockRef.current = false;
+      if (activeRef.current) setRevealBusy(false);
     }
-    if (!hasPasscode) return;
   }, [
     fingerprintEnabled,
     gatePasscode,
     hasPasscode,
     navigateToStep,
-    revealWithDeviceAuth,
-    revealWithPasscode,
+    revealWalletMaterial,
+    showToast,
   ]);
 
   const handleSetPasscode = useCallback(async (): Promise<void> => {
+    if (passcodeLockRef.current) return;
     if (!isValidPasscode(passcodeA) || !isValidPasscode(passcodeB)) {
-      setToast('Passcode must be 6 digits');
+      showToast('Passcode must be 6 digits');
       return;
     }
     if (passcodeA !== passcodeB) {
-      setToast('Passcodes do not match');
+      showToast('Passcodes do not match');
       return;
     }
+
+    passcodeLockRef.current = true;
+    setPasscodeBusy(true);
     try {
       await setPasscode(passcodeA);
+      if (!activeRef.current) return;
       setHasPasscode(true);
       setPasscodeA('');
       setPasscodeB('');
       setEditingPasscode(false);
-      setToast('Passcode set');
+      showToast('Passcode set');
       navigateToStep('root', { clearToast: false });
     } catch (error: unknown) {
       console.error('[SecuritySettings] passcode save failed:', error);
-      setToast('Failed to set passcode');
+      showToast('Failed to set passcode');
+    } finally {
+      passcodeLockRef.current = false;
+      if (activeRef.current) setPasscodeBusy(false);
     }
-  }, [navigateToStep, passcodeA, passcodeB]);
+  }, [navigateToStep, passcodeA, passcodeB, showToast]);
 
   // ---------------------------------------------------------------------------
   // Layout
@@ -591,37 +538,14 @@ export function SecuritySettingsModal({
 
   const overlayPaddingBottom = Math.max(insets.bottom, spacing.lg) + spacing.md;
   const compact = compactViewport;
-  const maxSheetHeight = windowHeight - insets.top - overlayPaddingBottom - spacing.lg;
-  const resolvedHeaderHeight = headerHeight > 0 ? headerHeight : HEADER_FALLBACK_HEIGHT;
-  const bodyMaxHeight = Math.max(120, maxSheetHeight - resolvedHeaderHeight - SHEET_CHROME_PADDING);
-  const scrollOverflows = contentHeight > bodyMaxHeight;
-  const sheetHeight = useMemo(() => {
-    const chromeHeight = resolvedHeaderHeight + SHEET_CHROME_PADDING;
-
-    if (contentHeight <= 0) {
-      return Math.min(maxSheetHeight, chromeHeight + STEP_CONTENT_ESTIMATES[step]);
-    }
-
-    if (scrollOverflows) {
-      return maxSheetHeight;
-    }
-
-    return Math.min(maxSheetHeight, Math.max(SHEET_MIN_HEIGHT, chromeHeight + contentHeight));
-  }, [contentHeight, maxSheetHeight, resolvedHeaderHeight, scrollOverflows, step]);
-
-  useEffect(() => {
-    animatedSheetHeight.value = withTiming(sheetHeight, SHEET_SIZE_TIMING);
-  }, [animatedSheetHeight, sheetHeight]);
-
-  const handleHeaderLayout = useCallback((event: LayoutChangeEvent): void => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setHeaderHeight((current) => (current === nextHeight ? current : nextHeight));
-  }, []);
-
-  const handleContentLayout = useCallback((event: LayoutChangeEvent): void => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setContentHeight((current) => (current === nextHeight ? current : nextHeight));
-  }, []);
+  const maxSheetHeight = Math.max(
+    240,
+    windowHeight - insets.top - overlayPaddingBottom - spacing.lg,
+  );
+  const stepEntering =
+    stepDirection === 'back' ? SETTINGS_BACK_ENTERING : SETTINGS_FORWARD_ENTERING;
+  const stepExiting = stepDirection === 'back' ? SETTINGS_BACK_EXITING : SETTINGS_FORWARD_EXITING;
+  const stepActionBusy = fingerprintBusy || passcodeBusy || revealBusy;
 
   const stepBody = (
     <>
@@ -629,6 +553,8 @@ export function SecuritySettingsModal({
         <View style={styles.rootMenu}>
           <SecurityRootStep
             fingerprintEnabled={fingerprintEnabled}
+            fingerprintBusy={fingerprintBusy}
+            loading={settingsBusy}
             hasPasscode={hasPasscode}
             canReveal={canReveal}
             compact={compact}
@@ -655,6 +581,7 @@ export function SecuritySettingsModal({
               setPasscodeB('');
               setEditingPasscode(true);
             }}
+            busy={passcodeBusy}
             compact={compact}
           />
         </PreferenceStepLayout>
@@ -669,6 +596,7 @@ export function SecuritySettingsModal({
             gatePasscode={gatePasscode}
             onChangeGatePasscode={setGatePasscode}
             onContinue={() => void handleGateContinue()}
+            busy={revealBusy}
             compact={compact}
           />
         </PreferenceStepLayout>
@@ -682,9 +610,9 @@ export function SecuritySettingsModal({
             revealPrivateKey={revealPrivateKey}
             visibleSecret={visibleSecret}
             onToggleVisibleSecret={setVisibleSecret}
-            onCopy={handleCopy}
+            onCopy={(value) => void handleCopy(value)}
             onExportSecrets={(payload) => void handleExportSecrets(payload)}
-            onToast={setToast}
+            onToast={showToast}
             compact={compact}
           />
         </PreferenceStepLayout>
@@ -692,12 +620,14 @@ export function SecuritySettingsModal({
     </>
   );
 
-  if (!mounted) return null;
-
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}>
+    <View collapsable={false} style={[StyleSheet.absoluteFill, { zIndex: 9999, elevation: 9999 }]}>
       {/* Backdrop */}
-      <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
+      <Animated.View
+        entering={SETTINGS_BACKDROP_ENTERING}
+        exiting={SETTINGS_BACKDROP_EXITING}
+        style={StyleSheet.absoluteFill}
+      >
         <ModalBackdropScrim />
         <TouchableWithoutFeedback onPress={handleClose}>
           <View style={StyleSheet.absoluteFill} />
@@ -712,22 +642,29 @@ export function SecuritySettingsModal({
         ]}
       >
         <Animated.View
-          style={[styles.sheet, { width: '100%', maxWidth: sheetMaxWidth }, sheetStyle]}
+          entering={SETTINGS_SURFACE_ENTERING}
+          exiting={SETTINGS_SURFACE_EXITING}
+          style={[
+            styles.sheet,
+            { width: '100%', maxWidth: sheetMaxWidth, maxHeight: maxSheetHeight },
+          ]}
         >
           {/* Header */}
-          <View
-            style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}
-            onLayout={handleHeaderLayout}
-          >
+          <View style={[styles.headerRow, compact ? styles.headerRowCompact : undefined]}>
             <View style={styles.headerLeft}>
               {step !== 'root' ? (
                 <Pressable
-                  style={styles.headerIconBtn}
+                  style={[
+                    styles.headerIconBtn,
+                    stepActionBusy ? styles.headerIconBtnDisabled : undefined,
+                  ]}
                   onPress={() => {
                     navigateToStep('root');
                   }}
+                  disabled={stepActionBusy}
                   accessibilityRole="button"
                   accessibilityLabel="Back"
+                  accessibilityState={{ disabled: stepActionBusy, busy: stepActionBusy }}
                   hitSlop={6}
                 >
                   <Ionicons
@@ -768,34 +705,35 @@ export function SecuritySettingsModal({
             </View>
           </View>
 
-          {scrollOverflows ? (
-            <ScrollView
-              style={[styles.bodyScroll, { maxHeight: bodyMaxHeight }]}
-              contentContainerStyle={styles.bodyContent}
-              contentInsetAdjustmentBehavior="automatic"
-              showsVerticalScrollIndicator={false}
-              bounces={false}
-              keyboardShouldPersistTaps="handled"
-              onContentSizeChange={(_width, height) => {
-                const nextHeight = Math.ceil(height);
-                setContentHeight((current) => (current === nextHeight ? current : nextHeight));
-              }}
+          <ScrollView
+            style={styles.bodyScroll}
+            contentContainerStyle={styles.bodyContent}
+            contentInsetAdjustmentBehavior="automatic"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Animated.View
+              key={step}
+              entering={stepEntering}
+              exiting={stepExiting}
+              style={styles.stepContent}
             >
-              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
-            </ScrollView>
-          ) : (
-            <View style={styles.bodyStatic} onLayout={handleContentLayout}>
-              <Animated.View style={[styles.stepContent, contentStyle]}>{stepBody}</Animated.View>
-            </View>
-          )}
+              {stepBody}
+            </Animated.View>
+          </ScrollView>
 
           {toast != null ? (
             <View style={styles.toastOverlay} pointerEvents="box-none">
-              <View style={styles.toast}>
+              <Animated.View
+                entering={SETTINGS_BACKDROP_ENTERING}
+                exiting={SETTINGS_BACKDROP_EXITING}
+                style={styles.toast}
+              >
                 <Text variant="small" color={colors.text.primary}>
                   {toast}
                 </Text>
-              </View>
+              </Animated.View>
             </View>
           ) : null}
         </Animated.View>
@@ -858,13 +796,10 @@ const styles = StyleSheet.create({
     boxShadow: '0 8px 18px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
   },
   headerIconPlaceholder: { width: layout.minTouchTarget, height: layout.minTouchTarget },
+  headerIconBtnDisabled: { opacity: 0.4 },
   bodyScroll: {
     flexGrow: 0,
     flexShrink: 1,
-  },
-  bodyStatic: {
-    flexGrow: 0,
-    flexShrink: 0,
   },
   bodyContent: {
     flexGrow: 0,

@@ -9,20 +9,14 @@ import React, {
 } from 'react';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import Animated, {
-  Easing,
-  Extrapolation,
-  interpolate,
-  runOnJS,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/Text';
+import {
+  SETTINGS_BACKDROP_ENTERING,
+  SETTINGS_BACKDROP_EXITING,
+} from '@/components/ui/settings-motion';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
@@ -90,7 +84,6 @@ const TOAST_DEDUPE_WINDOW_MS = 4000;
 const MAX_TOAST_TITLE_CHARS = 36;
 const MAX_TOAST_MESSAGE_CHARS = 56;
 const TOAST_MAX_WIDTH = 430;
-const TOAST_EXIT_MS = 220;
 
 function compactToastText(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -169,8 +162,6 @@ function AppToastHost({
 }): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
-  const reduceMotion = useReducedMotion();
-  const entryProgress = useSharedValue(0);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const compact = windowWidth < 360 || windowHeight < 680 || fontScale > 1.12;
@@ -186,14 +177,8 @@ function AppToastHost({
       dismissTimerRef.current = null;
     }
 
-    entryProgress.value = withTiming(
-      0,
-      { duration: reduceMotion ? 1 : TOAST_EXIT_MS, easing: Easing.in(Easing.cubic) },
-      (finished) => {
-        if (finished) runOnJS(onDismiss)();
-      },
-    );
-  }, [entryProgress, onDismiss, reduceMotion]);
+    onDismiss();
+  }, [onDismiss]);
 
   useEffect(() => {
     if (toast == null) return;
@@ -201,18 +186,6 @@ function AppToastHost({
     if (dismissTimerRef.current != null) {
       clearTimeout(dismissTimerRef.current);
       dismissTimerRef.current = null;
-    }
-
-    entryProgress.value = 0;
-
-    if (reduceMotion) {
-      entryProgress.value = withTiming(1, { duration: 1 });
-    } else {
-      entryProgress.value = withSpring(1, {
-        damping: 16,
-        stiffness: 210,
-        mass: 0.74,
-      });
     }
 
     dismissTimerRef.current = setTimeout(dismiss, toast.durationMs);
@@ -223,37 +196,7 @@ function AppToastHost({
         dismissTimerRef.current = null;
       }
     };
-  }, [dismiss, entryProgress, reduceMotion, toast]);
-
-  const wrapStyle = useAnimatedStyle(() => {
-    const progress = entryProgress.value;
-
-    return {
-      opacity: progress,
-      transform: [
-        { translateY: interpolate(progress, [0, 1], [-28, 0], Extrapolation.CLAMP) },
-        {
-          scaleX: reduceMotion
-            ? 1
-            : interpolate(progress, [0, 0.48, 0.78, 1], [0.62, 1.09, 0.98, 1], Extrapolation.CLAMP),
-        },
-        {
-          scaleY: reduceMotion
-            ? 1
-            : interpolate(progress, [0, 0.48, 0.78, 1], [0.76, 0.9, 1.06, 1], Extrapolation.CLAMP),
-        },
-      ],
-    };
-  });
-
-  const textStyle = useAnimatedStyle(() => {
-    const progress = entryProgress.value;
-
-    return {
-      opacity: interpolate(progress, [0.22, 1], [0, 1], Extrapolation.CLAMP),
-      transform: [{ translateY: interpolate(progress, [0, 1], [4, 0], Extrapolation.CLAMP) }],
-    };
-  });
+  }, [dismiss, toast]);
 
   if (toast == null) return null;
 
@@ -273,7 +216,12 @@ function AppToastHost({
         },
       ]}
     >
-      <Animated.View style={[styles.toastWrap, { width: toastWidth }, wrapStyle]}>
+      <Animated.View
+        key={toast.id}
+        entering={SETTINGS_BACKDROP_ENTERING}
+        exiting={SETTINGS_BACKDROP_EXITING}
+        style={[styles.toastWrap, { width: toastWidth }]}
+      >
         <Pressable
           style={({ pressed }) => [
             styles.toast,
@@ -300,7 +248,7 @@ function AppToastHost({
             >
               <Ionicons name={toastMeta.icon} size={compact ? 16 : 18} color={toastMeta.accent} />
             </View>
-            <Animated.View style={[styles.toastText, { maxWidth: textMaxWidth }, textStyle]}>
+            <View style={[styles.toastText, { maxWidth: textMaxWidth }]}>
               <Text
                 variant="bodyBold"
                 color={colors.text.primary}
@@ -321,7 +269,7 @@ function AppToastHost({
                   {toast.message}
                 </Text>
               ) : null}
-            </Animated.View>
+            </View>
           </View>
         </Pressable>
       </Animated.View>

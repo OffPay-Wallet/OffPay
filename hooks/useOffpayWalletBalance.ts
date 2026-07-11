@@ -34,7 +34,12 @@ export function useOffpayWalletBalance(
   walletAddressOverride?: string | null,
   options?: UseOffpayWalletBalanceOptions,
 ) {
-  const activeWalletAddress = useWalletStore((state) => state.publicKey);
+  // A fixed address should not subscribe this query to active-wallet changes.
+  // Returning a stable null keeps virtualized account rows isolated when the
+  // user changes the primary wallet.
+  const activeWalletAddress = useWalletStore((state) =>
+    walletAddressOverride == null ? state.publicKey : null,
+  );
   const walletAddress = walletAddressOverride ?? activeWalletAddress;
   const { network } = useOffpayNetwork();
   const { canUseNetwork } = useOffpayNetworkAccess();

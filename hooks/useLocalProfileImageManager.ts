@@ -1,9 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { useAppToast } from '@/components/ui/AppToast';
 import {
   deleteAllManagedProfileImages,
-  deleteManagedProfileImage,
   pickAndPersistLocalProfileImage,
   pruneManagedProfileImages,
 } from '@/lib/profile/profile-image';
@@ -23,18 +22,18 @@ export function useLocalProfileImageManager(): {
   const profileImageUri = useAppStore((state) => state.profileImageUri);
   const setProfileImageUri = useAppStore((state) => state.setProfileImageUri);
   const [pickingProfileImage, setPickingProfileImage] = useState(false);
+  const mutationLockRef = useRef(false);
 
-  const pickProfileImage = useCallback(async (): Promise<void> => {
-    if (pickingProfileImage) return;
+  const pickProfileImage = async (): Promise<void> => {
+    if (mutationLockRef.current) return;
 
+    mutationLockRef.current = true;
     setPickingProfileImage(true);
     try {
       const nextProfileImageUri = await pickAndPersistLocalProfileImage();
       if (nextProfileImageUri == null) return;
 
-      const previousProfileImageUri = useAppStore.getState().profileImageUri;
       setProfileImageUri(nextProfileImageUri);
-      deleteManagedProfileImage(previousProfileImageUri);
       pruneManagedProfileImages(nextProfileImageUri);
       showToast({
         title: 'Profile photo updated',
@@ -47,24 +46,31 @@ export function useLocalProfileImageManager(): {
         variant: 'error',
       });
     } finally {
+      mutationLockRef.current = false;
       setPickingProfileImage(false);
     }
-  }, [pickingProfileImage, setProfileImageUri, showToast]);
+  };
 
-  const clearProfileImage = useCallback(async (): Promise<void> => {
-    const previousProfileImageUri = useAppStore.getState().profileImageUri;
-    if (previousProfileImageUri == null) {
+  const clearProfileImage = async (): Promise<void> => {
+    if (mutationLockRef.current) return;
+
+    mutationLockRef.current = true;
+    try {
+      if (useAppStore.getState().profileImageUri == null) {
+        deleteAllManagedProfileImages();
+        return;
+      }
+
+      setProfileImageUri(null);
       deleteAllManagedProfileImages();
-      return;
+      showToast({
+        title: 'Profile photo reset',
+        variant: 'info',
+      });
+    } finally {
+      mutationLockRef.current = false;
     }
-
-    setProfileImageUri(null);
-    deleteAllManagedProfileImages();
-    showToast({
-      title: 'Profile photo reset',
-      variant: 'info',
-    });
-  }, [setProfileImageUri, showToast]);
+  };
 
   return {
     profileImageUri,

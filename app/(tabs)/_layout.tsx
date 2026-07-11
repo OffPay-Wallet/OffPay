@@ -2,38 +2,18 @@
  * Tab layout — bottom navigation with the custom notched tab bar.
  */
 import { Tabs } from 'expo-router';
-import { useMemo } from 'react';
-import { Easing, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { TabBar } from '@/components/navigation/TabBar';
 
 import type { BottomTabNavigationOptions } from 'expo-router/js-tabs';
 
 export default function TabLayout(): React.JSX.Element {
-  const screenOptions = useMemo<BottomTabNavigationOptions>(
-    () => ({
-      headerShown: false,
-      sceneStyle: styles.scene,
-      lazy: true,
-      freezeOnBlur: false,
-      tabBarStyle: styles.tabBarContainer,
-      animation: 'fade',
-      transitionSpec: {
-        animation: 'timing',
-        config: {
-          duration: 120,
-          easing: Easing.out(Easing.cubic),
-        },
-      },
-    }),
-    [],
-  );
-
   return (
     <Tabs
-      detachInactiveScreens={false}
+      detachInactiveScreens
       tabBar={(props) => <TabBar {...props} />}
-      screenOptions={screenOptions}
+      screenOptions={SCREEN_OPTIONS}
     >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="swap" />
@@ -63,3 +43,12 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
 });
+
+const SCREEN_OPTIONS: BottomTabNavigationOptions = {
+  headerShown: false,
+  sceneStyle: styles.scene,
+  lazy: true,
+  freezeOnBlur: true,
+  tabBarStyle: styles.tabBarContainer,
+  animation: 'none',
+};

@@ -21,6 +21,7 @@ interface PasscodeStepProps {
   onChangePasscodeB: (value: string) => void;
   onSetPasscode: () => void;
   onChangePasscodeFlow: () => void;
+  busy?: boolean;
   compact?: boolean;
 }
 
@@ -39,6 +40,7 @@ export function PasscodeStep({
   onChangePasscodeB,
   onSetPasscode,
   onChangePasscodeFlow,
+  busy = false,
   compact = false,
 }: PasscodeStepProps): React.JSX.Element {
   const activeField = passcodeA.length < 6 ? 'new' : 'confirm';
@@ -46,7 +48,8 @@ export function PasscodeStep({
   const confirmComplete = passcodeB.length === 6;
   const confirmationMismatch = confirmComplete && passcodeA !== passcodeB;
   const hasAnyInput = passcodeA.length > 0 || passcodeB.length > 0;
-  const canSave = passcodeA.length === 6 && passcodeB.length === 6 && passcodeA === passcodeB;
+  const canSave =
+    !busy && passcodeA.length === 6 && passcodeB.length === 6 && passcodeA === passcodeB;
   const keypadGap = spacing.sm;
   const keySize = compact ? 38 : 40;
 
@@ -111,7 +114,7 @@ export function PasscodeStep({
 
   const renderKey = (key: string): React.JSX.Element => {
     const isAction = key === 'clear' || key === 'delete';
-    const disabled = key === 'clear' ? activeValue.length === 0 : false;
+    const disabled = busy || (key === 'clear' ? activeValue.length === 0 : false);
     const label = key === 'delete' ? '<' : key === 'clear' ? 'x' : key;
     const keyFrameStyle = { width: keySize, height: keySize, borderRadius: keySize / 2 };
 
@@ -158,7 +161,13 @@ export function PasscodeStep({
     return (
       <SettingsSectionCard>
         <View style={[styles.section, styles.summarySection, compact && styles.sectionCompact]}>
-          <PillButton label="Change passcode" variant="primary" onPress={onChangePasscodeFlow} />
+          <PillButton
+            label="Change passcode"
+            variant="primary"
+            onPress={onChangePasscodeFlow}
+            disabled={busy}
+            loading={busy}
+          />
         </View>
       </SettingsSectionCard>
     );
@@ -167,89 +176,96 @@ export function PasscodeStep({
   return (
     <SettingsSectionCard>
       <View style={[styles.section, compact && styles.sectionCompact]}>
-      <View style={styles.passcodeFields}>
-        <View style={styles.inputGroup}>
-          <View style={styles.inputLabelRow}>
-            <Text
-              variant="small"
-              color={activeField === 'new' ? colors.text.secondary : colors.text.tertiary}
-              style={styles.inputLabel}
-            >
-              New
-            </Text>
-            {activeField === 'new' ? (
-              <Text variant="small" color={colors.brand.glossAccent} style={styles.activeHint}>
-                Enter 6 digits
-              </Text>
-            ) : null}
-          </View>
-          {renderDots(passcodeA, 'New passcode', activeField === 'new' ? 'active' : 'idle')}
-        </View>
-        <View style={styles.inputGroup}>
-          <View style={styles.inputLabelRow}>
-            <Text
-              variant="small"
-              color={
-                confirmationMismatch
-                  ? colors.semantic.error
-                  : activeField === 'confirm'
-                    ? colors.text.secondary
-                    : colors.text.tertiary
-              }
-              style={styles.inputLabel}
-            >
-              Confirm
-            </Text>
-            {activeField === 'confirm' ? (
+        <View style={styles.passcodeFields}>
+          <View style={styles.inputGroup}>
+            <View style={styles.inputLabelRow}>
               <Text
                 variant="small"
-                color={confirmationMismatch ? colors.semantic.error : colors.brand.glossAccent}
-                style={styles.activeHint}
+                color={activeField === 'new' ? colors.text.secondary : colors.text.tertiary}
+                style={styles.inputLabel}
               >
-                {confirmationMismatch ? 'Does not match' : 'Confirm now'}
+                New
               </Text>
-            ) : null}
+              {activeField === 'new' ? (
+                <Text variant="small" color={colors.brand.glossAccent} style={styles.activeHint}>
+                  Enter 6 digits
+                </Text>
+              ) : null}
+            </View>
+            {renderDots(passcodeA, 'New passcode', activeField === 'new' ? 'active' : 'idle')}
           </View>
-          {renderDots(
-            passcodeB,
-            'Confirm passcode',
-            confirmationMismatch ? 'error' : activeField === 'confirm' ? 'active' : 'idle',
-          )}
+          <View style={styles.inputGroup}>
+            <View style={styles.inputLabelRow}>
+              <Text
+                variant="small"
+                color={
+                  confirmationMismatch
+                    ? colors.semantic.error
+                    : activeField === 'confirm'
+                      ? colors.text.secondary
+                      : colors.text.tertiary
+                }
+                style={styles.inputLabel}
+              >
+                Confirm
+              </Text>
+              {activeField === 'confirm' ? (
+                <Text
+                  variant="small"
+                  color={confirmationMismatch ? colors.semantic.error : colors.brand.glossAccent}
+                  style={styles.activeHint}
+                >
+                  {confirmationMismatch ? 'Does not match' : 'Confirm now'}
+                </Text>
+              ) : null}
+            </View>
+            {renderDots(
+              passcodeB,
+              'Confirm passcode',
+              confirmationMismatch ? 'error' : activeField === 'confirm' ? 'active' : 'idle',
+            )}
+          </View>
         </View>
-      </View>
 
-      <View style={[styles.keypad, { gap: keypadGap }]}>
-        {KEYPAD_ROWS.map((row, index) => (
-          <View key={index} style={[styles.keyRow, { gap: keypadGap }]}>
-            {row.map(renderKey)}
-          </View>
-        ))}
-      </View>
+        <View style={[styles.keypad, { gap: keypadGap }]}>
+          {KEYPAD_ROWS.map((row, index) => (
+            <View key={index} style={[styles.keyRow, { gap: keypadGap }]}>
+              {row.map(renderKey)}
+            </View>
+          ))}
+        </View>
 
-      <View style={styles.actions}>
-        {hasAnyInput ? (
-          <Pressable
-            style={({ pressed }) => [styles.resetButton, pressed ? { opacity: 0.76 } : undefined]}
-            onPress={handleReset}
-            accessibilityRole="button"
-            accessibilityLabel="Reset passcode entry"
-            hitSlop={4}
-          >
-            <PuffyRefreshIcon
-              size={compact ? 15 : 16}
-              color={confirmationMismatch ? colors.semantic.error : colors.text.secondary}
+        <View style={styles.actions}>
+          {hasAnyInput ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.resetButton,
+                busy ? styles.actionDisabled : undefined,
+                pressed && !busy ? { opacity: 0.76 } : undefined,
+              ]}
+              onPress={handleReset}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="Reset passcode entry"
+              accessibilityState={{ disabled: busy, busy }}
+              hitSlop={4}
+            >
+              <PuffyRefreshIcon
+                size={compact ? 15 : 16}
+                color={confirmationMismatch ? colors.semantic.error : colors.text.secondary}
+              />
+            </Pressable>
+          ) : null}
+          <View style={styles.saveButtonSlot}>
+            <PillButton
+              label="Save passcode"
+              variant="primary"
+              disabled={!canSave}
+              onPress={onSetPasscode}
+              loading={busy}
             />
-          </Pressable>
-        ) : null}
-        <View style={styles.saveButtonSlot}>
-          <PillButton
-            label="Save passcode"
-            variant="primary"
-            disabled={!canSave}
-            onPress={onSetPasscode}
-          />
+          </View>
         </View>
-      </View>
       </View>
     </SettingsSectionCard>
   );
@@ -365,6 +381,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.backgroundTint,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
+  },
+  actionDisabled: {
+    opacity: 0.4,
   },
   saveButtonSlot: {
     flex: 1,

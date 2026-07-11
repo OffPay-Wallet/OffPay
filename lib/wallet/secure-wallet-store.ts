@@ -76,6 +76,10 @@ export interface StoredWalletSigningMaterial {
   privateKey: string | null;
 }
 
+export interface StoredWalletExportMaterial extends StoredWalletSigningMaterial {
+  importMethod: WalletImportMethod;
+}
+
 interface StoredWalletRecord extends StoredWalletInfo {
   mnemonic: string | null;
   privateKey: string | null;
@@ -629,6 +633,47 @@ export async function getStoredPrivateKeyWithAuth(walletId?: string): Promise<st
   try {
     const snapshot = await getSnapshotPayload(AUTH_OPTIONS);
     return getWalletFromPayload(snapshot, walletId)?.privateKey ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads every field required by the Security export screen from one snapshot.
+ * Keeping this combined avoids repeating the SecureStore manifest/chunk read and JSON parse.
+ */
+export async function getStoredWalletExportMaterial(
+  walletId?: string,
+): Promise<StoredWalletExportMaterial | null> {
+  try {
+    const snapshot = await getSnapshotPayload();
+    const wallet = getWalletFromPayload(snapshot, walletId);
+    if (wallet == null) return null;
+
+    return {
+      mnemonic: wallet.mnemonic,
+      privateKey: wallet.privateKey,
+      importMethod: wallet.importMethod,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Authenticated variant of getStoredWalletExportMaterial with one SecureStore read. */
+export async function getStoredWalletExportMaterialWithAuth(
+  walletId?: string,
+): Promise<StoredWalletExportMaterial | null> {
+  try {
+    const snapshot = await getSnapshotPayload(AUTH_OPTIONS);
+    const wallet = getWalletFromPayload(snapshot, walletId);
+    if (wallet == null) return null;
+
+    return {
+      mnemonic: wallet.mnemonic,
+      privateKey: wallet.privateKey,
+      importMethod: wallet.importMethod,
+    };
   } catch {
     return null;
   }

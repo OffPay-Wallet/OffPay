@@ -21,6 +21,7 @@ interface AuthGateStepProps {
   gatePasscode: string;
   onChangeGatePasscode: (value: string) => void;
   onContinue: () => void;
+  busy?: boolean;
   helperText?: string;
   compact?: boolean;
 }
@@ -40,13 +41,14 @@ export function AuthGateStep({
   gatePasscode,
   onChangeGatePasscode,
   onContinue,
+  busy = false,
   helperText,
   compact = false,
 }: AuthGateStepProps): React.JSX.Element {
   const showDescription = description != null && description.trim().length > 0;
   const canUsePasscode = hasPasscode && gatePasscode.length === 6;
   const hasPartialPasscode = hasPasscode && gatePasscode.length > 0 && gatePasscode.length < 6;
-  const canContinue = canUsePasscode || (fingerprintEnabled && !hasPartialPasscode);
+  const canContinue = !busy && (canUsePasscode || (fingerprintEnabled && !hasPartialPasscode));
   const hasAnyInput = gatePasscode.length > 0;
   const continueLabel = canUsePasscode
     ? 'Continue'
@@ -70,7 +72,7 @@ export function AuthGateStep({
 
   const renderKey = (key: string): React.JSX.Element => {
     const isAction = key === 'clear' || key === 'delete';
-    const disabled = key === 'clear' ? gatePasscode.length === 0 : false;
+    const disabled = busy || (key === 'clear' ? gatePasscode.length === 0 : false);
     const label = key === 'delete' ? '<' : key === 'clear' ? 'x' : key;
     const keyFrameStyle = { width: keySize, height: keySize, borderRadius: keySize / 2 };
 
@@ -116,77 +118,84 @@ export function AuthGateStep({
   return (
     <SettingsSectionCard>
       <View style={[styles.section, compact && styles.sectionCompact]}>
-      {showDescription ? (
-        <Text variant="small" color={colors.text.secondary} style={styles.description}>
-          {description}
-        </Text>
-      ) : null}
+        {showDescription ? (
+          <Text variant="small" color={colors.text.secondary} style={styles.description}>
+            {description}
+          </Text>
+        ) : null}
 
-      {hasPasscode ? (
-        <View style={styles.passcodeArea}>
-          <View style={styles.inputLabelRow}>
-            <Text variant="small" color={colors.text.secondary} style={styles.inputLabel}>
-              Passcode
-            </Text>
-            <Text variant="small" color={colors.brand.glossAccent} style={styles.activeHint}>
-              {gatePasscode.length === 6 ? 'Ready' : 'Enter 6 digits'}
-            </Text>
-          </View>
+        {hasPasscode ? (
+          <View style={styles.passcodeArea}>
+            <View style={styles.inputLabelRow}>
+              <Text variant="small" color={colors.text.secondary} style={styles.inputLabel}>
+                Passcode
+              </Text>
+              <Text variant="small" color={colors.brand.glossAccent} style={styles.activeHint}>
+                {gatePasscode.length === 6 ? 'Ready' : 'Enter 6 digits'}
+              </Text>
+            </View>
 
-          <View
-            style={[styles.dotInput, gatePasscode.length > 0 ? styles.dotInputActive : undefined]}
-            accessibilityLabel={`Passcode, ${gatePasscode.length} of 6 digits`}
-          >
-            <View style={styles.dotRow}>
-              {Array.from({ length: 6 }).map((_, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.dot,
-                    index < gatePasscode.length ? styles.dotFilled : styles.dotEmpty,
-                  ]}
-                />
+            <View
+              style={[styles.dotInput, gatePasscode.length > 0 ? styles.dotInputActive : undefined]}
+              accessibilityLabel={`Passcode, ${gatePasscode.length} of 6 digits`}
+            >
+              <View style={styles.dotRow}>
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.dot,
+                      index < gatePasscode.length ? styles.dotFilled : styles.dotEmpty,
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={[styles.keypad, { gap: keypadGap }]}>
+              {KEYPAD_ROWS.map((row, index) => (
+                <View key={index} style={[styles.keyRow, { gap: keypadGap }]}>
+                  {row.map(renderKey)}
+                </View>
               ))}
             </View>
           </View>
+        ) : null}
 
-          <View style={[styles.keypad, { gap: keypadGap }]}>
-            {KEYPAD_ROWS.map((row, index) => (
-              <View key={index} style={[styles.keyRow, { gap: keypadGap }]}>
-                {row.map(renderKey)}
-              </View>
-            ))}
+        <View style={styles.actions}>
+          {hasAnyInput ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.resetButton,
+                busy ? styles.actionDisabled : undefined,
+                pressed && !busy ? { opacity: 0.76 } : undefined,
+              ]}
+              onPress={handleReset}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="Reset passcode entry"
+              accessibilityState={{ disabled: busy, busy }}
+              hitSlop={4}
+            >
+              <PuffyRefreshIcon size={compact ? 15 : 16} color={colors.text.secondary} />
+            </Pressable>
+          ) : null}
+          <View style={styles.continueButtonSlot}>
+            <PillButton
+              label={continueLabel}
+              variant="primary"
+              onPress={onContinue}
+              disabled={!canContinue}
+              loading={busy}
+            />
           </View>
         </View>
-      ) : null}
 
-      <View style={styles.actions}>
-        {hasAnyInput ? (
-          <Pressable
-            style={({ pressed }) => [styles.resetButton, pressed ? { opacity: 0.76 } : undefined]}
-            onPress={handleReset}
-            accessibilityRole="button"
-            accessibilityLabel="Reset passcode entry"
-            hitSlop={4}
-          >
-            <PuffyRefreshIcon size={compact ? 15 : 16} color={colors.text.secondary} />
-          </Pressable>
+        {helperText != null ? (
+          <Text variant="small" color={colors.text.tertiary} style={styles.helperText}>
+            {helperText}
+          </Text>
         ) : null}
-        <View style={styles.continueButtonSlot}>
-          <PillButton
-            label={continueLabel}
-            variant="primary"
-            onPress={onContinue}
-            disabled={!canContinue}
-          />
-        </View>
-      </View>
-
-      {helperText != null ? (
-        <Text variant="small" color={colors.text.tertiary} style={styles.helperText}>
-          {helperText}
-        </Text>
-      ) : null}
       </View>
     </SettingsSectionCard>
   );
@@ -290,6 +299,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.backgroundTint,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
+  },
+  actionDisabled: {
+    opacity: 0.4,
   },
   continueButtonSlot: {
     flex: 1,

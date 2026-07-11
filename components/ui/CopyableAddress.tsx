@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
@@ -26,14 +26,46 @@ export function CopyableAddress({
   maxFontSizeMultiplier,
   textStyle,
 }: CopyableAddressProps): React.JSX.Element {
-  const [copied, setCopied] = useState(false);
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+  const clearCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyRequestRef = useRef(0);
 
-  const handleCopy = async () => {
+  const handleCopy = useCallback(async (): Promise<void> => {
     if (!address) return;
-    await Clipboard.setStringAsync(address);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+
+    const requestId = ++copyRequestRef.current;
+    try {
+      await Clipboard.setStringAsync(address);
+    } catch {
+      return;
+    }
+    if (requestId !== copyRequestRef.current) return;
+
+    if (clearCopiedTimerRef.current != null) {
+      clearTimeout(clearCopiedTimerRef.current);
+    }
+
+    setCopiedAddress(address);
+    clearCopiedTimerRef.current = setTimeout(() => {
+      if (requestId === copyRequestRef.current) {
+        setCopiedAddress((current) => (current === address ? null : current));
+      }
+      clearCopiedTimerRef.current = null;
+    }, 2000);
+  }, [address]);
+
+  useEffect(
+    () => () => {
+      copyRequestRef.current += 1;
+      if (clearCopiedTimerRef.current != null) {
+        clearTimeout(clearCopiedTimerRef.current);
+        clearCopiedTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const copied = copiedAddress === address;
 
   const truncated =
     address && address.length > 10
