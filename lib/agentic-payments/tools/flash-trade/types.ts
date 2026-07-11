@@ -1,5 +1,7 @@
 import type { AgentToolSchema } from '@/lib/agentic-payments/types';
+import type { FlashTradeEconomicIntent } from '@/lib/flash-trade/types';
 import type {
+  AgenticFlashDepositAction,
   AgenticFlashPositionOperation,
   AgenticFlashTriggerOrderSummary,
 } from '@/store/agenticChatStore';
@@ -9,6 +11,7 @@ export type FlashTradeToolName =
   | 'flash_get_positions'
   | 'flash_get_prices'
   | 'flash_get_orders'
+  | 'flash_fund_account'
   | 'flash_open_position'
   | 'flash_close_position'
   | 'flash_add_collateral'
@@ -63,10 +66,23 @@ export interface FlashTradeDraft {
   newLeverage?: number | null;
   newLiquidationPrice?: number | null;
   transactionBase64: string;
-  expiresAt: number;
+  /** V2 builders do not publish an expiry timestamp; the ER blockhash is checked at confirmation. */
+  expiresAt: number | null;
+  economicIntent: FlashTradeEconomicIntent;
+  expectedMarketPubkeys: string[];
+  expectedTriggerOrderCount?: number;
+  expectedOrderSlot?: number;
+  expectedIsStopLoss?: boolean;
+  expectedLimitPrice?: number;
+  expectedTriggerOrders?: { triggerPrice: number; isStopLoss: boolean }[];
   triggerOrders?: AgenticFlashTriggerOrderSummary[];
   requestedTriggerOrders?: AgenticFlashTriggerOrderSummary[];
   warnings?: string[];
 }
+
+export type FlashFundingDraft = Omit<
+  AgenticFlashDepositAction,
+  'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'
+>;
 
 export type { AgentToolSchema };

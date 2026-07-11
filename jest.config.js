@@ -21,7 +21,7 @@ module.exports = {
       '<rootDir>/node_modules/@solana/wallet-standard-features/lib/cjs/index.js',
     '^@solana/(.*)$': '<rootDir>/node_modules/@solana/$1/dist/index.node.cjs',
     '^rpc-websockets$': '<rootDir>/node_modules/rpc-websockets/dist/index.cjs',
-    '^uuid$': '<rootDir>/node_modules/rpc-websockets/node_modules/uuid/dist/cjs/index.js',
+    '^uuid$': '<rootDir>/node_modules/uuid/dist/cjs/index.js',
   },
   testPathIgnorePatterns: ['/node_modules/', '/.expo/', '/android/', '/ios/', '/dist/'],
   transformIgnorePatterns: [

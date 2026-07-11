@@ -1,119 +1,168 @@
 import type { AgenticToolDefinition } from '../types';
 import { getFlashTradeClient } from '@/lib/flash-trade';
-import { requireMainnet, requireWallet, errorCodeFromUnknown } from './helpers';
+import {
+  custodyPubkeyForSymbol,
+  encodedAmountFromUi,
+  errorCodeFromUnknown,
+  expectedMarketAccounts,
+  isPositiveFinite,
+  positionRef,
+  requireMainnet,
+  requireDecodedInstruction,
+  requireWallet,
+  resolvePositionReference,
+  sortedPositions,
+  validateSlippageBps,
+  validateTradablePrice,
+} from './helpers';
 import type { FlashTradeDraft } from './types';
+
+function decimalAmount(value: number, decimals: number): string {
+  const fixed = value.toFixed(Math.min(Math.max(decimals, 0), 9));
+  return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed;
+}
 
 export const flashAddCollateralTool: AgenticToolDefinition = {
   name: 'flash_add_collateral',
   schema: {
     name: 'flash_add_collateral',
-    description: 'Add collateral to an existing position to reduce leverage and move liquidation price further away (mainnet only).',
+    description:
+      'Build a real Flash Trade V2 mainnet transaction that reallocates an already-funded Flash ledger balance as margin on an existing position. This never funds Flash from the wallet. The amount is specified in USD and converted with the live collateral-token oracle price.',
     parameters: {
       type: 'object',
       properties: {
-        positionKey: { type: 'string', description: 'Position pubkey' },
-        depositAmount: { type: 'number', description: 'Amount to deposit in USD' },
-        depositTokenSymbol: { type: 'string', description: 'Token to deposit (USDC, SOL)' },
+        positionRef: {
+          type: 'string',
+          description: 'Opaque position_ref_N returned by flash_get_positions',
+        },
+        depositAmountUsd: { type: 'number', description: 'USD value of collateral to add' },
+        depositTokenSymbol: { type: 'string', description: 'Non-virtual Flash collateral token' },
+        slippageBps: {
+          type: 'number',
+          description: 'Slippage in basis points, from 1 through 500; default 50',
+        },
       },
-      required: ['positionKey', 'depositAmount', 'depositTokenSymbol'],
+      required: ['positionRef', 'depositAmountUsd', 'depositTokenSymbol'],
     },
   },
   run: async (call, context) => {
     const networkCheck = requireMainnet(context.scope.network);
-    if (!networkCheck.ok) {
-      return { error: { code: networkCheck.code } };
-    }
-
+    if (!networkCheck.ok) return { error: { code: networkCheck.code } };
     const walletCheck = requireWallet(context.scope.walletAddress);
-    if (!walletCheck.ok) {
-      return { error: { code: walletCheck.code } };
-    }
-
-    if (!context.canUseNetwork) {
-      return { error: { code: 'network_unavailable' } };
-    }
-
+    if (!walletCheck.ok) return { error: { code: walletCheck.code } };
+    if (!context.canUseNetwork) return { error: { code: 'network_unavailable' } };
     const args = call.args as {
-      positionKey: string;
-      depositAmount: number;
+      positionRef: string;
+      depositAmountUsd: number;
       depositTokenSymbol: string;
+      slippageBps?: number;
     };
-
-    if (args.depositAmount <= 0) {
-      return { error: { code: 'invalid_amount' } };
-    }
+    if (!isPositiveFinite(args.depositAmountUsd)) return { error: { code: 'invalid_amount' } };
+    const slippage = validateSlippageBps(args.slippageBps);
+    if (!slippage.ok) return { error: { code: slippage.code } };
 
     try {
       const client = getFlashTradeClient();
-
-      const position = await client.getPosition(args.positionKey, context.signal);
-
-      if (position.status !== 'open') {
-        return { error: { code: 'position_not_open' } };
+      const [positions, tokens, prices] = await Promise.all([
+        client.getOwnerPositions(walletCheck.walletAddress, context.signal),
+        client.getTokens(context.signal),
+        client.getPrices(context.signal),
+      ]);
+      const sorted = sortedPositions(positions);
+      const position = resolvePositionReference(sorted, args.positionRef);
+      if (position == null) return { error: { code: 'position_not_found' } };
+      const token = tokens.find(
+        (candidate) =>
+          candidate.symbol.toUpperCase() === args.depositTokenSymbol.trim().toUpperCase(),
+      );
+      if (token == null || token.isVirtual) return { error: { code: 'invalid_collateral_token' } };
+      const price = prices.find(
+        (candidate) => candidate.symbol.toUpperCase() === token.symbol.toUpperCase(),
+      );
+      if (price == null) return { error: { code: 'collateral_price_unavailable' } };
+      const priceCheck = validateTradablePrice(price);
+      if (!priceCheck.ok) return { error: { code: priceCheck.code } };
+      const depositAmountUi = decimalAmount(args.depositAmountUsd / price.price, token.decimals);
+      const encodedDeposit = encodedAmountFromUi({
+        amountUi: depositAmountUi,
+        decimals: token.decimals,
+        symbol: token.symbol,
+      });
+      if (encodedDeposit == null) return { error: { code: 'invalid_collateral_amount' } };
+      const marketAccounts = await client.getMarketExecutionAccounts(
+        position.marketPubkey,
+        context.signal,
+      );
+      const inputCustodyPubkey = custodyPubkeyForSymbol(marketAccounts, token.symbol);
+      if (inputCustodyPubkey == null) {
+        return { error: { code: 'collateral_custody_unavailable' } };
       }
 
       const response = await client.addCollateral(
         {
-          positionKey: args.positionKey,
-          depositAmount: args.depositAmount,
-          depositTokenSymbol: args.depositTokenSymbol,
-          owner: context.scope.walletAddress!,
+          marketSymbol: position.marketSymbol,
+          side: position.side === 'long' ? 'LONG' : 'SHORT',
+          depositAmountUi,
+          depositTokenSymbol: token.symbol,
+          owner: walletCheck.walletAddress,
+          slippagePercentage: slippage.slippagePercentage,
         },
         context.signal,
       );
-
+      const built = client.requireTransaction('/transaction-builder/add-collateral', response);
+      const decoded = requireDecodedInstruction(built.transactionBase64, 'add_collateral_er');
+      if (
+        decoded.accountPubkeys?.[9] !== inputCustodyPubkey ||
+        decoded.collateralRawAmount !== encodedDeposit.rawAmount
+      ) {
+        throw new Error('Flash Trade add-collateral builder changed the confirmed amount.');
+      }
       const draft: FlashTradeDraft = {
         kind: 'flash_position',
         operation: 'add_collateral',
         actionLabel: 'Add collateral',
-        walletAddress: context.scope.walletAddress!,
+        walletAddress: walletCheck.walletAddress,
         network: 'mainnet',
-        positionKey: args.positionKey,
+        positionKey: position.positionKey,
         marketSymbol: position.marketSymbol,
         side: position.side,
-        leverage: response.newLeverage,
-        collateralUsd: position.collateralUsd + args.depositAmount,
-        inputTokenSymbol: args.depositTokenSymbol,
+        leverage: Number(built.newLeverage),
+        collateralUsd: Number(built.newCollateralUsd),
+        inputTokenSymbol: token.symbol,
         tradeType: 'market',
         entryPrice: position.entryPrice,
-        liquidationPrice: response.newLiquidationPrice,
+        liquidationPrice: Number(built.newLiquidationPrice),
         sizeUsd: position.sizeUsd,
         entryFeeUsd: 0,
-        amountUsd: args.depositAmount,
-        amountTokenSymbol: args.depositTokenSymbol,
-        newLeverage: response.newLeverage,
-        newLiquidationPrice: response.newLiquidationPrice,
-        transactionBase64: response.transactionBase64,
-        expiresAt: response.expiresAt,
-        warnings:
-          position.triggerOrderCount > 0
-            ? [
-                'Position has trigger orders. Adding collateral changes leverage and may affect TP/SL triggering.',
-              ]
-            : undefined,
+        amountUsd: Number(built.depositUsdValue),
+        amountTokenSymbol: token.symbol,
+        newLeverage: Number(built.newLeverage),
+        newLiquidationPrice: Number(built.newLiquidationPrice),
+        transactionBase64: built.transactionBase64,
+        expiresAt: null,
+        economicIntent: {
+          operation: 'add_collateral',
+          side: position.side,
+          market: expectedMarketAccounts(marketAccounts, position.side),
+          inputCustodyPubkey,
+          amount: encodedDeposit,
+        },
+        expectedMarketPubkeys: [position.marketPubkey],
       };
-
       return {
         result: {
           status: 'drafted',
-          positionKey: args.positionKey,
+          positionRef: positionRef(position),
           marketSymbol: position.marketSymbol,
-          depositAmount: args.depositAmount,
-          depositTokenSymbol: args.depositTokenSymbol,
-          previousLeverage: position.leverage,
-          previousLiquidationPrice: position.liquidationPrice,
-          newLeverage: response.newLeverage,
-          newLiquidationPrice: response.newLiquidationPrice,
-          transactionBase64: response.transactionBase64,
-          expiresAt: response.expiresAt,
-          warning: position.triggerOrderCount > 0
-            ? 'Position has trigger orders. Adding collateral changes leverage and may affect TP/SL triggering.'
-            : undefined,
+          depositAmountUsd: Number(built.depositUsdValue),
+          depositAmountUi,
+          depositTokenSymbol: token.symbol,
+          previousLeverage: Number(built.existingLeverage),
+          previousLiquidationPrice: Number(built.existingLiquidationPrice),
+          newLeverage: Number(built.newLeverage),
+          newLiquidationPrice: Number(built.newLiquidationPrice),
         },
-        draft: {
-          kind: 'flash_position',
-          draft,
-        },
+        draft: { kind: 'flash_position', draft },
       };
     } catch (error) {
       return { error: { code: errorCodeFromUnknown(error, 'flash_api_unavailable') } };
@@ -125,122 +174,149 @@ export const flashRemoveCollateralTool: AgenticToolDefinition = {
   name: 'flash_remove_collateral',
   schema: {
     name: 'flash_remove_collateral',
-    description: 'Remove collateral from a position to increase leverage (mainnet only). Riskier - moves liquidation price closer to current price.',
+    description:
+      'Build a real Flash Trade V2 mainnet transaction that removes margin from a position. Removal raises liquidation risk and is bounded by the protocol preview.',
     parameters: {
       type: 'object',
       properties: {
-        positionKey: { type: 'string', description: 'Position pubkey' },
-        withdrawAmountUsd: { type: 'number', description: 'Amount to withdraw in USD' },
-        withdrawTokenSymbol: { type: 'string', description: 'Token to receive (USDC, SOL)' },
+        positionRef: {
+          type: 'string',
+          description: 'Opaque position_ref_N returned by flash_get_positions',
+        },
+        withdrawAmountUsd: { type: 'number', description: 'USD margin amount to remove' },
+        withdrawTokenSymbol: { type: 'string', description: 'Settlement token symbol' },
+        slippageBps: {
+          type: 'number',
+          description: 'Slippage in basis points, from 1 through 500; default 50',
+        },
       },
-      required: ['positionKey', 'withdrawAmountUsd', 'withdrawTokenSymbol'],
+      required: ['positionRef', 'withdrawAmountUsd', 'withdrawTokenSymbol'],
     },
   },
   run: async (call, context) => {
     const networkCheck = requireMainnet(context.scope.network);
-    if (!networkCheck.ok) {
-      return { error: { code: networkCheck.code } };
-    }
-
+    if (!networkCheck.ok) return { error: { code: networkCheck.code } };
     const walletCheck = requireWallet(context.scope.walletAddress);
-    if (!walletCheck.ok) {
-      return { error: { code: walletCheck.code } };
-    }
-
-    if (!context.canUseNetwork) {
-      return { error: { code: 'network_unavailable' } };
-    }
-
+    if (!walletCheck.ok) return { error: { code: walletCheck.code } };
+    if (!context.canUseNetwork) return { error: { code: 'network_unavailable' } };
     const args = call.args as {
-      positionKey: string;
+      positionRef: string;
       withdrawAmountUsd: number;
       withdrawTokenSymbol: string;
+      slippageBps?: number;
     };
-
-    if (args.withdrawAmountUsd <= 0) {
-      return { error: { code: 'invalid_amount' } };
-    }
+    if (!isPositiveFinite(args.withdrawAmountUsd)) return { error: { code: 'invalid_amount' } };
+    const slippage = validateSlippageBps(args.slippageBps);
+    if (!slippage.ok) return { error: { code: slippage.code } };
 
     try {
       const client = getFlashTradeClient();
-
-      const position = await client.getPosition(args.positionKey, context.signal);
-
-      if (position.status !== 'open') {
-        return { error: { code: 'position_not_open' } };
-      }
-
+      const sorted = sortedPositions(
+        await client.getOwnerPositions(walletCheck.walletAddress, context.signal),
+      );
+      const position = resolvePositionReference(sorted, args.positionRef);
+      if (position == null) return { error: { code: 'position_not_found' } };
       if (args.withdrawAmountUsd >= position.collateralUsd) {
         return { error: { code: 'cannot_remove_all_collateral' } };
+      }
+      const withdrawTokenSymbol = args.withdrawTokenSymbol.trim().toUpperCase();
+      const expectedUsdAmount = encodedAmountFromUi({
+        amountUi: String(args.withdrawAmountUsd),
+        decimals: 6,
+        symbol: 'USD',
+      });
+      if (expectedUsdAmount == null) return { error: { code: 'invalid_amount' } };
+      const marketAccounts = await client.getMarketExecutionAccounts(
+        position.marketPubkey,
+        context.signal,
+      );
+      const outputCustodyPubkey = custodyPubkeyForSymbol(marketAccounts, withdrawTokenSymbol);
+      if (outputCustodyPubkey == null) {
+        return { error: { code: 'withdraw_custody_unavailable' } };
       }
 
       const response = await client.removeCollateral(
         {
-          positionKey: args.positionKey,
-          withdrawAmountUsd: args.withdrawAmountUsd,
-          withdrawTokenSymbol: args.withdrawTokenSymbol,
-          owner: context.scope.walletAddress!,
+          marketSymbol: position.marketSymbol,
+          side: position.side === 'long' ? 'LONG' : 'SHORT',
+          withdrawAmountUsdUi: String(args.withdrawAmountUsd),
+          withdrawTokenSymbol,
+          owner: walletCheck.walletAddress,
+          slippagePercentage: slippage.slippagePercentage,
         },
         context.signal,
       );
-
-      const priceDistancePercent = Math.abs(
-        ((response.newLiquidationPrice - position.markPrice) / position.markPrice) * 100,
-      );
-
-      const warnings: string[] = [];
-      if (priceDistancePercent < 5) {
-        warnings.push('Liquidation price is within 5% of current price. High risk of liquidation.');
-      } else if (priceDistancePercent < 10) {
-        warnings.push('Liquidation price is within 10% of current price. Moderate risk.');
+      const built = client.requireTransaction('/transaction-builder/remove-collateral', response);
+      const decoded = requireDecodedInstruction(built.transactionBase64, 'remove_collateral_er');
+      if (
+        decoded.accountPubkeys?.[8] !== outputCustodyPubkey ||
+        decoded.usdAmountRaw !== expectedUsdAmount.rawAmount
+      ) {
+        throw new Error('Flash Trade remove-collateral builder changed the confirmed USD amount.');
       }
-
+      if (args.withdrawAmountUsd > Number(built.maxWithdrawableUsd)) {
+        return { error: { code: 'withdraw_amount_exceeds_maximum' } };
+      }
+      const newLiquidationPrice = Number(built.newLiquidationPrice);
+      const liquidationDistancePercent =
+        position.markPrice > 0
+          ? Math.abs(((newLiquidationPrice - position.markPrice) / position.markPrice) * 100)
+          : 0;
+      const warnings =
+        liquidationDistancePercent < 5
+          ? ['Liquidation price is within 5% of the live mark price.']
+          : liquidationDistancePercent < 10
+            ? ['Liquidation price is within 10% of the live mark price.']
+            : undefined;
       const draft: FlashTradeDraft = {
         kind: 'flash_position',
         operation: 'remove_collateral',
         actionLabel: 'Remove collateral',
-        walletAddress: context.scope.walletAddress!,
+        walletAddress: walletCheck.walletAddress,
         network: 'mainnet',
-        positionKey: args.positionKey,
+        positionKey: position.positionKey,
         marketSymbol: position.marketSymbol,
         side: position.side,
-        leverage: response.newLeverage,
-        collateralUsd: position.collateralUsd - args.withdrawAmountUsd,
-        inputTokenSymbol: args.withdrawTokenSymbol,
+        leverage: Number(built.newLeverage),
+        collateralUsd: Number(built.newCollateralUsd),
+        inputTokenSymbol: withdrawTokenSymbol,
         tradeType: 'market',
         entryPrice: position.entryPrice,
-        liquidationPrice: response.newLiquidationPrice,
+        liquidationPrice: newLiquidationPrice,
         sizeUsd: position.sizeUsd,
         entryFeeUsd: 0,
-        amountUsd: args.withdrawAmountUsd,
-        amountTokenSymbol: args.withdrawTokenSymbol,
-        newLeverage: response.newLeverage,
-        newLiquidationPrice: response.newLiquidationPrice,
-        transactionBase64: response.transactionBase64,
-        expiresAt: response.expiresAt,
-        warnings: warnings.length > 0 ? warnings : undefined,
+        amountUsd: Number(built.receiveAmountUsdUi),
+        amountTokenSymbol: withdrawTokenSymbol,
+        newLeverage: Number(built.newLeverage),
+        newLiquidationPrice,
+        transactionBase64: built.transactionBase64,
+        expiresAt: null,
+        economicIntent: {
+          operation: 'remove_collateral',
+          side: position.side,
+          market: expectedMarketAccounts(marketAccounts, position.side),
+          outputCustodyPubkey,
+          outputTokenSymbol: withdrawTokenSymbol,
+          usdAmountRaw: expectedUsdAmount.rawAmount,
+        },
+        expectedMarketPubkeys: [position.marketPubkey],
+        warnings,
       };
-
       return {
         result: {
           status: 'drafted',
-          positionKey: args.positionKey,
+          positionRef: positionRef(position),
           marketSymbol: position.marketSymbol,
-          withdrawAmountUsd: args.withdrawAmountUsd,
-          withdrawTokenSymbol: args.withdrawTokenSymbol,
-          previousLeverage: position.leverage,
-          previousLiquidationPrice: position.liquidationPrice,
-          newLeverage: response.newLeverage,
-          newLiquidationPrice: response.newLiquidationPrice,
-          liquidationDistancePercent: priceDistancePercent,
-          transactionBase64: response.transactionBase64,
-          expiresAt: response.expiresAt,
-          warnings: warnings.length > 0 ? warnings : undefined,
+          withdrawAmountUsd: Number(built.receiveAmountUsdUi),
+          withdrawTokenSymbol: draft.amountTokenSymbol,
+          previousLeverage: Number(built.existingLeverage),
+          previousLiquidationPrice: Number(built.existingLiquidationPrice),
+          newLeverage: Number(built.newLeverage),
+          newLiquidationPrice,
+          liquidationDistancePercent,
+          warnings,
         },
-        draft: {
-          kind: 'flash_position',
-          draft,
-        },
+        draft: { kind: 'flash_position', draft },
       };
     } catch (error) {
       return { error: { code: errorCodeFromUnknown(error, 'flash_api_unavailable') } };

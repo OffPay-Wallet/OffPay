@@ -64,6 +64,7 @@ interface SendSummarySheetProps {
   recipientAddress: string;
   network: ReturnType<typeof useOffpayNetwork>['network'];
   modeLabel: string;
+  protocolFeeLabel: string | null;
   networkFeeLabel: string;
   selfSend: boolean;
   canSubmit: boolean;
@@ -118,6 +119,7 @@ export function SendSummarySheet({
   recipientAddress,
   network,
   modeLabel,
+  protocolFeeLabel,
   networkFeeLabel,
   selfSend,
   canSubmit,
@@ -330,6 +332,9 @@ export function SendSummarySheet({
             <SummaryRow label="To" value={shortenWalletAddress(recipientAddress)} />
             <SummaryRow label="Network" value={network === 'devnet' ? 'Solana Devnet' : 'Solana'} />
             <SummaryRow label="Mode" value={modeLabel} />
+            {protocolFeeLabel != null ? (
+              <SummaryRow label="Protocol fee" value={protocolFeeLabel} />
+            ) : null}
             <SummaryRow label="Network fee" value={networkFeeLabel} last />
           </Animated.View>
         ) : null}

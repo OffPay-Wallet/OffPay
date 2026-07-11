@@ -152,7 +152,7 @@ export function RwaScreenContent(): React.JSX.Element {
   );
   const walletBalanceQuery = useOffpayWalletBalance(walletAddress, {
     eagerWithoutCapabilities: true,
-    enabled: walletAddress != null && network === 'devnet' && canUseNetwork,
+    enabled: walletAddress != null && canUseNetwork,
     requestOwner: 'rwa.wallet.balance',
     waitForDashboard: false,
   });
@@ -400,6 +400,10 @@ export function RwaScreenContent(): React.JSX.Element {
       if (!executeCapability.available) return executeCapability.message;
       if (walletAddress == null) return 'Unlock wallet.';
       if (!canSignWithApp) return signingBlocker ?? 'Wallet signing unavailable.';
+      if (asset.tradingHalted) return 'Trading is currently halted by the asset issuer.';
+      if (asset.multiplierTransitionActive) {
+        return 'Trading is paused during the issuer’s Token-2022 multiplier update.';
+      }
       if (!asset.tradable) return 'This asset is read only from the provider.';
       if (asset.execution[side] !== 'jupiter_swap' && asset.execution[side] !== 'devnet_sandbox') {
         return `RWA ${side} is unavailable for this asset.`;

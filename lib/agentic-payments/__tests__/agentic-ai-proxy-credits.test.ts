@@ -2,6 +2,22 @@ const originalProxyUrl = process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_URL;
 const originalAllowedOrigins = process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS;
 const originalFetch = global.fetch;
 
+jest.mock('@/lib/agentic-payments/session-token', () => {
+  class TestSessionTokenUnavailableError extends Error {}
+
+  return {
+    buildOffpayAiSessionToken: jest.fn(async () => ({
+      token: 'opaque-test-ai-session',
+      walletAddress: '11111111111111111111111111111111',
+      network: 'mainnet',
+      issuedAt: 1,
+      expiresAt: Number.MAX_SAFE_INTEGER,
+    })),
+    clearOffpayAiSessionTokenCache: jest.fn(),
+    OffpayAiSessionTokenUnavailableError: TestSessionTokenUnavailableError,
+  };
+});
+
 function restoreEnv(name: string, value: string | undefined): void {
   if (value == null) {
     delete process.env[name];
@@ -82,6 +98,52 @@ describe('AI proxy credit request identity', () => {
     if (init == null) throw new Error('fetch init missing');
     const headers = new Headers(init.headers);
     expect(headers.get('x-offpay-ai-turn-id')).toBe('ai-turn-visible-1');
+    expect(headers.get('x-offpay-ai-session')).toBe('opaque-test-ai-session');
+  });
+
+  it('strips serialized transactions again at the proxy serialization boundary', async () => {
+    const fetchMock = jest.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
+        return new Response(
+          JSON.stringify({
+            turn: { kind: 'agent_text', text: 'Done.' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    ) as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+
+    const { sendAgentTurn } = loadClient();
+    await sendAgentTurn(
+      {
+        responseMode: 'agent_turn',
+        messages: [{ role: 'user', content: 'Open a position' }],
+        toolResults: [
+          {
+            toolCallId: 'flash-call-1',
+            name: 'flash_open_position',
+            result: {
+              status: 'drafted',
+              transactionBase64: 'must-remain-on-device',
+              nested: { unsignedTransaction: 'also-local-only' },
+            },
+          },
+        ],
+      },
+      { timeoutMs: 5_000 },
+    );
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    if (typeof init?.body !== 'string') throw new Error('fetch body missing');
+    const serialized = init.body;
+    const body = JSON.parse(serialized) as {
+      toolResults: Array<{ result: Record<string, unknown> }>;
+    };
+
+    expect(serialized).not.toContain('must-remain-on-device');
+    expect(serialized).not.toContain('also-local-only');
+    expect(body.toolResults[0]?.result).toEqual({ status: 'drafted', nested: {} });
   });
 
   it('dedupes scoped credit preloads and stores the count before chat mounts', async () => {
@@ -191,11 +253,8 @@ describe('AI proxy credit request identity', () => {
     ) as jest.MockedFunction<typeof fetch>;
     global.fetch = fetchMock;
 
-    const {
-      prefetchAiChatCredits,
-      shouldRefreshAiChatCreditsFromBackend,
-      useAiChatCreditsStore,
-    } = loadCreditPreloadModules();
+    const { prefetchAiChatCredits, shouldRefreshAiChatCreditsFromBackend, useAiChatCreditsStore } =
+      loadCreditPreloadModules();
     const scopeKey = 'devnet:wallet:wallet-expired-db-window';
 
     useAiChatCreditsStore.getState().setCredits(

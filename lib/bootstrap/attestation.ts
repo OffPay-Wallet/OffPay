@@ -33,6 +33,16 @@ export interface OffpayAttestationAdapter {
   collectAttestation(request: OffpayAttestationRequest): Promise<OffpayBootstrapAttestation>;
 }
 
+interface ExpoAppIntegrityModule {
+  readonly isSupported: boolean;
+  attestKeyAsync(keyId: string, challenge: string): Promise<string>;
+  generateKeyAsync(): Promise<string>;
+  prepareIntegrityTokenProviderAsync(cloudProjectNumber: string): Promise<void>;
+  requestIntegrityCheckAsync(requestHash: string): Promise<string>;
+}
+
+type ExpoAppIntegrityLoader = () => Promise<ExpoAppIntegrityModule>;
+
 export class OffpayAttestationUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -112,8 +122,151 @@ export function createAndroidPrototypeBypassAttestationAdapter(): OffpayAttestat
 export const prototypeBypassOffpayAttestationAdapter =
   createAndroidPrototypeBypassAttestationAdapter();
 
+let preparedAndroidProjectNumber: string | null = null;
+let androidProviderPreparation: {
+  projectNumber: string;
+  promise: Promise<void>;
+} | null = null;
+
+function getGoogleCloudProjectNumber(): string {
+  const projectNumber = process.env.EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER?.trim() ?? '';
+  if (!/^\d{6,20}$/.test(projectNumber)) {
+    throw new OffpayAttestationUnavailableError(
+      'EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER must be configured for Play Integrity.',
+    );
+  }
+  return projectNumber;
+}
+
+function isInvalidIntegrityProviderError(error: unknown): boolean {
+  const code =
+    typeof error === 'object' && error != null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    code === 'ERR_APP_INTEGRITY_PROVIDER_INVALID' ||
+    message.includes('ERR_APP_INTEGRITY_PROVIDER_INVALID')
+  );
+}
+
+function resetAndroidIntegrityProvider(): void {
+  preparedAndroidProjectNumber = null;
+  androidProviderPreparation = null;
+}
+
+async function prepareAndroidIntegrityProvider(
+  appIntegrity: ExpoAppIntegrityModule,
+  projectNumber: string,
+): Promise<void> {
+  if (preparedAndroidProjectNumber === projectNumber) return;
+
+  if (androidProviderPreparation?.projectNumber !== projectNumber) {
+    const promise = appIntegrity
+      .prepareIntegrityTokenProviderAsync(projectNumber)
+      .then(() => {
+        preparedAndroidProjectNumber = projectNumber;
+      })
+      .catch((error: unknown) => {
+        if (androidProviderPreparation?.projectNumber === projectNumber) {
+          resetAndroidIntegrityProvider();
+        }
+        throw error;
+      });
+    androidProviderPreparation = { projectNumber, promise };
+  }
+
+  await androidProviderPreparation.promise;
+}
+
+async function collectAndroidIntegrity(
+  appIntegrity: ExpoAppIntegrityModule,
+  requestHash: string,
+): Promise<OffpayBootstrapAttestation> {
+  const projectNumber = getGoogleCloudProjectNumber();
+  await prepareAndroidIntegrityProvider(appIntegrity, projectNumber);
+
+  try {
+    return {
+      platform: 'android',
+      attestationToken: await appIntegrity.requestIntegrityCheckAsync(requestHash),
+    };
+  } catch (error) {
+    if (!isInvalidIntegrityProviderError(error)) throw error;
+
+    resetAndroidIntegrityProvider();
+    await prepareAndroidIntegrityProvider(appIntegrity, projectNumber);
+    return {
+      platform: 'android',
+      attestationToken: await appIntegrity.requestIntegrityCheckAsync(requestHash),
+    };
+  }
+}
+
+async function loadExpoAppIntegrity(): Promise<ExpoAppIntegrityModule> {
+  return import('@expo/app-integrity');
+}
+
+export function createExpoAppIntegrityAttestationAdapter(
+  loader: ExpoAppIntegrityLoader = loadExpoAppIntegrity,
+): OffpayAttestationAdapter {
+  return {
+    async collectAttestation(request) {
+      let appIntegrity: ExpoAppIntegrityModule;
+      try {
+        appIntegrity = await loader();
+      } catch (error) {
+        throw new OffpayAttestationUnavailableError(
+          `App integrity module is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      if (request.platform === 'android') {
+        try {
+          return await collectAndroidIntegrity(appIntegrity, request.nonceHashBase64Url);
+        } catch (error) {
+          if (error instanceof OffpayAttestationUnavailableError) throw error;
+          throw new OffpayAttestationUnavailableError(
+            `Play Integrity check failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      if (!appIntegrity.isSupported) {
+        throw new OffpayAttestationUnavailableError(
+          'Apple App Attest is not supported on this device.',
+        );
+      }
+
+      try {
+        const attestationKeyId = await appIntegrity.generateKeyAsync();
+        const attestationToken = await appIntegrity.attestKeyAsync(
+          attestationKeyId,
+          request.nonce,
+        );
+        return {
+          platform: 'ios',
+          attestationKeyId,
+          attestationToken,
+        };
+      } catch (error) {
+        throw new OffpayAttestationUnavailableError(
+          `Apple App Attest failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  };
+}
+
+export const expoAppIntegrityAttestationAdapter =
+  createExpoAppIntegrityAttestationAdapter();
+
 export function getConfiguredOffpayAttestationAdapter(): OffpayAttestationAdapter {
-  if (process.env.EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE === 'prototype') {
+  if (
+    __DEV__ &&
+    Platform.OS === 'android' &&
+    process.env.EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE === 'prototype'
+  ) {
     return prototypeBypassOffpayAttestationAdapter;
   }
 
@@ -121,5 +274,5 @@ export function getConfiguredOffpayAttestationAdapter(): OffpayAttestationAdapte
     return prototypeBypassOffpayAttestationAdapter;
   }
 
-  return unsupportedOffpayAttestationAdapter;
+  return expoAppIntegrityAttestationAdapter;
 }

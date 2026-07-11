@@ -1,6 +1,9 @@
 import { Buffer } from 'buffer';
 
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { PublicKey } from '@solana/web3.js';
+import bs58 from 'bs58';
 
 import {
   broadcastRawTransaction,
@@ -9,6 +12,7 @@ import {
   getRpcMinimumBalanceForRentExemption,
   initializePrivatePaymentMint,
   preparePrivateSend,
+  executePrivateSend,
   OffpayApiError,
 } from '@/lib/api/offpay-api-client';
 import {
@@ -21,7 +25,6 @@ import {
   assertInstructionIndexesAreSafe,
   assertRange,
   decodeBase64Transaction,
-  instructionContainsAmount,
   normalizeAtomicAmount,
   parseSerializedTransaction,
   readShortVec,
@@ -29,7 +32,12 @@ import {
 } from '@/lib/magicblock/tx-parsing';
 import { enqueuePendingPaymentBackup } from '@/lib/payments/pending-backup-queue';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
-import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@/lib/crypto/solana-token-accounts';
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  SPL_TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  deriveAssociatedTokenAddress,
+} from '@/lib/crypto/solana-token-accounts';
 import { signSerializedTransactionForWallet } from '@/lib/crypto/solana-transaction-signing';
 import { mark, measure } from '@/lib/perf/perf-marks';
 import {
@@ -56,13 +64,52 @@ const SYSTEM_INSTRUCTION_CREATE_ACCOUNT_WITH_SEED = 3;
 const SYSTEM_INSTRUCTION_TRANSFER_WITH_SEED = 11;
 const ASSOCIATED_TOKEN_CREATE_INSTRUCTION = 0;
 const ASSOCIATED_TOKEN_CREATE_IDEMPOTENT_INSTRUCTION = 1;
+const MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID = 'SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2';
+const MAGICBLOCK_DELEGATION_PROGRAM_ID = 'DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh';
+const MAGICBLOCK_PRIVATE_TRANSFER_INSTRUCTION = 0x19;
+const MAGICBLOCK_MAX_INIT_RENT_LAMPORTS = 50_000_000n;
+const TOKEN_PROGRAM_IDS = new Set([SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]);
+
+function deriveProgramAddress(seeds: readonly Uint8Array[], programId: string): string {
+  return PublicKey.findProgramAddressSync(
+    seeds.map((seed) => Buffer.from(seed)),
+    new PublicKey(programId),
+  )[0].toBase58();
+}
+
+function publicKeySeed(address: string): Uint8Array {
+  return new PublicKey(address).toBytes();
+}
+
+function delegationAccounts(delegatedAccount: string): {
+  buffer: string;
+  record: string;
+  metadata: string;
+} {
+  const accountSeed = publicKeySeed(delegatedAccount);
+  return {
+    buffer: deriveProgramAddress(
+      [Buffer.from('buffer', 'utf8'), accountSeed],
+      MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+    ),
+    record: deriveProgramAddress(
+      [Buffer.from('delegation', 'utf8'), accountSeed],
+      MAGICBLOCK_DELEGATION_PROGRAM_ID,
+    ),
+    metadata: deriveProgramAddress(
+      [Buffer.from('delegation-metadata', 'utf8'), accountSeed],
+      MAGICBLOCK_DELEGATION_PROGRAM_ID,
+    ),
+  };
+}
 
 export interface PrivatePaymentVerification {
   requiredSigners: string[];
   instructionCount: number;
   verifiedAmount: boolean;
   verifiedRecipient: boolean;
-  recipientVerification: 'explicit' | 'private-route';
+  recipientVerification: 'explicit' | 'provider-request-bound';
+  providerRequestBound: boolean;
   verifiedMint: boolean;
 }
 
@@ -93,10 +140,13 @@ export interface PreparedPrivatePaymentPlan {
   mint: string;
   amount: string;
   network: OffpayNetwork;
+  intentId: string;
+  expiresAt: number;
   unsignedTransaction: string;
   transaction: PreparedTransaction | null;
   verification: PrivatePaymentVerification;
   feeLamports: number | null;
+  tokenFeeRaw: string;
   solFeePayer: string | null;
   includesMintInitialization: boolean;
   preparedAt: number;
@@ -134,35 +184,310 @@ function assertPrivatePaymentInputs(params: {
   return normalizeAtomicAmount(params.amount);
 }
 
-function verifyPrivateRouteMetadata(params: {
-  unsignedTransaction: string;
-  transaction: PreparedTransaction | null;
-}): boolean {
-  if (params.transaction == null) {
-    return false;
+function getInstructionProgram(params: {
+  instruction: ReturnType<typeof parseSerializedTransaction>['instructions'][number];
+  accountKeys: string[];
+}): string {
+  const program = params.accountKeys[params.instruction.programIdIndex];
+  if (program == null) {
+    throw new Error('MagicBlock transaction references an unresolved program.');
   }
+  return program;
+}
 
-  const transaction = params.transaction;
+function getInstructionAccount(params: {
+  instruction: ReturnType<typeof parseSerializedTransaction>['instructions'][number];
+  accountKeys: string[];
+  position: number;
+}): string {
+  const accountIndex = params.instruction.accountIndexes[params.position];
+  const account = accountIndex == null ? null : params.accountKeys[accountIndex];
+  if (account == null) {
+    throw new Error('MagicBlock transaction contains a malformed instruction account list.');
+  }
+  return account;
+}
+
+function instructionDataEquals(data: Uint8Array, expected: readonly number[]): boolean {
+  return data.length === expected.length && expected.every((byte, index) => data[index] === byte);
+}
+
+function assertMagicBlockProviderEnvelope(params: {
+  unsignedTransaction: string;
+  transaction: PreparedTransaction;
+  parsed: ReturnType<typeof parseSerializedTransaction>;
+  walletAddress: string;
+  expectedKind: 'transfer' | 'initializeMint';
+  expectedVersion: 'v0' | 'legacy';
+  expectedInstructionCount: number;
+}): void {
+  const { transaction, parsed } = params;
+
   if (transaction.transactionBase64.trim() !== params.unsignedTransaction.trim()) {
     throw new Error('Private payment response metadata does not match the unsigned transaction.');
   }
+  if (
+    transaction.kind !== params.expectedKind ||
+    transaction.version !== params.expectedVersion ||
+    transaction.sendTo !== 'base' ||
+    transaction.instructionCount !== params.expectedInstructionCount ||
+    transaction.requiredSigners.length !== 1 ||
+    transaction.requiredSigners[0] !== params.walletAddress ||
+    transaction.validator == null ||
+    !isValidSolanaAddress(transaction.validator) ||
+    transaction.recentBlockhash !== parsed.recentBlockhash ||
+    transaction.lastValidBlockHeight == null ||
+    !Number.isSafeInteger(transaction.lastValidBlockHeight) ||
+    transaction.lastValidBlockHeight <= 0
+  ) {
+    throw new Error('MagicBlock transaction metadata is incomplete or inconsistent.');
+  }
+  if (
+    (params.expectedVersion === 'v0' && parsed.messageVersion !== 0) ||
+    (params.expectedVersion === 'legacy' && parsed.messageVersion !== 'legacy')
+  ) {
+    throw new Error('MagicBlock transaction version does not match its metadata.');
+  }
+  if (
+    parsed.signatureCount !== 1 ||
+    parsed.requiredSignerCount !== 1 ||
+    parsed.requiredSigners.length !== 1 ||
+    parsed.requiredSigners[0] !== params.walletAddress ||
+    parsed.accountKeys[0] !== params.walletAddress
+  ) {
+    throw new Error('MagicBlock transaction must use only the active wallet as signer and fee payer.');
+  }
+}
 
-  const routeKind = transaction.kind.toLowerCase();
-  const hasRouteMarker =
-    transaction.validator != null ||
-    transaction.transferQueue != null ||
-    transaction.rentPda != null ||
-    transaction.sendTo != null;
-
-  if (!routeKind.includes('private') && !routeKind.includes('transfer')) {
-    throw new Error('Private payment response metadata is not a MagicBlock private transfer.');
+function assertMagicBlockPrivateTransferLayout(params: {
+  parsed: ReturnType<typeof parseSerializedTransaction>;
+  accountKeys: string[];
+  transaction: PreparedTransaction;
+  walletAddress: string;
+  mint: string;
+  amount: bigint;
+}): void {
+  assertMagicBlockProviderEnvelope({
+    unsignedTransaction: params.transaction.transactionBase64,
+    transaction: params.transaction,
+    parsed: params.parsed,
+    walletAddress: params.walletAddress,
+    expectedKind: 'transfer',
+    expectedVersion: 'v0',
+    expectedInstructionCount: 4,
+  });
+  const fees = params.transaction.fees;
+  if (
+    fees == null ||
+    !/^\d+$/.test(fees.lamports) ||
+    !/^\d+$/.test(fees.tokens) ||
+    BigInt(fees.tokens) !== params.amount / 1_000n ||
+    BigInt(fees.lamports) > MAGICBLOCK_MAX_INIT_RENT_LAMPORTS
+  ) {
+    throw new Error('MagicBlock private transfer fee metadata is missing or unexpected.');
   }
 
-  if (!hasRouteMarker) {
-    throw new Error('Private payment response metadata does not include MagicBlock route details.');
+  const [ataInstruction, initializeInstruction, delegateInstruction, transferInstruction] =
+    params.parsed.instructions;
+  if (
+    ataInstruction == null ||
+    initializeInstruction == null ||
+    delegateInstruction == null ||
+    transferInstruction == null
+  ) {
+    throw new Error('MagicBlock private transfer instruction sequence is incomplete.');
   }
 
-  return true;
+  const programs = params.parsed.instructions.map((instruction) =>
+    getInstructionProgram({ instruction, accountKeys: params.accountKeys }),
+  );
+  if (
+    programs[0] !== ASSOCIATED_TOKEN_PROGRAM_ID ||
+    programs.slice(1).some((program) => program !== MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID)
+  ) {
+    throw new Error('MagicBlock private transfer invokes an unexpected program.');
+  }
+
+  if (
+    ataInstruction.accountIndexes.length !== 6 ||
+    !instructionDataEquals(ataInstruction.data, [ASSOCIATED_TOKEN_CREATE_IDEMPOTENT_INSTRUCTION])
+  ) {
+    throw new Error('MagicBlock private transfer contains a non-canonical token-account setup.');
+  }
+  const tokenProgram = getInstructionAccount({
+    instruction: ataInstruction,
+    accountKeys: params.accountKeys,
+    position: 5,
+  });
+  if (!TOKEN_PROGRAM_IDS.has(tokenProgram)) {
+    throw new Error('MagicBlock private transfer uses an unsupported token program.');
+  }
+  const walletTokenAccount = deriveAssociatedTokenAddress({
+    owner: params.walletAddress,
+    mint: params.mint,
+    tokenProgramId: tokenProgram,
+  });
+  if (
+    getInstructionAccount({ instruction: ataInstruction, accountKeys: params.accountKeys, position: 0 }) !==
+      params.walletAddress ||
+    getInstructionAccount({ instruction: ataInstruction, accountKeys: params.accountKeys, position: 1 }) !==
+      walletTokenAccount ||
+    getInstructionAccount({ instruction: ataInstruction, accountKeys: params.accountKeys, position: 2 }) !==
+      params.walletAddress ||
+    getInstructionAccount({ instruction: ataInstruction, accountKeys: params.accountKeys, position: 3 }) !==
+      params.mint ||
+    getInstructionAccount({ instruction: ataInstruction, accountKeys: params.accountKeys, position: 4 }) !==
+      SYSTEM_PROGRAM_ID
+  ) {
+    throw new Error('MagicBlock private transfer token-account setup does not match the request.');
+  }
+
+  if (
+    initializeInstruction.accountIndexes.length !== 5 ||
+    !instructionDataEquals(initializeInstruction.data, [0]) ||
+    getInstructionAccount({ instruction: initializeInstruction, accountKeys: params.accountKeys, position: 1 }) !==
+      params.walletAddress ||
+    getInstructionAccount({ instruction: initializeInstruction, accountKeys: params.accountKeys, position: 2 }) !==
+      params.walletAddress ||
+    getInstructionAccount({ instruction: initializeInstruction, accountKeys: params.accountKeys, position: 3 }) !==
+      params.mint ||
+    getInstructionAccount({ instruction: initializeInstruction, accountKeys: params.accountKeys, position: 4 }) !==
+      SYSTEM_PROGRAM_ID
+  ) {
+    throw new Error('MagicBlock private transfer initialization is not canonical.');
+  }
+  const encryptionAccount = getInstructionAccount({
+    instruction: initializeInstruction,
+    accountKeys: params.accountKeys,
+    position: 0,
+  });
+  const expectedEncryptionAccount = deriveProgramAddress(
+    [publicKeySeed(params.walletAddress), publicKeySeed(params.mint)],
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+  );
+  if (encryptionAccount !== expectedEncryptionAccount) {
+    throw new Error('MagicBlock private transfer initialization uses an unexpected ephemeral account.');
+  }
+  const validatorBytes = bs58.decode(params.transaction.validator!);
+  const encryptionDelegation = delegationAccounts(encryptionAccount);
+
+  if (
+    delegateInstruction.accountIndexes.length !== 8 ||
+    delegateInstruction.data.length !== 33 ||
+    delegateInstruction.data[0] !== 4 ||
+    !delegateInstruction.data
+      .subarray(1, 33)
+      .every((byte, index) => byte === validatorBytes[index]) ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 0 }) !==
+      params.walletAddress ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 1 }) !==
+      encryptionAccount ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 2 }) !==
+      MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 3 }) !==
+      encryptionDelegation.buffer ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 4 }) !==
+      encryptionDelegation.record ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 5 }) !==
+      encryptionDelegation.metadata ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 6 }) !==
+      MAGICBLOCK_DELEGATION_PROGRAM_ID ||
+    getInstructionAccount({ instruction: delegateInstruction, accountKeys: params.accountKeys, position: 7 }) !==
+      SYSTEM_PROGRAM_ID
+  ) {
+    throw new Error('MagicBlock private transfer delegation is not canonical.');
+  }
+
+  const shuttleId = u32FromLittleEndian(transferInstruction.data, 1);
+  if (shuttleId == null) {
+    throw new Error('MagicBlock private transfer is missing its shuttle identifier.');
+  }
+  const shuttleIdSeed = Buffer.alloc(4);
+  shuttleIdSeed.writeUInt32LE(shuttleId, 0);
+  const shuttleMetadata = deriveProgramAddress(
+    [publicKeySeed(params.walletAddress), publicKeySeed(params.mint), shuttleIdSeed],
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+  );
+  const shuttleAccount = deriveProgramAddress(
+    [publicKeySeed(shuttleMetadata), publicKeySeed(params.mint)],
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+  );
+  const shuttleWalletTokenAccount = deriveAssociatedTokenAddress({
+    owner: shuttleMetadata,
+    mint: params.mint,
+    tokenProgramId: tokenProgram,
+  });
+  const shuttleDelegation = delegationAccounts(shuttleAccount);
+  const rentPda = deriveProgramAddress(
+    [Buffer.from('rent', 'utf8')],
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+  );
+  const globalVault = deriveProgramAddress(
+    [publicKeySeed(params.mint)],
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+  );
+  const globalVaultTokenAccount = deriveAssociatedTokenAddress({
+    owner: globalVault,
+    mint: params.mint,
+    tokenProgramId: tokenProgram,
+  });
+  const transferQueue = deriveProgramAddress(
+    [Buffer.from('queue', 'utf8'), publicKeySeed(params.mint), validatorBytes],
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+  );
+
+  if (
+    transferInstruction.accountIndexes.length !== 19 ||
+    transferInstruction.data.length !== 196 ||
+    transferInstruction.data[0] !== MAGICBLOCK_PRIVATE_TRANSFER_INSTRUCTION ||
+    u64FromLittleEndian(transferInstruction.data, 5) !== params.amount ||
+    transferInstruction.data[13] !== 1 ||
+    transferInstruction.data[94] !== 1 ||
+    !transferInstruction.data
+      .subarray(95, 127)
+      .every((byte, index) => byte === validatorBytes[index]) ||
+    transferInstruction.data[127] !== transferInstruction.data.length - 128 ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 0 }) !==
+      params.walletAddress ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 1 }) !==
+      rentPda ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 2 }) !==
+      shuttleMetadata ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 3 }) !==
+      shuttleAccount ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 4 }) !==
+      shuttleWalletTokenAccount ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 5 }) !==
+      params.walletAddress ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 6 }) !==
+      MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 7 }) !==
+      shuttleDelegation.buffer ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 8 }) !==
+      shuttleDelegation.record ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 9 }) !==
+      shuttleDelegation.metadata ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 10 }) !==
+      MAGICBLOCK_DELEGATION_PROGRAM_ID ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 11 }) !==
+      ASSOCIATED_TOKEN_PROGRAM_ID ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 12 }) !==
+      SYSTEM_PROGRAM_ID ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 13 }) !==
+      params.mint ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 14 }) !==
+      tokenProgram ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 15 }) !==
+      globalVault ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 16 }) !==
+      walletTokenAccount ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 17 }) !==
+      globalVaultTokenAccount ||
+    getInstructionAccount({ instruction: transferInstruction, accountKeys: params.accountKeys, position: 18 }) !==
+      transferQueue
+  ) {
+    throw new Error('MagicBlock private transfer does not match the confirmed mint and amount.');
+  }
 }
 
 export async function verifyPrivatePaymentUnsignedTransaction(params: {
@@ -178,11 +503,18 @@ export async function verifyPrivatePaymentUnsignedTransaction(params: {
   const startedAt = mark();
   try {
     const amount = assertPrivatePaymentInputs(params);
+    assertUnsignedSignatureSlotsAreEmpty(params.unsignedTransaction);
     const parsed = parseSerializedTransaction(params.unsignedTransaction);
     const accountKeys = await resolveMessageAccountKeys(parsed, params.network);
+    assertInstructionIndexesAreSafe(parsed, accountKeys.length);
 
-    if (!parsed.requiredSigners.includes(params.walletAddress)) {
-      throw new Error('Private payment transaction is not signed by the active wallet.');
+    if (
+      parsed.signatureCount !== 1 ||
+      parsed.requiredSignerCount !== 1 ||
+      parsed.requiredSigners[0] !== params.walletAddress ||
+      parsed.accountKeys[0] !== params.walletAddress
+    ) {
+      throw new Error('Private payment transaction must use only the active wallet as signer and fee payer.');
     }
 
     const recipientIsExplicit = verifyExpectedRecipient({
@@ -192,57 +524,55 @@ export async function verifyPrivatePaymentUnsignedTransaction(params: {
       mint: params.mint,
       amount,
     });
-    const privateRouteIsAllowed =
-      !recipientIsExplicit && params.allowHiddenPrivateRecipient === true;
-    const privateRouteHasMetadata = privateRouteIsAllowed
-      ? verifyPrivateRouteMetadata({
-          unsignedTransaction: params.unsignedTransaction,
-          transaction: params.privateRouteTransaction ?? null,
-        })
-      : false;
-    const recipientVerification = recipientIsExplicit
-      ? 'explicit'
-      : privateRouteIsAllowed || privateRouteHasMetadata
-        ? 'private-route'
-        : null;
-    if (recipientVerification == null) {
-      throw new Error('Private payment transaction does not include the intended recipient.');
+    const providerRequestBound = params.allowHiddenPrivateRecipient === true;
+    if (providerRequestBound) {
+      const transaction = params.privateRouteTransaction;
+      if (transaction == null) {
+        throw new Error('MagicBlock private transfer metadata is required before signing.');
+      }
+      if (transaction.transactionBase64.trim() !== params.unsignedTransaction.trim()) {
+        throw new Error('Private payment response metadata does not match the unsigned transaction.');
+      }
+      assertMagicBlockPrivateTransferLayout({
+        parsed,
+        accountKeys,
+        transaction,
+        walletAddress: params.walletAddress,
+        mint: params.mint,
+        amount,
+      });
+    } else if (!recipientIsExplicit) {
+      throw new Error('Private payment transaction does not send tokens to the intended recipient.');
     }
 
-    const verifiedMint = await verifyRequestedTokenMint({
-      parsed,
-      accountKeys,
-      mint: params.mint,
-      amount,
-      network: params.network,
-      allowInstructionDataMint: recipientVerification === 'private-route',
-    });
-    if (!verifiedMint) {
-      throw new Error('Private payment transaction does not use the requested token mint.');
-    }
-
-    assertInstructionIndexesAreSafe(parsed, accountKeys.length);
-
-    const verifiedAmount = parsed.instructions.some((instruction) => {
-      return (
-        instructionHasTokenTransferAmount({
-          instruction,
+    const verifiedMint = providerRequestBound
+      ? true
+      : await verifyRequestedTokenMint({
+          parsed,
           accountKeys,
+          mint: params.mint,
           amount,
-        }) || instructionContainsAmount(instruction.data, amount)
-      );
-    });
+          network: params.network,
+        });
+    if (!verifiedMint) throw new Error('Private payment transaction does not use the requested token mint.');
+
+    const verifiedAmount = providerRequestBound
+      ? true
+      : parsed.instructions.some((instruction) =>
+          instructionHasTokenTransferAmount({ instruction, accountKeys, amount }),
+        );
 
     if (!verifiedAmount) {
-      throw new Error('Private payment transaction does not encode the requested amount.');
+      throw new Error('Private payment transaction does not transfer the requested amount.');
     }
 
     return {
       requiredSigners: parsed.requiredSigners,
       instructionCount: parsed.instructions.length,
       verifiedAmount,
-      verifiedRecipient: true,
-      recipientVerification,
+      verifiedRecipient: recipientIsExplicit,
+      recipientVerification: recipientIsExplicit ? 'explicit' : 'provider-request-bound',
+      providerRequestBound,
       verifiedMint,
     };
   } finally {
@@ -250,22 +580,152 @@ export async function verifyPrivatePaymentUnsignedTransaction(params: {
   }
 }
 
-function verifyMintInitTransaction(params: {
+async function verifyMintInitTransaction(params: {
   unsignedTransaction: string;
   walletAddress: string;
   mint: string;
-}): void {
+  network: OffpayNetwork;
+  transaction: PreparedTransaction | null;
+}): Promise<void> {
+  if (params.transaction == null) {
+    throw new Error('MagicBlock mint initialization metadata is required before signing.');
+  }
   const parsed = parseSerializedTransaction(params.unsignedTransaction);
+  const accountKeys = await resolveMessageAccountKeys(parsed, params.network);
+  assertInstructionIndexesAreSafe(parsed, accountKeys.length);
+  assertMagicBlockProviderEnvelope({
+    unsignedTransaction: params.unsignedTransaction,
+    transaction: params.transaction,
+    parsed,
+    walletAddress: params.walletAddress,
+    expectedKind: 'initializeMint',
+    expectedVersion: 'legacy',
+    expectedInstructionCount: 7,
+  });
 
-  if (!parsed.requiredSigners.includes(params.walletAddress)) {
-    throw new Error('Private mint init transaction is not signed by the active wallet.');
+  const expectedPrograms = [
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+    SYSTEM_PROGRAM_ID,
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+  ];
+  const actualPrograms = parsed.instructions.map((instruction) =>
+    getInstructionProgram({ instruction, accountKeys }),
+  );
+  if (actualPrograms.some((program, index) => program !== expectedPrograms[index])) {
+    throw new Error('MagicBlock mint initialization invokes an unexpected program.');
   }
 
-  if (!parsed.accountKeys.includes(params.mint)) {
-    throw new Error('Private mint init transaction does not include the requested mint.');
+  const [queueInstruction, rentInstruction, rentTransfer, delegateQueue, initializeAta, ataCreate, delegateAta] =
+    parsed.instructions;
+  if (
+    queueInstruction == null ||
+    rentInstruction == null ||
+    rentTransfer == null ||
+    delegateQueue == null ||
+    initializeAta == null ||
+    ataCreate == null ||
+    delegateAta == null
+  ) {
+    throw new Error('MagicBlock mint initialization instruction sequence is incomplete.');
+  }
+  const transferQueue = params.transaction.transferQueue;
+  const rentPda = params.transaction.rentPda;
+  const validator = params.transaction.validator;
+  if (
+    transferQueue == null ||
+    rentPda == null ||
+    validator == null ||
+    !isValidSolanaAddress(transferQueue) ||
+    !isValidSolanaAddress(rentPda)
+  ) {
+    throw new Error('MagicBlock mint initialization route accounts are missing.');
   }
 
-  assertInstructionIndexesAreSafe(parsed);
+  if (
+    queueInstruction.accountIndexes.length !== 16 ||
+    !instructionDataEquals(queueInstruction.data, [0x0c]) ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 0 }) !== params.walletAddress ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 1 }) !== transferQueue ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 3 }) !== params.mint ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 4 }) !== validator ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 5 }) !== SYSTEM_PROGRAM_ID ||
+    !TOKEN_PROGRAM_IDS.has(getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 9 })) ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 10 }) !== ASSOCIATED_TOKEN_PROGRAM_ID ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 11 }) !== MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID ||
+    getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 15 }) !== MAGICBLOCK_DELEGATION_PROGRAM_ID
+  ) {
+    throw new Error('MagicBlock transfer-queue initialization is not canonical.');
+  }
+  const tokenProgram = getInstructionAccount({ instruction: queueInstruction, accountKeys, position: 9 });
+
+  if (
+    rentInstruction.accountIndexes.length !== 3 ||
+    !instructionDataEquals(rentInstruction.data, [0x17]) ||
+    getInstructionAccount({ instruction: rentInstruction, accountKeys, position: 0 }) !== params.walletAddress ||
+    getInstructionAccount({ instruction: rentInstruction, accountKeys, position: 1 }) !== rentPda ||
+    getInstructionAccount({ instruction: rentInstruction, accountKeys, position: 2 }) !== SYSTEM_PROGRAM_ID ||
+    rentTransfer.accountIndexes.length !== 2 ||
+    rentTransfer.data.length !== 12 ||
+    u32FromLittleEndian(rentTransfer.data, 0) !== SYSTEM_INSTRUCTION_TRANSFER ||
+    getInstructionAccount({ instruction: rentTransfer, accountKeys, position: 0 }) !== params.walletAddress ||
+    getInstructionAccount({ instruction: rentTransfer, accountKeys, position: 1 }) !== rentPda
+  ) {
+    throw new Error('MagicBlock mint initialization rent transfer is not canonical.');
+  }
+  const rentLamports = u64FromLittleEndian(rentTransfer.data, 4);
+  if (rentLamports == null || rentLamports <= 0n || rentLamports > MAGICBLOCK_MAX_INIT_RENT_LAMPORTS) {
+    throw new Error('MagicBlock mint initialization rent exceeds the safety limit.');
+  }
+
+  if (
+    delegateQueue.accountIndexes.length !== 9 ||
+    !instructionDataEquals(delegateQueue.data, [0x13]) ||
+    getInstructionAccount({ instruction: delegateQueue, accountKeys, position: 0 }) !== params.walletAddress ||
+    getInstructionAccount({ instruction: delegateQueue, accountKeys, position: 1 }) !== transferQueue ||
+    getInstructionAccount({ instruction: delegateQueue, accountKeys, position: 2 }) !== params.mint ||
+    getInstructionAccount({ instruction: delegateQueue, accountKeys, position: 3 }) !== MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID ||
+    getInstructionAccount({ instruction: delegateQueue, accountKeys, position: 7 }) !== MAGICBLOCK_DELEGATION_PROGRAM_ID ||
+    getInstructionAccount({ instruction: delegateQueue, accountKeys, position: 8 }) !== SYSTEM_PROGRAM_ID
+  ) {
+    throw new Error('MagicBlock transfer-queue delegation is not canonical.');
+  }
+
+  const privateAtaOwner = getInstructionAccount({ instruction: initializeAta, accountKeys, position: 0 });
+  const privateAta = deriveAssociatedTokenAddress({ owner: privateAtaOwner, mint: params.mint, tokenProgramId: tokenProgram });
+  if (
+    initializeAta.accountIndexes.length !== 8 ||
+    !instructionDataEquals(initializeAta.data, [1]) ||
+    getInstructionAccount({ instruction: initializeAta, accountKeys, position: 2 }) !== params.mint ||
+    getInstructionAccount({ instruction: initializeAta, accountKeys, position: 5 }) !== tokenProgram ||
+    getInstructionAccount({ instruction: initializeAta, accountKeys, position: 6 }) !== ASSOCIATED_TOKEN_PROGRAM_ID ||
+    getInstructionAccount({ instruction: initializeAta, accountKeys, position: 7 }) !== SYSTEM_PROGRAM_ID ||
+    ataCreate.accountIndexes.length !== 6 ||
+    !instructionDataEquals(ataCreate.data, [ASSOCIATED_TOKEN_CREATE_IDEMPOTENT_INSTRUCTION]) ||
+    getInstructionAccount({ instruction: ataCreate, accountKeys, position: 0 }) !== params.walletAddress ||
+    getInstructionAccount({ instruction: ataCreate, accountKeys, position: 1 }) !== privateAta ||
+    getInstructionAccount({ instruction: ataCreate, accountKeys, position: 2 }) !== privateAtaOwner ||
+    getInstructionAccount({ instruction: ataCreate, accountKeys, position: 3 }) !== params.mint ||
+    getInstructionAccount({ instruction: ataCreate, accountKeys, position: 4 }) !== SYSTEM_PROGRAM_ID ||
+    getInstructionAccount({ instruction: ataCreate, accountKeys, position: 5 }) !== tokenProgram
+  ) {
+    throw new Error('MagicBlock private token-account initialization is not canonical.');
+  }
+
+  if (
+    delegateAta.accountIndexes.length !== 8 ||
+    delegateAta.data.length !== 33 ||
+    delegateAta.data[0] !== 4 ||
+    getInstructionAccount({ instruction: delegateAta, accountKeys, position: 0 }) !== params.walletAddress ||
+    getInstructionAccount({ instruction: delegateAta, accountKeys, position: 2 }) !== MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID ||
+    getInstructionAccount({ instruction: delegateAta, accountKeys, position: 6 }) !== MAGICBLOCK_DELEGATION_PROGRAM_ID ||
+    getInstructionAccount({ instruction: delegateAta, accountKeys, position: 7 }) !== SYSTEM_PROGRAM_ID
+  ) {
+    throw new Error('MagicBlock private token-account delegation is not canonical.');
+  }
 }
 
 function resolveInitTransactionBase64(response: PrivateInitMintResponse): string | null {
@@ -273,6 +733,8 @@ function resolveInitTransactionBase64(response: PrivateInitMintResponse): string
 }
 
 function resolvePrivateSendTransaction(response: PrivateSendResponse): {
+  intentId: string;
+  expiresAt: number;
   unsignedTransaction: string;
   transaction: PreparedTransaction | null;
 } {
@@ -282,8 +744,18 @@ function resolvePrivateSendTransaction(response: PrivateSendResponse): {
   if (unsignedTransaction == null || unsignedTransaction.trim().length === 0) {
     throw new Error('Private payment response did not include an unsigned transaction.');
   }
+  if (
+    typeof response.intentId !== 'string' ||
+    response.intentId.trim().length === 0 ||
+    !Number.isSafeInteger(response.expiresAt) ||
+    response.expiresAt <= Date.now()
+  ) {
+    throw new Error('Private payment response did not include a valid execution intent.');
+  }
 
   return {
+    intentId: response.intentId,
+    expiresAt: response.expiresAt,
     unsignedTransaction,
     transaction: response.transaction ?? null,
   };
@@ -300,14 +772,58 @@ function extractMessageBase64FromSerializedTransaction(transactionBase64: string
   return Buffer.from(transaction.subarray(messageOffset)).toString('base64');
 }
 
+function assertUnsignedSignatureSlotsAreEmpty(transactionBase64: string): void {
+  const transaction = decodeBase64Transaction(transactionBase64);
+  const signatureCount = readShortVec(transaction, 0);
+  const signatureLength = signatureCount.value * 64;
+  assertRange(transaction, signatureCount.offset, signatureLength, 'signatures');
+  if (
+    transaction
+      .subarray(signatureCount.offset, signatureCount.offset + signatureLength)
+      .some((byte) => byte !== 0)
+  ) {
+    throw new Error('MagicBlock returned an unexpectedly pre-signed wallet transaction.');
+  }
+}
+
+export function verifyPrivatePaymentSignedTransaction(params: {
+  unsignedTransaction: string;
+  signedTransaction: string;
+  walletAddress: string;
+}): void {
+  const unsignedMessage = extractMessageBase64FromSerializedTransaction(params.unsignedTransaction);
+  const signedMessage = extractMessageBase64FromSerializedTransaction(params.signedTransaction);
+  if (signedMessage !== unsignedMessage) {
+    throw new Error('Wallet signer changed the confirmed private payment transaction.');
+  }
+
+  const transaction = decodeBase64Transaction(params.signedTransaction);
+  const signatureCount = readShortVec(transaction, 0);
+  if (signatureCount.value !== 1) {
+    throw new Error('Signed private payment must contain exactly one wallet signature.');
+  }
+  assertRange(transaction, signatureCount.offset, 64, 'wallet signature');
+  const signature = transaction.subarray(signatureCount.offset, signatureCount.offset + 64);
+  const messageOffset = signatureCount.offset + 64;
+  const message = transaction.subarray(messageOffset);
+  const publicKey = bs58.decode(params.walletAddress);
+  if (
+    signature.every((byte) => byte === 0) ||
+    publicKey.length !== 32 ||
+    !ed25519.verify(signature, message, publicKey)
+  ) {
+    throw new Error('Signed private payment does not contain a valid active-wallet signature.');
+  }
+}
+
 function u32FromLittleEndian(data: Uint8Array, offset: number): number | null {
   if (offset < 0 || offset + 4 > data.length) return null;
 
   return (
-    (data[offset] ?? 0) |
-    ((data[offset + 1] ?? 0) << 8) |
-    ((data[offset + 2] ?? 0) << 16) |
-    ((data[offset + 3] ?? 0) << 24)
+    (data[offset] ?? 0) +
+    (data[offset + 1] ?? 0) * 0x100 +
+    (data[offset + 2] ?? 0) * 0x1_0000 +
+    (data[offset + 3] ?? 0) * 0x1_000000
   );
 }
 
@@ -490,11 +1006,13 @@ function preparedPlanMatchesParams(
     plan.mint === params.mint &&
     plan.amount === params.amount &&
     plan.network === params.network &&
-    Date.now() - plan.preparedAt < 30_000
+    Date.now() - plan.preparedAt < 30_000 &&
+    plan.expiresAt > Date.now() + 5_000
   );
 }
 
 function isBlockhashExpiredError(error: unknown): boolean {
+  if (error instanceof OffpayApiError && error.code === 'QUOTE_EXPIRED') return true;
   const message = error instanceof Error ? error.message : '';
   return /blockhash not found|blockhash expired|expired blockhash/i.test(message);
 }
@@ -517,7 +1035,12 @@ function buildPrivatePaymentTxId(signedTransaction: string): string {
 async function prepareVerifySignPrivateSend(
   params: SubmitPrivatePaymentParams,
   options?: { ignorePreparedPlan?: boolean },
-): Promise<{ signedTransaction: string; verification: PrivatePaymentVerification }> {
+): Promise<{
+  signedTransaction: string;
+  verification: PrivatePaymentVerification;
+  intentId: string;
+  expiresAt: number;
+}> {
   const startedAt = mark();
   let stage: 'prepare' | 'verify' | 'sign' = 'prepare';
   try {
@@ -536,9 +1059,19 @@ async function prepareVerifySignPrivateSend(
       walletAddress: params.walletAddress,
       walletId: params.walletId,
     });
+    verifyPrivatePaymentSignedTransaction({
+      unsignedTransaction: plan.unsignedTransaction,
+      signedTransaction,
+      walletAddress: params.walletAddress,
+    });
     measure('magicblock.private.sign', signStartedAt, { network: params.network });
 
-    return { signedTransaction, verification: plan.verification };
+    return {
+      signedTransaction,
+      verification: plan.verification,
+      intentId: plan.intentId,
+      expiresAt: plan.expiresAt,
+    };
   } finally {
     measure('magicblock.private.prepareVerifySign', startedAt, {
       network: params.network,
@@ -630,10 +1163,13 @@ async function preparePrivatePaymentPlanInternal(
       mint: params.mint,
       amount: params.amount,
       network: params.network,
+      intentId: preparedTransaction.intentId,
+      expiresAt: preparedTransaction.expiresAt,
       unsignedTransaction: preparedTransaction.unsignedTransaction,
       transaction: preparedTransaction.transaction,
       verification,
       feeLamports,
+      tokenFeeRaw: preparedTransaction.transaction?.fees?.tokens ?? '0',
       solFeePayer,
       includesMintInitialization,
       preparedAt: Date.now(),
@@ -651,6 +1187,8 @@ async function queueSignedPrivatePayment(params: {
   signedTransaction: string;
   verification: PrivatePaymentVerification;
   initSignature: string | null;
+  intentId: string;
+  expiresAt: number;
   error: unknown;
 }): Promise<PrivatePaymentSubmitResult> {
   const txId = buildPrivatePaymentTxId(params.signedTransaction);
@@ -665,6 +1203,8 @@ async function queueSignedPrivatePayment(params: {
       recipient: params.request.recipient,
       mint: params.request.mint,
       amount: params.request.amount,
+      intentId: params.intentId,
+      intentExpiresAt: params.expiresAt,
     },
     uploadImmediately: true,
   });
@@ -709,10 +1249,12 @@ async function initializeMintIfNeeded(params: SubmitPrivatePaymentParams): Promi
       );
     }
 
-    verifyMintInitTransaction({
+    await verifyMintInitTransaction({
       unsignedTransaction: initTransaction,
       walletAddress: params.walletAddress,
       mint: params.mint,
+      network: params.network,
+      transaction: init.transaction ?? null,
     });
 
     const signStartedAt = mark();
@@ -720,6 +1262,11 @@ async function initializeMintIfNeeded(params: SubmitPrivatePaymentParams): Promi
       unsignedTransaction: initTransaction,
       walletAddress: params.walletAddress,
       walletId: params.walletId,
+    });
+    verifyPrivatePaymentSignedTransaction({
+      unsignedTransaction: initTransaction,
+      signedTransaction: signedInitTransaction,
+      walletAddress: params.walletAddress,
     });
     measure('magicblock.private.initMint.sign', signStartedAt, { network: params.network });
 
@@ -760,9 +1307,11 @@ export async function submitPrivatePayment(
 
     try {
       const broadcastStartedAt = mark();
-      const submitted = await broadcastRawTransaction({
-        rawTransaction: signed.signedTransaction,
+      const submitted = await executePrivateSend({
+        intentId: signed.intentId,
+        walletAddress: params.walletAddress,
         network: params.network,
+        signedTransaction: signed.signedTransaction,
       });
       measure('magicblock.private.broadcast', broadcastStartedAt, { network: params.network });
 
@@ -778,9 +1327,11 @@ export async function submitPrivatePayment(
         signed = await prepareVerifySignPrivateSend(params, { ignorePreparedPlan: true });
         try {
           const retryBroadcastStartedAt = mark();
-          const submitted = await broadcastRawTransaction({
-            rawTransaction: signed.signedTransaction,
+          const submitted = await executePrivateSend({
+            intentId: signed.intentId,
+            walletAddress: params.walletAddress,
             network: params.network,
+            signedTransaction: signed.signedTransaction,
           });
           measure('magicblock.private.broadcast.retry', retryBroadcastStartedAt, {
             network: params.network,
@@ -804,6 +1355,8 @@ export async function submitPrivatePayment(
             signedTransaction: signed.signedTransaction,
             verification: signed.verification,
             initSignature,
+            intentId: signed.intentId,
+            expiresAt: signed.expiresAt,
             error: retryError,
           });
         }
@@ -819,6 +1372,8 @@ export async function submitPrivatePayment(
         signedTransaction: signed.signedTransaction,
         verification: signed.verification,
         initSignature,
+        intentId: signed.intentId,
+        expiresAt: signed.expiresAt,
         error,
       });
     }

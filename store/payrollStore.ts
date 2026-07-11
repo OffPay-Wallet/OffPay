@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { mmkvStorage } from '@/lib/cache/mmkv-storage';
-import { isPayrollRowSendable } from '@/lib/payroll/payroll-types';
+import { getPayrollSubmissionAttemptId, isPayrollRowSendable } from '@/lib/payroll/payroll-types';
 
 import type {
   PayrollRoutePolicy,
@@ -35,20 +35,25 @@ interface PayrollState {
   setRunRoutesDirty: (runId: string, dirty: boolean) => void;
   setRunCursor: (runId: string, cursor: number) => void;
   updateRow: (runId: string, rowId: string, patch: Partial<Omit<PayrollRow, 'id'>>) => void;
+  /** Atomically claims a ready row before any external submission begins. */
+  claimRowSubmission: (
+    runId: string,
+    rowId: string,
+    claim: { attemptId: string; startedAt: number },
+  ) => boolean;
   /**
    * Toggles a row between `skipped` and `ready`. Only ready/skipped rows are
    * eligible — settled or invalid rows are not affected, preserving the
    * double-pay and validation guarantees. Returns true when a change applied.
    */
   setRowSkipped: (runId: string, rowId: string, skipped: boolean) => boolean;
-  /** Resets failed-without-artifact rows back to `ready` for a retry pass. */
+  /** Resets only failures that occurred before any submission attempt. */
   prepareRetryFailedRows: (runId: string) => number;
   /**
    * Recovers rows orphaned in `sending` by a crash/kill. They carry no
-   * on-chain artifact (the artifact is only written on a completed outcome),
-   * so their fate is unknown. We mark them `failed` with an
-   * interrupted-verify message rather than silently skipping (underpay) or
-   * blindly re-sending (double-pay). Returns the count reconciled.
+   * on-chain artifact, so their fate is unknown. We persist/recover a durable
+   * attempt tombstone and mark them reconciliation-only rather than blindly
+   * re-sending. Returns the count reconciled.
    */
   reconcileInterruptedRows: (runId: string) => number;
   /**
@@ -78,6 +83,41 @@ function pruneRuns(runs: Record<string, PayrollRun>): Record<string, PayrollRun>
   return next;
 }
 
+function hasDurablePaymentEvidence(row: PayrollRow): boolean {
+  return (
+    row.signature != null ||
+    row.txId != null ||
+    row.initSignature != null ||
+    (row.submissionAttemptId != null && row.submissionAttemptId.trim().length > 0) ||
+    row.reconciliationRequired === true
+  );
+}
+
+/** Never let a row replacement erase evidence that makes re-submission unsafe. */
+function preserveDurablePaymentEvidence(
+  existing: PayrollRow | undefined,
+  replacement: PayrollRow,
+): PayrollRow {
+  if (existing == null || !hasDurablePaymentEvidence(existing)) return replacement;
+
+  return {
+    ...replacement,
+    status: existing.status,
+    requiresRecipientClaim: existing.requiresRecipientClaim,
+    validationError: existing.validationError,
+    signature: existing.signature ?? replacement.signature,
+    txId: existing.txId ?? replacement.txId,
+    initSignature: existing.initSignature ?? replacement.initSignature,
+    idempotencyKey: existing.idempotencyKey,
+    submissionAttemptId: existing.submissionAttemptId ?? replacement.submissionAttemptId,
+    submissionStartedAt: existing.submissionStartedAt ?? replacement.submissionStartedAt,
+    reconciliationRequired:
+      existing.reconciliationRequired === true ? true : replacement.reconciliationRequired,
+    retryCount: Math.max(existing.retryCount, replacement.retryCount),
+    updatedAt: Math.max(existing.updatedAt, replacement.updatedAt),
+  };
+}
+
 /** A `sending` row with no on-chain artifact was interrupted mid-submit. */
 function isOrphanedSendingRow(row: PayrollRow): boolean {
   return (
@@ -94,9 +134,13 @@ function isOrphanedSendingRow(row: PayrollRow): boolean {
  */
 function reconcileSendingRow(row: PayrollRow): PayrollRow {
   if (!isOrphanedSendingRow(row)) return row;
+  const fallbackAttemptId = `payroll:${row.idempotencyKey.trim() || row.id}`;
   return {
     ...row,
     status: 'failed',
+    submissionAttemptId: row.submissionAttemptId?.trim() || fallbackAttemptId,
+    submissionStartedAt: row.submissionStartedAt ?? row.updatedAt,
+    reconciliationRequired: true,
     validationError:
       'Interrupted before confirmation. Verify on-chain before retrying to avoid double payment.',
     updatedAt: Date.now(),
@@ -111,8 +155,12 @@ export const usePayrollStore = create<PayrollState>()(
 
       createRun: (run, rows) =>
         set((state) => {
+          const existingRows = new Map((state.rowsByRun[run.id] ?? []).map((row) => [row.id, row]));
+          const protectedRows = rows.map((row) =>
+            preserveDurablePaymentEvidence(existingRows.get(row.id), row),
+          );
           const runs = pruneRuns({ ...state.runs, [run.id]: run });
-          const rowsByRun = { ...state.rowsByRun, [run.id]: rows };
+          const rowsByRun = { ...state.rowsByRun, [run.id]: protectedRows };
           // Drop row arrays for runs that were pruned.
           for (const key of Object.keys(rowsByRun)) {
             if (runs[key] == null) delete rowsByRun[key];
@@ -124,11 +172,19 @@ export const usePayrollStore = create<PayrollState>()(
         set((state) => {
           const run = state.runs[runId];
           if (run == null) return state;
+          const existingRows = new Map((state.rowsByRun[runId] ?? []).map((row) => [row.id, row]));
+          const protectedRows = rows.map((row) =>
+            preserveDurablePaymentEvidence(existingRows.get(row.id), row),
+          );
           return {
-            rowsByRun: { ...state.rowsByRun, [runId]: rows },
+            rowsByRun: { ...state.rowsByRun, [runId]: protectedRows },
             runs: {
               ...state.runs,
-              [runId]: touchRun({ ...run, rowIds: rows.map((row) => row.id), routesDirty: true }),
+              [runId]: touchRun({
+                ...run,
+                rowIds: protectedRows.map((row) => row.id),
+                routesDirty: true,
+              }),
             },
           };
         }),
@@ -183,11 +239,58 @@ export const usePayrollStore = create<PayrollState>()(
         set((state) => {
           const rows = state.rowsByRun[runId];
           if (rows == null) return state;
-          const nextRows = rows.map((row) =>
-            row.id === rowId ? { ...row, ...patch, updatedAt: Date.now() } : row,
-          );
+          const nextRows = rows.map((row) => {
+            if (row.id !== rowId) return row;
+            const next = { ...row, ...patch, updatedAt: Date.now() };
+            // Generic UI/store updates may add evidence, but may never erase
+            // an existing tombstone or on-chain artifact.
+            if (row.submissionAttemptId != null && row.submissionAttemptId.trim().length > 0) {
+              next.submissionAttemptId = row.submissionAttemptId;
+              next.submissionStartedAt = row.submissionStartedAt;
+            }
+            if (row.reconciliationRequired === true) next.reconciliationRequired = true;
+            if (row.signature != null) next.signature = row.signature;
+            if (row.txId != null) next.txId = row.txId;
+            if (row.initSignature != null) next.initSignature = row.initSignature;
+            return next;
+          });
           return { rowsByRun: { ...state.rowsByRun, [runId]: nextRows } };
         }),
+
+      claimRowSubmission: (runId, rowId, claim) => {
+        let claimed = false;
+        set((state) => {
+          const rows = state.rowsByRun[runId];
+          if (rows == null || !Number.isSafeInteger(claim.startedAt) || claim.startedAt <= 0) {
+            return state;
+          }
+
+          const nextRows = rows.map((row) => {
+            if (row.id !== rowId) return row;
+            if (
+              row.route == null ||
+              row.status !== 'ready' ||
+              !isPayrollRowSendable(row) ||
+              claim.attemptId !== getPayrollSubmissionAttemptId(row.idempotencyKey)
+            ) {
+              return row;
+            }
+
+            claimed = true;
+            return {
+              ...row,
+              status: 'sending' as PayrollRowStatus,
+              submissionAttemptId: claim.attemptId,
+              submissionStartedAt: claim.startedAt,
+              reconciliationRequired: false,
+              validationError: null,
+              updatedAt: Date.now(),
+            };
+          });
+          return claimed ? { rowsByRun: { ...state.rowsByRun, [runId]: nextRows } } : state;
+        });
+        return claimed;
+      },
 
       setRowSkipped: (runId, rowId, skipped) => {
         let changed = false;
@@ -227,9 +330,8 @@ export const usePayrollStore = create<PayrollState>()(
           const rows = state.rowsByRun[runId];
           if (rows == null) return state;
           const nextRows = rows.map((row) => {
-            // Only rows that failed AND carry no on-chain artifact are
-            // eligible. Settled rows (submitted/queued/deposited) are never
-            // touched — this is the double-pay guard.
+            // Only pre-submission failures are eligible. Any durable attempt
+            // tombstone or on-chain artifact makes the row reconciliation-only.
             if (row.status === 'failed' && isPayrollRowSendable(row)) {
               reset += 1;
               return {

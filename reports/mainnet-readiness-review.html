@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OffPay Mainnet Readiness Review — 2026-07-11</title>
+    <style>
+      :root { color-scheme: dark; --bg:#090b10; --panel:#11151d; --line:#28303d; --text:#eef2f7; --muted:#9ba7b7; --red:#ff6b74; --amber:#ffc35c; --green:#59d99a; --blue:#72a7ff; }
+      * { box-sizing: border-box; }
+      body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      main { width:min(1120px,calc(100% - 32px)); margin:40px auto 72px; }
+      h1 { font-size:clamp(30px,5vw,54px); line-height:1.02; letter-spacing:-.04em; margin:12px 0 14px; }
+      h2 { margin:40px 0 14px; font-size:24px; letter-spacing:-.02em; }
+      h3 { margin:0 0 8px; font-size:17px; }
+      p { margin:8px 0; } a { color:#a9c7ff; } code { color:#d9e4f8; }
+      .eyebrow { color:var(--muted); text-transform:uppercase; letter-spacing:.12em; font-size:12px; }
+      .hero,.card { background:linear-gradient(145deg,#141923,#0f131a); border:1px solid var(--line); border-radius:18px; }
+      .hero { padding:28px; box-shadow:0 24px 80px rgba(0,0,0,.35); }
+      .verdict { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:20px; }
+      .pill { border:1px solid; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:750; letter-spacing:.04em; text-transform:uppercase; }
+      .hold { color:var(--red); background:rgba(255,107,116,.09); border-color:rgba(255,107,116,.45); }
+      .ok { color:var(--green); background:rgba(89,217,154,.09); border-color:rgba(89,217,154,.45); }
+      .warn { color:var(--amber); background:rgba(255,195,92,.09); border-color:rgba(255,195,92,.45); }
+      .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+      .card { padding:18px; }
+      .metric { font-size:29px; font-weight:800; letter-spacing:-.03em; }
+      .muted { color:var(--muted); }
+      table { width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+      th,td { text-align:left; vertical-align:top; padding:13px 14px; border-bottom:1px solid var(--line); }
+      th { color:#bdc7d5; background:#151a23; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+      tr:last-child td { border-bottom:0; }
+      .sev { font-weight:800; white-space:nowrap; }.critical{color:var(--red)}.high{color:var(--amber)}.medium{color:var(--blue)}.low{color:var(--muted)}
+      ul,ol { margin:9px 0 0; padding-left:21px; } li+li { margin-top:6px; }
+      .callout { border-left:3px solid var(--red); padding:10px 14px; background:rgba(255,107,116,.07); border-radius:0 10px 10px 0; }
+      footer { margin-top:46px; color:var(--muted); font-size:13px; }
+      @media(max-width:760px){.grid{grid-template-columns:1fr}table{display:block;overflow-x:auto}th,td{min-width:150px}.hero{padding:20px}}
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="eyebrow">OffPay · evidence-based production gate · 11 July 2026</div>
+        <h1>Mainnet readiness: HOLD</h1>
+        <p class="muted">The source is materially hardened and unsafe paths now fail closed. It is not deployed, not fully configured, and not proven safe for unrestricted real-money use.</p>
+        <div class="verdict">
+          <span class="pill hold">Not production ready</span>
+          <span class="pill hold">Not deployed</span>
+          <span class="pill ok">Source checks green</span>
+          <span class="pill warn">External approvals required</span>
+        </div>
+      </section>
+
+      <h2>Verification snapshot</h2>
+      <div class="grid">
+        <article class="card"><div class="metric">1,050</div><div class="muted">tests passed; zero failed</div></article>
+        <article class="card"><div class="metric">152</div><div class="muted">suites passed; one live suite skipped</div></article>
+        <article class="card"><div class="metric">503</div><div class="muted">live API health status at 15:38 UTC</div></article>
+      </div>
+      <p class="muted">TypeScript, Expo lint, client hardening, and the full Jest gate passed. Live contract and signed-mainnet execution were intentionally not run because this review had no authority to sign, broadcast, deploy, or move funds.</p>
+
+      <h2>Open findings — complete high-to-low launch list</h2>
+      <table>
+        <thead><tr><th>Severity</th><th>Finding</th><th>Evidence</th><th>Required closure</th></tr></thead>
+        <tbody>
+          <tr><td class="sev critical">Critical</td><td>Production bootstrap is unavailable.</td><td>Live <code>/api/health</code> returns HTTP 503; Android and iOS attestation are both false. API Worker secret names do not include Google Play service-account credentials or <code>AI_PROXY_SESSION_SECRET</code>.</td><td>Provision the missing API secrets, set the same 32+ byte AI session secret in both Workers, deploy, and verify real-device attestation.</td></tr>
+          <tr><td class="sev critical">Critical</td><td>Hardened source is not the deployed runtime.</td><td>Latest API Worker deployment is 2026-07-06 17:31 UTC; latest AI Worker deployment is 2026-07-06 16:13 UTC. Both predate this review.</td><td>Deploy in dependency order only after configuration gates are satisfied, then re-run health/capability and signed canary checks.</td></tr>
+          <tr><td class="sev critical">Critical</td><td>The custom RWA delegate program is unsafe for mainnet funding.</td><td>The devnet sandbox stores owner-supplied quote amounts/hash and lets that owner execute vault transfers; it is classic SPL while real xStocks use Token-2022.</td><td>Never deploy or fund it on mainnet. Keep the permanent backend disconnect; use verified Jupiter base-chain settlement for real xStocks.</td></tr>
+          <tr><td class="sev high">High</td><td>RWA execution is intentionally disabled.</td><td><code>OFFPAY_RWA_MAINNET_ENABLED=0</code>; eligible wallets and policy version are empty; source also requires an issuer-intersected mint allowlist.</td><td>Obtain legal/compliance approval, supply policy version and approved wallets, configure issuer mint intersection, then test quote expiry, halts, multipliers, Token-2022 balances, and settlement.</td></tr>
+          <tr><td class="sev high">High</td><td>Flash perps lacks a safe full deposit-to-withdraw lifecycle.</td><td>The live withdrawal request requires a distinct co-signer and OffPay has no authorized service for it. Deposits are disabled to avoid trapping funds.</td><td>Obtain an authorized provider co-signer integration and verify request, settle, retries, expiry, and partial failures before enabling deposits or withdrawals.</td></tr>
+          <tr><td class="sev high">High</td><td>Production mobile attestation inputs are incomplete.</td><td>EAS production still sets <code>EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE=prototype</code> and lacks the Google Cloud project number and Apple Team ID.</td><td>Configure production values, build signed store artifacts, and validate Play Integrity/App Attest on physical devices.</td></tr>
+          <tr><td class="sev high">High</td><td>No independent assurance or signed mainnet E2E evidence.</td><td>No external audit, fuzz campaign, Surfpool scenario run, physical-device attestation run, or signed mainnet canary was performed.</td><td>Complete independent security review and controlled low-value canaries with rollback/runbooks.</td></tr>
+          <tr><td class="sev medium">Medium</td><td>Privacy swaps remain paused.</td><td>The randomized executor is memory-only; process death between funding and settlement can strand assets.</td><td>Add encrypted crash-safe executor recovery and resumable settlement reconciliation before re-enabling.</td></tr>
+          <tr><td class="sev medium">Medium</td><td>Trigger V2 writes remain paused.</td><td>Every cancel-and-withdraw refund leg has not been semantically verified before signing.</td><td>Implement exact refund/cancel transaction binding and recovery tests before enabling create/cancel writes.</td></tr>
+          <tr><td class="sev medium">Medium</td><td>MagicBlock private recipient intent is provider-request-bound, not independently recipient-verifiable.</td><td>OffPay verifies transaction structure and active signer, but the hidden recipient semantics depend on the provider response.</td><td>Obtain a provider-supported cryptographic recipient commitment or keep the trust boundary explicit.</td></tr>
+          <tr><td class="sev medium">Medium</td><td>Remote AI cannot originate genuinely offline BLE/QR actions.</td><td>The model requires a reachable API session; offline transport and final user signing remain device-local.</td><td>Keep offline preparation local and represent it honestly in AI capability responses.</td></tr>
+          <tr><td class="sev low">Low</td><td>Native iOS dependency validation is incomplete on this machine.</td><td>Expo Doctor passes 20/21 checks; CocoaPods is unavailable.</td><td>Run pod installation and signed iOS build validation in the release environment.</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Resolved in source</h2>
+      <div class="grid">
+        <article class="card"><h3>Transaction binding</h3><p class="muted">Exact wallet, fee payer, signer set, mint, token account, amount, slippage, program, message, and provider-signature checks were added across RPC, payments, Jupiter, RWA, Flash, payroll, offline, and MagicBlock paths.</p></article>
+        <article class="card"><h3>AI authorization</h3><p class="muted">The public client secret was removed. The API now issues five-minute wallet/device/network-bound sessions; the AI Worker verifies them before credits or provider calls.</p></article>
+        <article class="card"><h3>Idempotency and recovery</h3><p class="muted">Wallet/network-scoped state, execution locks, persisted recurring-operation identities, verified reconciliation, and retry-safe receipts reduce duplicate submissions and crash races.</p></article>
+        <article class="card"><h3>Real provider paths</h3><p class="muted">Normal and recurring swaps use Jupiter; RWA catalog/price/trade uses official xStocks intersected with Jupiter; perps use Flash V2; Umbra uses configured mainnet indexer/relayer. Mock analytics and fabricated Flash tools were removed.</p></article>
+        <article class="card"><h3>AI feature coverage</h3><p class="muted">The agent can prepare confirmed actions for normal/recurring swaps, RWA, funded-ledger Flash trading, Umbra vault operations, and freshly revalidated Umbra claims. Device signing remains mandatory.</p></article>
+        <article class="card"><h3>Fail-closed capabilities</h3><p class="muted">Unsafe custom RWA mainnet routing, Flash funding/withdrawal, privacy swaps, and Trigger writes are unavailable instead of silently falling back to mocks or unverified transactions.</p></article>
+      </div>
+
+      <h2>Important deployed/source mismatch</h2>
+      <div class="callout"><strong>Do not treat the current deployed capability response as launch truth.</strong> The old deployment still reports privacy swaps and Trigger orders as available and contains obsolete custom-RWA mainnet capability text. The reviewed source disables those paths and labels <code>/health</code> as core bootstrap only, with <code>/api/capabilities</code> as the feature gate.</div>
+
+      <h2>Go criteria</h2>
+      <ol>
+        <li>All production attestation and shared AI-session credentials exist, with production EAS mode enabled.</li>
+        <li>The hardened API and AI Workers are deployed and return healthy, source-matching capabilities.</li>
+        <li>Signed store builds pass physical-device Android/iOS bootstrap and transaction flows.</li>
+        <li>RWA legal policy and issuer mint allowlist are approved; controlled real xStocks canaries pass.</li>
+        <li>Flash has an authorized withdrawal co-signer and the full lifecycle is proven, or funding remains unavailable.</li>
+        <li>Independent review, incident response, monitoring, rate limits, and rollback exercises are complete.</li>
+      </ol>
+
+      <h2>Primary provider references</h2>
+      <ul>
+        <li><a href="https://docs.expo.dev/versions/latest/sdk/app-integrity/">Expo AppIntegrity</a> — Play Integrity and App Attest setup/verification.</li>
+        <li><a href="https://docs.flash.trade/flash-trade/flash-trade-protocol/build-on-flash">Flash Trade build API</a> and <a href="https://docs.flash.trade/flash-trade/resources/security">Flash audits</a>.</li>
+        <li><a href="https://developers.jup.ag/docs/get-started">Jupiter developer documentation</a>.</li>
+        <li><a href="https://docs.xstocks.fi/developers/quickstart">xStocks API quickstart</a> and <a href="https://docs.xstocks.fi/developers/multipliers">corporate-action multipliers</a>.</li>
+      </ul>
+
+      <footer>Scope: source review, test execution, read-only production configuration/deployment inspection, and live health/capability reads. No server was started locally. No production configuration was changed. No deployment, signing, transaction broadcast, contract deployment, or funds movement occurred.</footer>
+    </main>
+  </body>
+</html>

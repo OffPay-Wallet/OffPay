@@ -55,12 +55,9 @@ AI_PROXY_TTS_ENABLED=true
 AI_PROXY_RATE_LIMIT_WINDOW_MS=60000
 AI_PROXY_RATE_LIMIT_MAX=40
 
-# Session token gate. When `AI_PROXY_REQUIRE_SESSION_TOKEN=true` the
-# Worker rejects requests without a valid `x-offpay-ai-session` header
-# signed with `AI_PROXY_SESSION_SECRET`. Defaults to `false` for staged
-# rollouts so older app builds keep working until the secret is
-# distributed to every client.
-AI_PROXY_REQUIRE_SESSION_TOKEN=false
+# Session tokens are issued by the authenticated OffPay API. Configure the
+# same random 32+ character secret in both Workers; never ship it to clients.
+AI_PROXY_REQUIRE_SESSION_TOKEN=true
 AI_PROXY_SESSION_SECRET=REPLACE_WITH_HIGH_ENTROPY_SECRET
 
 # Set this to a comma-separated allowlist only for browser/web clients.

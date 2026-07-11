@@ -11,16 +11,20 @@ import {
   executeSwapQuote,
   getSwapPrice,
   getSwapTokens,
+  listRecurringOrders,
+  prepareRecurringOrderCancellation,
 } from '../lib/jupiter.js';
 import {
+  confirmTriggerOrderCancellation,
   createTriggerOrder,
+  listTriggerOrders,
   prepareTriggerOrderDeposit,
+  prepareTriggerOrderCancellation,
   requestTriggerChallenge,
   verifyTriggerChallenge,
 } from '../lib/jupiter-trigger.js';
 import {
   finalizeSwapPrivacyEnvelope,
-  prepareSwapPrivacyEnvelope,
   refreshSwapPrivacyEnvelopeQuote,
 } from '../lib/swap-privacy.js';
 import type { AppEnv, Network } from '../lib/types.js';
@@ -70,6 +74,7 @@ const swapQuoteBodySchema = z.object({
   outputMint: mintStringSchema,
   amount: positiveIntegerStringSchema,
   slippageBps: z.coerce.number().int().min(0).max(10_000).optional(),
+  useManualSlippage: z.boolean().optional(),
   receiverAddress: mintStringSchema.optional(),
   network: networkSchema,
 });
@@ -85,12 +90,34 @@ const swapRecurringCreateBodySchema = z.object({
   outputMint: mintStringSchema,
   amount: positiveIntegerStringSchema,
   frequency: z.string().trim().min(1).max(MAX_FREQUENCY_LENGTH),
+  idempotencyKey: idStringSchema.regex(
+    /^[A-Za-z0-9_-]{8,128}$/,
+    'Recurring idempotency key is invalid.',
+  ),
   network: networkSchema,
 });
 
 const swapRecurringExecuteBodySchema = z.object({
   recurringId: idStringSchema,
   signedTransaction: base64StringSchema,
+  network: networkSchema,
+});
+
+const swapRecurringListQuerySchema = z.object({
+  status: z.enum(['active', 'history']).default('active'),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  mint: mintStringSchema.optional(),
+  includeFailedTransactions: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .default('false'),
+  network: networkSchema,
+});
+
+const swapRecurringCancelPrepareBodySchema = z.object({
+  orderId: mintStringSchema,
+  inputMint: mintStringSchema,
+  outputMint: mintStringSchema,
   network: networkSchema,
 });
 
@@ -119,6 +146,29 @@ const triggerPrepareBodySchema = z.object({
   inputMint: mintStringSchema,
   outputMint: mintStringSchema,
   amount: positiveIntegerStringSchema,
+  orderSubType: z.enum(['single', 'oco', 'otoco']),
+  network: networkSchema,
+});
+
+const triggerListBodySchema = z.object({
+  action: z.literal('list'),
+  state: z.enum(['active', 'past']).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+  network: networkSchema,
+});
+
+const triggerCancelPrepareBodySchema = z.object({
+  action: z.literal('cancel_prepare'),
+  orderId: idStringSchema,
+  network: networkSchema,
+});
+
+const triggerCancelConfirmBodySchema = z.object({
+  action: z.literal('cancel_confirm'),
+  orderId: idStringSchema,
+  cancelRequestId: idStringSchema,
+  signedTransaction: base64StringSchema,
   network: networkSchema,
 });
 
@@ -245,16 +295,6 @@ const triggerCreateBodySchema = z
         break;
     }
   });
-
-const privacyPrepareBodySchema = z.object({
-  executorWallet: mintStringSchema,
-  inputMint: mintStringSchema,
-  outputMint: mintStringSchema,
-  amount: positiveIntegerStringSchema,
-  slippageBps: z.coerce.number().int().min(0).max(10_000),
-  fundingMemo: z.string().trim().min(1).max(120).optional(),
-  network: networkSchema,
-});
 
 const privacyFinalizeBodySchema = z.object({
   sessionId: idStringSchema,
@@ -395,6 +435,9 @@ swapRoutes.post('/quote', async (context) => {
       outputMint: body.outputMint,
       amount: body.amount,
       ...(body.slippageBps === undefined ? {} : { slippageBps: body.slippageBps }),
+      ...(body.useManualSlippage === undefined
+        ? {}
+        : { useManualSlippage: body.useManualSlippage }),
       ...(body.receiverAddress ? { receiverAddress: body.receiverAddress } : {}),
       network: body.network,
     }),
@@ -481,6 +524,52 @@ swapRoutes.post('/trigger', async (context) => {
     return response;
   }
 
+  const listBody = triggerListBodySchema.safeParse(rawBody);
+  if (listBody.success) {
+    assertRequestedNetwork(listBody.data.network, authenticatedContext.network);
+    const response = context.json(
+      await listTriggerOrders(context.env, {
+        walletAddress: authenticatedContext.wallet,
+        network: listBody.data.network,
+        ...(listBody.data.state ? { state: listBody.data.state } : {}),
+        limit: listBody.data.limit,
+        offset: listBody.data.offset,
+      }),
+    );
+    response.headers.set('Cache-Control', 'no-store');
+    return response;
+  }
+
+  const cancelPrepareBody = triggerCancelPrepareBodySchema.safeParse(rawBody);
+  if (cancelPrepareBody.success) {
+    assertRequestedNetwork(cancelPrepareBody.data.network, authenticatedContext.network);
+    const response = context.json(
+      await prepareTriggerOrderCancellation(context.env, {
+        walletAddress: authenticatedContext.wallet,
+        network: cancelPrepareBody.data.network,
+        orderId: cancelPrepareBody.data.orderId,
+      }),
+    );
+    response.headers.set('Cache-Control', 'no-store');
+    return response;
+  }
+
+  const cancelConfirmBody = triggerCancelConfirmBodySchema.safeParse(rawBody);
+  if (cancelConfirmBody.success) {
+    assertRequestedNetwork(cancelConfirmBody.data.network, authenticatedContext.network);
+    const response = context.json(
+      await confirmTriggerOrderCancellation(context.env, {
+        walletAddress: authenticatedContext.wallet,
+        network: cancelConfirmBody.data.network,
+        orderId: cancelConfirmBody.data.orderId,
+        cancelRequestId: cancelConfirmBody.data.cancelRequestId,
+        signedTransaction: cancelConfirmBody.data.signedTransaction,
+      }),
+    );
+    response.headers.set('Cache-Control', 'no-store');
+    return response;
+  }
+
   const prepareBody = triggerPrepareBodySchema.safeParse(rawBody);
   if (prepareBody.success) {
     assertSolanaAddress(prepareBody.data.inputMint, 'Input mint address is invalid.');
@@ -493,6 +582,7 @@ swapRoutes.post('/trigger', async (context) => {
         inputMint: prepareBody.data.inputMint,
         outputMint: prepareBody.data.outputMint,
         amount: prepareBody.data.amount,
+        orderSubType: prepareBody.data.orderSubType,
         network: prepareBody.data.network,
       }),
     );
@@ -543,33 +633,13 @@ swapRoutes.post('/trigger', async (context) => {
 });
 
 swapRoutes.post('/privacy-envelope/prepare', async (context) => {
-  const authenticatedContext = getAuthenticatedContext(context);
-  const body = await readJsonBody(
-    context.req.raw,
-    privacyPrepareBodySchema,
-    'Private swap prepare request body is required.',
-    'Invalid private swap prepare request body.',
-  );
-
-  assertSolanaAddress(body.executorWallet, 'Executor wallet address is invalid.');
-  assertSolanaAddress(body.inputMint, 'Input mint address is invalid.');
-  assertSolanaAddress(body.outputMint, 'Output mint address is invalid.');
-  assertRequestedNetwork(body.network, authenticatedContext.network);
-
-  const response = context.json(
-    await prepareSwapPrivacyEnvelope(context.env, {
-      ownerWallet: authenticatedContext.wallet,
-      executorWallet: body.executorWallet,
-      inputMint: body.inputMint,
-      outputMint: body.outputMint,
-      amount: body.amount,
-      slippageBps: body.slippageBps,
-      network: body.network,
-      ...(body.fundingMemo ? { fundingMemo: body.fundingMemo } : {}),
-    }),
-  );
-  response.headers.set('Cache-Control', 'no-store');
-  return response;
+  getAuthenticatedContext(context);
+  throw new AppError({
+    status: 503,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message: 'Privacy swap preparation is paused until crash-safe executor recovery is available.',
+    retryable: false,
+  });
 });
 
 swapRoutes.post('/privacy-envelope/refresh-quote', async (context) => {
@@ -618,6 +688,50 @@ swapRoutes.post('/privacy-envelope/finalize', async (context) => {
   return response;
 });
 
+swapRoutes.get('/recurring', async (context) => {
+  const authenticatedContext = getAuthenticatedContext(context);
+  const query = readSearchParams(context.req.url, swapRecurringListQuerySchema);
+  assertRequestedNetwork(query.network, authenticatedContext.network);
+  if (query.mint) assertSolanaAddress(query.mint, 'Recurring order mint is invalid.');
+  const response = context.json(
+    await listRecurringOrders(context.env, {
+      walletAddress: authenticatedContext.wallet,
+      network: query.network,
+      status: query.status,
+      page: query.page,
+      ...(query.mint ? { mint: query.mint } : {}),
+      includeFailedTransactions: query.includeFailedTransactions,
+    }),
+  );
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+});
+
+swapRoutes.post('/recurring/cancel', async (context) => {
+  const authenticatedContext = getAuthenticatedContext(context);
+  const body = await readJsonBody(
+    context.req.raw,
+    swapRecurringCancelPrepareBodySchema,
+    'Recurring cancellation request body is required.',
+    'Invalid recurring cancellation request body.',
+  );
+  assertRequestedNetwork(body.network, authenticatedContext.network);
+  assertSolanaAddress(body.orderId, 'Recurring order ID is invalid.');
+  assertSolanaAddress(body.inputMint, 'Input mint address is invalid.');
+  assertSolanaAddress(body.outputMint, 'Output mint address is invalid.');
+  const response = context.json(
+    await prepareRecurringOrderCancellation(context.env, {
+      walletAddress: authenticatedContext.wallet,
+      network: body.network,
+      orderId: body.orderId,
+      inputMint: body.inputMint,
+      outputMint: body.outputMint,
+    }),
+  );
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+});
+
 swapRoutes.post('/recurring', async (context) => {
   const authenticatedContext = getAuthenticatedContext(context);
   const rawBody = await readUnionJsonBody(
@@ -634,6 +748,7 @@ swapRoutes.post('/recurring', async (context) => {
       await executeRecurringOrder(context.env, {
         recurringId: executeAttempt.data.recurringId,
         signedTransaction: executeAttempt.data.signedTransaction,
+        walletAddress: authenticatedContext.wallet,
         network: executeAttempt.data.network,
       }),
     );
@@ -657,6 +772,7 @@ swapRoutes.post('/recurring', async (context) => {
       outputMint: createBody.outputMint,
       amount: createBody.amount,
       frequency: createBody.frequency,
+      idempotencyKey: createBody.idempotencyKey,
       network: createBody.network,
     }),
   );

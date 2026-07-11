@@ -5,6 +5,7 @@ import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import type { AgenticSwapAction } from '@/store/agenticChatStore';
+import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 
 import { ConfirmationRow } from './ConfirmationRow';
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
@@ -47,6 +48,10 @@ export function SwapConfirmationCard({
       <View style={styles.confirmationRows}>
         <ConfirmationRow label="Pay" value={`${action.inputAmount} ${action.inputSymbol}`} />
         <ConfirmationRow label="Receive" value={`~${action.outputAmount} ${action.outputSymbol}`} />
+        <ConfirmationRow
+          label="Minimum receive"
+          value={`${formatAtomicAmount(action.minimumOutputAmount, action.outputDecimals)} ${action.outputSymbol}`}
+        />
         <ConfirmationRow
           label="Network"
           value={action.network === 'mainnet' ? 'Solana Mainnet' : 'Solana Devnet'}

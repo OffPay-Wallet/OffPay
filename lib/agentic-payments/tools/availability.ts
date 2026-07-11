@@ -60,6 +60,13 @@ const SWAP_TOOL_NAMES = new Set<AgenticToolName>([
   'prepare_swap_quote',
 ]);
 
+const TRIGGER_SWAP_TOOL_NAMES = new Set<AgenticToolName>(['prepare_trigger_swap']);
+const RECURRING_SWAP_TOOL_NAMES = new Set<AgenticToolName>(['prepare_recurring_swap']);
+const ADVANCED_ORDER_TOOL_NAMES = new Set<AgenticToolName>([
+  'get_advanced_swap_orders',
+  'prepare_advanced_swap_cancel',
+]);
+
 const RWA_READ_TOOL_NAMES = new Set<AgenticToolName>([
   'get_rwa_assets',
   'get_rwa_holdings',
@@ -125,6 +132,9 @@ function isModelToolAvailable(
   if (UMBRA_CLAIM_TOOL_NAMES.has(name)) return canUseUmbraClaimTools(params);
   if (name === 'stage_payroll') return canUsePayrollTools(params);
   if (SWAP_TOOL_NAMES.has(name)) return canUseSwapTools(params);
+  if (TRIGGER_SWAP_TOOL_NAMES.has(name)) return canUseTriggerSwapTools(params);
+  if (RECURRING_SWAP_TOOL_NAMES.has(name)) return canUseRecurringSwapTools(params);
+  if (ADVANCED_ORDER_TOOL_NAMES.has(name)) return canUseAdvancedOrderTools(params);
   if (RWA_READ_TOOL_NAMES.has(name)) return canUseRwaReadTools(params);
   if (RWA_TRADE_TOOL_NAMES.has(name)) return canUseRwaTradeTools(params);
   if (FLASH_TOOL_NAMES.has(name)) return canUseFlashTools(params);
@@ -160,21 +170,21 @@ function canUseWalletActivityTools(params: AgenticToolAvailabilityParams): boole
 function canUseNormalSendTools(params: AgenticToolAvailabilityParams): boolean {
   if (!hasActiveWallet(params) || !isOnlineNetworkReady(params)) return false;
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return isOffpayFeatureAvailable(capabilities, 'wallet.balance');
 }
 
 function canUsePrivateSendTools(params: AgenticToolAvailabilityParams): boolean {
   if (!hasActiveWallet(params) || !isOnlineNetworkReady(params)) return false;
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return hasPrivateSendCapabilities(capabilities) || canUseUmbraClaimTools(params);
 }
 
 function canUsePayrollTools(params: AgenticToolAvailabilityParams): boolean {
   if (!hasActiveWallet(params) || !isOnlineNetworkReady(params)) return false;
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return (
     isOffpayFeatureAvailable(capabilities, 'wallet.balance') ||
     hasPrivateSendCapabilities(capabilities) ||
@@ -191,21 +201,21 @@ function canUseUmbraVaultTools(params: AgenticToolAvailabilityParams): boolean {
     return false;
   }
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return isOffpayFeatureAvailable(capabilities, 'umbra.execution');
 }
 
 function canUseUmbraVaultActionTools(params: AgenticToolAvailabilityParams): boolean {
   if (!canUseUmbraVaultTools(params)) return false;
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return isOffpayFeatureAvailable(capabilities, 'umbra.execution');
 }
 
 function canUseUmbraClaimTools(params: AgenticToolAvailabilityParams): boolean {
   if (!canUseUmbraVaultTools(params)) return false;
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return hasUmbraSendCapabilities(capabilities);
 }
 
@@ -214,24 +224,65 @@ function canUseSwapTools(params: AgenticToolAvailabilityParams): boolean {
     return false;
   }
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return (
     isOffpayFeatureAvailable(capabilities, 'swap.tokens') &&
     isOffpayFeatureAvailable(capabilities, 'swap.normalSwap')
   );
 }
 
+function canUseTriggerSwapTools(params: AgenticToolAvailabilityParams): boolean {
+  if (!hasActiveWallet(params) || !isOnlineNetworkReady(params) || params.network !== 'mainnet') {
+    return false;
+  }
+  const capabilities = params.capabilities ?? null;
+  if (capabilities == null) return false;
+  return (
+    isOffpayFeatureAvailable(capabilities, 'wallet.balance') &&
+    isOffpayFeatureAvailable(capabilities, 'swap.tokens') &&
+    isOffpayFeatureAvailable(capabilities, 'swap.price') &&
+    isOffpayFeatureAvailable(capabilities, 'swap.triggerOrders')
+  );
+}
+
+function canUseAdvancedOrderTools(params: AgenticToolAvailabilityParams): boolean {
+  if (!hasActiveWallet(params) || !isOnlineNetworkReady(params) || params.network !== 'mainnet') {
+    return false;
+  }
+  const capabilities = params.capabilities ?? null;
+  if (capabilities == null) return false;
+  return (
+    isOffpayFeatureAvailable(capabilities, 'swap.tokens') ||
+    isOffpayFeatureAvailable(capabilities, 'swap.triggerOrders') ||
+    isOffpayFeatureAvailable(capabilities, 'swap.recurringSwap')
+  );
+}
+
+function canUseRecurringSwapTools(params: AgenticToolAvailabilityParams): boolean {
+  if (!hasActiveWallet(params) || !isOnlineNetworkReady(params) || params.network !== 'mainnet') {
+    return false;
+  }
+  const capabilities = params.capabilities ?? null;
+  if (capabilities == null) return false;
+  return (
+    isOffpayFeatureAvailable(capabilities, 'wallet.balance') &&
+    isOffpayFeatureAvailable(capabilities, 'swap.tokens') &&
+    isOffpayFeatureAvailable(capabilities, 'swap.price') &&
+    isOffpayFeatureAvailable(capabilities, 'swap.recurringSwap')
+  );
+}
+
 function canUseRwaReadTools(params: AgenticToolAvailabilityParams): boolean {
   if (!hasActiveWallet(params) || !isOnlineNetworkReady(params)) return false;
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return isOffpayFeatureAvailable(capabilities, 'rwa.assets');
 }
 
 function canUseRwaTradeTools(params: AgenticToolAvailabilityParams): boolean {
   if (!canUseRwaReadTools(params)) return false;
   const capabilities = params.capabilities ?? null;
-  if (capabilities == null) return true;
+  if (capabilities == null) return false;
   return (
     isOffpayFeatureAvailable(capabilities, 'rwa.quote') &&
     isOffpayFeatureAvailable(capabilities, 'rwa.execute')
@@ -239,7 +290,16 @@ function canUseRwaTradeTools(params: AgenticToolAvailabilityParams): boolean {
 }
 
 function canUseFlashTools(params: AgenticToolAvailabilityParams): boolean {
-  return hasActiveWallet(params) && isOnlineNetworkReady(params) && params.network === 'mainnet';
+  if (!hasActiveWallet(params) || !isOnlineNetworkReady(params) || params.network !== 'mainnet') {
+    return false;
+  }
+  const capabilities = params.capabilities ?? null;
+  if (capabilities == null) return false;
+  return (
+    isOffpayFeatureAvailable(capabilities, 'perps.markets') &&
+    isOffpayFeatureAvailable(capabilities, 'perps.trade') &&
+    isOffpayFeatureAvailable(capabilities, 'perps.magicBlockExecution')
+  );
 }
 
 function hasUnlockedUmbraWallet(params: AgenticToolAvailabilityParams): boolean {

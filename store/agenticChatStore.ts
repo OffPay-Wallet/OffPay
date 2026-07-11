@@ -2,9 +2,14 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { mmkvStorage } from '@/lib/cache/mmkv-storage';
+import {
+  clearAgenticActionTransactionPayload,
+  redactAgenticActionForPersistence,
+} from '@/lib/agentic-payments/action-persistence';
 import { usePayrollStore } from '@/store/payrollStore';
 
 import type { PayrollConfirmationSummary } from '@/lib/payroll/payroll-confirmation';
+import type { FlashTradeEconomicIntent } from '@/lib/flash-trade/types';
 import type {
   OffpayNetwork,
   RwaAsset,
@@ -81,10 +86,39 @@ export interface AgenticFlashPositionAction {
   newLeverage?: number | null;
   newLiquidationPrice?: number | null;
   transactionBase64: string;
-  expiresAt: number;
+  /** Null for Flash V2; confirmation validates the transaction blockhash on the ER. */
+  expiresAt: number | null;
+  economicIntent: FlashTradeEconomicIntent;
+  expectedMarketPubkeys: string[];
+  expectedTriggerOrderCount?: number;
+  expectedOrderSlot?: number;
+  expectedIsStopLoss?: boolean;
+  expectedLimitPrice?: number;
+  expectedTriggerOrders?: { triggerPrice: number; isStopLoss: boolean }[];
   triggerOrders?: AgenticFlashTriggerOrderSummary[];
   requestedTriggerOrders?: AgenticFlashTriggerOrderSummary[];
   warnings?: string[];
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface AgenticFlashDepositAction {
+  id: string;
+  kind: 'flash_deposit';
+  status: AgenticActionStatus;
+  walletAddress: string;
+  network: 'mainnet';
+  tokenSymbol: string;
+  tokenMint: string;
+  tokenDecimals: number;
+  amount: string;
+  rawAmount: string;
+  transactionBase64: string;
+  warnings: string[];
   conversationId?: string | null;
   toolCallId?: string;
   createdAt: number;
@@ -147,6 +181,26 @@ export interface AgenticUmbraVaultAction {
   errorMessage?: string | null;
 }
 
+export interface AgenticUmbraClaimAction {
+  id: string;
+  kind: 'umbra_claim';
+  status: AgenticActionStatus;
+  walletAddress: string;
+  network: OffpayNetwork;
+  /** Exact on-device claim set. Never include these indices in model-visible results. */
+  utxoInsertionIndices: number[];
+  claimCount: number;
+  destination: 'umbra_encrypted_balance';
+  settledClaimCount?: number;
+  remainingClaimCount?: number;
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  errorMessage?: string | null;
+}
+
 export interface AgenticSwapAction {
   id: string;
   kind: 'swap';
@@ -166,6 +220,7 @@ export interface AgenticSwapAction {
   outputDecimals: number;
   outputAmount: string;
   outputRawAmount: string;
+  minimumOutputAmount: string;
   slippageBps: number | null;
   slippageMode: 'auto' | 'manual' | null;
   priceImpactPct: number;
@@ -181,6 +236,85 @@ export interface AgenticSwapAction {
   signature?: string | null;
   errorMessage?: string | null;
 }
+
+interface AgenticAdvancedSwapActionBase {
+  id: string;
+  status: AgenticActionStatus;
+  walletAddress: string;
+  network: 'mainnet';
+  inputMint: string;
+  inputSymbol: string;
+  inputName: string;
+  inputDecimals: number;
+  inputAmount: string;
+  inputRawAmount: string;
+  inputValueUsd: number;
+  outputMint: string;
+  outputSymbol: string;
+  outputName: string;
+  outputDecimals: number;
+  warnings: string[];
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  providerOrderId?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface AgenticTriggerSwapAction extends AgenticAdvancedSwapActionBase {
+  kind: 'swap_trigger';
+  triggerMint: string;
+  triggerSymbol: string;
+  triggerCondition: 'above' | 'below';
+  triggerPriceUsd: number;
+  referencePriceUsd: number;
+  slippageBps: number;
+  expiresAt: number;
+}
+
+export interface AgenticRecurringSwapAction extends AgenticAdvancedSwapActionBase {
+  kind: 'swap_recurring';
+  interval: 'hourly' | 'daily' | 'weekly' | 'monthly';
+  orderCount: number;
+  frequency: string;
+  perOrderValueUsd: number;
+}
+
+export type AgenticAdvancedSwapAction = AgenticTriggerSwapAction | AgenticRecurringSwapAction;
+
+interface AgenticAdvancedSwapCancelActionBase {
+  id: string;
+  status: AgenticActionStatus;
+  walletAddress: string;
+  network: 'mainnet';
+  orderId: string;
+  inputMint: string;
+  outputMint: string;
+  inputSymbol: string;
+  outputSymbol: string;
+  providerStatus: string;
+  warnings: string[];
+  conversationId?: string | null;
+  toolCallId?: string;
+  createdAt: number;
+  updatedAt: number;
+  signature?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface AgenticTriggerSwapCancelAction extends AgenticAdvancedSwapCancelActionBase {
+  kind: 'swap_trigger_cancel';
+}
+
+export interface AgenticRecurringSwapCancelAction extends AgenticAdvancedSwapCancelActionBase {
+  kind: 'swap_recurring_cancel';
+}
+
+export type AgenticAdvancedSwapCancelAction =
+  | AgenticTriggerSwapCancelAction
+  | AgenticRecurringSwapCancelAction;
 
 export interface AgenticRwaTradeAction {
   id: string;
@@ -283,17 +417,26 @@ export interface AgenticChatToolCard {
 export type AgenticChatAction =
   | AgenticPrivateSendAction
   | AgenticUmbraVaultAction
+  | AgenticUmbraClaimAction
   | AgenticSwapAction
+  | AgenticAdvancedSwapAction
+  | AgenticAdvancedSwapCancelAction
   | AgenticRwaTradeAction
   | AgenticPayrollAction
+  | AgenticFlashDepositAction
   | AgenticFlashPositionAction;
 
 type AgenticActionPatch =
   | Partial<Omit<AgenticPrivateSendAction, 'id'>>
   | Partial<Omit<AgenticUmbraVaultAction, 'id'>>
+  | Partial<Omit<AgenticUmbraClaimAction, 'id'>>
   | Partial<Omit<AgenticSwapAction, 'id'>>
+  | Partial<Omit<AgenticTriggerSwapAction, 'id'>>
+  | Partial<Omit<AgenticRecurringSwapAction, 'id'>>
+  | Partial<Omit<AgenticAdvancedSwapCancelAction, 'id'>>
   | Partial<Omit<AgenticRwaTradeAction, 'id'>>
   | Partial<Omit<AgenticPayrollAction, 'id'>>
+  | Partial<Omit<AgenticFlashDepositAction, 'id'>>
   | Partial<Omit<AgenticFlashPositionAction, 'id'>>;
 
 export interface AgenticChatMessage {
@@ -508,12 +651,20 @@ export const useAgenticChatStore = create<AgenticChatState>()(
         })),
       updateAction: (id, patch) =>
         set((state) => ({
-          actions: state.actions.map(
-            (action): AgenticChatAction =>
-              action.id === id
-                ? ({ ...action, ...patch, updatedAt: Date.now() } as AgenticChatAction)
-                : action,
-          ),
+          actions: state.actions.map((action): AgenticChatAction => {
+            if (action.id !== id) return action;
+            const next = {
+              ...action,
+              ...patch,
+              updatedAt: Date.now(),
+            } as AgenticChatAction;
+            return next.status === 'submitted' ||
+              next.status === 'queued' ||
+              next.status === 'cancelled' ||
+              next.status === 'failed'
+              ? clearAgenticActionTransactionPayload(next)
+              : next;
+          }),
         })),
       clearMessages: (scope) =>
         set((state) => {
@@ -556,26 +707,34 @@ export const useAgenticChatStore = create<AgenticChatState>()(
     }),
     {
       name: 'offpay-agentic-chat',
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => mmkvStorage),
+      partialize: (state) => ({
+        messages: state.messages,
+        actions: state.actions.map(redactAgenticActionForPersistence),
+        conversations: state.conversations,
+        activeConversationIdByScope: state.activeConversationIdByScope,
+      }),
       migrate: (persistedState) => {
         if (persistedState == null || typeof persistedState !== 'object') {
           return persistedState as AgenticChatState;
         }
 
         const state = persistedState as {
+          actions?: AgenticChatAction[];
           conversations?: Array<AgenticConversation & { archivedAt?: number | null }>;
         };
 
-        if (!Array.isArray(state.conversations)) {
-          return persistedState as AgenticChatState;
-        }
-
         return {
           ...(persistedState as AgenticChatState),
-          conversations: state.conversations
-            .filter((conversation) => conversation.archivedAt == null)
-            .map(({ archivedAt: _archivedAt, ...conversation }) => conversation),
+          actions: Array.isArray(state.actions)
+            ? state.actions.map(redactAgenticActionForPersistence)
+            : [],
+          conversations: Array.isArray(state.conversations)
+            ? state.conversations
+                .filter((conversation) => conversation.archivedAt == null)
+                .map(({ archivedAt: _archivedAt, ...conversation }) => conversation)
+            : [],
         };
       },
     },

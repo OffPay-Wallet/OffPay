@@ -6,7 +6,10 @@ import bs58 from 'bs58';
 
 import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { runCryptoTask } from '@/lib/crypto/crypto-scheduler';
-import { getOfflineTokenDecimals, getOfflineTokenMetadata } from '@/lib/offline/offline-token-metadata';
+import {
+  getOfflineTokenDecimals,
+  getOfflineTokenMetadata,
+} from '@/lib/offline/offline-token-metadata';
 import {
   assertBase58PublicKey,
   assertCachedNonce,
@@ -31,15 +34,22 @@ import { getOrDeriveSigningSeed } from '@/lib/wallet/signing-seed-cache';
 import {
   PRIVATE_PAYMENT_LAYER_LABEL,
   STABLECOIN_ONLY_PAYMENT_MESSAGE,
+  getStablecoinPolicyEntries,
   isSupportedStablecoinToken,
 } from '@/lib/policy/stablecoin-policy';
 import { decimalInputToAtomicAmount } from '@/lib/policy/token-amounts';
-import { decodeSigningSeedFromPrivateKey, deriveSigningSeedFromMnemonic } from '@/lib/wallet/wallet';
+import {
+  decodeSigningSeedFromPrivateKey,
+  deriveSigningSeedFromMnemonic,
+} from '@/lib/wallet/wallet';
 
 import type { WalletMode } from '@/store/preferencesStore';
 import type { OffpayNetwork } from '@/types/offpay-api';
 
-export type { OfflinePaymentRequest, ParsedOfflineQrPayload } from '@/lib/offline/offline-validators';
+export type {
+  OfflinePaymentRequest,
+  ParsedOfflineQrPayload,
+} from '@/lib/offline/offline-validators';
 export { isNativeOfflineSolToken } from '@/lib/offline/offline-validators';
 export {
   buildOfflinePaymentRequestQr,
@@ -51,6 +61,8 @@ export {
 const NONCE_STATE_KEY_PREFIX = 'offpay_offline_nonce_v1';
 const NONCE_STATE_VERSION = 1;
 const NONCE_STALE_MS = 24 * 60 * 60 * 1000;
+const MAX_SOLANA_TRANSACTION_BYTES = 1_232;
+const MAX_ENCODED_TRANSACTION_LENGTH = 2_000;
 const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 const RECENT_BLOCKHASHES_SYSVAR_ID = 'SysvarRecentB1ockHashes11111111111111111111';
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -102,7 +114,10 @@ interface ParsedSignedTransaction {
   transaction: Uint8Array;
   message: Uint8Array;
   requiredSignerCount: number;
+  readonlySignedAccountCount: number;
+  readonlyUnsignedAccountCount: number;
   accountKeys: string[];
+  recentBlockhash: string;
   instructions: ParsedInstruction[];
 }
 
@@ -112,6 +127,7 @@ export interface OfflineSignedTransactionVerification {
   requiredSigners: string[];
   nonceAccount: string;
   nonceAuthority: string;
+  recentBlockhash: string;
   recipientVerified: boolean;
   amountVerified: boolean;
   instructionCount: number;
@@ -158,7 +174,7 @@ function nonceStateKey(walletAddress: string, network: OffpayNetwork): string {
 async function assertOfflineStablecoinToken(
   network: OffpayNetwork,
   token: string | null | undefined,
-): Promise<void> {
+): Promise<{ mint: string; decimals: number; programId: string }> {
   const metadata = await getOfflineTokenMetadata(network, token);
   if (
     metadata == null ||
@@ -172,6 +188,28 @@ async function assertOfflineStablecoinToken(
       `${STABLECOIN_ONLY_PAYMENT_MESSAGE} ${PRIVATE_PAYMENT_LAYER_LABEL} handles the private/offline layer; SOL is reserved for network fees.`,
     );
   }
+
+  const mint = assertBase58PublicKey(metadata.mint, 'Expected token mint');
+  const policy = getStablecoinPolicyEntries(network).find(
+    (entry) => entry.enabled && entry.mint === mint,
+  );
+  if (
+    policy == null ||
+    metadata.symbol !== policy.symbol ||
+    !Number.isSafeInteger(metadata.decimals) ||
+    metadata.decimals !== policy.decimals
+  ) {
+    throw new Error('Offline token metadata does not match the canonical stablecoin policy.');
+  }
+  const programId =
+    metadata.programId != null && metadata.programId.trim().length > 0
+      ? assertBase58PublicKey(metadata.programId, 'Expected token program')
+      : TOKEN_PROGRAM_ID;
+  if (programId !== TOKEN_PROGRAM_ID) {
+    throw new Error('Offline stablecoin uses an unsupported token program.');
+  }
+
+  return { mint, decimals: metadata.decimals, programId };
 }
 
 function normalizeNonceState(value: unknown): OfflineNonceState | null {
@@ -322,9 +360,10 @@ async function assertNonceCanBeLocked(params: {
 
   if (
     current.nonceAccount !== params.verification.nonceAccount ||
-    current.nonceAuthority !== params.verification.nonceAuthority
+    current.nonceAuthority !== params.verification.nonceAuthority ||
+    current.cachedNonce !== params.verification.recentBlockhash
   ) {
-    throw new Error('Signed offline transaction does not match the cached durable nonce account.');
+    throw new Error('Signed offline transaction does not match the cached durable nonce state.');
   }
 
   return current;
@@ -561,18 +600,29 @@ function decodeSignedTransactionPayload(payload: string): Uint8Array {
   if (normalized.length === 0) {
     throw new Error('Offline signed transaction is missing.');
   }
+  if (normalized.length > MAX_ENCODED_TRANSACTION_LENGTH) {
+    throw new Error('Offline signed transaction exceeds Solana packet limits.');
+  }
 
   const base64Candidate = /^[A-Za-z0-9+/]+={0,2}$/.test(normalized) && normalized.length % 4 === 0;
   if (base64Candidate) {
     const decoded = Uint8Array.from(Buffer.from(normalized, 'base64'));
+    if (decoded.length > MAX_SOLANA_TRANSACTION_BYTES) {
+      throw new Error('Offline signed transaction exceeds Solana packet limits.');
+    }
     if (decoded.length > 0) return decoded;
   }
 
+  let decoded: Uint8Array;
   try {
-    return bs58.decode(normalized);
+    decoded = bs58.decode(normalized);
   } catch {
     throw new Error('Offline signed transaction must be base64 or base58 encoded.');
   }
+  if (decoded.length > MAX_SOLANA_TRANSACTION_BYTES) {
+    throw new Error('Offline signed transaction exceeds Solana packet limits.');
+  }
+  return decoded;
 }
 
 function parseSignedTransaction(payload: string): ParsedSignedTransaction {
@@ -588,14 +638,15 @@ function parseSignedTransaction(payload: string): ParsedSignedTransaction {
   let cursor = 0;
   if ((message[cursor] ?? 0) & 0x80) {
     const version = (message[cursor] ?? 0) & 0x7f;
-    if (version !== 0) {
-      throw new Error(`Unsupported offline transaction version: ${version}.`);
-    }
-    cursor += 1;
+    throw new Error(
+      `Versioned offline transactions are not accepted (received version ${version}); address lookup tables cannot be verified offline.`,
+    );
   }
 
   assertRange(message, cursor, 3, 'message header');
   const requiredSignerCount = message[cursor] ?? 0;
+  const readonlySignedAccountCount = message[cursor + 1] ?? 0;
+  const readonlyUnsignedAccountCount = message[cursor + 2] ?? 0;
   cursor += 3;
 
   const accountKeyCount = readShortVec(message, cursor);
@@ -608,6 +659,7 @@ function parseSignedTransaction(payload: string): ParsedSignedTransaction {
   cursor += accountKeyCount.value * 32;
 
   assertRange(message, cursor, 32, 'recent blockhash');
+  const recentBlockhash = bs58.encode(message.subarray(cursor, cursor + 32));
   cursor += 32;
 
   const instructionCount = readShortVec(message, cursor);
@@ -619,11 +671,26 @@ function parseSignedTransaction(payload: string): ParsedSignedTransaction {
     cursor = parsed.offset;
   }
 
-  if (signatureCount.value < requiredSignerCount) {
-    throw new Error('Offline transaction is missing required signature slots.');
+  if (cursor !== message.length) {
+    throw new Error('Malformed offline transaction: unexpected trailing message bytes.');
+  }
+  if (signatureCount.value !== requiredSignerCount) {
+    throw new Error('Offline transaction signature slots do not exactly match required signers.');
+  }
+  if (requiredSignerCount === 0 || requiredSignerCount > accountKeys.length) {
+    throw new Error('Offline transaction has an invalid signer header.');
   }
   if (instructions.length === 0) {
     throw new Error('Offline transaction contains no instructions.');
+  }
+
+  for (const instruction of instructions) {
+    if (instruction.programIdIndex >= accountKeys.length) {
+      throw new Error('Offline transaction instruction references an invalid program account.');
+    }
+    if (instruction.accountIndexes.some((accountIndex) => accountIndex >= accountKeys.length)) {
+      throw new Error('Offline transaction instruction references an invalid account.');
+    }
   }
 
   for (let index = 0; index < requiredSignerCount; index += 1) {
@@ -644,19 +711,12 @@ function parseSignedTransaction(payload: string): ParsedSignedTransaction {
     transaction,
     message,
     requiredSignerCount,
+    readonlySignedAccountCount,
+    readonlyUnsignedAccountCount,
     accountKeys,
+    recentBlockhash,
     instructions,
   };
-}
-
-function u32FromLittleEndian(data: Uint8Array, offset: number): number | null {
-  if (offset < 0 || offset + 4 > data.length) return null;
-  return (
-    (data[offset] ?? 0) |
-    ((data[offset + 1] ?? 0) << 8) |
-    ((data[offset + 2] ?? 0) << 16) |
-    ((data[offset + 3] ?? 0) << 24)
-  );
 }
 
 function u64FromLittleEndian(data: Uint8Array, offset: number): bigint | null {
@@ -795,7 +855,9 @@ async function deriveSigningSeedForOfflinePayment(params: {
       }
 
       if (seed == null) {
-        throw new Error('No wallet signing material is available for offline transaction construction.');
+        throw new Error(
+          'No wallet signing material is available for offline transaction construction.',
+        );
       }
 
       // Verify before caching so a corrupt/mismatched private key
@@ -883,12 +945,12 @@ function signedTransactionFromMessage(params: {
   }
 }
 
-function instructionContainsAmount(data: Uint8Array, amount: bigint): boolean {
-  for (let offset = 0; offset <= data.length - 8; offset += 1) {
-    if (u64FromLittleEndian(data, offset) === amount) return true;
-  }
+function byteArraysEqual(left: Uint8Array, right: readonly number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
 
-  return false;
+function numberArraysEqual(left: readonly number[], right: readonly number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 async function atomicAmountFromText(params: {
@@ -935,65 +997,158 @@ function buildDeterministicUuid(bytes: Uint8Array): string {
 export async function verifyOfflineSignedTransaction(params: {
   signedTransaction: string;
   network: OffpayNetwork;
-  expectedRecipient?: string | null;
-  expectedAmount?: string | null;
+  expectedSender: string;
+  expectedRecipientOwner: string;
+  expectedRecipient: string;
+  expectedAmount: string;
   expectedAmountUnit?: OfflineExpectedAmountUnit;
-  expectedToken?: string | null;
+  expectedToken: string;
 }): Promise<OfflineSignedTransactionVerification> {
-  await assertOfflineStablecoinToken(params.network, params.expectedToken);
-
-  const parsed = parseSignedTransaction(params.signedTransaction);
-  const firstInstruction = parsed.instructions[0];
-  if (firstInstruction == null) {
-    throw new Error('Offline transaction contains no instructions.');
-  }
-
-  const firstProgramId = parsed.accountKeys[firstInstruction.programIdIndex];
-  if (firstProgramId !== SYSTEM_PROGRAM_ID) {
-    throw new Error('Offline transaction must start with SystemProgram.nonceAdvance.');
-  }
-  if (u32FromLittleEndian(firstInstruction.data, 0) !== ADVANCE_NONCE_ACCOUNT_INSTRUCTION) {
-    throw new Error('Offline transaction first instruction is not nonceAdvance.');
-  }
-
-  const nonceAccount = parsed.accountKeys[firstInstruction.accountIndexes[0] ?? -1];
-  const nonceAuthority = parsed.accountKeys[firstInstruction.accountIndexes[2] ?? -1];
-  if (nonceAccount == null || nonceAuthority == null) {
-    throw new Error('Offline nonceAdvance instruction is missing required accounts.');
-  }
-
-  const expectedRecipient =
-    params.expectedRecipient != null && params.expectedRecipient.trim().length > 0
-      ? assertBase58PublicKey(params.expectedRecipient, 'Expected recipient')
-      : null;
-  const recipientVerified =
-    expectedRecipient == null || parsed.accountKeys.includes(expectedRecipient);
-  if (!recipientVerified) {
-    throw new Error('Offline transaction does not include the expected recipient.');
-  }
-
-  const normalizedAmount = assertPositiveAmount(params.expectedAmount ?? null);
+  const token = await assertOfflineStablecoinToken(params.network, params.expectedToken);
+  const expectedSender = assertBase58PublicKey(params.expectedSender, 'Expected offline sender');
+  const expectedRecipientOwner = assertBase58PublicKey(
+    params.expectedRecipientOwner,
+    'Expected recipient owner',
+  );
+  const expectedRecipient = assertBase58PublicKey(
+    params.expectedRecipient,
+    'Expected recipient token account',
+  );
+  const normalizedAmount = assertPositiveAmount(params.expectedAmount);
   const amount = await atomicAmountFromText({
     value: normalizedAmount,
     unit: params.expectedAmountUnit ?? 'raw',
     network: params.network,
-    token: params.expectedToken,
+    token: token.mint,
   });
-  const amountVerified =
-    amount == null ||
-    parsed.instructions
-      .slice(1)
-      .some((instruction) => instructionContainsAmount(instruction.data, amount));
-  if (!amountVerified) {
-    throw new Error('Offline transaction does not encode the expected raw amount.');
+  if (amount == null || amount <= 0n) {
+    throw new Error('Offline transaction verification requires an expected positive amount.');
   }
+
+  const parsed = parseSignedTransaction(params.signedTransaction);
+  if (
+    parsed.requiredSignerCount !== 1 ||
+    parsed.readonlySignedAccountCount !== 0 ||
+    parsed.readonlyUnsignedAccountCount !== 6
+  ) {
+    throw new Error('Offline transaction header does not match the supported payment template.');
+  }
+  if (parsed.accountKeys.length !== 10 || parsed.instructions.length !== 3) {
+    throw new Error('Offline transaction does not exactly match the supported payment template.');
+  }
+
+  const [
+    sender,
+    nonceAccount,
+    senderTokenAccount,
+    recipientTokenAccount,
+    recipientOwner,
+    mint,
+    recentBlockhashesSysvar,
+    systemProgram,
+    associatedTokenProgram,
+    tokenProgram,
+  ] = parsed.accountKeys;
+  if (
+    sender == null ||
+    nonceAccount == null ||
+    senderTokenAccount == null ||
+    recipientTokenAccount == null ||
+    recipientOwner == null
+  ) {
+    throw new Error('Offline transaction is missing required payment accounts.');
+  }
+  if (sender !== expectedSender) {
+    throw new Error('Offline transaction sender does not match the expected signer.');
+  }
+  if (recipientOwner !== expectedRecipientOwner) {
+    throw new Error('Offline transaction recipient owner does not match the expected wallet.');
+  }
+  if (
+    mint !== token.mint ||
+    recentBlockhashesSysvar !== RECENT_BLOCKHASHES_SYSVAR_ID ||
+    systemProgram !== SYSTEM_PROGRAM_ID ||
+    associatedTokenProgram !== ASSOCIATED_TOKEN_PROGRAM_ID ||
+    tokenProgram !== token.programId
+  ) {
+    throw new Error('Offline transaction program or mint accounts do not match expectations.');
+  }
+  if (recipientTokenAccount !== expectedRecipient) {
+    throw new Error(
+      'Offline transfer destination does not match the expected recipient token account.',
+    );
+  }
+  if (
+    senderTokenAccount !==
+    deriveAssociatedTokenAddress({
+      owner: sender,
+      mint: token.mint,
+      tokenProgramId: token.programId,
+    })
+  ) {
+    throw new Error('Offline transfer source is not the signer associated token account.');
+  }
+  if (
+    recipientTokenAccount !==
+    deriveAssociatedTokenAddress({
+      owner: recipientOwner,
+      mint: token.mint,
+      tokenProgramId: token.programId,
+    })
+  ) {
+    throw new Error('Offline transfer destination is not the recipient associated token account.');
+  }
+
+  const [nonceAdvance, createRecipientAccount, transferChecked] = parsed.instructions;
+  if (
+    nonceAdvance == null ||
+    nonceAdvance.programIdIndex !== 7 ||
+    !numberArraysEqual(nonceAdvance.accountIndexes, [1, 6, 0]) ||
+    !byteArraysEqual(nonceAdvance.data, u32ToLittleEndian(ADVANCE_NONCE_ACCOUNT_INSTRUCTION))
+  ) {
+    throw new Error(
+      'Offline transaction must start with the exact durable nonce advance instruction.',
+    );
+  }
+  if (
+    createRecipientAccount == null ||
+    createRecipientAccount.programIdIndex !== 8 ||
+    !numberArraysEqual(createRecipientAccount.accountIndexes, [0, 3, 4, 5, 7, 9]) ||
+    !byteArraysEqual(createRecipientAccount.data, [
+      CREATE_ASSOCIATED_TOKEN_ACCOUNT_IDEMPOTENT_INSTRUCTION,
+    ])
+  ) {
+    throw new Error(
+      'Offline transaction recipient account instruction does not match expectations.',
+    );
+  }
+  if (
+    transferChecked == null ||
+    transferChecked.programIdIndex !== 9 ||
+    !numberArraysEqual(transferChecked.accountIndexes, [2, 5, 3, 0]) ||
+    transferChecked.data.length !== 10 ||
+    transferChecked.data[0] !== TRANSFER_CHECKED_INSTRUCTION
+  ) {
+    throw new Error('Offline transaction transfer instruction does not match expectations.');
+  }
+  if (u64FromLittleEndian(transferChecked.data, 1) !== amount) {
+    throw new Error('Offline transaction transfer amount does not match the expected raw amount.');
+  }
+  if (transferChecked.data[9] !== token.decimals) {
+    throw new Error('Offline transaction transfer decimals do not match the token mint.');
+  }
+
+  const nonceAuthority = sender;
+  const recipientVerified = true;
+  const amountVerified = true;
 
   return {
     txId: buildDeterministicUuid(parsed.transaction),
     signedBlob: Buffer.from(parsed.transaction).toString('base64'),
-    requiredSigners: parsed.accountKeys.slice(0, parsed.requiredSignerCount),
+    requiredSigners: [sender],
     nonceAccount,
     nonceAuthority,
+    recentBlockhash: parsed.recentBlockhash,
     recipientVerified,
     amountVerified,
     instructionCount: parsed.instructions.length,
@@ -1027,6 +1182,8 @@ async function getLocalOfflineStablecoinContext(params: {
     );
   }
 
+  const canonicalToken = await assertOfflineStablecoinToken(params.network, params.token);
+
   const symbol = metadata.symbol === 'USDC' || metadata.symbol === 'USDT' ? metadata.symbol : null;
   if (
     symbol == null ||
@@ -1039,26 +1196,23 @@ async function getLocalOfflineStablecoinContext(params: {
     throw new Error(STABLECOIN_ONLY_PAYMENT_MESSAGE);
   }
 
-  const tokenProgramId =
-    metadata.programId != null && metadata.programId.trim().length > 0
-      ? assertBase58PublicKey(metadata.programId, 'Token program')
-      : TOKEN_PROGRAM_ID;
+  const tokenProgramId = canonicalToken.programId;
   const senderTokenAccount = deriveAssociatedTokenAddress({
     owner: params.walletAddress,
-    mint: metadata.mint,
+    mint: canonicalToken.mint,
     tokenProgramId,
   });
   const recipientTokenAccount = deriveAssociatedTokenAddress({
     owner: params.recipient,
-    mint: metadata.mint,
+    mint: canonicalToken.mint,
     tokenProgramId,
   });
 
   return {
-    mint: metadata.mint,
+    mint: canonicalToken.mint,
     symbol,
     name: metadata.name,
-    decimals: metadata.decimals,
+    decimals: canonicalToken.decimals,
     programId: tokenProgramId,
     senderTokenAccount,
     recipientTokenAccount,
@@ -1155,6 +1309,8 @@ export async function buildSignedStablecoinOfflinePayment(params: {
     const verification = await verifyOfflineSignedTransaction({
       signedTransaction,
       network: params.network,
+      expectedSender: params.walletAddress,
+      expectedRecipientOwner: recipient,
       expectedRecipient: context.recipientTokenAccount,
       expectedAmount: rawAmount,
       expectedAmountUnit: 'raw',
@@ -1205,6 +1361,7 @@ export async function buildAndEnqueueOfflineStablecoinPayment(params: {
     walletId: params.walletId,
     network: params.network,
     signedTransaction: built.signedTransaction,
+    expectedRecipientOwner: params.recipient,
     expectedRecipient: built.recipientTokenAccount,
     expectedAmount: built.rawAmount,
     expectedAmountUnit: 'raw',
@@ -1240,6 +1397,7 @@ export async function buildAndEnqueueOfflineSolPayment(params: {
     walletId: params.walletId,
     network: params.network,
     signedTransaction: built.signedTransaction,
+    expectedRecipientOwner: params.recipient,
     expectedRecipient: params.recipient,
     expectedAmount: built.rawAmount,
     expectedAmountUnit: 'raw',
@@ -1257,14 +1415,17 @@ export async function enqueueOfflineSignedPayment(params: {
   walletId?: string | null;
   network: OffpayNetwork;
   signedTransaction: string;
-  expectedRecipient?: string | null;
-  expectedAmount?: string | null;
-  token?: string | null;
+  expectedRecipientOwner: string;
+  expectedRecipient: string;
+  expectedAmount: string;
+  token: string;
   expectedAmountUnit?: OfflineExpectedAmountUnit;
 }): Promise<OfflineSignedTransactionVerification & { uploaded: boolean }> {
   const verification = await verifyOfflineSignedTransaction({
     signedTransaction: params.signedTransaction,
     network: params.network,
+    expectedSender: params.walletAddress,
+    expectedRecipientOwner: params.expectedRecipientOwner,
     expectedRecipient: params.expectedRecipient,
     expectedAmount: params.expectedAmount,
     expectedAmountUnit: params.expectedAmountUnit,
@@ -1286,12 +1447,14 @@ export async function enqueueOfflineSignedPayment(params: {
       signedBlob: verification.signedBlob,
       kind: 'offline-payment',
       metadata: {
-        recipient: params.expectedRecipient ?? null,
-        amount: params.expectedAmount ?? null,
+        recipient: params.expectedRecipient,
+        recipientOwner: params.expectedRecipientOwner,
+        amount: params.expectedAmount,
         amountUnit: params.expectedAmountUnit ?? 'raw',
-        token: params.token ?? null,
+        token: params.token,
         nonceAccount: verification.nonceAccount,
         nonceAuthority: verification.nonceAuthority,
+        recentBlockhash: verification.recentBlockhash,
       },
       uploadImmediately: false,
     });
@@ -1318,14 +1481,16 @@ export async function enqueueReceivedOfflineSignedPayment(params: {
   network: OffpayNetwork;
   txId: string;
   signedTransaction: string;
-  expectedRecipient?: string | null;
-  expectedAmount?: string | null;
-  token?: string | null;
-  sender?: string | null;
+  expectedRecipient: string;
+  expectedAmount: string;
+  token: string;
+  sender: string;
 }): Promise<OfflineSignedTransactionVerification & { uploaded: boolean }> {
   const verification = await verifyOfflineSignedTransaction({
     signedTransaction: params.signedTransaction,
     network: params.network,
+    expectedSender: params.sender,
+    expectedRecipientOwner: params.walletAddress,
     expectedRecipient: params.expectedRecipient,
     expectedAmount: params.expectedAmount,
     expectedAmountUnit: 'raw',
@@ -1337,8 +1502,6 @@ export async function enqueueReceivedOfflineSignedPayment(params: {
   }
 
   if (
-    params.sender != null &&
-    params.sender.trim().length > 0 &&
     !verification.requiredSigners.includes(assertBase58PublicKey(params.sender, 'Offline sender'))
   ) {
     throw new Error('Received offline payment sender does not match the transaction signer.');
@@ -1353,13 +1516,14 @@ export async function enqueueReceivedOfflineSignedPayment(params: {
     kind: 'offline-payment',
     metadata: {
       direction: 'receive',
-      sender: params.sender ?? null,
-      recipient: params.expectedRecipient ?? null,
-      amount: params.expectedAmount ?? null,
+      sender: params.sender,
+      recipient: params.expectedRecipient,
+      amount: params.expectedAmount,
       amountUnit: 'raw',
-      token: params.token ?? null,
+      token: params.token,
       nonceAccount: verification.nonceAccount,
       nonceAuthority: verification.nonceAuthority,
+      recentBlockhash: verification.recentBlockhash,
     },
     uploadImmediately: false,
   });

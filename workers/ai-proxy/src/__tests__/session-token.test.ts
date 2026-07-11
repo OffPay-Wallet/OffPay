@@ -1,118 +1,97 @@
 import { verifyOffpayAiSessionToken } from '../auth/session-token';
 
-const SHARED_SECRET = 'shared-secret-for-test';
-const DEVICE_SECRET = 'device-secret';
+const SHARED_SECRET = 'shared-secret-for-test-at-least-32-characters';
+const WALLET = 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw';
 
 describe('Worker session-token verifier', () => {
-  it('rejects malformed tokens', async () => {
-    const result = await verifyOffpayAiSessionToken('not.a.token', {
-      sharedSecret: SHARED_SECRET,
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('malformed');
-    }
+  it('rejects malformed tokens and weak server configuration', async () => {
+    await expect(
+      verifyOffpayAiSessionToken('not.a.token', { sharedSecret: SHARED_SECRET }),
+    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining('malformed') });
+    await expect(
+      verifyOffpayAiSessionToken('v2.payload.signature', { sharedSecret: 'too-short' }),
+    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining('securely') });
   });
 
-  it('accepts a valid token built with the same shared secret', async () => {
-    const token = await buildToken({
-      walletAddress: 'WalletAlpha',
+  it('accepts a valid API-issued mainnet token', async () => {
+    const issuedAt = Date.now();
+    const token = await buildToken({ issuedAt, expiresAt: issuedAt + 60_000 });
+    await expect(
+      verifyOffpayAiSessionToken(token, {
+        sharedSecret: SHARED_SECRET,
+        now: issuedAt + 1_000,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      walletAddress: WALLET,
       deviceId: 'device-alpha',
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + 60_000,
-      sharedSecret: SHARED_SECRET,
+      network: 'mainnet',
+      expiresAt: issuedAt + 60_000,
     });
-
-    const result = await verifyOffpayAiSessionToken(token, {
-      sharedSecret: SHARED_SECRET,
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.walletAddress).toBe('WalletAlpha');
-      expect(result.deviceId).toBe('device-alpha');
-    }
   });
 
-  it('rejects a token whose signature was made with a different secret', async () => {
+  it('rejects a token signed with another secret', async () => {
+    const issuedAt = Date.now();
     const token = await buildToken({
-      walletAddress: 'WalletAlpha',
-      deviceId: 'device-alpha',
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + 60_000,
-      sharedSecret: 'attacker-secret',
+      issuedAt,
+      expiresAt: issuedAt + 60_000,
+      sharedSecret: 'attacker-secret-at-least-32-characters',
     });
-
-    const result = await verifyOffpayAiSessionToken(token, {
-      sharedSecret: SHARED_SECRET,
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('signature');
-    }
+    await expect(
+      verifyOffpayAiSessionToken(token, { sharedSecret: SHARED_SECRET, now: issuedAt }),
+    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining('signature') });
   });
 
-  it('checks the device binding when a resolver is provided', async () => {
-    const token = await buildToken({
-      walletAddress: 'WalletAlpha',
-      deviceId: 'device-alpha',
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + 60_000,
-      sharedSecret: SHARED_SECRET,
-      deviceSecret: DEVICE_SECRET,
-    });
+  it('rejects expired, future, and overlong sessions', async () => {
+    const issuedAt = 1_000_000;
+    const expired = await buildToken({ issuedAt, expiresAt: issuedAt + 60_000 });
+    await expect(
+      verifyOffpayAiSessionToken(expired, {
+        sharedSecret: SHARED_SECRET,
+        now: issuedAt + 120_000,
+        skewMs: 0,
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining('expired') });
 
-    const result = await verifyOffpayAiSessionToken(token, {
-      sharedSecret: SHARED_SECRET,
-      resolveDeviceSecret: async ({ walletAddress, deviceId }) => {
-        if (walletAddress === 'WalletAlpha' && deviceId === 'device-alpha') {
-          return DEVICE_SECRET;
-        }
-        return null;
-      },
-    });
+    const future = await buildToken({ issuedAt, expiresAt: issuedAt + 60_000 });
+    await expect(
+      verifyOffpayAiSessionToken(future, {
+        sharedSecret: SHARED_SECRET,
+        now: issuedAt - 1,
+        skewMs: 0,
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining('not yet') });
 
-    expect(result.ok).toBe(true);
-  });
-
-  it('rejects when the resolver supplies a different device secret', async () => {
-    const token = await buildToken({
-      walletAddress: 'WalletAlpha',
-      deviceId: 'device-alpha',
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + 60_000,
-      sharedSecret: SHARED_SECRET,
-      deviceSecret: DEVICE_SECRET,
-    });
-
-    const result = await verifyOffpayAiSessionToken(token, {
-      sharedSecret: SHARED_SECRET,
-      resolveDeviceSecret: async () => 'different-device-secret',
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('binding');
-    }
+    const overlong = await buildToken({ issuedAt, expiresAt: issuedAt + 6 * 60_000 });
+    await expect(
+      verifyOffpayAiSessionToken(overlong, {
+        sharedSecret: SHARED_SECRET,
+        now: issuedAt,
+        skewMs: 0,
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining('lifetime') });
   });
 });
 
-interface BuildTokenParams {
-  walletAddress: string;
-  deviceId: string;
+async function buildToken(params: {
   issuedAt: number;
   expiresAt: number;
-  sharedSecret: string;
-  deviceSecret?: string;
-}
-
-async function buildToken(params: BuildTokenParams): Promise<string> {
-  const payload = `aud:offpay-ai|sub:${params.walletAddress}|dev:${params.deviceId}|iat:${params.issuedAt}|exp:${params.expiresAt}`;
-  const signature = await hmacBase64Url(params.sharedSecret, payload);
-  const deviceBinding = (
-    await hmacBase64Url(params.deviceSecret ?? params.sharedSecret, payload)
-  ).slice(0, 32);
-  const header = base64Url(JSON.stringify({ alg: 'HS256', typ: 'OFFPAY_AI', ver: 'v1' }));
-  return `${header}.${base64Url(payload)}.${signature}.${deviceBinding}`;
+  sharedSecret?: string;
+}): Promise<string> {
+  const claims = {
+    aud: 'offpay-ai',
+    iss: 'offpay-api',
+    sub: WALLET,
+    dev: 'device-alpha',
+    net: 'mainnet',
+    iat: params.issuedAt,
+    exp: params.expiresAt,
+    jti: '00000000-0000-4000-8000-000000000000',
+  };
+  const payload = base64Url(JSON.stringify(claims));
+  const signingInput = `v2.${payload}`;
+  const signature = await hmacBase64Url(params.sharedSecret ?? SHARED_SECRET, signingInput);
+  return `${signingInput}.${signature}`;
 }
 
 async function hmacBase64Url(secret: string, message: string): Promise<string> {
@@ -133,10 +112,5 @@ function base64Url(input: string): string {
 }
 
 function base64UrlFromBytes(bytes: Uint8Array): string {
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  const base64 = typeof btoa === 'function' ? btoa(binary) : Buffer.from(binary, 'binary').toString('base64');
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return Buffer.from(bytes).toString('base64url');
 }

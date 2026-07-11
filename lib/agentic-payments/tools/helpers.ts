@@ -240,11 +240,37 @@ export function isExplicitUmbraReadRequest(userText: string): boolean {
 }
 
 export function isExplicitUmbraClaimScanRequest(userText: string): boolean {
-  const text = userText.trim();
+  const text = latestAgenticUserTurn(userText);
+  if (isExplicitUmbraClaimExecutionRequest(text)) return false;
   return (
-    (/\bumbra\b/i.test(text) && /\b(claim|claims)\b/i.test(text)) ||
-    /\b(pending\s+claims?|claim\s+scan|scan\s+claims?|check\s+claims?)\b/i.test(text)
+    /\bumbra\b/i.test(text) &&
+    /\b(claim|claims)\b/i.test(text) &&
+    /\b(scan|check|show|list|status|pending|any|how\s+many|are\s+there)\b/i.test(text)
   );
+}
+
+export function isExplicitUmbraClaimExecutionRequest(userText: string): boolean {
+  const text = latestAgenticUserTurn(userText);
+  if (
+    /\b(?:do\s+not|don't|dont|never)\b[^.!?]*\b(?:claim|redeem|collect)\b/i.test(text) ||
+    /\b(?:how|where)\s+(?:do|can|should)\s+i\b/i.test(text) ||
+    /\bcan\s+i\b[^.!?]*\b(?:claim|redeem|collect)\b/i.test(text)
+  ) {
+    return false;
+  }
+  return (
+    /\b(?:claim|redeem|collect)\b/i.test(text) &&
+    (/\bumbra\b/i.test(text) ||
+      /\b(?:my|the|these|those|all|pending)\s+(?:umbra\s+)?claims?\b/i.test(text))
+  );
+}
+
+function latestAgenticUserTurn(userText: string): string {
+  const turns = userText
+    .split('\n')
+    .map((turn) => turn.trim())
+    .filter((turn) => turn.length > 0);
+  return turns.at(-1) ?? '';
 }
 
 export function isExplicitMagicBlockPrivateBalanceRequest(userText: string): boolean {

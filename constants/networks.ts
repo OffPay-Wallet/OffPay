@@ -25,25 +25,13 @@ export interface SolanaNetwork {
   unavailableDescription?: string;
 }
 
-/**
- * Client-side mainnet kill switch.
- *
- * Keep this false for public builds. Flip only in an internal/admin build;
- * it is intentionally not user-configurable from the app UI. Client code is
- * not a secure secret boundary, so backend authorization must still enforce
- * any real mainnet access controls.
- */
-const ENABLE_MAINNET_IN_CLIENT = false;
-
 /** Provider endpoints are loaded from Expo `EXPO_PUBLIC_*` env vars and protected at the provider level. */
 export const SOLANA_NETWORKS: readonly SolanaNetwork[] = [
   {
     id: 'mainnet-beta',
     label: 'Mainnet',
     description: 'Real SOL and tokens',
-    selectable: ENABLE_MAINNET_IN_CLIENT,
-    adminOnly: true,
-    unavailableDescription: 'Unavailable',
+    selectable: true,
   },
   {
     id: 'devnet',
@@ -53,8 +41,8 @@ export const SOLANA_NETWORKS: readonly SolanaNetwork[] = [
   },
 ] as const;
 
-/** Default network */
-export const DEFAULT_NETWORK: SolanaNetworkId = 'devnet';
+/** Mainnet is the production default; an existing persisted Devnet choice is preserved. */
+export const DEFAULT_NETWORK: SolanaNetworkId = 'mainnet-beta';
 
 export function isSolanaNetworkSelectable(network: SolanaNetworkId): boolean {
   return SOLANA_NETWORKS.some((entry) => entry.id === network && entry.selectable);

@@ -6,6 +6,8 @@ import {
   runKvPipeline,
   sanitizeText,
 } from './provider-utils.js';
+import { acquireRedisLock, releaseRedisLock } from './redis-lock.js';
+import { readBoundTransactionMessage } from './solana-transaction-binding.js';
 import { isRecord, isValidSolanaAddress } from './validation.js';
 import type { Bindings, Network } from './types.js';
 
@@ -13,6 +15,15 @@ const DEFAULT_JUPITER_TRIGGER_API_BASE_URL = 'https://api.jup.ag/trigger/v2';
 const TRIGGER_AUTH_KEY_PREFIX = 'trigger-auth:v1';
 const TRIGGER_JWT_TTL_MS = 24 * 60 * 60 * 1000;
 const TRIGGER_JWT_REFRESH_WINDOW_MS = 5 * 60 * 1000;
+const TRIGGER_DEPOSIT_KEY_PREFIX = 'trigger-deposit:v1';
+const TRIGGER_DEPOSIT_LOCK_KEY_PREFIX = 'trigger-deposit-lock:v1';
+const TRIGGER_DEPOSIT_TTL_MS = 60_000;
+const TRIGGER_DEPOSIT_LOCK_TTL_SECONDS = 120;
+const TRIGGER_CANCEL_KEY_PREFIX = 'trigger-cancel:v1';
+const TRIGGER_CANCEL_LOCK_KEY_PREFIX = 'trigger-cancel-lock:v1';
+const TRIGGER_CANCEL_TTL_MS = 5 * 60_000;
+const TRIGGER_CANCEL_RESULT_TTL_MS = 24 * 60 * 60_000;
+const TRIGGER_CANCEL_LOCK_TTL_SECONDS = 120;
 
 type TriggerChallengeType = 'message' | 'transaction';
 type TriggerOrderType = 'single' | 'oco' | 'otoco';
@@ -55,6 +66,7 @@ interface TriggerDepositPreparationRequest {
   inputMint: string;
   outputMint: string;
   amount: string;
+  orderSubType: TriggerOrderType;
   network: Network;
 }
 
@@ -94,6 +106,71 @@ interface TriggerOrderResponse {
   depositSignature: string;
 }
 
+type TriggerOrderState =
+  | 'pending'
+  | 'open'
+  | 'executing'
+  | 'filled'
+  | 'pending_withdraw'
+  | 'cancelled'
+  | 'expired'
+  | 'failed';
+
+interface TriggerOrderSummary {
+  id: string;
+  orderType: TriggerOrderType;
+  orderState: TriggerOrderState;
+  rawState: string | null;
+  inputMint: string;
+  outputMint: string;
+  triggerMint: string | null;
+  initialInputAmount: string | null;
+  remainingInputAmount: string | null;
+  outputAmount: string | null;
+  expiresAt: number | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
+interface TriggerOrderListRequest {
+  walletAddress: string;
+  network: Network;
+  state?: 'active' | 'past';
+  limit?: number;
+  offset?: number;
+}
+
+interface TriggerOrderListResponse {
+  orders: TriggerOrderSummary[];
+  pagination: { total: number; limit: number; offset: number };
+}
+
+interface TriggerCancelPrepareRequest {
+  walletAddress: string;
+  network: Network;
+  orderId: string;
+}
+
+interface TriggerCancelPrepareResponse {
+  orderId: string;
+  cancelRequestId: string;
+  unsignedTransaction: string;
+}
+
+interface TriggerCancelConfirmRequest {
+  walletAddress: string;
+  network: Network;
+  orderId: string;
+  cancelRequestId: string;
+  signedTransaction: string;
+}
+
+interface TriggerCancelConfirmResponse {
+  orderId: string;
+  status: 'cancelled';
+  signature: string;
+}
+
 interface JupiterTriggerHttpResult {
   response: Response;
   payload: unknown;
@@ -103,6 +180,27 @@ interface StoredTriggerAuthSession {
   walletAddress: string;
   network: Network;
   token: string;
+  expiresAt: number;
+}
+
+interface StoredTriggerDeposit {
+  walletAddress: string;
+  network: Network;
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  orderSubType: TriggerOrderType;
+  transactionMessageBase64: string;
+  expiresAt: number;
+}
+
+interface StoredTriggerCancelIntent {
+  walletAddress: string;
+  network: Network;
+  orderId: string;
+  transactionMessageBase64: string;
+  status: 'pending' | 'completed';
+  signature: string | null;
   expiresAt: number;
 }
 
@@ -162,8 +260,34 @@ function assertTriggerMainnet(network: Network): void {
   });
 }
 
+function assertTriggerLifecycleVerifiable(): void {
+  throw new AppError({
+    status: 503,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message:
+      'Trigger order creation and cancellation are disabled until vault withdrawal transactions can be semantically verified for every refund leg.',
+    retryable: false,
+  });
+}
+
 function buildTriggerAuthKey(network: Network, walletAddress: string): string {
   return `${TRIGGER_AUTH_KEY_PREFIX}:${network}:${walletAddress}`;
+}
+
+function buildTriggerDepositKey(depositRequestId: string): string {
+  return `${TRIGGER_DEPOSIT_KEY_PREFIX}:${depositRequestId}`;
+}
+
+function buildTriggerDepositLockKey(depositRequestId: string): string {
+  return `${TRIGGER_DEPOSIT_LOCK_KEY_PREFIX}:${depositRequestId}`;
+}
+
+function buildTriggerCancelKey(cancelRequestId: string): string {
+  return `${TRIGGER_CANCEL_KEY_PREFIX}:${cancelRequestId}`;
+}
+
+function buildTriggerCancelLockKey(cancelRequestId: string): string {
+  return `${TRIGGER_CANCEL_LOCK_KEY_PREFIX}:${cancelRequestId}`;
 }
 
 function buildTriggerHeaders(
@@ -187,9 +311,7 @@ function readJupiterTriggerApiBaseUrl(bindings: Bindings): string {
 
   try {
     const parsed = new URL(configuredUrl);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new Error('Unsupported Jupiter Trigger API protocol.');
-    }
+    if (parsed.protocol !== 'https:') throw new Error('Jupiter Trigger API must use HTTPS.');
     return parsed.toString().replace(/\/$/, '');
   } catch (error) {
     throw new AppError({
@@ -240,13 +362,163 @@ async function storeTriggerAuthSession(
   session: StoredTriggerAuthSession,
 ): Promise<void> {
   const ttlSeconds = Math.max(1, Math.ceil((session.expiresAt - Date.now()) / 1000));
-  await runKvPipeline(bindings, [[
-    'SET',
-    buildTriggerAuthKey(session.network, session.walletAddress),
-    JSON.stringify(session),
-    'EX',
-    ttlSeconds,
-  ]], 'Trigger session storage is unavailable.');
+  await runKvPipeline(
+    bindings,
+    [
+      [
+        'SET',
+        buildTriggerAuthKey(session.network, session.walletAddress),
+        JSON.stringify(session),
+        'EX',
+        ttlSeconds,
+      ],
+    ],
+    'Trigger session storage is unavailable.',
+  );
+}
+
+async function storeTriggerDeposit(
+  bindings: Bindings,
+  depositRequestId: string,
+  deposit: StoredTriggerDeposit,
+): Promise<void> {
+  const ttlSeconds = Math.max(1, Math.ceil((deposit.expiresAt - Date.now()) / 1000));
+  await runKvPipeline(
+    bindings,
+    [['SET', buildTriggerDepositKey(depositRequestId), JSON.stringify(deposit), 'EX', ttlSeconds]],
+    'Trigger deposit state storage is unavailable.',
+  );
+}
+
+async function getTriggerDeposit(
+  bindings: Bindings,
+  depositRequestId: string,
+): Promise<StoredTriggerDeposit | null> {
+  const [result] = await runKvPipeline(
+    bindings,
+    [['GET', buildTriggerDepositKey(depositRequestId)]],
+    'Trigger deposit state storage is unavailable.',
+  );
+  if (typeof result !== 'string' || result.trim().length === 0) return null;
+
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (!isRecord(parsed)) return null;
+    const walletAddress = readTrimmedString(parsed.walletAddress);
+    const network = readTrimmedString(parsed.network);
+    const inputMint = readTrimmedString(parsed.inputMint);
+    const outputMint = readTrimmedString(parsed.outputMint);
+    const amount = readTrimmedString(parsed.amount);
+    const orderSubType = readTrimmedString(parsed.orderSubType);
+    const transactionMessageBase64 = readTrimmedString(parsed.transactionMessageBase64);
+    const expiresAt = readFiniteNumber(parsed.expiresAt);
+    if (
+      !walletAddress ||
+      !isValidSolanaAddress(walletAddress) ||
+      (network !== 'mainnet' && network !== 'devnet') ||
+      !inputMint ||
+      !isValidSolanaAddress(inputMint) ||
+      !outputMint ||
+      !isValidSolanaAddress(outputMint) ||
+      !amount ||
+      (orderSubType !== 'single' && orderSubType !== 'oco' && orderSubType !== 'otoco') ||
+      !transactionMessageBase64 ||
+      expiresAt == null
+    ) {
+      return null;
+    }
+    return {
+      walletAddress,
+      network,
+      inputMint,
+      outputMint,
+      amount,
+      orderSubType,
+      transactionMessageBase64,
+      expiresAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function deleteTriggerDeposit(bindings: Bindings, depositRequestId: string): Promise<void> {
+  await runKvPipeline(
+    bindings,
+    [['DEL', buildTriggerDepositKey(depositRequestId)]],
+    'Trigger deposit state storage is unavailable.',
+  );
+}
+
+async function storeTriggerCancelIntent(
+  bindings: Bindings,
+  cancelRequestId: string,
+  intent: StoredTriggerCancelIntent,
+): Promise<void> {
+  const ttlSeconds = Math.max(1, Math.ceil((intent.expiresAt - Date.now()) / 1000));
+  await runKvPipeline(
+    bindings,
+    [['SET', buildTriggerCancelKey(cancelRequestId), JSON.stringify(intent), 'EX', ttlSeconds]],
+    'Trigger cancellation state storage is unavailable.',
+  );
+}
+
+async function getTriggerCancelIntent(
+  bindings: Bindings,
+  cancelRequestId: string,
+): Promise<StoredTriggerCancelIntent | null> {
+  const [result] = await runKvPipeline(
+    bindings,
+    [['GET', buildTriggerCancelKey(cancelRequestId)]],
+    'Trigger cancellation state storage is unavailable.',
+  );
+  if (typeof result !== 'string' || result.trim().length === 0) return null;
+
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (!isRecord(parsed)) return null;
+    const walletAddress = readTrimmedString(parsed.walletAddress);
+    const network = readTrimmedString(parsed.network);
+    const orderId = readTrimmedString(parsed.orderId);
+    const transactionMessageBase64 = readTrimmedString(parsed.transactionMessageBase64);
+    const status = readTrimmedString(parsed.status);
+    const signature = readTrimmedString(parsed.signature);
+    const expiresAt = readFiniteNumber(parsed.expiresAt);
+    if (
+      !walletAddress ||
+      !isValidSolanaAddress(walletAddress) ||
+      network !== 'mainnet' ||
+      !orderId ||
+      !transactionMessageBase64 ||
+      (status !== 'pending' && status !== 'completed') ||
+      (status === 'completed' && !signature) ||
+      expiresAt == null
+    ) {
+      return null;
+    }
+    return {
+      walletAddress,
+      network,
+      orderId,
+      transactionMessageBase64,
+      status,
+      signature,
+      expiresAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function deleteTriggerCancelIntent(
+  bindings: Bindings,
+  cancelRequestId: string,
+): Promise<void> {
+  await runKvPipeline(
+    bindings,
+    [['DEL', buildTriggerCancelKey(cancelRequestId)]],
+    'Trigger cancellation state storage is unavailable.',
+  );
 }
 
 async function clearTriggerAuthSession(
@@ -314,7 +586,12 @@ async function requireTriggerAuthSession(
   network: Network,
 ): Promise<StoredTriggerAuthSession> {
   const session = await getTriggerAuthSession(bindings, walletAddress, network);
-  if (!session || session.expiresAt <= Date.now() + TRIGGER_JWT_REFRESH_WINDOW_MS) {
+  if (
+    !session ||
+    session.walletAddress !== walletAddress ||
+    session.network !== network ||
+    session.expiresAt <= Date.now() + TRIGGER_JWT_REFRESH_WINDOW_MS
+  ) {
     if (session) {
       await clearTriggerAuthSession(bindings, walletAddress, network);
     }
@@ -370,7 +647,13 @@ function parseVaultResponse(payload: unknown, walletAddress: string): TriggerVau
   const privyVaultId = readTrimmedString(payload.privyVaultId);
   const privyUserId = readTrimmedString(payload.privyUserId);
 
-  if (!userPubkey || !vaultPubkey || !privyVaultId) {
+  if (
+    !userPubkey ||
+    userPubkey !== walletAddress ||
+    !vaultPubkey ||
+    !isValidSolanaAddress(vaultPubkey) ||
+    !privyVaultId
+  ) {
     throw new AppError({
       status: 503,
       code: 'UPSTREAM_UNAVAILABLE',
@@ -599,10 +882,162 @@ async function getOrRegisterTriggerVault(
   });
 }
 
+function assertTriggerOrderId(value: string, label: string): void {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
+    throw new AppError({ status: 400, code: 'INVALID_REQUEST', message: `${label} is invalid.` });
+  }
+}
+
+function parseTriggerOrderSummary(value: unknown, walletAddress: string): TriggerOrderSummary {
+  if (!isRecord(value)) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Trigger order history returned an invalid order.',
+      retryable: true,
+    });
+  }
+  const id = readTrimmedString(value.id);
+  const orderType = readTrimmedString(value.orderType);
+  const orderState = readTrimmedString(value.orderState);
+  const userPubkey = readTrimmedString(value.userPubkey);
+  const inputMint = readTrimmedString(value.inputMint);
+  const outputMint = readTrimmedString(value.outputMint);
+  const triggerMint = readTrimmedString(value.triggerMint);
+  const validState =
+    orderState === 'pending' ||
+    orderState === 'open' ||
+    orderState === 'executing' ||
+    orderState === 'filled' ||
+    orderState === 'pending_withdraw' ||
+    orderState === 'cancelled' ||
+    orderState === 'expired' ||
+    orderState === 'failed';
+  if (
+    !id ||
+    (orderType !== 'single' && orderType !== 'oco' && orderType !== 'otoco') ||
+    !validState ||
+    userPubkey !== walletAddress ||
+    !inputMint ||
+    !isValidSolanaAddress(inputMint) ||
+    !outputMint ||
+    !isValidSolanaAddress(outputMint) ||
+    (triggerMint != null && !isValidSolanaAddress(triggerMint))
+  ) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Trigger order history could not be verified for this wallet.',
+      retryable: true,
+    });
+  }
+  return {
+    id,
+    orderType,
+    orderState,
+    rawState: readTrimmedString(value.rawState),
+    inputMint,
+    outputMint,
+    triggerMint,
+    initialInputAmount: readTrimmedString(value.initialInputAmount),
+    remainingInputAmount: readTrimmedString(value.remainingInputAmount),
+    outputAmount: readTrimmedString(value.outputAmount),
+    expiresAt: readFiniteNumber(value.expiresAt),
+    createdAt: readFiniteNumber(value.createdAt),
+    updatedAt: readFiniteNumber(value.updatedAt),
+  };
+}
+
+async function listTriggerOrders(
+  bindings: Bindings,
+  request: TriggerOrderListRequest,
+): Promise<TriggerOrderListResponse> {
+  assertTriggerMainnet(request.network);
+  const limit = request.limit ?? 20;
+  const offset = request.offset ?? 0;
+  if (
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > 100 ||
+    !Number.isInteger(offset) ||
+    offset < 0
+  ) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Trigger order pagination is invalid.',
+    });
+  }
+  return withTriggerAuthRetry(
+    bindings,
+    request.walletAddress,
+    request.network,
+    async (jwtToken) => {
+      const params = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+        sort: 'updated_at',
+        dir: 'desc',
+      });
+      if (request.state) params.set('state', request.state);
+      const { response, payload } = await fetchTriggerJson(
+        bindings,
+        `/orders/history?${params.toString()}`,
+        { method: 'GET' },
+        'Trigger order history is currently unavailable.',
+        jwtToken,
+      );
+      if (!response.ok || !isRecord(payload) || !Array.isArray(payload.orders)) {
+        throw new AppError({
+          status: response.status === 401 || response.status === 403 ? response.status : 503,
+          code:
+            response.status === 401
+              ? 'TRIGGER_AUTH_REQUIRED'
+              : response.status === 403
+                ? 'INVALID_REQUEST'
+                : 'UPSTREAM_UNAVAILABLE',
+          message:
+            extractProviderMessage(payload) ?? 'Trigger order history is currently unavailable.',
+          retryable: response.status !== 403,
+        });
+      }
+      const pagination = isRecord(payload.pagination) ? payload.pagination : null;
+      const total = pagination ? readFiniteNumber(pagination.total) : null;
+      const responseLimit = pagination ? readFiniteNumber(pagination.limit) : null;
+      const responseOffset = pagination ? readFiniteNumber(pagination.offset) : null;
+      if (
+        total == null ||
+        responseLimit == null ||
+        responseOffset == null ||
+        !Number.isInteger(total) ||
+        !Number.isInteger(responseLimit) ||
+        !Number.isInteger(responseOffset) ||
+        total < 0 ||
+        responseLimit < 1 ||
+        responseOffset < 0
+      ) {
+        throw new AppError({
+          status: 503,
+          code: 'UPSTREAM_UNAVAILABLE',
+          message: 'Trigger order history pagination is invalid.',
+          retryable: true,
+        });
+      }
+      return {
+        orders: payload.orders.map((order) =>
+          parseTriggerOrderSummary(order, request.walletAddress),
+        ),
+        pagination: { total, limit: responseLimit, offset: responseOffset },
+      };
+    },
+  );
+}
+
 async function prepareTriggerOrderDeposit(
   bindings: Bindings,
   request: TriggerDepositPreparationRequest,
 ): Promise<TriggerDepositPreparationResponse> {
+  assertTriggerLifecycleVerifiable();
   assertTriggerMainnet(request.network);
   assertSupportedMint(request.inputMint, 'Input mint address is invalid.');
   assertSupportedMint(request.outputMint, 'Output mint address is invalid.');
@@ -613,62 +1048,92 @@ async function prepareTriggerOrderDeposit(
 
   const vault = await getOrRegisterTriggerVault(bindings, request.walletAddress, request.network);
 
-  return withTriggerAuthRetry(bindings, request.walletAddress, request.network, async (jwtToken) => {
-    const { response, payload } = await fetchTriggerJson(
-      bindings,
-      '/deposit/craft',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+  return withTriggerAuthRetry(
+    bindings,
+    request.walletAddress,
+    request.network,
+    async (jwtToken) => {
+      const { response, payload } = await fetchTriggerJson(
+        bindings,
+        '/deposit/craft',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            inputMint: request.inputMint,
+            outputMint: request.outputMint,
+            userAddress: request.walletAddress,
+            amount: request.amount,
+            orderType: 'price',
+            orderSubType: request.orderSubType,
+          }),
         },
-        body: JSON.stringify({
-          inputMint: request.inputMint,
-          outputMint: request.outputMint,
-          userAddress: request.walletAddress,
-          amount: request.amount,
+        'Trigger deposit preparation is currently unavailable.',
+        jwtToken,
+      );
+
+      if (!response.ok || !isRecord(payload)) {
+        throw new AppError({
+          status: response.status === 400 ? 400 : 503,
+          code: response.status === 400 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
+          message:
+            extractProviderMessage(payload) ??
+            'Trigger deposit preparation is currently unavailable.',
+          retryable: response.status !== 400,
+        });
+      }
+
+      const depositRequestId = readTrimmedString(payload.requestId);
+      const unsignedTransaction = readTrimmedString(payload.transaction);
+      const receiverAddress = readTrimmedString(payload.receiverAddress);
+      const mint = readTrimmedString(payload.mint);
+      const amount = readTrimmedString(payload.amount);
+      const tokenDecimals = readFiniteNumber(payload.tokenDecimals);
+
+      if (
+        !depositRequestId ||
+        !unsignedTransaction ||
+        mint !== request.inputMint ||
+        amount !== request.amount ||
+        (receiverAddress != null && !isValidSolanaAddress(receiverAddress))
+      ) {
+        throw new AppError({
+          status: 503,
+          code: 'UPSTREAM_UNAVAILABLE',
+          message: 'Trigger deposit preparation is currently unavailable.',
+          retryable: true,
+        });
+      }
+
+      await storeTriggerDeposit(bindings, depositRequestId, {
+        walletAddress: request.walletAddress,
+        network: request.network,
+        inputMint: request.inputMint,
+        outputMint: request.outputMint,
+        amount: request.amount,
+        orderSubType: request.orderSubType,
+        transactionMessageBase64: readBoundTransactionMessage({
+          transactionBase64: unsignedTransaction,
+          requiredSignerAddress: request.walletAddress,
+          requireSignerSignature: false,
+          label: 'Trigger deposit',
         }),
-      },
-      'Trigger deposit preparation is currently unavailable.',
-      jwtToken,
-    );
-
-    if (!response.ok || !isRecord(payload)) {
-      throw new AppError({
-        status: response.status === 400 ? 400 : 503,
-        code: response.status === 400 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
-        message:
-          extractProviderMessage(payload) ?? 'Trigger deposit preparation is currently unavailable.',
-        retryable: response.status !== 400,
+        expiresAt: Date.now() + TRIGGER_DEPOSIT_TTL_MS,
       });
-    }
 
-    const depositRequestId = readTrimmedString(payload.requestId);
-    const unsignedTransaction = readTrimmedString(payload.transaction);
-    const receiverAddress = readTrimmedString(payload.receiverAddress);
-    const mint = readTrimmedString(payload.mint);
-    const amount = readTrimmedString(payload.amount);
-    const tokenDecimals = readFiniteNumber(payload.tokenDecimals);
-
-    if (!depositRequestId || !unsignedTransaction || !mint || !amount) {
-      throw new AppError({
-        status: 503,
-        code: 'UPSTREAM_UNAVAILABLE',
-        message: 'Trigger deposit preparation is currently unavailable.',
-        retryable: true,
-      });
-    }
-
-    return {
-      depositRequestId,
-      unsignedTransaction,
-      receiverAddress,
-      mint,
-      amount,
-      tokenDecimals,
-      vault,
-    };
-  });
+      return {
+        depositRequestId,
+        unsignedTransaction,
+        receiverAddress,
+        mint,
+        amount,
+        tokenDecimals,
+        vault,
+      };
+    },
+  );
 }
 
 function assertSlippageBps(value: number | undefined, fieldLabel: string): void {
@@ -784,8 +1249,7 @@ function validateTriggerOrderRequest(request: TriggerOrderRequest): void {
         throw new AppError({
           status: 400,
           code: 'INVALID_REQUEST',
-          message:
-            'OTOCO trigger orders require triggerPriceUsd, tpPriceUsd, and slPriceUsd.',
+          message: 'OTOCO trigger orders require triggerPriceUsd, tpPriceUsd, and slPriceUsd.',
         });
       }
 
@@ -804,95 +1268,386 @@ async function createTriggerOrder(
   bindings: Bindings,
   request: TriggerOrderRequest,
 ): Promise<TriggerOrderResponse> {
+  assertTriggerLifecycleVerifiable();
   validateTriggerOrderRequest(request);
 
-  return withTriggerAuthRetry(bindings, request.walletAddress, request.network, async (jwtToken) => {
-    const body: Record<string, unknown> = {
-      orderType: request.orderType,
-      depositRequestId: request.depositRequestId,
-      depositSignedTx: request.depositSignedTransaction,
-      userPubkey: request.walletAddress,
-      inputMint: request.inputMint,
-      inputAmount: request.inputAmount,
-      outputMint: request.outputMint,
-      triggerMint: request.triggerMint,
-      expiresAt: request.expiresAt,
-    };
+  const lockKey = buildTriggerDepositLockKey(request.depositRequestId);
+  const lockToken = await acquireRedisLock({
+    bindings,
+    key: lockKey,
+    ttlSeconds: TRIGGER_DEPOSIT_LOCK_TTL_SECONDS,
+    unavailableMessage: 'Trigger deposit state storage is unavailable.',
+  });
+  if (!lockToken) {
+    throw new AppError({
+      status: 409,
+      code: 'INVALID_REQUEST',
+      message: 'This trigger deposit is already being submitted.',
+      retryable: true,
+      retryAfterMs: 1000,
+    });
+  }
+  const acquiredLockToken = lockToken;
 
-    if (request.triggerCondition) {
-      body.triggerCondition = request.triggerCondition;
-    }
-
-    if (request.triggerPriceUsd !== undefined) {
-      body.triggerPriceUsd = request.triggerPriceUsd;
-    }
-
-    if (request.slippageBps !== undefined) {
-      body.slippageBps = request.slippageBps;
-    }
-
-    if (request.tpPriceUsd !== undefined) {
-      body.tpPriceUsd = request.tpPriceUsd;
-    }
-
-    if (request.slPriceUsd !== undefined) {
-      body.slPriceUsd = request.slPriceUsd;
-    }
-
-    if (request.tpSlippageBps !== undefined) {
-      body.tpSlippageBps = request.tpSlippageBps;
-    }
-
-    if (request.slSlippageBps !== undefined) {
-      body.slSlippageBps = request.slSlippageBps;
-    }
-
-    const { response, payload } = await fetchTriggerJson(
-      bindings,
-      '/orders/price',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      },
-      'Trigger order creation is currently unavailable.',
-      jwtToken,
-    );
-
-    if (!response.ok || !isRecord(payload)) {
+  try {
+    const deposit = await getTriggerDeposit(bindings, request.depositRequestId);
+    if (deposit == null) {
       throw new AppError({
-        status: response.status === 400 ? 400 : 503,
-        code: response.status === 400 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
-        message: extractProviderMessage(payload) ?? 'Trigger order creation is currently unavailable.',
-        retryable: response.status !== 400,
+        status: 409,
+        code: 'QUOTE_EXPIRED',
+        message: 'The trigger deposit draft expired. Please prepare and sign a fresh deposit.',
+        retryable: true,
       });
     }
-
-    const triggerId = readTrimmedString(payload.id);
-    const depositSignature = readTrimmedString(payload.txSignature);
-
-    if (!triggerId || !depositSignature) {
+    if (
+      deposit.walletAddress !== request.walletAddress ||
+      deposit.network !== request.network ||
+      deposit.inputMint !== request.inputMint ||
+      deposit.outputMint !== request.outputMint ||
+      deposit.amount !== request.inputAmount ||
+      deposit.orderSubType !== request.orderType ||
+      deposit.expiresAt <= Date.now()
+    ) {
+      await deleteTriggerDeposit(bindings, request.depositRequestId);
       throw new AppError({
-        status: 503,
-        code: 'UPSTREAM_UNAVAILABLE',
-        message: 'Trigger order creation is currently unavailable.',
+        status: 409,
+        code: 'QUOTE_EXPIRED',
+        message: 'The trigger deposit draft expired. Please prepare and sign a fresh deposit.',
         retryable: true,
       });
     }
 
-    return {
-      triggerId,
-      status: 'open',
-      depositSignature,
-    };
+    const signedMessage = readBoundTransactionMessage({
+      transactionBase64: request.depositSignedTransaction,
+      requiredSignerAddress: request.walletAddress,
+      requireSignerSignature: true,
+      label: 'Trigger deposit',
+    });
+    if (signedMessage !== deposit.transactionMessageBase64) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed trigger deposit does not match the prepared transaction.',
+      });
+    }
+
+    const result = await withTriggerAuthRetry<TriggerOrderResponse>(
+      bindings,
+      request.walletAddress,
+      request.network,
+      async (jwtToken) => {
+        const body: Record<string, unknown> = {
+          orderType: request.orderType,
+          depositRequestId: request.depositRequestId,
+          depositSignedTx: request.depositSignedTransaction,
+          userPubkey: request.walletAddress,
+          inputMint: request.inputMint,
+          inputAmount: request.inputAmount,
+          outputMint: request.outputMint,
+          triggerMint: request.triggerMint,
+          expiresAt: request.expiresAt,
+        };
+
+        if (request.triggerCondition) {
+          body.triggerCondition = request.triggerCondition;
+        }
+
+        if (request.triggerPriceUsd !== undefined) {
+          body.triggerPriceUsd = request.triggerPriceUsd;
+        }
+
+        if (request.slippageBps !== undefined) {
+          body.slippageBps = request.slippageBps;
+        }
+
+        if (request.tpPriceUsd !== undefined) {
+          body.tpPriceUsd = request.tpPriceUsd;
+        }
+
+        if (request.slPriceUsd !== undefined) {
+          body.slPriceUsd = request.slPriceUsd;
+        }
+
+        if (request.tpSlippageBps !== undefined) {
+          body.tpSlippageBps = request.tpSlippageBps;
+        }
+
+        if (request.slSlippageBps !== undefined) {
+          body.slSlippageBps = request.slSlippageBps;
+        }
+
+        const { response, payload } = await fetchTriggerJson(
+          bindings,
+          '/orders/price',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          },
+          'Trigger order creation is currently unavailable.',
+          jwtToken,
+        );
+
+        if (!response.ok || !isRecord(payload)) {
+          throw new AppError({
+            status: response.status === 400 ? 400 : 503,
+            code: response.status === 400 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
+            message:
+              extractProviderMessage(payload) ?? 'Trigger order creation is currently unavailable.',
+            retryable: response.status !== 400,
+          });
+        }
+
+        const triggerId = readTrimmedString(payload.id);
+        const depositSignature = readTrimmedString(payload.txSignature);
+
+        if (!triggerId || !depositSignature) {
+          throw new AppError({
+            status: 503,
+            code: 'UPSTREAM_UNAVAILABLE',
+            message: 'Trigger order creation is currently unavailable.',
+            retryable: true,
+          });
+        }
+
+        return {
+          triggerId,
+          status: 'open',
+          depositSignature,
+        };
+      },
+    );
+    await deleteTriggerDeposit(bindings, request.depositRequestId);
+    return result;
+  } finally {
+    await releaseRedisLock({
+      bindings,
+      key: lockKey,
+      token: acquiredLockToken,
+      unavailableMessage: 'Trigger deposit state storage is unavailable.',
+    });
+  }
+}
+
+async function prepareTriggerOrderCancellation(
+  bindings: Bindings,
+  request: TriggerCancelPrepareRequest,
+): Promise<TriggerCancelPrepareResponse> {
+  assertTriggerLifecycleVerifiable();
+  assertTriggerMainnet(request.network);
+  assertTriggerOrderId(request.orderId, 'Trigger order ID');
+
+  return withTriggerAuthRetry(
+    bindings,
+    request.walletAddress,
+    request.network,
+    async (jwtToken) => {
+      const { response, payload } = await fetchTriggerJson(
+        bindings,
+        `/orders/price/cancel/${encodeURIComponent(request.orderId)}`,
+        { method: 'POST' },
+        'Trigger order cancellation is currently unavailable.',
+        jwtToken,
+      );
+      if (!response.ok || !isRecord(payload)) {
+        throw new AppError({
+          status:
+            response.status === 400 ||
+            response.status === 401 ||
+            response.status === 403 ||
+            response.status === 404
+              ? response.status
+              : 503,
+          code:
+            response.status === 401
+              ? 'TRIGGER_AUTH_REQUIRED'
+              : response.status === 404
+                ? 'NOT_FOUND'
+                : response.status === 400 || response.status === 403
+                  ? 'INVALID_REQUEST'
+                  : 'UPSTREAM_UNAVAILABLE',
+          message:
+            extractProviderMessage(payload) ??
+            'Trigger order cancellation is currently unavailable.',
+          retryable: response.status >= 500 || response.status === 401,
+        });
+      }
+      const orderId = readTrimmedString(payload.id);
+      const unsignedTransaction = readTrimmedString(payload.transaction);
+      const cancelRequestId = readTrimmedString(payload.requestId);
+      if (orderId !== request.orderId || !unsignedTransaction || !cancelRequestId) {
+        throw new AppError({
+          status: 503,
+          code: 'UPSTREAM_UNAVAILABLE',
+          message: 'Trigger cancellation response could not be bound to the requested order.',
+          retryable: true,
+        });
+      }
+      assertTriggerOrderId(cancelRequestId, 'Trigger cancel request ID');
+      await storeTriggerCancelIntent(bindings, cancelRequestId, {
+        walletAddress: request.walletAddress,
+        network: request.network,
+        orderId: request.orderId,
+        transactionMessageBase64: readBoundTransactionMessage({
+          transactionBase64: unsignedTransaction,
+          requiredSignerAddress: request.walletAddress,
+          requireSignerSignature: false,
+          label: 'Trigger cancellation withdrawal',
+        }),
+        status: 'pending',
+        signature: null,
+        expiresAt: Date.now() + TRIGGER_CANCEL_TTL_MS,
+      });
+      return { orderId, cancelRequestId, unsignedTransaction };
+    },
+  );
+}
+
+async function confirmTriggerOrderCancellation(
+  bindings: Bindings,
+  request: TriggerCancelConfirmRequest,
+): Promise<TriggerCancelConfirmResponse> {
+  assertTriggerMainnet(request.network);
+  assertTriggerOrderId(request.orderId, 'Trigger order ID');
+  assertTriggerOrderId(request.cancelRequestId, 'Trigger cancel request ID');
+  assertBase64Transaction(
+    request.signedTransaction,
+    'Signed trigger cancellation transaction must be base64-encoded.',
+  );
+
+  const lockKey = buildTriggerCancelLockKey(request.cancelRequestId);
+  const lockToken = await acquireRedisLock({
+    bindings,
+    key: lockKey,
+    ttlSeconds: TRIGGER_CANCEL_LOCK_TTL_SECONDS,
+    unavailableMessage: 'Trigger cancellation state storage is unavailable.',
   });
+  if (!lockToken) {
+    throw new AppError({
+      status: 409,
+      code: 'INVALID_REQUEST',
+      message: 'This trigger cancellation is already being submitted.',
+      retryable: true,
+      retryAfterMs: 1000,
+    });
+  }
+
+  try {
+    const intent = await getTriggerCancelIntent(bindings, request.cancelRequestId);
+    if (
+      intent == null ||
+      intent.walletAddress !== request.walletAddress ||
+      intent.network !== request.network ||
+      intent.orderId !== request.orderId
+    ) {
+      throw new AppError({
+        status: 409,
+        code: 'QUOTE_EXPIRED',
+        message: 'The trigger cancellation intent is missing or no longer matches this order.',
+        retryable: true,
+      });
+    }
+    const signedMessage = readBoundTransactionMessage({
+      transactionBase64: request.signedTransaction,
+      requiredSignerAddress: request.walletAddress,
+      requireSignerSignature: true,
+      label: 'Trigger cancellation withdrawal',
+    });
+    if (signedMessage !== intent.transactionMessageBase64) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed trigger cancellation does not match the prepared withdrawal.',
+      });
+    }
+    if (intent.status === 'completed' && intent.signature) {
+      return { orderId: request.orderId, status: 'cancelled', signature: intent.signature };
+    }
+    if (intent.expiresAt <= Date.now()) {
+      await deleteTriggerCancelIntent(bindings, request.cancelRequestId);
+      throw new AppError({
+        status: 410,
+        code: 'QUOTE_EXPIRED',
+        message: 'The trigger cancellation transaction expired. Prepare a fresh cancellation.',
+        retryable: true,
+      });
+    }
+
+    const result = await withTriggerAuthRetry<TriggerCancelConfirmResponse>(
+      bindings,
+      request.walletAddress,
+      request.network,
+      async (jwtToken) => {
+        const { response, payload } = await fetchTriggerJson(
+          bindings,
+          `/orders/price/confirm-cancel/${encodeURIComponent(request.orderId)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              signedTransaction: request.signedTransaction,
+              cancelRequestId: request.cancelRequestId,
+            }),
+          },
+          'Trigger cancellation confirmation is currently unavailable.',
+          jwtToken,
+        );
+        if (!response.ok || !isRecord(payload)) {
+          throw new AppError({
+            status:
+              response.status === 400 || response.status === 401 || response.status === 403
+                ? response.status
+                : 503,
+            code:
+              response.status === 401
+                ? 'TRIGGER_AUTH_REQUIRED'
+                : response.status === 400 || response.status === 403
+                  ? 'INVALID_REQUEST'
+                  : 'UPSTREAM_UNAVAILABLE',
+            message:
+              extractProviderMessage(payload) ??
+              'Trigger cancellation confirmation is currently unavailable.',
+            retryable: response.status >= 500 || response.status === 401,
+          });
+        }
+        const orderId = readTrimmedString(payload.id);
+        const signature = readTrimmedString(payload.txSignature);
+        if (orderId !== request.orderId || !signature) {
+          throw new AppError({
+            status: 503,
+            code: 'UPSTREAM_UNAVAILABLE',
+            message: 'Trigger cancellation confirmation could not be verified.',
+            retryable: true,
+          });
+        }
+        return { orderId, status: 'cancelled', signature };
+      },
+    );
+    await storeTriggerCancelIntent(bindings, request.cancelRequestId, {
+      ...intent,
+      status: 'completed',
+      signature: result.signature,
+      expiresAt: Date.now() + TRIGGER_CANCEL_RESULT_TTL_MS,
+    });
+    return result;
+  } finally {
+    await releaseRedisLock({
+      bindings,
+      key: lockKey,
+      token: lockToken,
+      unavailableMessage: 'Trigger cancellation state storage is unavailable.',
+    });
+  }
 }
 
 export {
+  confirmTriggerOrderCancellation,
   createTriggerOrder,
   getOrRegisterTriggerVault,
+  listTriggerOrders,
+  prepareTriggerOrderCancellation,
   prepareTriggerOrderDeposit,
   requestTriggerChallenge,
   verifyTriggerChallenge,
@@ -902,10 +1657,18 @@ export {
   type TriggerChallengeResponse,
   type TriggerChallengeType,
   type TriggerCondition,
+  type TriggerCancelConfirmRequest,
+  type TriggerCancelConfirmResponse,
+  type TriggerCancelPrepareRequest,
+  type TriggerCancelPrepareResponse,
   type TriggerDepositPreparationRequest,
   type TriggerDepositPreparationResponse,
   type TriggerOrderRequest,
   type TriggerOrderResponse,
+  type TriggerOrderListRequest,
+  type TriggerOrderListResponse,
+  type TriggerOrderState,
+  type TriggerOrderSummary,
   type TriggerOrderType,
   type TriggerVaultResponse,
 };

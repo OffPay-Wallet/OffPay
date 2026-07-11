@@ -28,6 +28,7 @@ interface SessionTokenGateResult {
   ok: boolean;
   walletSubject?: string;
   deviceId?: string;
+  network?: 'mainnet' | 'devnet';
   reason?: string;
 }
 
@@ -276,27 +277,20 @@ async function verifySessionToken(
   request: Request,
   env: AiProxyEnv,
 ): Promise<SessionTokenGateResult> {
-  const required = env.AI_PROXY_REQUIRE_SESSION_TOKEN === 'true';
   const sharedSecret = env.AI_PROXY_SESSION_SECRET?.trim() ?? '';
   const tokenHeader = request.headers.get('x-offpay-ai-session')?.trim() ?? '';
 
-  // Soft mode: no secret configured at all. Behave as before so existing
-  // deploys keep working until the rollout completes. Logs a single line
-  // so a misconfigured prod is easy to spot.
-  if (sharedSecret.length === 0) {
-    if (required) {
-      return { ok: false, reason: 'Shared secret is not configured.' };
-    }
-    return { ok: true };
+  if (sharedSecret.length < 32) {
+    return { ok: false, reason: 'Shared secret is not configured securely.' };
   }
-
-  if (tokenHeader.length === 0) {
-    return required ? { ok: false, reason: 'Missing session token.' } : { ok: true };
-  }
+  if (tokenHeader.length === 0) return { ok: false, reason: 'Missing session token.' };
 
   const result = await verifyOffpayAiSessionToken(tokenHeader, { sharedSecret });
-  if (!result.ok) {
-    return required ? { ok: false, reason: result.reason } : { ok: true };
-  }
-  return { ok: true, walletSubject: result.walletAddress, deviceId: result.deviceId };
+  if (!result.ok) return { ok: false, reason: result.reason };
+  return {
+    ok: true,
+    walletSubject: result.walletAddress,
+    deviceId: result.deviceId,
+    network: result.network,
+  };
 }

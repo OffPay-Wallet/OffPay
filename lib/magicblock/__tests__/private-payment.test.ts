@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 
+import { PublicKey } from '@solana/web3.js';
 import bs58 from 'bs58';
 
 import { getRpcAccounts } from '@/lib/api/offpay-api-client';
@@ -35,13 +36,23 @@ const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const ADDRESS_LOOKUP_TABLE_PROGRAM_ID = 'AddressLookupTab1e1111111111111111111111111';
 const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 const ASSOCIATED_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+const MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID = 'SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2';
+const MAGICBLOCK_DELEGATION_PROGRAM_ID = 'DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh';
 
 function pubkey(byte: number): string {
   return bs58.encode(Uint8Array.from({ length: 32 }, () => byte));
 }
 
 function shortVec(value: number): number[] {
-  return [value];
+  const bytes: number[] = [];
+  let remaining = value;
+  do {
+    let byte = remaining & 0x7f;
+    remaining >>>= 7;
+    if (remaining > 0) byte |= 0x80;
+    bytes.push(byte);
+  } while (remaining > 0);
+  return bytes;
 }
 
 function u64LittleEndian(value: bigint): number[] {
@@ -301,6 +312,146 @@ function buildHiddenRecipientPrivateTransferTransaction(params: {
   return Buffer.from(transaction).toString('base64');
 }
 
+function buildCanonicalMagicBlockPrivateTransferTransaction(params: {
+  walletAddress: string;
+  mint: string;
+  amount: bigint;
+  validator: string;
+  tamper?: 'shuttleDelegationBuffer' | 'transferQueue';
+}): string {
+  const walletTokenAccount = deriveAssociatedTokenAddress({
+    owner: params.walletAddress,
+    mint: params.mint,
+  });
+  const magicProgram = new PublicKey(MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID);
+  const delegationProgram = new PublicKey(MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const pda = (seeds: readonly Uint8Array[], program = magicProgram): string =>
+    PublicKey.findProgramAddressSync(
+      seeds.map((seed) => Buffer.from(seed)),
+      program,
+    )[0].toBase58();
+  const walletSeed = new PublicKey(params.walletAddress).toBytes();
+  const mintSeed = new PublicKey(params.mint).toBytes();
+  const validatorSeed = new PublicKey(params.validator).toBytes();
+  const shuttleId = 7;
+  const shuttleIdSeed = Buffer.from(u32LittleEndian(shuttleId));
+  const encryptionAccount = pda([walletSeed, mintSeed]);
+  const encryptionBuffer = pda([Buffer.from('buffer'), new PublicKey(encryptionAccount).toBytes()]);
+  const encryptionRecord = pda(
+    [Buffer.from('delegation'), new PublicKey(encryptionAccount).toBytes()],
+    delegationProgram,
+  );
+  const encryptionMetadata = pda(
+    [Buffer.from('delegation-metadata'), new PublicKey(encryptionAccount).toBytes()],
+    delegationProgram,
+  );
+  const rentPda = pda([Buffer.from('rent')]);
+  const shuttleMetadata = pda([walletSeed, mintSeed, shuttleIdSeed]);
+  const shuttleAccount = pda([new PublicKey(shuttleMetadata).toBytes(), mintSeed]);
+  const shuttleWalletTokenAccount = deriveAssociatedTokenAddress({
+    owner: shuttleMetadata,
+    mint: params.mint,
+  });
+  const shuttleBuffer = pda([Buffer.from('buffer'), new PublicKey(shuttleAccount).toBytes()]);
+  const shuttleRecord = pda(
+    [Buffer.from('delegation'), new PublicKey(shuttleAccount).toBytes()],
+    delegationProgram,
+  );
+  const shuttleMetadataRecord = pda(
+    [Buffer.from('delegation-metadata'), new PublicKey(shuttleAccount).toBytes()],
+    delegationProgram,
+  );
+  const globalVault = pda([mintSeed]);
+  const globalVaultTokenAccount = deriveAssociatedTokenAddress({
+    owner: globalVault,
+    mint: params.mint,
+  });
+  const transferQueue = pda([Buffer.from('queue'), mintSeed, validatorSeed]);
+  const accountKeys = [
+    params.walletAddress,
+    walletTokenAccount,
+    params.mint,
+    SYSTEM_PROGRAM_ID,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+    MAGICBLOCK_DELEGATION_PROGRAM_ID,
+    encryptionAccount,
+    encryptionBuffer,
+    encryptionRecord,
+    encryptionMetadata,
+    rentPda,
+    shuttleMetadata,
+    shuttleAccount,
+    shuttleWalletTokenAccount,
+    params.tamper === 'shuttleDelegationBuffer' ? pubkey(214) : shuttleBuffer,
+    shuttleRecord,
+    shuttleMetadataRecord,
+    globalVault,
+    globalVaultTokenAccount,
+    params.tamper === 'transferQueue' ? pubkey(215) : transferQueue,
+  ];
+  const accountIndex = (address: string): number => {
+    const index = accountKeys.indexOf(address);
+    if (index < 0) throw new Error(`Missing test account ${address}`);
+    return index;
+  };
+  const instruction = (program: string, accounts: number[], data: number[]): number[] => [
+    accountIndex(program),
+    ...shortVec(accounts.length),
+    ...accounts,
+    ...shortVec(data.length),
+    ...data,
+  ];
+  const validatorBytes = Array.from(bs58.decode(params.validator));
+  const transferData = [
+    0x19,
+    ...u32LittleEndian(shuttleId),
+    ...u64LittleEndian(params.amount),
+    1,
+    ...Array.from({ length: 80 }, () => 0),
+    1,
+    ...validatorBytes,
+    68,
+    ...Array.from({ length: 68 }, () => 0),
+  ];
+  const instructions = [
+    instruction(
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+      [0, 1, 0, 2, 3, 4],
+      [1],
+    ),
+    instruction(MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID, [8, 0, 0, 2, 3], [0]),
+    instruction(
+      MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+      [0, 8, 6, 9, 10, 11, 7, 3],
+      [4, ...validatorBytes],
+    ),
+    instruction(
+      MAGICBLOCK_PRIVATE_SPL_PROGRAM_ID,
+      [0, 12, 13, 14, 15, 0, 6, 16, 17, 18, 7, 5, 3, 2, 4, 19, 1, 20, 21],
+      transferData,
+    ),
+  ];
+  const message = [
+    0x80,
+    1,
+    0,
+    0,
+    ...shortVec(accountKeys.length),
+    ...accountKeys.flatMap((key) => Array.from(bs58.decode(key))),
+    ...Array.from(bs58.decode(pubkey(90))),
+    ...shortVec(instructions.length),
+    ...instructions.flat(),
+    ...shortVec(0),
+  ];
+  return Buffer.from([
+    ...shortVec(1),
+    ...Array.from({ length: 64 }, () => 0),
+    ...message,
+  ]).toString('base64');
+}
+
 function buildVersionedTokenTransferWithLookup(params: {
   walletAddress: string;
   recipient: string;
@@ -354,23 +505,37 @@ function addressLookupTableData(addresses: string[]): string {
   ]).toString('base64');
 }
 
-function privateRouteTransaction(unsignedTransaction: string) {
+function privateRouteTransaction(params: {
+  unsignedTransaction: string;
+  walletAddress: string;
+  validator: string;
+  amount: bigint;
+}) {
   return {
-    kind: 'magicblock-private-transfer',
-    version: 'legacy',
-    transactionBase64: unsignedTransaction,
-    sendTo: pubkey(199),
-    recentBlockhash: null,
-    lastValidBlockHeight: null,
-    instructionCount: 1,
-    requiredSigners: [],
-    validator: pubkey(198),
+    kind: 'transfer',
+    version: 'v0',
+    transactionBase64: params.unsignedTransaction,
+    sendTo: 'base',
+    recentBlockhash: pubkey(90),
+    lastValidBlockHeight: 123_456,
+    instructionCount: 4,
+    requiredSigners: [params.walletAddress],
+    validator: params.validator,
+    fees: {
+      lamports: '2039280',
+      tokens: (params.amount / 1_000n).toString(),
+    },
   };
 }
 
 describe('private payment transaction verification', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetRpcAccounts.mockReset();
+    getRpcFeeForMessage.mockReset();
+    getRpcMinimumBalanceForRentExemption.mockReset();
+    initializePrivatePaymentMint.mockReset();
+    preparePrivateSend.mockReset();
   });
 
   it('verifies a stablecoin transfer when the mint is proven by the source token account', async () => {
@@ -458,7 +623,7 @@ describe('private payment transaction verification', () => {
     expect(verification.verifiedAmount).toBe(true);
   });
 
-  it('verifies a private-style transfer when the recipient is encoded separately', async () => {
+  it('rejects a decoy recipient that is merely encoded in an unrelated instruction', async () => {
     const walletAddress = pubkey(41);
     const recipient = pubkey(42);
     const transferDestination = pubkey(43);
@@ -479,24 +644,23 @@ describe('private payment transaction verification', () => {
       ],
     });
 
-    const verification = await verifyPrivatePaymentUnsignedTransaction({
-      unsignedTransaction: buildPrivateStyleTransferTransaction({
+    await expect(
+      verifyPrivatePaymentUnsignedTransaction({
+        unsignedTransaction: buildPrivateStyleTransferTransaction({
+          walletAddress,
+          recipientHint: recipient,
+          transferDestination,
+          sourceTokenAccount,
+          amount,
+        }),
         walletAddress,
-        recipientHint: recipient,
-        transferDestination,
-        sourceTokenAccount,
-        amount,
+        recipient,
+        mint: MAINNET_USDC_MINT,
+        amount: amount.toString(),
+        network: 'mainnet',
       }),
-      walletAddress,
-      recipient,
-      mint: MAINNET_USDC_MINT,
-      amount: amount.toString(),
-      network: 'mainnet',
-    });
-
-    expect(verification.verifiedRecipient).toBe(true);
-    expect(verification.verifiedMint).toBe(true);
-    expect(verification.verifiedAmount).toBe(true);
+    ).rejects.toThrow('intended recipient');
+    expect(mockGetRpcAccounts).not.toHaveBeenCalled();
   });
 
   it('rejects a hidden-recipient private transfer unless the private route allows it', async () => {
@@ -525,74 +689,41 @@ describe('private payment transaction verification', () => {
     expect(mockGetRpcAccounts).not.toHaveBeenCalled();
   });
 
-  it('verifies a legacy MagicBlock private transfer response without route metadata', async () => {
+  it('rejects a hidden-recipient transfer without provider metadata', async () => {
     const walletAddress = pubkey(55);
     const recipient = pubkey(56);
     const transferDestination = pubkey(57);
     const sourceTokenAccount = pubkey(58);
     const amount = 22_011n;
 
-    mockGetRpcAccounts.mockResolvedValueOnce({
-      network: 'mainnet',
-      accounts: [
-        {
-          pubkey: sourceTokenAccount,
-          data: tokenAccountData(MAINNET_USDC_MINT),
-          owner: TOKEN_PROGRAM_ID,
-          lamports: '1',
-          executable: false,
-          rentEpoch: '0',
-        },
-      ],
-    });
-
-    const verification = await verifyPrivatePaymentUnsignedTransaction({
-      unsignedTransaction: buildHiddenRecipientPrivateTransferTransaction({
+    await expect(
+      verifyPrivatePaymentUnsignedTransaction({
+        unsignedTransaction: buildHiddenRecipientPrivateTransferTransaction({
+          walletAddress,
+          transferDestination,
+          sourceTokenAccount,
+          amount,
+        }),
         walletAddress,
-        transferDestination,
-        sourceTokenAccount,
-        amount,
+        recipient,
+        mint: MAINNET_USDC_MINT,
+        amount: amount.toString(),
+        network: 'mainnet',
+        allowHiddenPrivateRecipient: true,
       }),
-      walletAddress,
-      recipient,
-      mint: MAINNET_USDC_MINT,
-      amount: amount.toString(),
-      network: 'mainnet',
-      allowHiddenPrivateRecipient: true,
-    });
-
-    expect(verification.verifiedRecipient).toBe(true);
-    expect(verification.recipientVerification).toBe('private-route');
-    expect(verification.verifiedMint).toBe(true);
-    expect(verification.verifiedAmount).toBe(true);
+    ).rejects.toThrow('metadata is required');
   });
 
   it('verifies a MagicBlock private transfer whose recipient is hidden behind the route', async () => {
     const walletAddress = pubkey(61);
     const recipient = pubkey(62);
-    const transferDestination = pubkey(63);
-    const sourceTokenAccount = pubkey(64);
     const amount = 47_000n;
-
-    mockGetRpcAccounts.mockResolvedValueOnce({
-      network: 'mainnet',
-      accounts: [
-        {
-          pubkey: sourceTokenAccount,
-          data: tokenAccountData(MAINNET_USDC_MINT),
-          owner: TOKEN_PROGRAM_ID,
-          lamports: '1',
-          executable: false,
-          rentEpoch: '0',
-        },
-      ],
-    });
-
-    const unsignedTransaction = buildHiddenRecipientPrivateTransferTransaction({
+    const validator = pubkey(198);
+    const unsignedTransaction = buildCanonicalMagicBlockPrivateTransferTransaction({
       walletAddress,
-      transferDestination,
-      sourceTokenAccount,
+      mint: MAINNET_USDC_MINT,
       amount,
+      validator,
     });
 
     const verification = await verifyPrivatePaymentUnsignedTransaction({
@@ -603,14 +734,55 @@ describe('private payment transaction verification', () => {
       amount: amount.toString(),
       network: 'mainnet',
       allowHiddenPrivateRecipient: true,
-      privateRouteTransaction: privateRouteTransaction(unsignedTransaction),
+      privateRouteTransaction: privateRouteTransaction({
+        unsignedTransaction,
+        walletAddress,
+        validator,
+        amount,
+      }),
     });
 
-    expect(verification.verifiedRecipient).toBe(true);
-    expect(verification.recipientVerification).toBe('private-route');
+    expect(verification.verifiedRecipient).toBe(false);
+    expect(verification.recipientVerification).toBe('provider-request-bound');
+    expect(verification.providerRequestBound).toBe(true);
     expect(verification.verifiedMint).toBe(true);
     expect(verification.verifiedAmount).toBe(true);
   });
+
+  it.each(['shuttleDelegationBuffer', 'transferQueue'] as const)(
+    'rejects a MagicBlock private transfer with a substituted %s PDA',
+    async (tamper) => {
+      const walletAddress = pubkey(63);
+      const recipient = pubkey(64);
+      const amount = 48_000n;
+      const validator = pubkey(198);
+      const unsignedTransaction = buildCanonicalMagicBlockPrivateTransferTransaction({
+        walletAddress,
+        mint: MAINNET_USDC_MINT,
+        amount,
+        validator,
+        tamper,
+      });
+
+      await expect(
+        verifyPrivatePaymentUnsignedTransaction({
+          unsignedTransaction,
+          walletAddress,
+          recipient,
+          mint: MAINNET_USDC_MINT,
+          amount: amount.toString(),
+          network: 'mainnet',
+          allowHiddenPrivateRecipient: true,
+          privateRouteTransaction: privateRouteTransaction({
+            unsignedTransaction,
+            walletAddress,
+            validator,
+            amount,
+          }),
+        }),
+      ).rejects.toThrow('does not match the confirmed mint and amount');
+    },
+  );
 
   it('verifies a mainnet-style transfer when the source token account is loaded from an address lookup table', async () => {
     const walletAddress = pubkey(7);
@@ -714,21 +886,18 @@ describe('private payment transaction verification', () => {
   it('estimates MagicBlock SOL fees and account-creation rent from the prepared transaction', async () => {
     const walletAddress = pubkey(81);
     const recipient = pubkey(82);
-    const sourceTokenAccount = pubkey(83);
-    const createdAccount = pubkey(84);
-    const associatedTokenAccount = pubkey(85);
     const amount = 1_000_000n;
-    const systemCreateLamports = 2_039_280n;
     const associatedTokenRentLamports = 2_039_280;
-    const unsignedTransaction = buildTransferCheckedWithSolAccountCostsTransaction({
-      walletAddress,
-      sourceTokenAccount,
+    const validator = pubkey(198);
+    const associatedTokenAccount = deriveAssociatedTokenAddress({
+      owner: walletAddress,
       mint: MAINNET_USDC_MINT,
-      recipient,
-      createdAccount,
-      associatedTokenAccount,
+    });
+    const unsignedTransaction = buildCanonicalMagicBlockPrivateTransferTransaction({
+      walletAddress,
+      mint: MAINNET_USDC_MINT,
       amount,
-      systemCreateLamports,
+      validator,
     });
 
     initializePrivatePaymentMint.mockResolvedValueOnce({
@@ -737,8 +906,15 @@ describe('private payment transaction verification', () => {
       status: 'initialized',
     });
     preparePrivateSend.mockResolvedValueOnce({
+      intentId: 'private-intent-1',
+      expiresAt: Date.now() + 60_000,
       unsignedTransaction,
-      transaction: privateRouteTransaction(unsignedTransaction),
+      transaction: privateRouteTransaction({
+        unsignedTransaction,
+        walletAddress,
+        validator,
+        amount,
+      }),
     });
     getRpcFeeForMessage.mockResolvedValueOnce({ lamports: 8_000 });
     mockGetRpcAccounts.mockResolvedValueOnce({
@@ -757,9 +933,8 @@ describe('private payment transaction verification', () => {
       network: 'mainnet',
     });
 
-    expect(plan.feeLamports).toBe(
-      8_000 + Number(systemCreateLamports) + associatedTokenRentLamports,
-    );
+    expect(plan.feeLamports).toBe(8_000 + associatedTokenRentLamports);
+    expect(plan.tokenFeeRaw).toBe('1000');
     expect(plan.solFeePayer).toBe(walletAddress);
     expect(plan.includesMintInitialization).toBe(false);
     expect(plan).not.toHaveProperty('relayFeeAtomicAmount');

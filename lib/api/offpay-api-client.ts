@@ -42,6 +42,7 @@ import { assertWorkerCandidateSafe, classifyWorkerCandidate } from '@/lib/perf/w
 
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type {
+  AiSessionResponse,
   BackendErrorCode,
   BackendErrorEnvelope,
   BootstrapNonceResponse,
@@ -53,6 +54,10 @@ import type {
   CapabilitiesResponse,
   FxRateResponse,
   InviteVerifyResponse,
+  MagicBlockAuthChallengeRequest,
+  MagicBlockAuthChallengeResponse,
+  MagicBlockAuthLoginRequest,
+  MagicBlockAuthLoginResponse,
   OffpayApiMethod,
   OffpayNetwork,
   PaymentSettleRequest,
@@ -68,8 +73,11 @@ import type {
   OfflineTokenContextResponse,
   PrivateInitMintRequest,
   PrivateInitMintResponse,
+  PrivateBalanceResponse,
   PrivateSendRequest,
   PrivateSendResponse,
+  PrivateSendExecuteRequest,
+  PrivateSendExecuteResponse,
   DevnetAirdropRequest,
   DevnetAirdropResponse,
   QueryParams,
@@ -90,6 +98,8 @@ import type {
   RpcMinimumBalanceForRentExemptionResponse,
   RpcSignatureStatusesRequest,
   RpcSignatureStatusesResponse,
+  RpcSimulationRequest,
+  RpcSimulationResponse,
   RpcSignaturesForAddressRequest,
   RpcSignaturesForAddressResponse,
   RpcSlotResponse,
@@ -109,12 +119,22 @@ import type {
   SwapQuoteResponse,
   SwapRecurringCreateRequest,
   SwapRecurringCreateResponse,
+  SwapRecurringCancelPrepareRequest,
+  SwapRecurringCancelPrepareResponse,
   SwapRecurringExecuteRequest,
   SwapRecurringExecuteResponse,
+  SwapRecurringListRequest,
+  SwapRecurringListResponse,
   SwapTriggerChallengeRequest,
   SwapTriggerChallengeResponse,
   SwapTriggerCreateRequest,
   SwapTriggerCreateResponse,
+  SwapTriggerCancelConfirmRequest,
+  SwapTriggerCancelConfirmResponse,
+  SwapTriggerCancelPrepareRequest,
+  SwapTriggerCancelPrepareResponse,
+  SwapTriggerListRequest,
+  SwapTriggerListResponse,
   SwapTriggerPrepareRequest,
   SwapTriggerPrepareResponse,
   SwapTriggerVerifyRequest,
@@ -1380,6 +1400,25 @@ export async function provisionBootstrap(
   }
 }
 
+/**
+ * Requests a short-lived, opaque Yuga bearer token from the attested OffPay
+ * API. The signing key remains server-side and is never embedded in the app.
+ */
+export function createAiSession(
+  network: OffpayNetwork,
+  options?: { signal?: AbortSignal; walletId?: string },
+): Promise<AiSessionResponse> {
+  return offpayApiRequest<AiSessionResponse>({
+    path: '/api/ai/session',
+    method: 'POST',
+    body: {},
+    network,
+    walletId: options?.walletId,
+    signal: options?.signal,
+    requestOwner: 'ai.session',
+  });
+}
+
 export function getCapabilities(
   network: OffpayNetwork,
   options?: { signal?: AbortSignal; timeoutMs?: number; requestOwner?: string },
@@ -1747,6 +1786,41 @@ export function createSwapTriggerOrder(
   });
 }
 
+export function listSwapTriggerOrders(
+  request: SwapTriggerListRequest,
+  options?: { signal?: AbortSignal },
+): Promise<SwapTriggerListResponse> {
+  return offpayApiRequest<SwapTriggerListResponse>({
+    path: '/api/swap/trigger',
+    method: 'POST',
+    body: request,
+    network: request.network,
+    signal: options?.signal,
+  });
+}
+
+export function prepareSwapTriggerCancellation(
+  request: SwapTriggerCancelPrepareRequest,
+): Promise<SwapTriggerCancelPrepareResponse> {
+  return offpayApiRequest<SwapTriggerCancelPrepareResponse>({
+    path: '/api/swap/trigger',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+export function confirmSwapTriggerCancellation(
+  request: SwapTriggerCancelConfirmRequest,
+): Promise<SwapTriggerCancelConfirmResponse> {
+  return offpayApiRequest<SwapTriggerCancelConfirmResponse>({
+    path: '/api/swap/trigger',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
 export function createRecurringSwap(
   request: SwapRecurringCreateRequest,
 ): Promise<SwapRecurringCreateResponse> {
@@ -1763,6 +1837,36 @@ export function executeRecurringSwap(
 ): Promise<SwapRecurringExecuteResponse> {
   return offpayApiRequest<SwapRecurringExecuteResponse>({
     path: '/api/swap/recurring',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+export function listRecurringSwaps(
+  request: SwapRecurringListRequest,
+  options?: { signal?: AbortSignal },
+): Promise<SwapRecurringListResponse> {
+  return offpayApiRequest<SwapRecurringListResponse>({
+    path: '/api/swap/recurring',
+    method: 'GET',
+    query: {
+      status: request.status,
+      page: request.page,
+      mint: request.mint,
+      includeFailedTransactions: request.includeFailedTransactions,
+      network: request.network,
+    },
+    network: request.network,
+    signal: options?.signal,
+  });
+}
+
+export function prepareRecurringSwapCancellation(
+  request: SwapRecurringCancelPrepareRequest,
+): Promise<SwapRecurringCancelPrepareResponse> {
+  return offpayApiRequest<SwapRecurringCancelPrepareResponse>({
+    path: '/api/swap/recurring/cancel',
     method: 'POST',
     body: request,
     network: request.network,
@@ -1813,9 +1917,90 @@ export function initializePrivatePaymentMint(
   });
 }
 
+export function requestMagicBlockAuthChallenge(
+  request: MagicBlockAuthChallengeRequest,
+): Promise<MagicBlockAuthChallengeResponse> {
+  return offpayApiRequest<MagicBlockAuthChallengeResponse>({
+    path: '/api/payment/private-auth/challenge',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+export function loginMagicBlockAuth(
+  request: MagicBlockAuthLoginRequest,
+): Promise<MagicBlockAuthLoginResponse> {
+  return offpayApiRequest<MagicBlockAuthLoginResponse>({
+    path: '/api/payment/private-auth/login',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+async function readPrivatePaymentBalance(params: {
+  walletAddress: string;
+  mint?: string;
+  network: OffpayNetwork;
+}): Promise<PrivateBalanceResponse> {
+  return offpayApiRequest<PrivateBalanceResponse>({
+    path: '/api/payment/private-balance',
+    query: {
+      wallet: params.walletAddress,
+      network: params.network,
+      mint: params.mint,
+    },
+    network: params.network,
+  });
+}
+
+export async function getPrivatePaymentBalance(params: {
+  walletAddress: string;
+  walletId?: string | null;
+  mint?: string;
+  network: OffpayNetwork;
+}): Promise<PrivateBalanceResponse> {
+  try {
+    return await readPrivatePaymentBalance(params);
+  } catch (error) {
+    if (!(error instanceof OffpayApiError) || error.code !== 'MAGICBLOCK_AUTH_REQUIRED') {
+      throw error;
+    }
+  }
+
+  const challenge = await requestMagicBlockAuthChallenge({
+    walletAddress: params.walletAddress,
+    network: params.network,
+  });
+  const signature = await signMessageForWallet({
+    message: challenge.challenge,
+    walletAddress: params.walletAddress,
+    walletId: params.walletId,
+  });
+  await loginMagicBlockAuth({
+    walletAddress: params.walletAddress,
+    network: params.network,
+    challenge: challenge.challenge,
+    signature,
+  });
+  return readPrivatePaymentBalance(params);
+}
+
 export function preparePrivateSend(request: PrivateSendRequest): Promise<PrivateSendResponse> {
   return offpayApiRequest<PrivateSendResponse>({
     path: '/api/payment/private-send',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+export function executePrivateSend(
+  request: PrivateSendExecuteRequest,
+): Promise<PrivateSendExecuteResponse> {
+  return offpayApiRequest<PrivateSendExecuteResponse>({
+    path: '/api/payment/private-send/execute',
     method: 'POST',
     body: request,
     network: request.network,
@@ -1838,6 +2023,17 @@ export function broadcastRawTransaction(
 ): Promise<RpcBroadcastResponse> {
   return offpayApiRequest<RpcBroadcastResponse>({
     path: '/api/rpc/broadcast',
+    method: 'POST',
+    body: request,
+    network: request.network,
+  });
+}
+
+export function simulateRawTransaction(
+  request: RpcSimulationRequest,
+): Promise<RpcSimulationResponse> {
+  return offpayApiRequest<RpcSimulationResponse>({
+    path: '/api/rpc/simulate',
     method: 'POST',
     body: request,
     network: request.network,
@@ -1902,12 +2098,16 @@ export function getRpcMinimumBalanceForRentExemption(
   });
 }
 
-export function getRpcAccounts(request: RpcAccountsRequest): Promise<RpcAccountsResponse> {
+export function getRpcAccounts(
+  request: RpcAccountsRequest,
+  options?: { signal?: AbortSignal },
+): Promise<RpcAccountsResponse> {
   return offpayApiRequest<RpcAccountsResponse>({
     path: '/api/rpc/accounts',
     method: 'POST',
     body: request,
     network: request.network,
+    signal: options?.signal,
   });
 }
 

@@ -3,20 +3,27 @@ import bs58 from 'bs58';
 
 import {
   broadcastRawTransaction,
+  confirmSwapTriggerCancellation,
   createRecurringSwap,
   createSwapTriggerOrder,
   executeRecurringSwap,
   finalizePrivacySwapEnvelope,
   OffpayApiError,
+  listRecurringSwaps,
+  listSwapTriggerOrders,
   preparePrivacySwapEnvelope,
   prepareSwapTriggerOrder,
+  prepareRecurringSwapCancellation,
+  prepareSwapTriggerCancellation,
   refreshPrivacySwapQuote,
   requestSwapTriggerChallenge,
+  simulateRawTransaction,
   verifySwapTriggerAuth,
 } from '@/lib/api/offpay-api-client';
 import { zeroOutBytes } from '@/lib/crypto/offpay-api-auth';
 import { runCryptoTask } from '@/lib/crypto/crypto-scheduler';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
+import { SPL_TOKEN_PROGRAM_ID } from '@/lib/crypto/solana-token-accounts';
 import {
   getRequiredSignersForSerializedTransaction,
   signMessageForWallet,
@@ -28,8 +35,11 @@ import type {
   OffpayNetwork,
   PreparedTransaction,
   PrivacySwapFinalizeResponse,
+  RpcAccountsResponse,
   SwapTriggerCondition,
   SwapTriggerCreateResponse,
+  SwapRecurringListResponse,
+  SwapTriggerListResponse,
   SwapTriggerOrderType,
 } from '@/types/offpay-api';
 
@@ -69,6 +79,7 @@ export interface CreateRecurringSwapParams {
   outputMint: string;
   amount: string;
   frequency: string;
+  idempotencyKey: string;
   network: OffpayNetwork;
 }
 
@@ -93,6 +104,76 @@ export interface TriggerOrderResult extends SwapTriggerCreateResponse {
 export interface RecurringSwapResult {
   recurringId: string;
   status: 'Success' | 'Failed';
+  signature: string;
+  orderId: string;
+}
+
+export interface CancelTriggerOrderParams {
+  walletAddress: string;
+  walletId?: string | null;
+  orderId: string;
+  network: OffpayNetwork;
+}
+
+export interface CancelRecurringSwapParams {
+  walletAddress: string;
+  walletId?: string | null;
+  orderId: string;
+  inputMint: string;
+  outputMint: string;
+  network: OffpayNetwork;
+}
+
+export interface RecurringOperationIdentity {
+  fingerprint: string;
+  idempotencyKey: string;
+}
+
+export function buildRecurringOperationFingerprint(params: {
+  walletAddress: string;
+  network: OffpayNetwork;
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  frequency: string;
+}): string {
+  return JSON.stringify([
+    params.walletAddress.trim(),
+    params.network,
+    params.inputMint.trim(),
+    params.outputMint.trim(),
+    params.amount.trim(),
+    params.frequency.trim(),
+  ]);
+}
+
+export function resolveRecurringOperationIdentity(params: {
+  existing: RecurringOperationIdentity | null;
+  fingerprint: string;
+  createKey: () => string;
+}): RecurringOperationIdentity {
+  return params.existing?.fingerprint === params.fingerprint
+    ? params.existing
+    : { fingerprint: params.fingerprint, idempotencyKey: params.createKey() };
+}
+
+export function areClassicSplMintAccounts(response: RpcAccountsResponse): boolean {
+  return (
+    response.accounts.length === 2 &&
+    response.accounts.every((account) => account?.owner === SPL_TOKEN_PROGRAM_ID)
+  );
+}
+
+export interface TriggerCancellationResult {
+  orderId: string;
+  status: 'cancelled';
+  signature: string;
+}
+
+export interface RecurringCancellationResult {
+  recurringId: string;
+  orderId: string;
+  status: 'Success';
   signature: string;
 }
 
@@ -138,6 +219,16 @@ function assertCommonSwapInputs(params: {
 function assertFutureExpiry(expiresAt: number): void {
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     throw new Error('Trigger order expiry must be in the future.');
+  }
+}
+
+function assertMainnet(network: OffpayNetwork): void {
+  if (network !== 'mainnet') throw new Error('Advanced order lifecycle is mainnet-only.');
+}
+
+function assertOrderId(orderId: string, label: string): void {
+  if (orderId.trim().length === 0 || orderId.length > 128) {
+    throw new Error(`${label} is invalid.`);
   }
 }
 
@@ -239,6 +330,22 @@ function getSwapStageErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown swap transaction error.';
 }
 
+async function assertAdvancedSwapSimulation(params: {
+  transactionBase64: string;
+  network: OffpayNetwork;
+  label: string;
+}): Promise<void> {
+  const simulation = await simulateRawTransaction({
+    transactionBase64: params.transactionBase64,
+    network: params.network,
+  });
+  if (!simulation.success) {
+    throw new Error(
+      `${params.label} preflight failed: ${simulation.error ?? 'transaction simulation failed'}`,
+    );
+  }
+}
+
 async function signAndBroadcastPreparedTransaction(params: {
   transaction: PreparedTransaction;
   activeWallet: ActiveWalletSigner;
@@ -287,55 +394,58 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export async function authenticateTriggerOrderSession(params: {
+  walletAddress: string;
+  walletId?: string | null;
+  network: OffpayNetwork;
+}): Promise<number> {
+  assertAddress(params.walletAddress, 'Active wallet');
+  assertMainnet(params.network);
+  const challenge = await requestSwapTriggerChallenge({
+    action: 'auth_challenge',
+    challengeType: 'message',
+    network: params.network,
+  });
+  if (challenge.challengeType !== 'message' || challenge.challenge == null) {
+    throw new Error('Trigger authentication did not return the requested message challenge.');
+  }
+  const signature = await signMessageForWallet({
+    message: challenge.challenge,
+    walletAddress: params.walletAddress,
+    walletId: params.walletId,
+  });
+  const verified = await verifySwapTriggerAuth({
+    action: 'auth_verify',
+    challengeType: 'message',
+    signature,
+    network: params.network,
+  });
+  return verified.expiresAt;
+}
+
 export async function createTriggerOrder(
   params: CreateTriggerOrderParams,
 ): Promise<TriggerOrderResult> {
   assertCommonSwapInputs(params);
   assertTriggerOrderFields(params);
-
-  const challenge = await requestSwapTriggerChallenge({
-    action: 'auth_challenge',
-    challengeType: 'transaction',
+  const authExpiresAt = await authenticateTriggerOrderSession({
+    walletAddress: params.walletAddress,
+    walletId: params.walletId,
     network: params.network,
   });
-
-  let authExpiresAt: number;
-  if (challenge.challengeType === 'transaction' && challenge.unsignedChallengeTransaction != null) {
-    const signedChallengeTransaction = await signSerializedTransactionForWallet({
-      unsignedTransaction: challenge.unsignedChallengeTransaction,
-      walletAddress: params.walletAddress,
-      walletId: params.walletId,
-    });
-    const verified = await verifySwapTriggerAuth({
-      action: 'auth_verify',
-      challengeType: 'transaction',
-      signedChallengeTransaction,
-      network: params.network,
-    });
-    authExpiresAt = verified.expiresAt;
-  } else if (challenge.challengeType === 'message' && challenge.challenge != null) {
-    const signature = await signMessageForWallet({
-      message: challenge.challenge,
-      walletAddress: params.walletAddress,
-      walletId: params.walletId,
-    });
-    const verified = await verifySwapTriggerAuth({
-      action: 'auth_verify',
-      challengeType: 'message',
-      signature,
-      network: params.network,
-    });
-    authExpiresAt = verified.expiresAt;
-  } else {
-    throw new Error('Trigger authentication challenge is incomplete.');
-  }
 
   const prepared = await prepareSwapTriggerOrder({
     action: 'prepare',
     inputMint: params.inputMint,
     outputMint: params.outputMint,
     amount: params.amount,
+    orderSubType: params.orderType,
     network: params.network,
+  });
+  await assertAdvancedSwapSimulation({
+    transactionBase64: prepared.unsignedTransaction,
+    network: params.network,
+    label: 'Trigger deposit',
   });
   const depositSignedTransaction = await signSerializedTransactionForWallet({
     unsignedTransaction: prepared.unsignedTransaction,
@@ -381,7 +491,13 @@ export async function createAndExecuteRecurringSwap(
     outputMint: params.outputMint,
     amount: params.amount,
     frequency: params.frequency.trim(),
+    idempotencyKey: params.idempotencyKey,
     network: params.network,
+  });
+  await assertAdvancedSwapSimulation({
+    transactionBase64: created.unsignedTransaction,
+    network: params.network,
+    label: 'Recurring order',
   });
   const signedTransaction = await signSerializedTransactionForWallet({
     unsignedTransaction: created.unsignedTransaction,
@@ -389,11 +505,146 @@ export async function createAndExecuteRecurringSwap(
     walletId: params.walletId,
   });
 
-  return executeRecurringSwap({
+  const executed = await executeRecurringSwap({
     recurringId: created.recurringId,
     signedTransaction,
     network: params.network,
   });
+  if (
+    executed.status !== 'Success' ||
+    executed.operation !== 'create' ||
+    executed.orderId == null
+  ) {
+    throw new Error('Recurring order creation could not be verified after execution.');
+  }
+  return {
+    recurringId: executed.recurringId,
+    status: executed.status,
+    signature: executed.signature,
+    orderId: executed.orderId,
+  };
+}
+
+export function listTriggerOrders(params: {
+  network: OffpayNetwork;
+  state?: 'active' | 'past';
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+}): Promise<SwapTriggerListResponse> {
+  assertMainnet(params.network);
+  return listSwapTriggerOrders(
+    {
+      action: 'list',
+      network: params.network,
+      ...(params.state ? { state: params.state } : {}),
+      ...(params.limit == null ? {} : { limit: params.limit }),
+      ...(params.offset == null ? {} : { offset: params.offset }),
+    },
+    { signal: params.signal },
+  );
+}
+
+export function listRecurringOrders(params: {
+  network: OffpayNetwork;
+  status: 'active' | 'history';
+  page?: number;
+  signal?: AbortSignal;
+}): Promise<SwapRecurringListResponse> {
+  assertMainnet(params.network);
+  return listRecurringSwaps(
+    {
+      network: params.network,
+      status: params.status,
+      ...(params.page == null ? {} : { page: params.page }),
+      includeFailedTransactions: false,
+    },
+    { signal: params.signal },
+  );
+}
+
+export async function cancelTriggerOrder(
+  params: CancelTriggerOrderParams,
+): Promise<TriggerCancellationResult> {
+  assertAddress(params.walletAddress, 'Active wallet');
+  assertMainnet(params.network);
+  assertOrderId(params.orderId, 'Trigger order ID');
+  await authenticateTriggerOrderSession(params);
+  const prepared = await prepareSwapTriggerCancellation({
+    action: 'cancel_prepare',
+    orderId: params.orderId,
+    network: params.network,
+  });
+  if (prepared.orderId !== params.orderId) {
+    throw new Error('Trigger cancellation was prepared for a different order.');
+  }
+  await assertAdvancedSwapSimulation({
+    transactionBase64: prepared.unsignedTransaction,
+    network: params.network,
+    label: 'Trigger cancellation',
+  });
+  const signedTransaction = await signSerializedTransactionForWallet({
+    unsignedTransaction: prepared.unsignedTransaction,
+    walletAddress: params.walletAddress,
+    walletId: params.walletId,
+  });
+  return confirmSwapTriggerCancellation({
+    action: 'cancel_confirm',
+    orderId: params.orderId,
+    cancelRequestId: prepared.cancelRequestId,
+    signedTransaction,
+    network: params.network,
+  });
+}
+
+export async function cancelRecurringOrder(
+  params: CancelRecurringSwapParams,
+): Promise<RecurringCancellationResult> {
+  assertAddress(params.walletAddress, 'Active wallet');
+  assertMainnet(params.network);
+  assertAddress(params.orderId, 'Recurring order ID');
+  assertAddress(params.inputMint, 'Recurring input mint');
+  assertAddress(params.outputMint, 'Recurring output mint');
+  if (params.inputMint === params.outputMint) {
+    throw new Error('Recurring cancellation mints must be different.');
+  }
+  const prepared = await prepareRecurringSwapCancellation({
+    orderId: params.orderId,
+    inputMint: params.inputMint,
+    outputMint: params.outputMint,
+    network: params.network,
+  });
+  if (prepared.orderId !== params.orderId) {
+    throw new Error('Recurring cancellation was prepared for a different order.');
+  }
+  await assertAdvancedSwapSimulation({
+    transactionBase64: prepared.unsignedTransaction,
+    network: params.network,
+    label: 'Recurring cancellation',
+  });
+  const signedTransaction = await signSerializedTransactionForWallet({
+    unsignedTransaction: prepared.unsignedTransaction,
+    walletAddress: params.walletAddress,
+    walletId: params.walletId,
+  });
+  const executed = await executeRecurringSwap({
+    recurringId: prepared.recurringId,
+    signedTransaction,
+    network: params.network,
+  });
+  if (
+    executed.status !== 'Success' ||
+    executed.operation !== 'cancel' ||
+    executed.orderId !== params.orderId
+  ) {
+    throw new Error('Recurring cancellation could not be verified after execution.');
+  }
+  return {
+    recurringId: executed.recurringId,
+    orderId: params.orderId,
+    status: 'Success',
+    signature: executed.signature,
+  };
 }
 
 async function finalizePrivacySwapWithRetry(params: {

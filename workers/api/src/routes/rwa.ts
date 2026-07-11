@@ -13,8 +13,8 @@ import {
   readSearchParams,
 } from '../lib/validation.js';
 
-const RWA_ASSETS_EDGE_FRESH_TTL_MS = 5 * 60 * 1000;
-const RWA_ASSETS_EDGE_STALE_TTL_MS = 10 * 60 * 1000;
+const RWA_ASSETS_EDGE_FRESH_TTL_MS = 30 * 1000;
+const RWA_ASSETS_EDGE_STALE_TTL_MS = 0;
 const MAX_MINT_LENGTH = 64;
 const MAX_TRANSACTION_BASE64_LENGTH = 256_000;
 const MAX_DECIMAL_STRING_LENGTH = 48;
@@ -136,6 +136,17 @@ function assertRequestedNetwork(requestedNetwork: Network, authenticatedNetwork:
   }
 }
 
+function readEdgeCountryCode(
+  context: Parameters<typeof getAuthenticatedContext>[0],
+): string | undefined {
+  const rawRequest = context.req.raw as Request & { cf?: { country?: unknown } };
+  const country =
+    typeof rawRequest.cf?.country === 'string'
+      ? rawRequest.cf.country.trim().toUpperCase()
+      : undefined;
+  return country && /^[A-Z]{2}$/.test(country) ? country : undefined;
+}
+
 const rwaRoutes = new Hono<AppEnv>();
 
 rwaRoutes.get('/assets', async (context) => {
@@ -151,7 +162,7 @@ rwaRoutes.get('/assets', async (context) => {
       resolver: () => getRwaAssets(context.env, query.network),
     }),
   );
-  response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+  response.headers.set('Cache-Control', 'public, max-age=30, must-revalidate');
   return response;
 });
 
@@ -188,6 +199,7 @@ rwaRoutes.post('/quote', async (context) => {
     await createRwaQuote(context.env, {
       ...body,
       walletAddress: authenticatedContext.wallet,
+      countryCode: readEdgeCountryCode(context),
     }),
   );
 });
@@ -208,6 +220,7 @@ rwaRoutes.post('/execute', async (context) => {
     await executeRwaQuote(context.env, {
       ...body,
       walletAddress: authenticatedContext.wallet,
+      countryCode: readEdgeCountryCode(context),
     }),
   );
 });

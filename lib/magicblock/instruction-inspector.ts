@@ -201,21 +201,10 @@ export function verifyExpectedRecipient(params: {
     accountKeys: params.accountKeys,
     amount: params.amount,
   });
-  const recipientAppearsInMessage =
-    params.accountKeys.some((account) => expectedRecipientAccounts.has(account)) ||
-    instructionDataContainsAnyAccount({
-      parsed: params.parsed,
-      expectedAccounts: expectedRecipientAccountList,
-    });
-
-  if (transferDestinations.length > 0) {
-    return (
-      transferDestinations.some((account) => expectedRecipientAccounts.has(account)) ||
-      recipientAppearsInMessage
-    );
-  }
-
-  return recipientAppearsInMessage;
+  // A recipient merely appearing in an unrelated account or instruction is not
+  // proof that tokens are sent there. Only the destination account of the
+  // exact SPL Token transfer can satisfy an explicit-recipient check.
+  return transferDestinations.some((account) => expectedRecipientAccounts.has(account));
 }
 
 function getAddressLookupTableAddresses(record: RpcAccountRecord | null | undefined): string[] {

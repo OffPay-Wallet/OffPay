@@ -1,140 +1,91 @@
 import {
+  buildOffpayAiSessionToken,
+  clearOffpayAiSessionTokenCache,
   isOffpayAiSessionTokenConfigured,
-  verifyOffpayAiSessionToken,
-  __aiSessionTokenInternal,
+  OffpayAiSessionTokenUnavailableError,
 } from '@/lib/agentic-payments/session-token';
 
-const ORIGINAL_SECRET = process.env.EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET;
+const WALLET = 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw';
 
-jest.mock('@/lib/api/offpay-api-storage', () => ({
-  getOffpayRequestSecret: jest.fn(),
-  getOffpayRequestWalletAddress: jest.fn(),
-  getOrCreateOffpayDeviceId: jest.fn(),
+jest.mock('@/lib/api/offpay-api-client', () => ({ createAiSession: jest.fn() }));
+jest.mock('@/lib/wallet/secure-wallet-store', () => ({ getStoredWalletInfo: jest.fn() }));
+jest.mock('@/store/preferencesStore', () => ({
+  usePreferencesStore: { getState: () => ({ network: 'mainnet-beta' }) },
 }));
 
-const storageMock = jest.requireMock('@/lib/api/offpay-api-storage') as {
-  getOffpayRequestSecret: jest.Mock;
-  getOffpayRequestWalletAddress: jest.Mock;
-  getOrCreateOffpayDeviceId: jest.Mock;
+const apiMock = jest.requireMock('@/lib/api/offpay-api-client') as {
+  createAiSession: jest.Mock;
+};
+const walletMock = jest.requireMock('@/lib/wallet/secure-wallet-store') as {
+  getStoredWalletInfo: jest.Mock;
 };
 
-afterAll(() => {
-  process.env.EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET = ORIGINAL_SECRET;
-});
-
-describe('OffPay AI session token', () => {
+describe('server-issued OffPay AI sessions', () => {
   beforeEach(() => {
-    storageMock.getOffpayRequestSecret.mockReset();
-    storageMock.getOffpayRequestWalletAddress.mockReset();
-    storageMock.getOrCreateOffpayDeviceId.mockReset();
+    clearOffpayAiSessionTokenCache();
+    apiMock.createAiSession.mockReset();
+    walletMock.getStoredWalletInfo.mockReset();
+    walletMock.getStoredWalletInfo.mockResolvedValue({ id: 'wallet-1', publicKey: WALLET });
   });
 
-  it('reports unconfigured when the shared secret env is empty', () => {
-    expect(isOffpayAiSessionTokenConfigured()).toBe(false);
+  it('requires no client-side shared secret', () => {
+    expect(isOffpayAiSessionTokenConfigured()).toBe(true);
   });
 
-  it('builds a token whose canonical payload binds wallet, device, and ttl', async () => {
-    storageMock.getOffpayRequestSecret.mockResolvedValue('device-request-secret');
-    storageMock.getOffpayRequestWalletAddress.mockResolvedValue('Wallet1234');
-    storageMock.getOrCreateOffpayDeviceId.mockResolvedValue('offpay-device-1');
-
-    // The exported builder reads SHARED_SECRET at module load time, so we
-    // verify the canonical payload via the internal helper which the
-    // builder always uses.
-    const payload = __aiSessionTokenInternal.canonicalPayload({
-      walletAddress: 'Wallet1234',
-      deviceId: 'offpay-device-1',
-      issuedAt: 1_000,
-      expiresAt: 2_000,
+  it('requests a network-bound token from the authenticated API and caches it', async () => {
+    const issuedAt = Date.now();
+    apiMock.createAiSession.mockResolvedValue({
+      token: 'v2.payload.signature',
+      walletAddress: WALLET,
+      network: 'mainnet',
+      issuedAt,
+      expiresAt: issuedAt + 5 * 60_000,
     });
 
-    expect(payload).toBe(
-      `aud:${__aiSessionTokenInternal.AI_AUDIENCE}|sub:Wallet1234|dev:offpay-device-1|iat:1000|exp:2000`,
+    const first = await buildOffpayAiSessionToken();
+    const second = await buildOffpayAiSessionToken();
+
+    expect(first).toEqual(second);
+    expect(apiMock.createAiSession).toHaveBeenCalledTimes(1);
+    expect(apiMock.createAiSession).toHaveBeenCalledWith('mainnet', { walletId: 'wallet-1' });
+  });
+
+  it('coalesces concurrent refreshes to one API request', async () => {
+    const issuedAt = Date.now();
+    apiMock.createAiSession.mockResolvedValue({
+      token: 'v2.payload.signature',
+      walletAddress: WALLET,
+      network: 'mainnet',
+      issuedAt,
+      expiresAt: issuedAt + 5 * 60_000,
+    });
+
+    await Promise.all([
+      buildOffpayAiSessionToken({ forceRefresh: true }),
+      buildOffpayAiSessionToken({ forceRefresh: true }),
+    ]);
+    expect(apiMock.createAiSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a response issued for another wallet or network', async () => {
+    const issuedAt = Date.now();
+    apiMock.createAiSession.mockResolvedValue({
+      token: 'v2.payload.signature',
+      walletAddress: '86xCnPeV69n6t3DnyGvkKobf9FdN2H9oiVDdaMpo2MMY',
+      network: 'devnet',
+      issuedAt,
+      expiresAt: issuedAt + 5 * 60_000,
+    });
+
+    await expect(buildOffpayAiSessionToken()).rejects.toBeInstanceOf(
+      OffpayAiSessionTokenUnavailableError,
     );
-
-    const parsed = __aiSessionTokenInternal.parseCanonicalPayload(payload);
-    expect(parsed).toEqual({
-      audience: __aiSessionTokenInternal.AI_AUDIENCE,
-      walletAddress: 'Wallet1234',
-      deviceId: 'offpay-device-1',
-      issuedAt: 1000,
-      expiresAt: 2000,
-    });
   });
 
-  it('rejects malformed tokens', async () => {
-    const result = await verifyOffpayAiSessionToken('not.a.token', {
-      sharedSecret: 'shared',
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('malformed');
-    }
-  });
-
-  it('rejects tokens signed with a different secret', async () => {
-    const payload = __aiSessionTokenInternal.canonicalPayload({
-      walletAddress: 'Wallet1234',
-      deviceId: 'offpay-device-1',
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + 5 * 60_000,
-    });
-    const sig = __aiSessionTokenInternal.hmacSha256Base64Url('attacker-secret', payload);
-    const token = `eyJhbGciOiJIUzI1NiJ9.${base64Url(payload)}.${sig}.devicebinding00000000000000000000`;
-
-    const result = await verifyOffpayAiSessionToken(token, { sharedSecret: 'shared' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('signature');
-    }
-  });
-
-  it('rejects expired tokens outside the skew window', async () => {
-    const issuedAt = 1_000_000;
-    const expiresAt = issuedAt + 60_000;
-    const payload = __aiSessionTokenInternal.canonicalPayload({
-      walletAddress: 'Wallet1234',
-      deviceId: 'offpay-device-1',
-      issuedAt,
-      expiresAt,
-    });
-    const sig = __aiSessionTokenInternal.hmacSha256Base64Url('shared', payload);
-    const token = `eyJhbGciOiJIUzI1NiJ9.${base64Url(payload)}.${sig}.devicebinding00000000000000000000`;
-
-    const result = await verifyOffpayAiSessionToken(token, {
-      sharedSecret: 'shared',
-      now: expiresAt + 5 * 60_000, // way past skew
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('expired');
-    }
-  });
-
-  it('accepts a valid token within the active window', async () => {
-    const issuedAt = 1_000_000;
-    const expiresAt = issuedAt + 60_000;
-    const payload = __aiSessionTokenInternal.canonicalPayload({
-      walletAddress: 'Wallet1234',
-      deviceId: 'offpay-device-1',
-      issuedAt,
-      expiresAt,
-    });
-    const sig = __aiSessionTokenInternal.hmacSha256Base64Url('shared', payload);
-    const token = `eyJhbGciOiJIUzI1NiJ9.${base64Url(payload)}.${sig}.devicebinding00000000000000000000`;
-
-    const result = await verifyOffpayAiSessionToken(token, {
-      sharedSecret: 'shared',
-      now: issuedAt + 15_000,
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.walletAddress).toBe('Wallet1234');
-      expect(result.deviceId).toBe('offpay-device-1');
-    }
+  it('fails closed when no active wallet is available', async () => {
+    walletMock.getStoredWalletInfo.mockResolvedValue(null);
+    await expect(buildOffpayAiSessionToken()).rejects.toThrow(
+      'A wallet is required before using Yuga.',
+    );
   });
 });
-
-function base64Url(input: string): string {
-  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}

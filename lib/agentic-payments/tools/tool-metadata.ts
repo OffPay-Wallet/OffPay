@@ -100,6 +100,52 @@ export const AGENTIC_TOOL_METADATA = {
       'Do not guess missing token or amount fields; ask one short clarification instead.',
     ],
   },
+  prepare_trigger_swap: {
+    category: 'swap',
+    networkScope: mainnetOnly,
+    pendingLabel: 'Preparing target order',
+    parallelSafe: false,
+    modelInstructions: [
+      'Use for a standalone Jupiter target-price swap only when input token, output token, total amount, monitored token, above/below condition, target USD price, and expiry hours are explicit.',
+      'Never infer the monitored token: it must be one of the two swap tokens.',
+      'This creates a local confirmation draft only; signing and the real mainnet deposit happen after user confirmation.',
+      'Do not describe OCO, OTOCO, cancellation, or withdrawal as supported by this agent tool.',
+    ],
+  },
+  prepare_recurring_swap: {
+    category: 'swap',
+    networkScope: mainnetOnly,
+    pendingLabel: 'Preparing recurring order',
+    parallelSafe: false,
+    modelInstructions: [
+      'Use for a Jupiter time-based recurring swap only when the token pair, total deposit amount, interval, and number of orders are explicit.',
+      'Amount is the total deposit split across every order, not an amount charged per order.',
+      'Each order must have at least $50 of live input value and the full schedule must finish within one year.',
+      'This creates a local confirmation draft only; signing and mainnet submission happen after user confirmation.',
+    ],
+  },
+  get_advanced_swap_orders: {
+    category: 'swap',
+    networkScope: mainnetOnly,
+    pendingLabel: 'Checking advanced orders',
+    parallelSafe: true,
+    modelInstructions: [
+      'Use to list exact Jupiter Trigger or Recurring order IDs and current states for the active mainnet wallet.',
+      'Use the returned exact orderId before drafting cancellation; never invent or truncate an order ID.',
+      'Trigger listing may require the user to authenticate from the Advanced Swap screen first.',
+    ],
+  },
+  prepare_advanced_swap_cancel: {
+    category: 'swap',
+    networkScope: mainnetOnly,
+    pendingLabel: 'Preparing order cancellation',
+    parallelSafe: false,
+    modelInstructions: [
+      'Use only with an exact order kind and full orderId returned by get_advanced_swap_orders or explicitly supplied by the user.',
+      'This drafts cancellation only. The user must confirm a fresh verified and simulated cancellation transaction before funds move.',
+      'Do not describe an order as cancelled until the confirmation action reports success.',
+    ],
+  },
   get_rwa_assets: {
     category: 'rwa_read',
     networkScope: bothNetworks,
@@ -148,10 +194,11 @@ export const AGENTIC_TOOL_METADATA = {
     category: 'umbra',
     networkScope: bothNetworks,
     pendingLabel: 'Scanning Umbra claims',
-    parallelSafe: true,
+    parallelSafe: false,
     modelInstructions: [
-      'Use only when the user explicitly asks to scan or check Umbra claims.',
-      'This tool never claims funds; it only reports whether manual claiming is needed.',
+      'Use action=scan only when the user explicitly asks to scan or check Umbra claims.',
+      'Use action=claim only when the latest user message explicitly asks to claim Umbra funds.',
+      'A claim call creates an exact confirmation draft on-device. It never signs or submits until the user confirms the card.',
     ],
   },
   get_umbra_balances: {
@@ -286,6 +333,18 @@ export const AGENTIC_TOOL_METADATA = {
     parallelSafe: true,
     modelInstructions: [
       'Use for existing trigger orders, take-profit orders, stop-loss orders, and pending Flash orders.',
+    ],
+  },
+  flash_fund_account: {
+    category: 'flash_draft',
+    networkScope: mainnetOnly,
+    pendingLabel: 'Preparing Flash funding',
+    parallelSafe: false,
+    modelInstructions: [
+      'Use when the user wants to initialize, fund, or deposit collateral into their Flash Trade V2 account.',
+      'Require an exact token symbol and amount. Never guess either value.',
+      'The app confirmation card signs and submits; this tool only prepares the deposit.',
+      'Warn that OffPay withdrawal is not yet available before asking the user to confirm.',
     ],
   },
   flash_open_position: {

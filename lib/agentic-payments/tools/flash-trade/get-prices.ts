@@ -1,19 +1,20 @@
 import type { AgenticToolDefinition } from '../types';
 import { getFlashTradeClient } from '@/lib/flash-trade';
-import { requireMainnet, requireWallet, isPriceStale, errorCodeFromUnknown } from './helpers';
+import { requireMainnet, isPriceStale, errorCodeFromUnknown } from './helpers';
 
 export const flashGetPricesTool: AgenticToolDefinition = {
   name: 'flash_get_prices',
   schema: {
     name: 'flash_get_prices',
-    description: 'Get current Pyth oracle prices for all perpetual markets (mainnet only). Returns prices with confidence intervals and freshness status.',
+    description:
+      'Get live Flash Trade V2 Pyth Lazer prices on mainnet, including oracle confidence, freshness, and market session.',
     parameters: {
       type: 'object',
       properties: {
         symbols: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional filter by market symbols (SOL, BTC, ETH). Returns all if omitted.',
+          description: 'Optional market-symbol filter. Returns every live API symbol if omitted.',
         },
       },
     },
@@ -35,9 +36,7 @@ export const flashGetPricesTool: AgenticToolDefinition = {
       const prices = await client.getPrices(context.signal);
 
       const filtered = symbols
-        ? prices.filter((p) =>
-            symbols.some((s) => s.toUpperCase() === p.symbol.toUpperCase()),
-          )
+        ? prices.filter((p) => symbols.some((s) => s.toUpperCase() === p.symbol.toUpperCase()))
         : prices;
 
       const now = Date.now();
@@ -48,6 +47,7 @@ export const flashGetPricesTool: AgenticToolDefinition = {
         updatedAt: p.updatedAt,
         ageMs: now - p.updatedAt,
         isStale: isPriceStale(p),
+        marketSession: p.marketSession,
       }));
 
       const hasStale = enriched.some((p) => p.isStale);
@@ -61,6 +61,7 @@ export const flashGetPricesTool: AgenticToolDefinition = {
             confidenceInterval: p.confidenceInterval,
             isStale: p.isStale,
             ageMs: p.ageMs,
+            marketSession: p.marketSession,
           })),
           warning: hasStale
             ? 'Some prices may be stale. Trading not recommended for stale markets.'

@@ -39,26 +39,35 @@ describe('preferencesStore', () => {
     jest.restoreAllMocks();
   });
 
-  it('writes a devnet mirror for killed-process cold starts', async () => {
+  it('writes a mainnet mirror for a new killed-process cold start', async () => {
     await hydrateCriticalPreferencesFallback();
 
     expect(usePreferencesStore.getState()).toMatchObject({
-      network: 'devnet',
+      network: 'mainnet-beta',
       networkUpdatedAt: 10_000,
     });
 
     const rawMirror = await secureStore.getItemAsync(PREFERENCES_NETWORK_MIRROR_KEY);
-    expect(rawMirror).toBe(JSON.stringify({ version: 1, network: 'devnet', updatedAt: 10_000 }));
+    expect(rawMirror).toBe(
+      JSON.stringify({ version: 1, network: 'mainnet-beta', updatedAt: 10_000 }),
+    );
   });
 
-  it('clamps public-client mainnet selection back to devnet', async () => {
-    await usePreferencesStore.getState().setNetwork('mainnet-beta');
-
-    expect(usePreferencesStore.getState()).toMatchObject({
+  it('persists an explicit switch from devnet to mainnet', async () => {
+    usePreferencesStore.setState({
       network: 'devnet',
       networkUpdatedAt: 0,
     });
-    await expect(secureStore.getItemAsync(PREFERENCES_NETWORK_MIRROR_KEY)).resolves.toBeNull();
+
+    await usePreferencesStore.getState().setNetwork('mainnet-beta');
+
+    expect(usePreferencesStore.getState()).toMatchObject({
+      network: 'mainnet-beta',
+      networkUpdatedAt: 10_000,
+    });
+    await expect(secureStore.getItemAsync(PREFERENCES_NETWORK_MIRROR_KEY)).resolves.toBe(
+      JSON.stringify({ version: 1, network: 'mainnet-beta', updatedAt: 10_000 }),
+    );
   });
 
   it('recovers the previous network when MMKV hydrates as the default network', async () => {
@@ -101,7 +110,7 @@ describe('preferencesStore', () => {
     );
   });
 
-  it('recovers old persisted mainnet state as devnet while mainnet is disabled', async () => {
+  it('preserves an existing persisted mainnet state', async () => {
     usePreferencesStore.setState({
       network: 'mainnet-beta',
       networkUpdatedAt: 30_000,
@@ -110,10 +119,12 @@ describe('preferencesStore', () => {
     await hydrateCriticalPreferencesFallback();
 
     expect(usePreferencesStore.getState()).toMatchObject({
-      network: 'devnet',
+      network: 'mainnet-beta',
       networkUpdatedAt: 30_000,
     });
     const rawMirror = await secureStore.getItemAsync(PREFERENCES_NETWORK_MIRROR_KEY);
-    expect(rawMirror).toBe(JSON.stringify({ version: 1, network: 'devnet', updatedAt: 30_000 }));
+    expect(rawMirror).toBe(
+      JSON.stringify({ version: 1, network: 'mainnet-beta', updatedAt: 30_000 }),
+    );
   });
 });

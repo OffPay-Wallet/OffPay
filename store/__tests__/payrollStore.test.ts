@@ -126,9 +126,72 @@ describe('payrollStore', () => {
     // No-artifact sending row -> failed with a verify message.
     expect(rows[0].status).toBe('failed');
     expect(rows[0].validationError).toMatch(/Verify on-chain/);
+    expect(rows[0]).toMatchObject({
+      submissionAttemptId: 'payroll:run-1-row-2-key',
+      reconciliationRequired: true,
+    });
+    // Unknown outcomes are never turned back into sendable rows.
+    expect(usePayrollStore.getState().prepareRetryFailedRows('run-1')).toBe(0);
     // A sending row that already carries a signature is left as-is (it is a
     // settled artifact, never reverted).
     expect(rows[1].status).toBe('sending');
+  });
+
+  it('atomically claims a row exactly once before external submission', () => {
+    usePayrollStore
+      .getState()
+      .createRun(makeRun(), [makeRow('run-1-row-2', { route: 'magicblock' })]);
+
+    const first = usePayrollStore.getState().claimRowSubmission('run-1', 'run-1-row-2', {
+      attemptId: 'payroll:run-1-row-2-key',
+      startedAt: 123,
+    });
+    const second = usePayrollStore.getState().claimRowSubmission('run-1', 'run-1-row-2', {
+      attemptId: 'payroll:run-1-row-2-key',
+      startedAt: 124,
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(usePayrollStore.getState().getRows('run-1')[0]).toMatchObject({
+      status: 'sending',
+      submissionAttemptId: 'payroll:run-1-row-2-key',
+      submissionStartedAt: 123,
+      reconciliationRequired: false,
+    });
+  });
+
+  it('rejects a submission claim that is not bound to the row idempotency key', () => {
+    usePayrollStore
+      .getState()
+      .createRun(makeRun(), [makeRow('run-1-row-2', { route: 'magicblock' })]);
+
+    expect(
+      usePayrollStore.getState().claimRowSubmission('run-1', 'run-1-row-2', {
+        attemptId: 'payroll:another-row',
+        startedAt: 123,
+      }),
+    ).toBe(false);
+    expect(usePayrollStore.getState().getRows('run-1')[0].status).toBe('ready');
+  });
+
+  it('does not let row replacement erase a durable submission tombstone', () => {
+    usePayrollStore
+      .getState()
+      .createRun(makeRun(), [makeRow('run-1-row-2', { route: 'magicblock' })]);
+    usePayrollStore.getState().claimRowSubmission('run-1', 'run-1-row-2', {
+      attemptId: 'payroll:run-1-row-2-key',
+      startedAt: 123,
+    });
+
+    usePayrollStore
+      .getState()
+      .replaceRows('run-1', [makeRow('run-1-row-2', { route: 'magicblock', status: 'ready' })]);
+
+    expect(usePayrollStore.getState().getRows('run-1')[0]).toMatchObject({
+      status: 'sending',
+      submissionAttemptId: 'payroll:run-1-row-2-key',
+    });
   });
 
   it('persists cursor for resume', () => {

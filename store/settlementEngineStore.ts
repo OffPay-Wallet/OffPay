@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 
 export type SettlementEngineStatus = 'idle' | 'running' | 'backoff' | 'settled' | 'error';
-export type SettlementEngineTrigger = 'launch' | 'network' | 'foreground' | 'retry' | 'manual' | 'queue';
+export type SettlementEngineTrigger =
+  | 'launch'
+  | 'network'
+  | 'foreground'
+  | 'retry'
+  | 'manual'
+  | 'queue';
 
 interface SettlementEngineRunStats {
   queuedCount: number;
@@ -9,6 +15,7 @@ interface SettlementEngineRunStats {
   uploadFailedCount: number;
   submittedCount: number;
   confirmedCount: number;
+  pendingCount: number;
   failedCount: number;
   deleteFailedCount: number;
 }
@@ -40,6 +47,7 @@ const EMPTY_STATS: SettlementEngineRunStats = {
   uploadFailedCount: 0,
   submittedCount: 0,
   confirmedCount: 0,
+  pendingCount: 0,
   failedCount: 0,
   deleteFailedCount: 0,
 };

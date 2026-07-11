@@ -11,7 +11,17 @@ const allowedFetchFiles = new Set([
   path.join('backend', 'umbra.ts'),
   path.join('lib', 'api', 'offpay-api-client.ts'),
   path.join('lib', 'agentic-payments', 'ai-proxy-client.ts'),
+  // Public, read-only SNS data. Recipient resolution still validates the
+  // returned address locally before any transaction can be prepared.
+  path.join('lib', 'identity', 'sns-proxy.ts'),
   path.join('lib', 'umbra', 'umbra-rn-zk-prover.ts'),
+]);
+
+const allowedDirectProviderFiles = new Set([
+  // Flash V2 transactions execute on Flash's dedicated MagicBlock ER. The
+  // wallet verifies the exact V0 message and protocol instructions locally;
+  // this endpoint contains no app credential or user-controlled origin.
+  path.join('lib', 'flash-trade', 'constants.ts'),
 ]);
 
 const disallowedProviderPatterns = [
@@ -107,7 +117,9 @@ for (const file of files) {
   }
 
   for (const pattern of disallowedProviderPatterns) {
-    if (testLike || isClientBackendAdapter(relative)) break;
+    if (testLike || isClientBackendAdapter(relative) || allowedDirectProviderFiles.has(relative)) {
+      break;
+    }
     if (pattern.test(source)) {
       reportFailure(`${relative}: direct provider/RPC reference matched ${pattern}.`, failures);
     }

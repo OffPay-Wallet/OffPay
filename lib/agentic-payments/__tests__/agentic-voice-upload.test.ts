@@ -6,6 +6,18 @@ type ExpoFileSystemMock = typeof import('expo-file-system') & {
 const originalProxyUrl = process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_URL;
 const originalAllowedOrigins = process.env.EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS;
 
+jest.mock('@/lib/agentic-payments/session-token', () => ({
+  buildOffpayAiSessionToken: jest.fn(async () => ({
+    token: 'v2.test-payload.test-signature',
+    walletAddress: 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw',
+    network: 'mainnet',
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+  })),
+  clearOffpayAiSessionTokenCache: jest.fn(),
+  OffpayAiSessionTokenUnavailableError: class OffpayAiSessionTokenUnavailableError extends Error {},
+}));
+
 function restoreEnv(name: string, value: string | undefined): void {
   if (value == null) {
     delete process.env[name];
@@ -72,6 +84,7 @@ describe('transcribeAgentVoice native file uploads', () => {
         uploadType: 0,
         headers: expect.objectContaining({
           accept: 'application/json',
+          'x-offpay-ai-session': 'v2.test-payload.test-signature',
           'content-type': 'audio/mp4',
           'x-offpay-language-hint': 'en',
         }),

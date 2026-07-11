@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { randomUUID } from 'expo-crypto';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { Easing, FadeIn, FadeInDown, FadeInUp, FadeOut } from 'react-native-reanimated';
@@ -41,7 +42,17 @@ import { useOffpayCapabilities } from '@/hooks/useOffpayCapabilities';
 import { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
 import { useOffpayNetworkAccess } from '@/hooks/useOffpayNetworkAccess';
 import { useOffpayWalletBalance } from '@/hooks/useOffpayWalletBalance';
-import { createAndExecuteRecurringSwap, createTriggerOrder } from '@/lib/swap/advanced-swap';
+import {
+  authenticateTriggerOrderSession,
+  areClassicSplMintAccounts,
+  buildRecurringOperationFingerprint,
+  cancelRecurringOrder,
+  cancelTriggerOrder,
+  createAndExecuteRecurringSwap,
+  createTriggerOrder,
+  listRecurringOrders,
+  listTriggerOrders,
+} from '@/lib/swap/advanced-swap';
 import {
   offpaySwapTokensQueryKey,
   TOKEN_LOGO_CACHE_GC_MS,
@@ -57,7 +68,7 @@ import {
   offpayWalletTokenTransactionsBaseQueryKey,
   offpayWalletTransactionsBaseQueryKey,
 } from '@/lib/api/offpay-wallet-query-keys';
-import { getSwapTokens } from '@/lib/api/offpay-api-client';
+import { getRpcAccounts, getSwapTokens } from '@/lib/api/offpay-api-client';
 import { formatLamportsAsSol, formatTokenBalance } from '@/lib/api/offpay-wallet-data';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import {
@@ -65,12 +76,19 @@ import {
   formatAtomicAmount,
   sanitizeDecimalInput,
 } from '@/lib/policy/token-amounts';
-import { useAdvancedSwapStore, type AdvancedSwapMode } from '@/store/advancedSwapStore';
+import {
+  clearPersistedRecurringOperationIdentity,
+  getOrCreatePersistedRecurringOperationIdentity,
+  useAdvancedSwapStore,
+  type AdvancedSwapMode,
+} from '@/store/advancedSwapStore';
 import { useWalletStore } from '@/store/walletStore';
 
 import type {
   CapabilityStatus,
   SwapTriggerCondition,
+  SwapRecurringOrderSummary,
+  SwapTriggerOrderSummary,
   SwapTokensResponse,
   WalletBalanceResponse,
 } from '@/types/offpay-api';
@@ -82,7 +100,7 @@ const ADVANCED_CONTENT_MAX_WIDTH = 430;
 const screenHeaderEntering = FadeInDown.duration(220).easing(Easing.out(Easing.cubic));
 const screenSectionEntering = FadeInUp.duration(220).easing(Easing.out(Easing.cubic));
 
-type RecurringFrequency = 'daily:1' | 'weekly:1' | 'monthly:1';
+type RecurringFrequency = 'daily:2' | 'weekly:2' | 'monthly:2';
 
 interface SupportedTokenInput {
   symbol: string;
@@ -102,6 +120,17 @@ type TokenSelectionTarget = 'input' | 'output';
 type AdvancedFormMode = Exclude<AdvancedSwapMode, 'privacy'>;
 type TriggerAdvancedResult = Awaited<ReturnType<typeof createTriggerOrder>>;
 type RecurringAdvancedResult = Awaited<ReturnType<typeof createAndExecuteRecurringSwap>>;
+type AdvancedOrderKind = 'trigger' | 'recurring';
+type AdvancedOrderView = 'active' | 'history';
+
+interface PendingAdvancedCancellation {
+  kind: AdvancedOrderKind;
+  orderId: string;
+  inputMint: string;
+  outputMint: string;
+  status: string;
+  cancellable?: boolean;
+}
 
 interface AdvancedReviewState {
   mode: AdvancedFormMode;
@@ -109,6 +138,7 @@ interface AdvancedReviewState {
   statusLabel: string;
   confirmLabel: string;
   busyLabel: string;
+  idempotencyKey: string | null;
   payLeg: SwapReviewTokenLeg;
   receiveLeg: SwapReviewTokenLeg;
   detailRows: SwapReviewDetailRow[];
@@ -317,14 +347,26 @@ function resolveTokenInput(
 }
 
 function frequencyHelper(frequency: RecurringFrequency): string {
-  if (frequency === 'weekly:1') return 'Runs once every week until you cancel it.';
-  if (frequency === 'monthly:1') return 'Runs once every month until you cancel it.';
-  return 'Runs once every day until you cancel it.';
+  if (frequency === 'weekly:2') return 'Splits the total deposit into 2 weekly orders.';
+  if (frequency === 'monthly:2') return 'Splits the total deposit into 2 monthly orders.';
+  return 'Splits the total deposit into 2 daily orders.';
 }
 
 function modeReviewLabel(mode: AdvancedFormMode): string {
   if (mode === 'recurring') return 'Repeat';
   return 'Target';
+}
+
+function triggerOrderCanRecover(order: SwapTriggerOrderSummary): boolean {
+  return (
+    order.orderState === 'open' ||
+    order.orderState === 'expired' ||
+    order.orderState === 'pending_withdraw'
+  );
+}
+
+function recurringOrderCanClose(order: SwapRecurringOrderSummary): boolean {
+  return !order.userClosed && order.closeSignature == null;
 }
 
 function HeaderIconButton({
@@ -503,12 +545,15 @@ export function AdvancedSwapScreen(): React.JSX.Element {
   const [triggerCondition, setTriggerCondition] = useState<SwapTriggerCondition>('above');
   const [triggerPriceUsd, setTriggerPriceUsd] = useState('');
   const [expiresHours, setExpiresHours] = useState(DEFAULT_EXPIRY_HOURS);
-  const [frequency, setFrequency] = useState<RecurringFrequency>('daily:1');
+  const [frequency, setFrequency] = useState<RecurringFrequency>('daily:2');
   const [slippagePercent, setSlippagePercent] = useState(DEFAULT_SLIPPAGE_PERCENT);
   const [selectionTarget, setSelectionTarget] = useState<TokenSelectionTarget | null>(null);
   const [reviewState, setReviewState] = useState<AdvancedReviewState | null>(null);
   const [processResult, setProcessResult] = useState<AdvancedProcessResultState | null>(null);
-
+  const [orderView, setOrderView] = useState<AdvancedOrderView>('active');
+  const [triggerOrdersUnlocked, setTriggerOrdersUnlocked] = useState(false);
+  const [pendingCancellation, setPendingCancellation] =
+    useState<PendingAdvancedCancellation | null>(null);
   const capabilities = capabilitiesQuery.capabilities;
   const canLoadTokens = network != null && isOffpayFeatureAvailable(capabilities, 'swap.tokens');
   const swapTokensQuery = useQuery({
@@ -531,6 +576,47 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     mode === 'trigger'
       ? isOffpayFeatureAvailable(capabilities, 'swap.triggerOrders')
       : isOffpayFeatureAvailable(capabilities, 'swap.recurringSwap');
+  const canManageOrders =
+    walletAddress != null &&
+    network === 'mainnet' &&
+    (mode === 'trigger' ? isOffpayFeatureAvailable(capabilities, 'swap.tokens') : currentAvailable);
+  const triggerOrdersQuery = useInfiniteQuery({
+    queryKey: ['advanced-swap-orders', 'trigger', walletAddress, network, orderView] as const,
+    queryFn: ({ pageParam, signal }) =>
+      listTriggerOrders({
+        network: 'mainnet',
+        state: orderView === 'active' ? 'active' : 'past',
+        limit: 20,
+        offset: pageParam,
+        signal,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      const nextOffset = lastPage.pagination.offset + lastPage.pagination.limit;
+      return nextOffset < lastPage.pagination.total ? nextOffset : undefined;
+    },
+    enabled: canManageOrders && mode === 'trigger' && triggerOrdersUnlocked,
+    staleTime: 5_000,
+    gcTime: 60_000,
+    retry: false,
+  });
+  const recurringOrdersQuery = useInfiniteQuery({
+    queryKey: ['advanced-swap-orders', 'recurring', walletAddress, network, orderView] as const,
+    queryFn: ({ pageParam, signal }) =>
+      listRecurringOrders({
+        network: 'mainnet',
+        status: orderView,
+        page: pageParam,
+        signal,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined,
+    enabled: canManageOrders && mode === 'recurring',
+    staleTime: 5_000,
+    gcTime: 60_000,
+    retry: false,
+  });
   const supportedTokenLookup = useMemo(
     () =>
       buildSupportedTokenLookup({
@@ -578,6 +664,32 @@ export function AdvancedSwapScreen(): React.JSX.Element {
           ) ?? null),
     [availableTokens, outputToken],
   );
+  const recurringMintEligibilityQuery = useQuery({
+    queryKey: [
+      'advanced-swap-recurring-mint-eligibility',
+      network,
+      inputToken?.mint,
+      outputToken?.mint,
+    ] as const,
+    queryFn: ({ signal }) => {
+      if (network !== 'mainnet' || inputToken == null || outputToken == null) {
+        throw new Error('Recurring token eligibility requires a mainnet token pair.');
+      }
+      return getRpcAccounts(
+        { addresses: [inputToken.mint, outputToken.mint], network },
+        { signal },
+      );
+    },
+    enabled:
+      mode === 'recurring' &&
+      network === 'mainnet' &&
+      inputToken != null &&
+      outputToken != null &&
+      inputToken.mint !== outputToken.mint,
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
+    retry: false,
+  });
   const rawAmount = useMemo(
     () =>
       inputToken?.decimals != null ? decimalInputToAtomicAmount(amount, inputToken.decimals) : null,
@@ -617,6 +729,17 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     if (slippageBps == null) {
       return 'Enter a max slippage percentage greater than zero.';
     }
+    if (mode === 'recurring') {
+      if (recurringMintEligibilityQuery.isPending) {
+        return 'Checking recurring token compatibility…';
+      }
+      if (recurringMintEligibilityQuery.isError || recurringMintEligibilityQuery.data == null) {
+        return 'Unable to verify the recurring token programs.';
+      }
+      if (!areClassicSplMintAccounts(recurringMintEligibilityQuery.data)) {
+        return 'Repeat swaps support classic SPL tokens only; Token-2022 is unavailable.';
+      }
+    }
     if (mode === 'trigger') {
       if (!/^\d+$/.test(expiresHours) || parsePositiveInteger(expiresHours, 0) <= 0) {
         return 'Enter a positive expiry window in hours.';
@@ -636,6 +759,9 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     network,
     outputToken,
     rawAmount,
+    recurringMintEligibilityQuery.data,
+    recurringMintEligibilityQuery.isError,
+    recurringMintEligibilityQuery.isPending,
     triggerPriceUsd,
     unsupportedReason,
     walletAddress,
@@ -662,6 +788,82 @@ export function AdvancedSwapScreen(): React.JSX.Element {
       }),
     ]);
   };
+
+  const triggerOrdersAuthMutation = useMutation({
+    mutationFn: async () => {
+      if (walletAddress == null || network !== 'mainnet') {
+        throw new Error('Trigger order authentication requires a mainnet wallet.');
+      }
+      await authenticateTriggerOrderSession({ walletAddress, walletId, network });
+    },
+    onSuccess: () => {
+      setTriggerOrdersUnlocked(true);
+      void triggerOrdersQuery.refetch();
+    },
+    onError: (error) => {
+      showToast({
+        title: 'Unable to load target orders',
+        message: getErrorMessage(error),
+        variant: 'error',
+      });
+    },
+  });
+
+  const cancellationMutation = useMutation({
+    mutationFn: async (request: PendingAdvancedCancellation) => {
+      if (walletAddress == null || network !== 'mainnet') {
+        throw new Error('Order cancellation requires a mainnet wallet.');
+      }
+      if (request.kind === 'trigger') {
+        const result = await cancelTriggerOrder({
+          walletAddress,
+          walletId,
+          orderId: request.orderId,
+          network,
+        });
+        return { kind: request.kind, orderId: request.orderId, signature: result.signature };
+      }
+      const result = await cancelRecurringOrder({
+        walletAddress,
+        walletId,
+        orderId: request.orderId,
+        inputMint: request.inputMint,
+        outputMint: request.outputMint,
+        network,
+      });
+      return { kind: request.kind, orderId: request.orderId, signature: result.signature };
+    },
+    onSuccess: (result) => {
+      if (network == null || walletAddress == null) return;
+      addReceipt({
+        id: `${result.kind}-cancel-${result.orderId}`,
+        mode: result.kind,
+        title: result.kind === 'trigger' ? 'Trigger funds recovered' : 'Recurring order closed',
+        subtitle: `Order ${shorten(result.orderId)}`,
+        signature: result.signature,
+        network,
+        walletAddress,
+        createdAt: Date.now(),
+      });
+      setPendingCancellation(null);
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['advanced-swap-orders'] }),
+        invalidateWalletData(),
+      ]).catch(() => undefined);
+      showToast({
+        title: result.kind === 'trigger' ? 'Trigger order cancelled' : 'Recurring order cancelled',
+        message: `Funds recovery submitted for ${shorten(result.orderId)}.`,
+        variant: 'success',
+      });
+    },
+    onError: (error) => {
+      showToast({
+        title: 'Cancellation failed',
+        message: getErrorMessage(error),
+        variant: 'error',
+      });
+    },
+  });
 
   const triggerMutation = useMutation({
     mutationFn: () => {
@@ -718,6 +920,7 @@ export function AdvancedSwapScreen(): React.JSX.Element {
           decimals: outputToken?.decimals ?? outputTokenOption?.decimals ?? null,
         },
       });
+      void queryClient.invalidateQueries({ queryKey: ['advanced-swap-orders'] });
       void invalidateWalletData().catch(() => undefined);
     },
     onError: (error) => {
@@ -730,7 +933,7 @@ export function AdvancedSwapScreen(): React.JSX.Element {
   });
 
   const recurringMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: ({ idempotencyKey }: { idempotencyKey: string }) => {
       if (walletAddress == null || network == null) {
         throw new Error('Recurring swap requires a wallet and supported network.');
       }
@@ -741,10 +944,11 @@ export function AdvancedSwapScreen(): React.JSX.Element {
         outputMint: outputToken?.mint ?? '',
         amount: rawAmount ?? '',
         frequency,
+        idempotencyKey,
         network,
       });
     },
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       if (network == null) return;
       const inputDecimals = inputToken?.decimals ?? inputTokenOption?.decimals ?? null;
       const inputAmount =
@@ -780,6 +984,10 @@ export function AdvancedSwapScreen(): React.JSX.Element {
           decimals: outputToken?.decimals ?? outputTokenOption?.decimals ?? null,
         },
       });
+      clearPersistedRecurringOperationIdentity({
+        idempotencyKey: variables.idempotencyKey,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['advanced-swap-orders'] });
       void invalidateWalletData().catch(() => undefined);
     },
     onError: (error) => {
@@ -791,7 +999,26 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     },
   });
 
-  const isSubmitting = triggerMutation.isPending || recurringMutation.isPending;
+  const isSubmitting =
+    triggerMutation.isPending || recurringMutation.isPending || cancellationMutation.isPending;
+  const managedOrders: PendingAdvancedCancellation[] =
+    mode === 'trigger'
+      ? (triggerOrdersQuery.data?.pages.flatMap((page) => page.orders) ?? []).map((order) => ({
+          kind: 'trigger',
+          orderId: order.id,
+          inputMint: order.inputMint,
+          outputMint: order.outputMint,
+          status: order.orderState,
+          cancellable: currentAvailable && triggerOrderCanRecover(order),
+        }))
+      : (recurringOrdersQuery.data?.pages.flatMap((page) => page.orders) ?? []).map((order) => ({
+          kind: 'recurring',
+          orderId: order.orderId,
+          inputMint: order.inputMint,
+          outputMint: order.outputMint,
+          status: order.userClosed ? 'closed' : 'active',
+          cancellable: recurringOrderCanClose(order),
+        }));
   const compactScreen = windowWidth < 390 || windowHeight < 760 || fontScale > 1.08;
   const denseScreen = windowWidth < 340 || windowHeight < 700 || fontScale > 1.18;
   const screenHorizontalPadding = denseScreen
@@ -804,7 +1031,11 @@ export function AdvancedSwapScreen(): React.JSX.Element {
   const panelSpacing = denseScreen ? spacing.sm : compactScreen ? 10 : spacing.md;
 
   const frequencyLabel =
-    frequency === 'weekly:1' ? 'Weekly' : frequency === 'monthly:1' ? 'Monthly' : 'Daily';
+    frequency === 'weekly:2'
+      ? 'Weekly × 2'
+      : frequency === 'monthly:2'
+        ? 'Monthly × 2'
+        : 'Daily × 2';
   const triggerDirectionLabel = triggerCondition === 'above' ? 'Above' : 'Below';
   const slippageLabel =
     slippageBps == null
@@ -838,6 +1069,23 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     }
 
     const modeLabel = modeReviewLabel(mode);
+    let idempotencyKey: string | null = null;
+    if (mode === 'recurring') {
+      if (walletAddress == null || network == null || rawAmount == null) return null;
+      const fingerprint = buildRecurringOperationFingerprint({
+        walletAddress,
+        network,
+        inputMint: inputToken.mint,
+        outputMint: outputToken.mint,
+        amount: rawAmount,
+        frequency,
+      });
+      const operation = getOrCreatePersistedRecurringOperationIdentity({
+        fingerprint,
+        createKey: randomUUID,
+      });
+      idempotencyKey = operation.idempotencyKey;
+    }
     const receiveAmount = mode === 'recurring' ? 'Per schedule' : 'At target';
     const detailRows: SwapReviewDetailRow[] = [
       { label: 'Mode', value: modeLabel },
@@ -860,6 +1108,7 @@ export function AdvancedSwapScreen(): React.JSX.Element {
       statusLabel: modeLabel,
       confirmLabel: 'Sign & Execute',
       busyLabel: 'Signing & executing',
+      idempotencyKey,
       payLeg: {
         label: 'You pay',
         amount,
@@ -961,16 +1210,19 @@ export function AdvancedSwapScreen(): React.JSX.Element {
     });
 
     try {
-      const execution =
-        reviewState.mode === 'recurring'
-          ? ({
-              mode: 'recurring',
-              result: await recurringMutation.mutateAsync(),
-            } satisfies AdvancedMutationResult)
-          : ({
-              mode: 'trigger',
-              result: await triggerMutation.mutateAsync(),
-            } satisfies AdvancedMutationResult);
+      let execution: AdvancedMutationResult;
+      if (reviewState.mode === 'recurring') {
+        const idempotencyKey = reviewState.idempotencyKey;
+        if (idempotencyKey == null) {
+          throw new Error('Recurring review is missing its idempotency key.');
+        }
+        execution = {
+          mode: 'recurring',
+          result: await recurringMutation.mutateAsync({ idempotencyKey }),
+        };
+      } else {
+        execution = { mode: 'trigger', result: await triggerMutation.mutateAsync() };
+      }
 
       setReviewState(null);
       setProcessResult(buildSuccessResult(reviewState, execution));
@@ -1001,6 +1253,11 @@ export function AdvancedSwapScreen(): React.JSX.Element {
       return;
     }
 
+    if (reviewState.mode === 'recurring' && reviewState.idempotencyKey != null) {
+      clearPersistedRecurringOperationIdentity({
+        idempotencyKey: reviewState.idempotencyKey,
+      });
+    }
     setReviewState(null);
     setProcessResult(
       buildProcessResult({
@@ -1150,7 +1407,7 @@ export function AdvancedSwapScreen(): React.JSX.Element {
               </View>
 
               <CompactInputField
-                label={`Amount${inputToken?.symbol != null ? ` (${inputToken.symbol})` : ''}`}
+                label={`${mode === 'recurring' ? 'Total amount' : 'Amount'}${inputToken?.symbol != null ? ` (${inputToken.symbol})` : ''}`}
                 value={amount}
                 onChangeText={(value) =>
                   setAmount(sanitizeDecimalInput(value, inputToken?.decimals ?? 9))
@@ -1201,9 +1458,9 @@ export function AdvancedSwapScreen(): React.JSX.Element {
                   <SegmentedButton
                     value={frequency}
                     options={[
-                      { value: 'daily:1', label: 'Daily' },
-                      { value: 'weekly:1', label: 'Weekly' },
-                      { value: 'monthly:1', label: 'Monthly' },
+                      { value: 'daily:2', label: 'Daily × 2' },
+                      { value: 'weekly:2', label: 'Weekly × 2' },
+                      { value: 'monthly:2', label: 'Monthly × 2' },
                     ]}
                     onChange={setFrequency}
                   />
@@ -1274,6 +1531,152 @@ export function AdvancedSwapScreen(): React.JSX.Element {
                 </View>
               </Pressable>
             </Animated.View>
+
+            <Animated.View
+              entering={screenSectionEntering}
+              style={[styles.contentFrame, styles.card, styles.ordersCard]}
+            >
+              <View style={styles.compactSectionHeader}>
+                <Text variant="bodyBold" color={colors.text.primary} style={styles.sectionTitle}>
+                  {mode === 'trigger' ? 'Target orders' : 'Repeat orders'}
+                </Text>
+                <SegmentedButton
+                  value={orderView}
+                  options={[
+                    { value: 'active', label: 'Active' },
+                    { value: 'history', label: 'History' },
+                  ]}
+                  onChange={setOrderView}
+                />
+              </View>
+
+              {mode === 'trigger' && !currentAvailable ? (
+                <Text variant="small" color={colors.semantic.warning}>
+                  Status is read-only. New deposits and in-app cancellation are disabled until every
+                  Trigger withdrawal refund can be verified before signing.
+                </Text>
+              ) : null}
+
+              {mode === 'trigger' && (!triggerOrdersUnlocked || triggerOrdersQuery.isError) ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.orderActionButton,
+                    pressed ? styles.controlPressed : null,
+                    triggerOrdersAuthMutation.isPending ? styles.submitButtonDisabled : null,
+                  ]}
+                  disabled={triggerOrdersAuthMutation.isPending || !canManageOrders}
+                  onPress={() => triggerOrdersAuthMutation.mutate()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Authenticate and load target orders"
+                >
+                  <Text variant="buttonSmall" color={colors.text.primary}>
+                    {triggerOrdersAuthMutation.isPending ? 'Authenticating' : 'Authenticate & Load'}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              {(mode === 'trigger' && triggerOrdersQuery.isPending) ||
+              (mode === 'recurring' && recurringOrdersQuery.isPending) ? (
+                <Text variant="small" color={colors.text.secondary}>
+                  Loading verified orders…
+                </Text>
+              ) : null}
+
+              {mode === 'recurring' && recurringOrdersQuery.isError ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.orderActionButton,
+                    pressed ? styles.controlPressed : null,
+                  ]}
+                  onPress={() => void recurringOrdersQuery.refetch()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry loading repeat orders"
+                >
+                  <Text variant="buttonSmall" color={colors.text.primary}>
+                    Retry Loading Orders
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              {((mode === 'trigger' && triggerOrdersQuery.isSuccess) ||
+                (mode === 'recurring' && recurringOrdersQuery.isSuccess)) &&
+              managedOrders.length === 0 ? (
+                <Text variant="small" color={colors.text.secondary}>
+                  No {orderView} {mode === 'trigger' ? 'target' : 'repeat'} orders.
+                </Text>
+              ) : null}
+
+              {managedOrders.map((order) => (
+                <View key={`${order.kind}-${order.orderId}`} style={styles.orderRow}>
+                  <View style={styles.orderDetails}>
+                    <Text variant="bodyBold" color={colors.text.primary} numberOfLines={1}>
+                      {shorten(order.orderId)}
+                    </Text>
+                    <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+                      {shorten(order.inputMint)} → {shorten(order.outputMint)} · {order.status}
+                    </Text>
+                  </View>
+                  {order.cancellable ? (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.cancelOrderButton,
+                        pressed ? styles.controlPressed : null,
+                      ]}
+                      onPress={() => setPendingCancellation(order)}
+                      disabled={cancellationMutation.isPending}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Cancel order ${order.orderId}`}
+                    >
+                      <Text variant="buttonSmall" color={colors.semantic.error}>
+                        {order.kind === 'trigger' && order.status !== 'open' ? 'Recover' : 'Cancel'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))}
+
+              {(
+                mode === 'trigger'
+                  ? triggerOrdersQuery.hasNextPage
+                  : recurringOrdersQuery.hasNextPage
+              ) ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.orderActionButton,
+                    pressed ? styles.controlPressed : null,
+                    (
+                      mode === 'trigger'
+                        ? triggerOrdersQuery.isFetchingNextPage
+                        : recurringOrdersQuery.isFetchingNextPage
+                    )
+                      ? styles.submitButtonDisabled
+                      : null,
+                  ]}
+                  disabled={
+                    mode === 'trigger'
+                      ? triggerOrdersQuery.isFetchingNextPage
+                      : recurringOrdersQuery.isFetchingNextPage
+                  }
+                  onPress={() =>
+                    void (mode === 'trigger'
+                      ? triggerOrdersQuery.fetchNextPage()
+                      : recurringOrdersQuery.fetchNextPage())
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Load more repeat orders"
+                >
+                  <Text variant="buttonSmall" color={colors.text.primary}>
+                    {(
+                      mode === 'trigger'
+                        ? triggerOrdersQuery.isFetchingNextPage
+                        : recurringOrdersQuery.isFetchingNextPage
+                    )
+                      ? 'Loading More'
+                      : 'Load More Orders'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </Animated.View>
           </ScrollView>
         </KeyboardAvoidingView>
 
@@ -1289,6 +1692,32 @@ export function AdvancedSwapScreen(): React.JSX.Element {
           busy={isSubmitting}
           onCancel={handleCancelReviewSwap}
           onConfirm={handleConfirmReviewSwap}
+        />
+
+        <SwapReviewFlowScreen
+          visible={pendingCancellation != null}
+          title={
+            pendingCancellation?.kind === 'trigger' ? 'Cancel target order' : 'Cancel repeat order'
+          }
+          statusLabel="Funds recovery"
+          payLeg={null}
+          receiveLeg={null}
+          detailRows={
+            pendingCancellation == null
+              ? []
+              : [
+                  { label: 'Order', value: shorten(pendingCancellation.orderId) },
+                  { label: 'Current status', value: pendingCancellation.status },
+                  { label: 'Network', value: 'Solana mainnet' },
+                ]
+          }
+          confirmLabel="Sign & Cancel"
+          busyLabel="Signing cancellation"
+          busy={cancellationMutation.isPending}
+          onCancel={() => setPendingCancellation(null)}
+          onConfirm={() => {
+            if (pendingCancellation) cancellationMutation.mutate(pendingCancellation);
+          }}
         />
 
         <ProcessResultScreen
@@ -1499,6 +1928,44 @@ const styles = StyleSheet.create({
   },
   modeFields: {
     gap: spacing.sm,
+  },
+  ordersCard: {
+    marginTop: spacing.md,
+  },
+  orderActionButton: {
+    minHeight: layout.minTouchTarget,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.glass.textBacking,
+    borderWidth: 1,
+    borderColor: colors.glass.rimSubtle,
+  },
+  orderRow: {
+    minHeight: layout.minTouchTarget,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.glass.rimSubtle,
+  },
+  orderDetails: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  cancelOrderButton: {
+    minWidth: 72,
+    minHeight: layout.minTouchTarget,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.semantic.errorSoftFill,
   },
   fieldRow: {
     flexDirection: 'row',

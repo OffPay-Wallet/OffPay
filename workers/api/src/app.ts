@@ -12,6 +12,7 @@ import {
 } from './lib/logging';
 import { requestTimingMiddleware } from './lib/timing';
 import { getWorkerConfigStatus, toPublicWorkerConfigStatus } from './lib/config';
+import aiRoutes from './routes/ai';
 import bootstrapRoutes from './routes/bootstrap';
 import capabilitiesRoutes from './routes/capabilities';
 import inviteRoutes from './routes/invite';
@@ -58,6 +59,8 @@ app.get('/health', (context) => {
     {
       status,
       timestamp: new Date().toISOString(),
+      readinessScope: 'core_bootstrap',
+      capabilitiesEndpoint: '/api/capabilities',
       config: publicConfigStatus,
     },
     configStatus.ready ? 200 : 503,
@@ -65,6 +68,7 @@ app.get('/health', (context) => {
 });
 
 app.route('/capabilities', capabilitiesRoutes);
+app.route('/ai', aiRoutes);
 app.route('/bootstrap', bootstrapRoutes);
 app.route('/invite', inviteRoutes);
 app.route('/market', marketRoutes);

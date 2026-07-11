@@ -450,13 +450,11 @@ function buildRwaHoldingsCard(
     title: 'RWA holdings',
     subtitle: holdings.length === 0 ? 'No RWA holdings' : `${holdings.length} position(s)`,
     tone: holdings.length === 0 ? 'default' : 'success',
-    rows: settlement.slice(0, 2).map((token) =>
-      row(
-        readString(token.symbol) ?? 'Settlement',
-        readString(token.balance) ?? '0',
-        'default',
+    rows: settlement
+      .slice(0, 2)
+      .map((token) =>
+        row(readString(token.symbol) ?? 'Settlement', readString(token.balance) ?? '0', 'default'),
       ),
-    ),
     items: holdings.slice(0, MAX_ITEMS_PER_CARD).map((holding) => ({
       title: `${formatUnknown(holding.balance)} ${formatUnknown(holding.symbol)}`,
       detail:
@@ -525,6 +523,10 @@ function buildFlashPositionsCard(
       detail: `Size ${formatMoney(position.sizeUsd)} | PnL ${formatMoney(position.unrealizedPnlUsd)}`,
       tone: (readNumber(position.unrealizedPnlUsd) ?? 0) < 0 ? 'warning' : 'success',
     })),
+    footer:
+      result.withdrawalAvailable === false
+        ? (readString(result.withdrawalMessage) ?? 'Flash withdrawal is unavailable.')
+        : null,
   };
 }
 

@@ -42,6 +42,11 @@ function buildCapabilities(
       magicBlockIntent: available,
       magicBlockTransfer: unsupportedNetwork,
     },
+    perps: {
+      markets: network === 'mainnet' ? available : unsupportedNetwork,
+      trade: network === 'mainnet' ? available : unsupportedNetwork,
+      magicBlockExecution: network === 'mainnet' ? available : unsupportedNetwork,
+    },
     payment: {
       privateInitMint: available,
       privateBalance: available,

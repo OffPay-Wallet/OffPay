@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import router from '../router';
+import {
+  buildTestAiSessionToken,
+  TEST_AI_SESSION_SECRET,
+} from '../test-helpers/ai-session-token';
 
 import type { AiProxyEnv } from '../types';
 
@@ -10,6 +14,7 @@ describe('AI chat response cache', () => {
   });
 
   it('does not cache agent turns because they can carry executable tool state', async () => {
+    const sessionToken = await buildTestAiSessionToken();
     const kvStore = new Map<string, string>();
     let providerCalls = 0;
     jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init): Promise<Response> => {
@@ -48,6 +53,7 @@ describe('AI chat response cache', () => {
     });
 
     const env: AiProxyEnv = {
+      AI_PROXY_SESSION_SECRET: TEST_AI_SESSION_SECRET,
       GEMINI_API_KEY: 'gemini-key',
       AI_PROXY_GEMINI_PRIVACY_CONFIRMED: 'true',
       UPSTASH_REDIS_REST_URL: 'https://upstash.offpay.test',
@@ -84,6 +90,7 @@ describe('AI chat response cache', () => {
         headers: {
           'content-type': 'application/json',
           'x-offpay-ai-turn-id': 'turn-cache-1',
+          'x-offpay-ai-session': sessionToken,
         },
         body: JSON.stringify({
           responseMode: 'agent_turn',

@@ -12,6 +12,7 @@ interface WorkerConfigStatus {
   ready: boolean;
   degraded: boolean;
   features: {
+    aiSession: FeatureConfigStatus;
     androidAttestation: FeatureConfigStatus;
     iosAttestation: FeatureConfigStatus;
     inviteGate: FeatureConfigStatus;
@@ -60,6 +61,7 @@ const INVITE_GATE_BINDINGS: BindingKey[] = [
   'OFFPAY_INVITE_CODE_PEPPER',
 ];
 const MIN_INVITE_CODE_PEPPER_LENGTH = 32;
+const MIN_AI_SESSION_SECRET_LENGTH = 32;
 
 function hasStringBinding(bindings: Bindings, key: BindingKey): boolean {
   const value = bindings[key];
@@ -73,6 +75,14 @@ function hasTruthyStringBinding(value: string | undefined): boolean {
 
 function missingStringBindings(bindings: Bindings, keys: readonly BindingKey[]): string[] {
   return keys.flatMap((key) => (hasStringBinding(bindings, key) ? [] : [key]));
+}
+
+function missingAiSessionBindings(bindings: Bindings): string[] {
+  const value = bindings.AI_PROXY_SESSION_SECRET?.trim() ?? '';
+  if (value.length === 0) return ['AI_PROXY_SESSION_SECRET'];
+  return value.length >= MIN_AI_SESSION_SECRET_LENGTH
+    ? []
+    : ['AI_PROXY_SESSION_SECRET_MIN_32'];
 }
 
 function missingUpstashBindings(bindings: Bindings): string[] {
@@ -222,6 +232,7 @@ function getAndroidAttestationStatus(bindings: Bindings): FeatureConfigStatus {
 }
 
 function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
+  const aiSession = withConfiguredState(missingAiSessionBindings(bindings));
   const protectedAuth = withConfiguredState(
     mergeMissing(
       missingStringBindings(bindings, PROTECTED_AUTH_BINDINGS),
@@ -259,6 +270,7 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
   const umbra = withConfiguredState(rpc.missing);
 
   const ready =
+    aiSession.configured &&
     protectedAuth.configured &&
     platformAttestationReady &&
     pendingBackup.configured &&
@@ -278,6 +290,7 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
         !offline.configured ||
         !umbra.configured),
     features: {
+      aiSession,
       androidAttestation,
       iosAttestation,
       inviteGate,

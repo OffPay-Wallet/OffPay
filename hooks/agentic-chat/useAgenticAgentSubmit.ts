@@ -327,6 +327,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
   let pendingToolResults: AgentToolResult[] = [];
   let attachedActionId: string | null = null;
   let attachedToolCards: AgenticChatToolCard[] = [];
+  let writeIntentUsed = false;
   const canReadUmbraVaultBalance = isOffpayFeatureAvailable(
     params.capabilities ?? null,
     'umbra.execution',
@@ -345,6 +346,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     canUseUmbraWallet: activeWalletCanUseUmbra,
     capabilities: params.capabilities,
   });
+  const offeredToolNames = toolSchemas.map((schema) => schema.name);
 
   for (let turnIndex = 0; turnIndex < MAX_TOOL_TURNS; turnIndex += 1) {
     const turn = await sendAgentTurn(
@@ -379,7 +381,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
               isOffpayFeatureAvailable(params.capabilities ?? null, 'payment.umbraPrivateP2p'),
             umbraVaultBalance: activeWalletCanUseUmbra && canReadUmbraVaultBalance,
             privateBalance: activeWalletCanUseUmbra && canReadUmbraVaultBalance,
-            flashTrade: params.scope.network === 'mainnet' && params.canUseNetwork,
+            flashTrade: offeredToolNames.some((name) => name.startsWith('flash_')),
           },
           tokenSymbols: buildSafeTokenSymbols(params.balance),
         },
@@ -453,14 +455,17 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       signal: params.controller.signal,
       walletId: params.walletId,
       walletImportMethod: params.walletImportMethod ?? null,
+      offeredToolNames,
     };
     const run = await runAgenticTools(turn.toolCalls, toolContext, {
+      allowWriteIntent: !writeIntentUsed,
       onToolStart: (toolCalls) => {
         store.updateMessage(params.assistantMessageId, {
           processingLabel: formatAgenticToolProcessingLabel(toolCalls),
         });
       },
     });
+    if (run.writeIntentUsed) writeIntentUsed = true;
 
     if (run.drafts.length > 0) {
       attachedActionId = persistDraftAction({
@@ -535,52 +540,109 @@ function persistDraftAction({
           createdAt: now,
           updatedAt: now,
         }
-      : draft.kind === 'rwa_trade'
+      : draft.kind === 'swap_trigger'
         ? {
             ...draft.draft,
-            id: createAgenticId('agentic-rwa'),
-            kind: 'rwa_trade',
+            id: createAgenticId('agentic-trigger-swap'),
+            kind: 'swap_trigger',
             status: 'needs_confirmation',
             conversationId,
             toolCallId: createAgenticId('intent'),
             createdAt: now,
             updatedAt: now,
           }
-      : draft.kind === 'flash_position'
-        ? {
-            ...draft.draft,
-            id: createAgenticId('agentic-flash'),
-            kind: 'flash_position',
-            status: 'needs_confirmation',
-            conversationId,
-            toolCallId: createAgenticId('intent'),
-            createdAt: now,
-            updatedAt: now,
-          }
-        : draft.kind === 'umbra_vault'
+        : draft.kind === 'swap_recurring'
           ? {
               ...draft.draft,
-              id: createAgenticId('agentic-umbra-vault'),
-              kind: 'umbra_vault',
+              id: createAgenticId('agentic-recurring-swap'),
+              kind: 'swap_recurring',
               status: 'needs_confirmation',
               conversationId,
               toolCallId: createAgenticId('intent'),
               createdAt: now,
               updatedAt: now,
             }
-          : {
-              ...draft.draft,
-              id: createAgenticId(
-                draft.kind === 'normal_send' ? 'agentic-normal-send' : 'agentic-private-send',
-              ),
-              kind: draft.kind,
-              status: 'needs_confirmation',
-              route: draft.route,
-              conversationId,
-              toolCallId: createAgenticId('intent'),
-              createdAt: now,
-              updatedAt: now,
-            };
+          : draft.kind === 'swap_trigger_cancel' || draft.kind === 'swap_recurring_cancel'
+            ? {
+                ...draft.draft,
+                id: createAgenticId('agentic-advanced-swap-cancel'),
+                kind: draft.kind,
+                status: 'needs_confirmation',
+                conversationId,
+                toolCallId: createAgenticId('intent'),
+                createdAt: now,
+                updatedAt: now,
+              }
+            : draft.kind === 'rwa_trade'
+              ? {
+                  ...draft.draft,
+                  id: createAgenticId('agentic-rwa'),
+                  kind: 'rwa_trade',
+                  status: 'needs_confirmation',
+                  conversationId,
+                  toolCallId: createAgenticId('intent'),
+                  createdAt: now,
+                  updatedAt: now,
+                }
+              : draft.kind === 'flash_deposit'
+                ? {
+                    ...draft.draft,
+                    id: createAgenticId('agentic-flash-deposit'),
+                    kind: 'flash_deposit',
+                    status: 'needs_confirmation',
+                    conversationId,
+                    toolCallId: createAgenticId('intent'),
+                    createdAt: now,
+                    updatedAt: now,
+                  }
+                : draft.kind === 'flash_position'
+                  ? {
+                      ...draft.draft,
+                      id: createAgenticId('agentic-flash'),
+                      kind: 'flash_position',
+                      status: 'needs_confirmation',
+                      conversationId,
+                      toolCallId: createAgenticId('intent'),
+                      createdAt: now,
+                      updatedAt: now,
+                    }
+                  : draft.kind === 'umbra_vault'
+                    ? {
+                        ...draft.draft,
+                        id: createAgenticId('agentic-umbra-vault'),
+                        kind: 'umbra_vault',
+                        status: 'needs_confirmation',
+                        conversationId,
+                        toolCallId: createAgenticId('intent'),
+                        createdAt: now,
+                        updatedAt: now,
+                      }
+                    : draft.kind === 'umbra_claim'
+                      ? {
+                          ...draft.draft,
+                          id: createAgenticId('agentic-umbra-claim'),
+                          kind: 'umbra_claim',
+                          status: 'needs_confirmation',
+                          conversationId,
+                          toolCallId: createAgenticId('intent'),
+                          createdAt: now,
+                          updatedAt: now,
+                        }
+                      : {
+                          ...draft.draft,
+                          id: createAgenticId(
+                            draft.kind === 'normal_send'
+                              ? 'agentic-normal-send'
+                              : 'agentic-private-send',
+                          ),
+                          kind: draft.kind,
+                          status: 'needs_confirmation',
+                          route: draft.route,
+                          conversationId,
+                          toolCallId: createAgenticId('intent'),
+                          createdAt: now,
+                          updatedAt: now,
+                        };
   store.upsertAction(action);
   return action.id;
 }

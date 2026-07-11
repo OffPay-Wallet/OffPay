@@ -20,6 +20,65 @@ function buildBindings(overrides: Partial<Bindings> = {}): Bindings {
 }
 
 describe('capabilities RWA MagicBlock delegation gates', () => {
+  it('advertises stateful Jupiter orders only with shared binding and execution-lock storage', async () => {
+    const withoutSharedState = await getCapabilities(buildBindings(), 'mainnet');
+    expect(withoutSharedState.capabilities.swap.triggerOrders.available).toBe(false);
+    expect(withoutSharedState.capabilities.swap.recurringSwap.available).toBe(false);
+
+    const withSharedState = await getCapabilities(
+      buildBindings({
+        UPSTASH_REDIS_REST_URL: 'https://redis.offpay.test',
+        UPSTASH_REDIS_REST_TOKEN: 'redis-token',
+      }),
+      'mainnet',
+    );
+    expect(withSharedState.capabilities.swap.triggerOrders).toMatchObject({
+      available: false,
+      reason: 'not_implemented',
+    });
+    expect(withSharedState.capabilities.swap.triggerOrders.message).toContain(
+      'cancel-and-withdraw',
+    );
+    expect(withSharedState.capabilities.swap.recurringSwap).toMatchObject({
+      available: true,
+      reason: 'available',
+    });
+  });
+
+  it('fails Flash withdrawal closed without an authorized distinct co-signer', async () => {
+    const response = await getCapabilities(buildBindings(), 'mainnet');
+
+    expect(response.capabilities.perps.funding).toMatchObject({
+      available: false,
+      reason: 'not_implemented',
+    });
+    expect(response.capabilities.perps.funding.message).toContain('deposits are disabled');
+    expect(response.capabilities.perps.funding.message).toContain('trapped user funds');
+    expect(response.capabilities.perps.withdrawal).toMatchObject({
+      available: false,
+      reason: 'not_implemented',
+    });
+    expect(response.capabilities.perps.withdrawal.message).toContain('distinct co-signer');
+    expect(response.capabilities.perps.withdrawal.message).toContain('no authorized');
+  });
+
+  it('advertises private balance only when the provider auth token store is configured', async () => {
+    const withoutState = await getCapabilities(buildBindings(), 'mainnet');
+    expect(withoutState.capabilities.payment.privateBalance.available).toBe(false);
+
+    const withState = await getCapabilities(
+      buildBindings({
+        UPSTASH_REDIS_REST_URL: 'https://redis.offpay.test',
+        UPSTASH_REDIS_REST_TOKEN: 'redis-token',
+      }),
+      'mainnet',
+    );
+    expect(withState.capabilities.payment.privateBalance).toMatchObject({
+      available: true,
+      reason: 'available',
+    });
+  });
+
   it('treats wildcard Jupiter stocks catalog config as available on mainnet', async () => {
     const response = await getCapabilities(
       buildBindings({
@@ -36,6 +95,28 @@ describe('capabilities RWA MagicBlock delegation gates', () => {
       available: false,
       reason: 'not_implemented',
     });
+  });
+
+  it('advertises mainnet RWA trading only after the eligibility policy is configured', async () => {
+    const withoutEligibility = await getCapabilities(
+      buildBindings({
+        OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST: '*',
+        OFFPAY_RWA_MAINNET_ENABLED: '1',
+      }),
+      'mainnet',
+    );
+    expect(withoutEligibility.capabilities.rwa.quote.available).toBe(false);
+
+    const withEligibility = await getCapabilities(
+      buildBindings({
+        OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST: '*',
+        OFFPAY_RWA_MAINNET_ENABLED: '1',
+        OFFPAY_RWA_MAINNET_ELIGIBLE_WALLETS: '11111111111111111111111111111111',
+        OFFPAY_RWA_MAINNET_ELIGIBILITY_POLICY_VERSION: 'approved-v1',
+      }),
+      'mainnet',
+    );
+    expect(withEligibility.capabilities.rwa.quote.available).toBe(true);
   });
 
   it('advertises devnet RWA intent delegation only when the program and router are configured', async () => {
@@ -96,14 +177,12 @@ describe('capabilities RWA MagicBlock delegation gates', () => {
     });
   });
 
-  it('keeps mainnet RWA intent delegation gated separately from devnet', async () => {
+  it('keeps the classic-SPL RWA delegate permanently disabled on mainnet', async () => {
     const response = await getCapabilities(
       buildBindings({
         OFFPAY_RWA_DELEGATE_PROGRAM_ID: PROGRAM_ID,
         OFFPAY_RWA_DELEGATE_DEVNET_ENABLED: '1',
-        OFFPAY_RWA_DELEGATE_MAINNET_ENABLED: '0',
         OFFPAY_RWA_MAGICBLOCK_ROUTER_DEVNET_URL: 'https://devnet-router.magicblock.app',
-        OFFPAY_RWA_MAGICBLOCK_ROUTER_MAINNET_URL: 'https://mainnet-router.magicblock.app',
       }),
       'mainnet',
     );
@@ -112,6 +191,6 @@ describe('capabilities RWA MagicBlock delegation gates', () => {
       available: false,
       reason: 'not_implemented',
     });
-    expect(response.capabilities.rwa.magicBlockIntent.message).toContain('after audit');
+    expect(response.capabilities.rwa.magicBlockIntent.message).toContain('permanently disabled');
   });
 });

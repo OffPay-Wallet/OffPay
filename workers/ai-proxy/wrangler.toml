@@ -53,9 +53,9 @@ AI_PROXY_TTS_ENABLED = "true"
 AI_PROXY_ALLOWED_ORIGINS = "https://offpay.app"
 AI_PROXY_RATE_LIMIT_WINDOW_MS = "60000"
 AI_PROXY_RATE_LIMIT_MAX = "40"
-# Soft-rollout. Flip to "true" once every shipped app build includes
-# EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET, otherwise older clients 401.
-AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
+# Retained as an explicit deployment assertion. The Worker fails closed even
+# if this marker is removed; tokens are issued by the attested OffPay API.
+AI_PROXY_REQUIRE_SESSION_TOKEN = "true"
 
 # Set secrets with:
 # npx wrangler secret put GEMINI_API_KEY --config workers/ai-proxy/wrangler.toml
@@ -67,13 +67,10 @@ AI_PROXY_REQUIRE_SESSION_TOKEN = "false"
 # npx wrangler secret put UPSTASH_REDIS_REST_URL --config workers/ai-proxy/wrangler.toml
 # npx wrangler secret put UPSTASH_REDIS_REST_TOKEN --config workers/ai-proxy/wrangler.toml
 #
-# AI_PROXY_SESSION_SECRET is the HMAC secret the Worker uses to verify
-# the `x-offpay-ai-session` header. Distribute the same value to clients
-# via `EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET` (or, preferably, behind a
-# backend-issued bootstrap step). When `AI_PROXY_REQUIRE_SESSION_TOKEN`
-# is set to "true" the Worker rejects requests without a valid token.
-# Until then the Worker logs the failure but allows the request, so a
-# staged rollout doesn't break older app builds.
+# AI_PROXY_SESSION_SECRET is the HMAC secret this Worker uses to verify the
+# `x-offpay-ai-session` header. Set the same random 32+ character value as a
+# secret on workers/api/wrangler.toml. Never expose it through EXPO_PUBLIC_*;
+# the attested API Worker issues five-minute opaque client tokens.
 #
 # Chat provider is Workers AI primary through the [ai] binding above,
 # using CLOUDFLARE_AI_CHAT_MODEL. Gemini and Groq remain fallback paths

@@ -1,8 +1,4 @@
-import {
-  createRwaQuote,
-  getRwaAssets,
-  getWalletTransactions,
-} from '@/lib/api/offpay-api-client';
+import { createRwaQuote, getRwaAssets, getWalletTransactions } from '@/lib/api/offpay-api-client';
 import { runAgenticTools, type AgenticToolRunnerContext } from '@/lib/agentic-payments/agent-tools';
 
 import type {
@@ -134,6 +130,7 @@ const context: AgenticToolRunnerContext = {
   userText: 'buy 2 RWAUSDC of SPY',
   walletId: 'wallet-1',
   walletImportMethod: 'generated',
+  offeredToolNames: ['get_rwa_assets', 'get_rwa_holdings', 'get_rwa_history', 'prepare_rwa_trade'],
 };
 
 describe('agentic RWA tools', () => {
@@ -194,7 +191,13 @@ describe('agentic RWA tools', () => {
     mockCreateRwaQuote.mockResolvedValue(quote);
 
     const run = await runAgenticTools(
-      [{ id: 'call-rwa-buy', name: 'prepare_rwa_trade', args: { asset: 'SPY', side: 'buy', amount: '2 USDC' } }],
+      [
+        {
+          id: 'call-rwa-buy',
+          name: 'prepare_rwa_trade',
+          args: { asset: 'SPY', side: 'buy', amount: '2 USDC' },
+        },
+      ],
       context,
     );
 
@@ -218,6 +221,35 @@ describe('agentic RWA tools', () => {
     expect(JSON.stringify(run.results[0].result)).not.toContain(spyMint);
     expect(JSON.stringify(run.results[0].result)).not.toContain(settlementMint);
     expect(JSON.stringify(run.results[0].result)).not.toContain('unsigned-base64');
+  });
+
+  it.each([
+    [{ tradingHalted: true, tradable: false }, 'rwa_trading_halted'],
+    [{ multiplierTransitionActive: true, tradable: false }, 'rwa_multiplier_transition'],
+  ] as const)('fails closed before quoting an unsafe RWA asset', async (assetPatch, code) => {
+    mockGetRwaAssets.mockResolvedValue({
+      network: 'devnet',
+      mode: 'devnet_sandbox',
+      provider: 'offpay_devnet_sandbox',
+      providerEnvironment: 'devnet_sandbox',
+      assets: [{ ...spyAsset, ...assetPatch }],
+      fetchedAt: 1,
+    });
+
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-rwa-unsafe',
+          name: 'prepare_rwa_trade',
+          args: { asset: 'SPY', side: 'buy', amount: '2 USDC' },
+        },
+      ],
+      context,
+    );
+
+    expect(run.results[0].error?.code).toBe(code);
+    expect(run.drafts).toHaveLength(0);
+    expect(mockCreateRwaQuote).not.toHaveBeenCalled();
   });
 
   it('returns a single sanitized RWA asset when a ticker is requested', async () => {

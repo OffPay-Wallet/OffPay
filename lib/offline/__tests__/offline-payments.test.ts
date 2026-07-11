@@ -18,6 +18,7 @@ jest.mock('@/lib/wallet/wallet', () => ({
 
 import { afterEach } from '@jest/globals';
 import { ed25519 } from '@noble/curves/ed25519.js';
+import { Keypair, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import bs58 from 'bs58';
 
 import * as offpayApiClient from '@/lib/api/offpay-api-client';
@@ -28,11 +29,13 @@ import {
   buildOffpayReceiveRequestQr,
   buildSolanaPayRequestQr,
   clearOfflineNonceState,
+  enqueueOfflineSignedPayment,
   enqueueReceivedOfflineSignedPayment,
   getOfflineNonceReadiness,
   isNativeOfflineSolToken,
   parseOfflineQrPayload,
   saveOfflineNonceState,
+  verifyOfflineSignedTransaction,
 } from '@/lib/offline/offline-payments';
 import {
   isOfflinePaymentSlotReclaimable,
@@ -48,6 +51,58 @@ import {
 describe('offline-payments', () => {
   const walletAddress = 'Arbj11u1RHjfUwnBsg2zTWFP82EdCAxirxGvLrvsfwiw';
   const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+  async function buildAdversarialFixture(recipient = walletAddress) {
+    const signingSeed = new Uint8Array(32).fill(7);
+    const signer = Keypair.fromSeed(signingSeed);
+    const derivedWalletAddress = signer.publicKey.toBase58();
+    const nonceAccount = bs58.encode(ed25519.getPublicKey(new Uint8Array(32).fill(13)));
+    (getStoredWalletSigningMaterialWithAuth as jest.Mock).mockResolvedValue({
+      privateKey: 'test-private-key',
+    });
+
+    await saveOfflineNonceState({
+      walletAddress: derivedWalletAddress,
+      network: 'mainnet',
+      nonceAccount,
+      nonceAuthority: derivedWalletAddress,
+      cachedNonce: '11111111111111111111111111111111',
+    });
+
+    const payment = await buildSignedStablecoinOfflinePayment({
+      walletAddress: derivedWalletAddress,
+      walletId: 'wallet-1',
+      network: 'mainnet',
+      recipient,
+      amount: '1',
+      token: usdcMint,
+    });
+
+    return { payment, signer };
+  }
+
+  function resignTransaction(transaction: Transaction, signer: Keypair): string {
+    transaction.sign(signer);
+    return transaction
+      .serialize({ requireAllSignatures: true, verifySignatures: true })
+      .toString('base64');
+  }
+
+  function replaceSignedRecentBlockhash(
+    signedTransaction: string,
+    signer: Keypair,
+    recentBlockhash: Uint8Array,
+  ): string {
+    const bytes = Buffer.from(signedTransaction, 'base64');
+    // The strict test fixture has one signature, a three-byte legacy header,
+    // one-byte account count, and ten 32-byte account keys.
+    const messageOffset = 1 + 64;
+    const recentBlockhashOffset = messageOffset + 3 + 1 + 10 * 32;
+    Buffer.from(recentBlockhash).copy(bytes, recentBlockhashOffset);
+    const signature = ed25519.sign(bytes.subarray(messageOffset), signer.secretKey.subarray(0, 32));
+    Buffer.from(signature).copy(bytes, 1);
+    return bytes.toString('base64');
+  }
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -553,6 +608,137 @@ describe('offline-payments', () => {
     expect(payment.recipientTokenAccount).not.toBe(recipient);
     expect(payment.verification.recipientVerified).toBe(true);
     expect(payment.verification.instructionCount).toBe(3);
+  });
+
+  it('rejects a transfer redirected to an attacker even when the expected recipient remains in a decoy account instruction', async () => {
+    const { payment, signer } = await buildAdversarialFixture();
+    const transaction = Transaction.from(Buffer.from(payment.signedTransaction, 'base64'));
+    const transfer = transaction.instructions[2];
+    expect(transfer).toBeDefined();
+    transaction.instructions[2] = new TransactionInstruction({
+      programId: transfer.programId,
+      keys: transfer.keys.map((key, index) =>
+        index === 2 ? { ...key, pubkey: Keypair.generate().publicKey } : key,
+      ),
+      data: transfer.data,
+    });
+
+    await expect(
+      verifyOfflineSignedTransaction({
+        signedTransaction: resignTransaction(transaction, signer),
+        network: 'mainnet',
+        expectedSender: signer.publicKey.toBase58(),
+        expectedRecipientOwner: walletAddress,
+        expectedRecipient: payment.recipientTokenAccount,
+        expectedAmount: payment.rawAmount,
+        expectedAmountUnit: 'raw',
+        expectedToken: payment.tokenMint,
+      }),
+    ).rejects.toThrow(/template|destination/i);
+  });
+
+  it('rejects any extra drain instruction even when the expected transfer is intact', async () => {
+    const { payment, signer } = await buildAdversarialFixture();
+    const transaction = Transaction.from(Buffer.from(payment.signedTransaction, 'base64'));
+    transaction.add(
+      SystemProgram.transfer({
+        fromPubkey: signer.publicKey,
+        toPubkey: Keypair.generate().publicKey,
+        lamports: 1,
+      }),
+    );
+
+    await expect(
+      verifyOfflineSignedTransaction({
+        signedTransaction: resignTransaction(transaction, signer),
+        network: 'mainnet',
+        expectedSender: signer.publicKey.toBase58(),
+        expectedRecipientOwner: walletAddress,
+        expectedRecipient: payment.recipientTokenAccount,
+        expectedAmount: payment.rawAmount,
+        expectedAmountUnit: 'raw',
+        expectedToken: payment.tokenMint,
+      }),
+    ).rejects.toThrow(/template/i);
+  });
+
+  it('rejects a changed transfer amount even when a decoy instruction contains the expected amount bytes', async () => {
+    const { payment, signer } = await buildAdversarialFixture();
+    const transaction = Transaction.from(Buffer.from(payment.signedTransaction, 'base64'));
+    const transfer = transaction.instructions[2];
+    expect(transfer).toBeDefined();
+    const changedTransferData = Buffer.from(transfer.data);
+    changedTransferData.writeBigUInt64LE(2_000_000n, 1);
+    transaction.instructions[2] = new TransactionInstruction({
+      programId: transfer.programId,
+      keys: transfer.keys,
+      data: changedTransferData,
+    });
+    const expectedAmountBytes = Buffer.alloc(8);
+    expectedAmountBytes.writeBigUInt64LE(BigInt(payment.rawAmount));
+    transaction.add(
+      new TransactionInstruction({
+        programId: SystemProgram.programId,
+        keys: [],
+        data: Buffer.concat([Buffer.from([99]), expectedAmountBytes]),
+      }),
+    );
+
+    await expect(
+      verifyOfflineSignedTransaction({
+        signedTransaction: resignTransaction(transaction, signer),
+        network: 'mainnet',
+        expectedSender: signer.publicKey.toBase58(),
+        expectedRecipientOwner: walletAddress,
+        expectedRecipient: payment.recipientTokenAccount,
+        expectedAmount: payment.rawAmount,
+        expectedAmountUnit: 'raw',
+        expectedToken: payment.tokenMint,
+      }),
+    ).rejects.toThrow(/template|amount/i);
+  });
+
+  it('rejects a receiver payload whose transaction pays a different owner', async () => {
+    const attacker = Keypair.generate().publicKey.toBase58();
+    const { payment, signer } = await buildAdversarialFixture(attacker);
+
+    await expect(
+      verifyOfflineSignedTransaction({
+        signedTransaction: payment.signedTransaction,
+        network: 'mainnet',
+        expectedSender: signer.publicKey.toBase58(),
+        expectedRecipientOwner: walletAddress,
+        // A malicious payload can truthfully advertise its own ATA. The
+        // active receiver owner must still be bound independently.
+        expectedRecipient: payment.recipientTokenAccount,
+        expectedAmount: payment.rawAmount,
+        expectedAmountUnit: 'raw',
+        expectedToken: payment.tokenMint,
+      }),
+    ).rejects.toThrow(/recipient owner/i);
+  });
+
+  it('rejects an outgoing transaction whose signed nonce value differs from the cached slot', async () => {
+    const { payment, signer } = await buildAdversarialFixture();
+    const differentNonce = Keypair.generate().publicKey.toBytes();
+
+    await expect(
+      enqueueOfflineSignedPayment({
+        walletAddress: signer.publicKey.toBase58(),
+        walletId: 'wallet-1',
+        network: 'mainnet',
+        signedTransaction: replaceSignedRecentBlockhash(
+          payment.signedTransaction,
+          signer,
+          differentNonce,
+        ),
+        expectedRecipientOwner: walletAddress,
+        expectedRecipient: payment.recipientTokenAccount,
+        expectedAmount: payment.rawAmount,
+        expectedAmountUnit: 'raw',
+        token: payment.tokenMint,
+      }),
+    ).rejects.toThrow(/cached durable nonce state/i);
   });
 
   it('rejects received offline payments when the advertised sender did not sign', async () => {

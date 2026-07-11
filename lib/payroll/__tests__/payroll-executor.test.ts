@@ -1,8 +1,14 @@
 import { runPayrollBatch, type PayrollExecutorHooks } from '@/lib/payroll/payroll-executor';
+import { isPayrollRowSendable } from '@/lib/payroll/payroll-types';
+import { createAbortError } from '@/lib/perf/abort';
 
 import type { PayrollRoute, PayrollRow } from '@/lib/payroll/payroll-types';
 
-function makeRow(id: string, route: PayrollRoute | null, overrides: Partial<PayrollRow> = {}): PayrollRow {
+function makeRow(
+  id: string,
+  route: PayrollRoute | null,
+  overrides: Partial<PayrollRow> = {},
+): PayrollRow {
   const now = Date.now();
   return {
     id,
@@ -40,6 +46,25 @@ function makeHarness(rows: PayrollRow[]) {
   const hooks: PayrollExecutorHooks = {
     submitRow: async () => {
       throw new Error('override submitRow per test');
+    },
+    onRowSubmissionStart: (rowId, attemptId, startedAt) => {
+      const current = map.get(rowId);
+      if (
+        current == null ||
+        current.route == null ||
+        current.status !== 'ready' ||
+        !isPayrollRowSendable(current)
+      ) {
+        return false;
+      }
+      map.set(rowId, {
+        ...current,
+        status: 'sending',
+        submissionAttemptId: attemptId,
+        submissionStartedAt: startedAt,
+        reconciliationRequired: false,
+      });
+      return true;
     },
     onRowUpdate: (rowId, patch) => {
       const current = map.get(rowId);
@@ -93,7 +118,7 @@ describe('runPayrollBatch', () => {
     });
   });
 
-  it('marks a row failed and continues the batch', async () => {
+  it('locks an uncertain failed row for reconciliation and continues the batch', async () => {
     const rows = [makeRow('a', 'magicblock'), makeRow('b', 'magicblock')];
     const harness = makeHarness(rows);
     harness.hooks.submitRow = async ({ row }) => {
@@ -105,8 +130,74 @@ describe('runPayrollBatch', () => {
 
     expect(summary.failed).toBe(1);
     expect(summary.submitted).toBe(1);
-    expect(harness.row('a')).toMatchObject({ status: 'failed', retryCount: 1 });
+    expect(harness.row('a')).toMatchObject({
+      status: 'failed',
+      retryCount: 1,
+      submissionAttemptId: 'payroll:a-key',
+      reconciliationRequired: true,
+    });
+    expect(harness.row('a').validationError).toMatch(/outcome is unknown/i);
     expect(harness.row('b').status).toBe('submitted');
+  });
+
+  it('never submits an uncertain failed row a second time', async () => {
+    const rows = [makeRow('a', 'magicblock')];
+    const harness = makeHarness(rows);
+    const submit = jest.fn(async () => {
+      throw new Error('RPC timeout');
+    });
+    harness.hooks.submitRow = submit;
+
+    await runPayrollBatch({ rows, hooks: harness.hooks });
+    // Even a stale caller that still holds a `ready` snapshot cannot acquire
+    // the durable claim again.
+    await runPayrollBatch({
+      rows: [{ ...rows[0], status: 'ready' }],
+      hooks: harness.hooks,
+    });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(harness.row('a').reconciliationRequired).toBe(true);
+  });
+
+  it('allows only one concurrent executor to claim and submit a row', async () => {
+    const rows = [makeRow('a', 'magicblock')];
+    const harness = makeHarness(rows);
+    const submit = jest.fn(async () => ({
+      status: 'submitted' as const,
+      signature: 'sig-a',
+    }));
+    harness.hooks.submitRow = submit;
+
+    await Promise.all([
+      runPayrollBatch({ rows, hooks: harness.hooks }),
+      runPayrollBatch({ rows, hooks: harness.hooks }),
+    ]);
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(harness.row('a')).toMatchObject({
+      status: 'submitted',
+      signature: 'sig-a',
+      submissionAttemptId: 'payroll:a-key',
+    });
+  });
+
+  it('keeps an aborted in-flight row locked until its chain outcome is reconciled', async () => {
+    const rows = [makeRow('a', 'magicblock')];
+    const harness = makeHarness(rows);
+    harness.hooks.submitRow = async () => {
+      throw createAbortError('paused');
+    };
+
+    const summary = await runPayrollBatch({ rows, hooks: harness.hooks });
+
+    expect(summary).toMatchObject({ interrupted: true, failed: 1, nextCursor: 1 });
+    expect(harness.row('a')).toMatchObject({
+      status: 'failed',
+      submissionAttemptId: 'payroll:a-key',
+      reconciliationRequired: true,
+    });
+    expect(harness.row('a').validationError).toMatch(/outcome is unknown/i);
   });
 
   it('never re-sends a row that already carries a signature', async () => {
@@ -141,7 +232,11 @@ describe('runPayrollBatch', () => {
   });
 
   it('stops after the current row when aborted and points the cursor at the pending row', async () => {
-    const rows = [makeRow('a', 'magicblock'), makeRow('b', 'magicblock'), makeRow('c', 'magicblock')];
+    const rows = [
+      makeRow('a', 'magicblock'),
+      makeRow('b', 'magicblock'),
+      makeRow('c', 'magicblock'),
+    ];
     const harness = makeHarness(rows);
     const controller = new AbortController();
     harness.hooks.submitRow = async ({ row }) => {

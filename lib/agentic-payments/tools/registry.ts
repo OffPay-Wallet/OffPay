@@ -1,6 +1,12 @@
 import type { AgentToolCall } from '@/lib/agentic-payments/types';
 
 import { analyzeWalletTool } from './analyze-wallet';
+import {
+  getAdvancedSwapOrdersTool,
+  prepareAdvancedSwapCancelTool,
+  prepareRecurringSwapTool,
+  prepareTriggerSwapTool,
+} from './advanced-swaps';
 import { checkPrivateSendReadyTool } from './check-private-send-ready';
 import { draftNormalSendTool, draftPrivateSendTool } from './payment-drafts';
 import { getClientCapabilitiesTool } from './get-client-capabilities';
@@ -38,19 +44,6 @@ import {
   flashCancelTriggerOrderTool,
   flashCancelAllTriggerOrdersTool,
   flashReversePositionTool,
-  flashGetPoolStatsTool,
-  flashGetFundingRatesTool,
-  flashGetOpenInterestTool,
-  flashGetLiquidationClustersTool,
-  flashGetMarketMetricsTool,
-  flashGetPortfolioRiskTool,
-  flashGetAbsorptionAnalysisTool,
-  flashGetOptimalEntryTool,
-  flashGetPositionSizingTool,
-  flashGetHedgeSuggestionsTool,
-  flashGetDataPoolsTool,
-  flashValidateDataAccessTool,
-  flashGetRateLimitsTool,
 } from './flash-trade';
 import type {
   AgenticToolDefinition,
@@ -82,6 +75,28 @@ const MODEL_HIDDEN_TOOL_NAMES = new Set<AgenticToolName>([
   'flash_get_rate_limits',
 ]);
 
+const WRITE_INTENT_TOOL_NAMES = new Set<AgenticToolName>([
+  'scan_umbra_claims',
+  'prepare_swap_quote',
+  'prepare_trigger_swap',
+  'prepare_recurring_swap',
+  'prepare_advanced_swap_cancel',
+  'prepare_rwa_trade',
+  'draft_normal_send',
+  'draft_private_send',
+  'draft_umbra_vault_action',
+  'stage_payroll',
+  'flash_open_position',
+  'flash_close_position',
+  'flash_add_collateral',
+  'flash_remove_collateral',
+  'flash_place_trigger_order',
+  'flash_edit_trigger_order',
+  'flash_cancel_trigger_order',
+  'flash_cancel_all_trigger_orders',
+  'flash_reverse_position',
+]);
+
 const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   getClientCapabilitiesTool,
   getWalletBalanceTool,
@@ -92,6 +107,10 @@ const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   getSwapTokensTool,
   getSwapPriceTool,
   prepareSwapQuoteTool,
+  prepareTriggerSwapTool,
+  prepareRecurringSwapTool,
+  getAdvancedSwapOrdersTool,
+  prepareAdvancedSwapCancelTool,
   getRwaAssetsTool,
   getRwaHoldingsTool,
   getRwaHistoryTool,
@@ -119,19 +138,6 @@ const RAW_AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] = [
   flashCancelTriggerOrderTool,
   flashCancelAllTriggerOrdersTool,
   flashReversePositionTool,
-  flashGetPoolStatsTool,
-  flashGetFundingRatesTool,
-  flashGetOpenInterestTool,
-  flashGetLiquidationClustersTool,
-  flashGetMarketMetricsTool,
-  flashGetPortfolioRiskTool,
-  flashGetAbsorptionAnalysisTool,
-  flashGetOptimalEntryTool,
-  flashGetPositionSizingTool,
-  flashGetHedgeSuggestionsTool,
-  flashGetDataPoolsTool,
-  flashValidateDataAccessTool,
-  flashGetRateLimitsTool,
 ] as const;
 
 export const AGENTIC_TOOL_DEFINITIONS: readonly AgenticToolDefinition[] =
@@ -154,6 +160,14 @@ export async function runToolHandler(
   const handler = TOOL_HANDLERS.get(call.name as AgenticToolName);
   if (handler == null) return { error: { code: 'unknown_tool' } };
   return handler.run(call, context);
+}
+
+export function isRegisteredAgenticTool(name: string): boolean {
+  return TOOL_HANDLERS.has(name as AgenticToolName);
+}
+
+export function isAgenticWriteIntentTool(name: string): boolean {
+  return WRITE_INTENT_TOOL_NAMES.has(name as AgenticToolName);
 }
 
 export { formatAgenticToolProcessingLabel, getAgenticToolMetadata, isAgenticToolParallelSafe };

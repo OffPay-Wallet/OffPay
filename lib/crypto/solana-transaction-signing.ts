@@ -284,7 +284,13 @@ async function signSerializedTransactionWithExternalSigner(params: {
 
   const transaction = deserializeSignableTransaction(params.unsignedTransaction);
   const signedTransaction = await params.signer.signTransaction(transaction);
-  return serializeSignableTransaction(signedTransaction);
+  const serialized = serializeSignableTransaction(signedTransaction);
+  verifySignedSerializedTransactionForWallet({
+    unsignedTransaction: params.unsignedTransaction,
+    signedTransaction: serialized,
+    walletAddress: params.walletAddress,
+  });
+  return serialized;
 }
 
 function verifyExternalSignature(params: {
@@ -304,6 +310,34 @@ function verifyExternalSignature(params: {
   if (!ed25519.verify(params.signature, params.message, publicKey)) {
     throw new Error('Wallet provider signature does not match the active wallet.');
   }
+}
+
+function messagesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((byte, index) => byte === right[index]);
+}
+
+export function verifySignedSerializedTransactionForWallet(params: {
+  unsignedTransaction: string;
+  signedTransaction: string;
+  walletAddress: string;
+}): void {
+  const unsigned = getMessageFromSerializedTransaction(params.unsignedTransaction);
+  const signed = getMessageFromSerializedTransaction(params.signedTransaction);
+  if (!messagesEqual(unsigned.message, signed.message)) {
+    throw new Error('Wallet provider changed the transaction that was approved for signing.');
+  }
+
+  const signerIndex = findRequiredSignerIndex(unsigned.message, params.walletAddress);
+  if (signed.signatureCount.value <= signerIndex) {
+    throw new Error('Wallet provider returned a transaction without the required signature slot.');
+  }
+  const signatureOffset = signed.signaturesOffset + signerIndex * 64;
+  assertRange(signed.transaction, signatureOffset, 64, 'wallet signature');
+  verifyExternalSignature({
+    signature: signed.transaction.subarray(signatureOffset, signatureOffset + 64),
+    message: signed.message,
+    walletAddress: params.walletAddress,
+  });
 }
 
 export async function signSerializedTransactionForWallet({
@@ -362,7 +396,15 @@ export async function signSerializedTransactionsForWallet({
             transactions.map((transaction) => externalSigner.signTransaction(transaction)),
           );
     await yieldToEventLoop();
-    return signedTransactions.map(serializeSignableTransaction);
+    return signedTransactions.map((signedTransaction, index) => {
+      const serialized = serializeSignableTransaction(signedTransaction);
+      verifySignedSerializedTransactionForWallet({
+        unsignedTransaction: unsignedTransactions[index]!,
+        signedTransaction: serialized,
+        walletAddress,
+      });
+      return serialized;
+    });
   }
 
   const signingSeed = await getSigningSeedForWallet(walletAddress, walletId);

@@ -49,6 +49,13 @@ export interface CapabilitiesResponse {
       magicBlockIntent?: CapabilityStatus;
       magicBlockTransfer?: CapabilityStatus;
     };
+    perps?: {
+      markets?: CapabilityStatus;
+      trade?: CapabilityStatus;
+      magicBlockExecution?: CapabilityStatus;
+      funding?: CapabilityStatus;
+      withdrawal?: CapabilityStatus;
+    };
     payment: {
       privateInitMint: CapabilityStatus;
       privateBalance: CapabilityStatus;
@@ -120,6 +127,14 @@ export interface BootstrapProvisionResponse {
   secret: string;
   issuedAt: number;
   bootstrapVersion: number;
+}
+
+export interface AiSessionResponse {
+  token: string;
+  walletAddress: string;
+  network: OffpayNetwork;
+  issuedAt: number;
+  expiresAt: number;
 }
 
 export interface InviteVerifyResponse {
@@ -330,6 +345,17 @@ export interface RwaAsset {
   logo: string | null;
   underlyingSymbol: string | null;
   complianceLabel: string;
+  /** Official issuer registry identifier. Present for mainnet xStocks. */
+  issuerAssetId?: string | null;
+  /** Token-2022 Scaled UI multiplier used to convert raw token units to display units. */
+  scaledUiMultiplier?: string | null;
+  /** Announced next multiplier, when a corporate-action transition is pending. */
+  pendingScaledUiMultiplier?: string | null;
+  /** Millisecond Unix timestamp for the pending multiplier activation. */
+  multiplierActivationAt?: number | null;
+  tradingHalted?: boolean;
+  multiplierTransitionActive?: boolean;
+  supportsAtomicSwaps?: boolean;
   execution: RwaExecutionPolicy;
 }
 
@@ -380,6 +406,7 @@ export interface RwaQuoteResponse {
   expiresAt: number | null;
   provider: RwaProvider;
   providerEnvironment: RwaProviderEnvironment;
+  scaledUiMultiplier?: string | null;
   unsignedTransaction: string;
   transactionFormat: 'solana_legacy_transaction_base64' | 'solana_versioned_transaction_base64';
   unsignedTransactions?: Array<{
@@ -474,6 +501,7 @@ export interface SwapQuoteResponse {
   outputMint: string;
   inAmount: string;
   outAmount: string;
+  minimumOutputAmount: string;
   slippageBps?: number | null;
   slippageMode?: 'auto' | 'manual';
   priceImpactPct: number;
@@ -491,6 +519,11 @@ export interface SwapExecuteRequest {
 
 export interface SwapExecuteResponse {
   signature: string;
+  code: number;
+  inputAmountResult: string | null;
+  outputAmountResult: string | null;
+  totalInputAmount: string | null;
+  totalOutputAmount: string | null;
 }
 
 export interface SwapTriggerChallengeRequest {
@@ -529,6 +562,7 @@ export interface SwapTriggerPrepareRequest {
   inputMint: string;
   outputMint: string;
   amount: string;
+  orderSubType: SwapTriggerOrderType;
   network: OffpayNetwork;
 }
 
@@ -576,11 +610,77 @@ export interface SwapTriggerCreateResponse {
   depositSignature: string;
 }
 
+export type SwapTriggerOrderState =
+  | 'pending'
+  | 'open'
+  | 'executing'
+  | 'filled'
+  | 'pending_withdraw'
+  | 'cancelled'
+  | 'expired'
+  | 'failed';
+
+export interface SwapTriggerOrderSummary {
+  id: string;
+  orderType: SwapTriggerOrderType;
+  orderState: SwapTriggerOrderState;
+  rawState: string | null;
+  inputMint: string;
+  outputMint: string;
+  triggerMint: string | null;
+  initialInputAmount: string | null;
+  remainingInputAmount: string | null;
+  outputAmount: string | null;
+  expiresAt: number | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
+export interface SwapTriggerListRequest {
+  action: 'list';
+  state?: 'active' | 'past';
+  limit?: number;
+  offset?: number;
+  network: OffpayNetwork;
+}
+
+export interface SwapTriggerListResponse {
+  orders: SwapTriggerOrderSummary[];
+  pagination: { total: number; limit: number; offset: number };
+}
+
+export interface SwapTriggerCancelPrepareRequest {
+  action: 'cancel_prepare';
+  orderId: string;
+  network: OffpayNetwork;
+}
+
+export interface SwapTriggerCancelPrepareResponse {
+  orderId: string;
+  cancelRequestId: string;
+  unsignedTransaction: string;
+}
+
+export interface SwapTriggerCancelConfirmRequest {
+  action: 'cancel_confirm';
+  orderId: string;
+  cancelRequestId: string;
+  signedTransaction: string;
+  network: OffpayNetwork;
+}
+
+export interface SwapTriggerCancelConfirmResponse {
+  orderId: string;
+  status: 'cancelled';
+  signature: string;
+}
+
 export interface SwapRecurringCreateRequest {
   inputMint: string;
   outputMint: string;
   amount: string;
   frequency: string;
+  idempotencyKey: string;
   network: OffpayNetwork;
 }
 
@@ -600,6 +700,56 @@ export interface SwapRecurringExecuteResponse {
   recurringId: string;
   status: 'Success' | 'Failed';
   signature: string;
+  orderId: string | null;
+  operation: 'create' | 'cancel';
+}
+
+export interface SwapRecurringOrderSummary {
+  orderId: string;
+  inputMint: string;
+  outputMint: string;
+  rawInDeposited: string;
+  rawInWithdrawn: string;
+  rawInUsed: string;
+  rawOutReceived: string;
+  rawOutWithdrawn: string;
+  rawInAmountPerCycle: string;
+  cycleFrequency: string;
+  userClosed: boolean;
+  openSignature: string | null;
+  closeSignature: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface SwapRecurringListRequest {
+  status: 'active' | 'history';
+  page?: number;
+  mint?: string;
+  includeFailedTransactions?: boolean;
+  network: OffpayNetwork;
+}
+
+export interface SwapRecurringListResponse {
+  walletAddress: string;
+  status: 'active' | 'history';
+  orders: SwapRecurringOrderSummary[];
+  page: number;
+  totalPages: number;
+}
+
+export interface SwapRecurringCancelPrepareRequest {
+  orderId: string;
+  inputMint: string;
+  outputMint: string;
+  network: OffpayNetwork;
+}
+
+export interface SwapRecurringCancelPrepareResponse {
+  recurringId: string;
+  orderId: string;
+  status: 'requires_signature';
+  unsignedTransaction: string;
 }
 
 export interface PrivacySwapPrepareRequest {
@@ -674,6 +824,26 @@ export interface PrivateBalanceResponse {
   decimals?: number;
 }
 
+export interface MagicBlockAuthChallengeRequest {
+  walletAddress: string;
+  network: OffpayNetwork;
+}
+
+export interface MagicBlockAuthChallengeResponse {
+  challenge: string;
+  expiresAt: number;
+}
+
+export interface MagicBlockAuthLoginRequest extends MagicBlockAuthChallengeRequest {
+  challenge: string;
+  signature: string;
+}
+
+export interface MagicBlockAuthLoginResponse {
+  authenticated: true;
+  expiresAt: number;
+}
+
 export interface PrivateSendRequest {
   walletAddress: string;
   recipient: string;
@@ -683,8 +853,23 @@ export interface PrivateSendRequest {
 }
 
 export interface PrivateSendResponse {
+  intentId: string;
+  expiresAt: number;
   unsignedTransaction: string;
   transaction?: PreparedTransaction;
+}
+
+export interface PrivateSendExecuteRequest {
+  intentId: string;
+  walletAddress: string;
+  network: OffpayNetwork;
+  signedTransaction: string;
+}
+
+export interface PrivateSendExecuteResponse {
+  intentId: string;
+  signature: string;
+  status: 'confirmed' | 'pending';
 }
 
 export interface PaymentSettleRequest {
@@ -697,7 +882,7 @@ export interface PaymentSettleResponse {
   results: Array<{
     txId: string;
     signature: string | null;
-    status: 'confirmed' | 'failed';
+    status: 'confirmed' | 'pending' | 'failed';
   }>;
 }
 
@@ -717,6 +902,17 @@ export interface RpcOfflineSlotBroadcastRequest extends RpcBroadcastRequest {
 
 export interface RpcBroadcastResponse {
   signature: string;
+}
+
+export interface RpcSimulationRequest {
+  transactionBase64: string;
+  network: OffpayNetwork;
+}
+
+export interface RpcSimulationResponse {
+  success: boolean;
+  error: string | null;
+  unitsConsumed: number | null;
 }
 
 export interface DevnetAirdropRequest {
@@ -1010,6 +1206,10 @@ export interface PreparedTransaction {
   validator: string | null;
   transferQueue?: string | null;
   rentPda?: string | null;
+  fees?: {
+    lamports: string;
+    tokens: string;
+  } | null;
 }
 
 export type BackendErrorCode =
@@ -1019,6 +1219,7 @@ export type BackendErrorCode =
   | 'OUTDATED_APP'
   | 'RATE_LIMITED'
   | 'UPSTREAM_UNAVAILABLE'
+  | 'RWA_ELIGIBILITY_REQUIRED'
   | 'QUOTE_EXPIRED'
   | 'SETTLEMENT_TIMEOUT'
   | 'NOT_FOUND'
@@ -1031,6 +1232,8 @@ export type BackendErrorCode =
   | 'INVALID_INVITE_CODE'
   | 'INVALID_NETWORK'
   | 'INVALID_REQUEST'
+  | 'MAGICBLOCK_AUTH_REQUIRED'
+  | 'TRIGGER_AUTH_REQUIRED'
   | 'INVALID_NONCE'
   | 'ATTESTATION_FAILED';
 

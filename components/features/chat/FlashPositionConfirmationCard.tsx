@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Pressable, View } from 'react-native';
 
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
+import { formatAtomicAmount } from '@/lib/policy/token-amounts';
+import type { FlashEncodedAmount } from '@/lib/flash-trade/types';
 import type {
   AgenticFlashPositionAction,
   AgenticFlashTriggerOrderSummary,
@@ -21,8 +23,6 @@ interface FlashPositionConfirmationCardProps {
   onConfirm: (action: AgenticFlashPositionAction) => void;
   onCancel: (action: AgenticFlashPositionAction) => void;
 }
-
-const EXPIRY_TICK_MS = 1000;
 
 function formatLeverage(leverage: number): string {
   return `${leverage.toFixed(1)}x`;
@@ -67,6 +67,10 @@ function formatTriggerOrders(orders: readonly AgenticFlashTriggerOrderSummary[])
   return orders.map(formatTriggerOrder).join(' / ');
 }
 
+function formatEncodedAmount(amount: FlashEncodedAmount): string {
+  return `${formatAtomicAmount(amount.rawAmount, amount.decimals, amount.decimals)} ${amount.symbol}`;
+}
+
 function amountLabel(action: AgenticFlashPositionAction): string {
   if (action.operation === 'open_position' || action.operation === 'reverse_position') {
     return `${getSideLabel(action.side)} ${formatUsd(action.sizeUsd)}`;
@@ -88,14 +92,6 @@ export function FlashPositionConfirmationCard({
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
   const statusLabel = formatPrivateSendStatus(action.status);
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!canAct) return undefined;
-    const id = setInterval(() => setNow(Date.now()), EXPIRY_TICK_MS);
-    return () => clearInterval(id);
-  }, [canAct]);
-
   const handleConfirm = useCallback(() => {
     onConfirm(action);
   }, [action, onConfirm]);
@@ -104,9 +100,9 @@ export function FlashPositionConfirmationCard({
     onCancel(action);
   }, [action, onCancel]);
 
-  const expiresInMs = Math.max(0, action.expiresAt - now);
-  const isExpiringSoon = expiresInMs < 15000;
-  const isExpired = expiresInMs <= 0;
+  const expiresInMs = action.expiresAt == null ? null : Math.max(0, action.expiresAt - Date.now());
+  const isExpiringSoon = expiresInMs != null && expiresInMs < 15000;
+  const isExpired = expiresInMs != null && expiresInMs <= 0;
 
   const warnings = useMemo(() => {
     const next = [...(action.warnings ?? [])];
@@ -169,6 +165,24 @@ export function FlashPositionConfirmationCard({
             />
             <ConfirmationRow label="Entry fee" value={formatUsd(action.entryFeeUsd)} />
             <ConfirmationRow label="Input" value={action.inputTokenSymbol} />
+            {action.economicIntent?.operation === 'open_position' ? (
+              <>
+                <ConfirmationRow
+                  label="Exact collateral"
+                  value={formatEncodedAmount(action.economicIntent.collateral)}
+                />
+                <ConfirmationRow
+                  label="Exact position"
+                  value={formatEncodedAmount(action.economicIntent.size)}
+                />
+                {action.economicIntent.executionPriceLimit != null ? (
+                  <ConfirmationRow
+                    label="Execution limit"
+                    value={formatPrice(action.economicIntent.executionPriceLimit)}
+                  />
+                ) : null}
+              </>
+            ) : null}
             {action.limitPrice != null ? (
               <ConfirmationRow label="Limit" value={formatPrice(action.limitPrice)} />
             ) : null}
@@ -190,6 +204,26 @@ export function FlashPositionConfirmationCard({
                 (action.realizedPnlUsd ?? 0) >= 0 ? colors.semantic.receive : colors.semantic.error
               }
             />
+            {action.economicIntent?.operation === 'close_position' ? (
+              <>
+                <ConfirmationRow
+                  label="Exact close"
+                  value={
+                    action.economicIntent.size == null
+                      ? 'Entire position'
+                      : formatEncodedAmount(action.economicIntent.size)
+                  }
+                />
+                <ConfirmationRow
+                  label="Settlement"
+                  value={action.economicIntent.outputTokenSymbol}
+                />
+                <ConfirmationRow
+                  label="Execution limit"
+                  value={formatPrice(action.economicIntent.executionPriceLimit)}
+                />
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -206,6 +240,24 @@ export function FlashPositionConfirmationCard({
               value={formatPrice(action.newLiquidationPrice ?? action.liquidationPrice)}
               valueColor={colors.semantic.warning}
             />
+            {action.economicIntent?.operation === 'add_collateral' ? (
+              <ConfirmationRow
+                label="Exact deposit"
+                value={formatEncodedAmount(action.economicIntent.amount)}
+              />
+            ) : null}
+            {action.economicIntent?.operation === 'remove_collateral' ? (
+              <>
+                <ConfirmationRow
+                  label="Exact removal"
+                  value={`$${formatAtomicAmount(action.economicIntent.usdAmountRaw, 6, 6)}`}
+                />
+                <ConfirmationRow
+                  label="Settlement"
+                  value={action.economicIntent.outputTokenSymbol}
+                />
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -216,6 +268,19 @@ export function FlashPositionConfirmationCard({
             ) : null}
             {action.amountUsd != null ? (
               <ConfirmationRow label="Size" value={formatUsd(action.amountUsd)} />
+            ) : null}
+            {action.economicIntent?.operation === 'place_trigger_order' ||
+            action.economicIntent?.operation === 'edit_trigger_order' ? (
+              <>
+                <ConfirmationRow
+                  label="Exact size"
+                  value={formatEncodedAmount(action.economicIntent.size)}
+                />
+                <ConfirmationRow
+                  label="Settlement"
+                  value={action.economicIntent.receiveTokenSymbol}
+                />
+              </>
             ) : null}
           </>
         ) : null}
@@ -234,6 +299,30 @@ export function FlashPositionConfirmationCard({
             <ConfirmationRow label="Size" value={formatUsd(action.sizeUsd)} />
             <ConfirmationRow label="Collateral" value={formatUsd(action.collateralUsd)} />
             <ConfirmationRow label="Leverage" value={formatLeverage(action.leverage)} />
+            {action.economicIntent?.operation === 'reverse_position' ? (
+              <>
+                <ConfirmationRow
+                  label="Exact collateral"
+                  value={formatEncodedAmount(action.economicIntent.collateral)}
+                />
+                <ConfirmationRow
+                  label="Exact position"
+                  value={formatEncodedAmount(action.economicIntent.size)}
+                />
+                <ConfirmationRow
+                  label="Settlement"
+                  value={action.economicIntent.settlementTokenSymbol}
+                />
+                <ConfirmationRow
+                  label="Close limit"
+                  value={formatPrice(action.economicIntent.closeExecutionPriceLimit)}
+                />
+                <ConfirmationRow
+                  label="Open limit"
+                  value={formatPrice(action.economicIntent.openExecutionPriceLimit)}
+                />
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -241,6 +330,15 @@ export function FlashPositionConfirmationCard({
           <ConfirmationRow
             label="After open"
             value={formatTriggerOrders(action.requestedTriggerOrders)}
+          />
+        ) : null}
+
+        {action.operation === 'open_position' &&
+        action.triggerOrders != null &&
+        action.triggerOrders.length > 0 ? (
+          <ConfirmationRow
+            label="Bundled TP/SL"
+            value={formatTriggerOrders(action.triggerOrders)}
           />
         ) : null}
 

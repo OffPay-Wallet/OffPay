@@ -188,16 +188,13 @@ export type AiProxyEnv = {
     release?(payload: unknown, reason: string): Promise<unknown>;
   };
   /**
-   * Shared secret used to verify the OffPay AI session token. Issued by
-   * the OffPay backend (or pre-shared via Wrangler) and held by the
-   * client through `EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET`.
+   * Shared secret used by the OffPay API to issue and this Worker to verify
+   * short-lived AI sessions. It must never be distributed to app clients.
    */
   AI_PROXY_SESSION_SECRET?: string;
   /**
-   * `'true'` to refuse requests that are missing or carry an invalid
-   * session token. Defaults to soft mode while the token rollout is
-   * staged: the Worker logs the reason and continues so older app
-   * builds keep working until the secret is distributed everywhere.
+   * Deprecated rollout marker. Session authentication is fail-closed even
+   * if this field is missing or false.
    */
   AI_PROXY_REQUIRE_SESSION_TOKEN?: string;
 };

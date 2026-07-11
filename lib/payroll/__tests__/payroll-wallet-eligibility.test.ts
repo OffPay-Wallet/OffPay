@@ -7,6 +7,11 @@ import {
 
 import type { WalletBalanceResponse } from '@/types/offpay-api';
 
+jest.mock('@/lib/privy/config', () => ({
+  isPrivyConfigured: () => true,
+  MISSING_PRIVY_ENVIRONMENT_MESSAGE: 'Privy is not configured.',
+}));
+
 function balanceWith(tokens: WalletBalanceResponse['tokens']): WalletBalanceResponse {
   return {
     address: 'wallet-1',
@@ -48,7 +53,7 @@ describe('walletCanSignPayroll', () => {
     expect(walletCanSignPayroll({ importMethod: 'private-key-import' })).toBe(true);
   });
 
-  it('allows Privy embedded wallets and blocks unknown wallets', () => {
+  it('allows configured Privy embedded wallets and blocks unknown wallets', () => {
     expect(walletCanSignPayroll({ importMethod: 'privy-embedded' })).toBe(true);
     expect(walletCanSignPayroll({ importMethod: null })).toBe(false);
     expect(walletCanSignPayroll({ importMethod: undefined })).toBe(false);

@@ -475,6 +475,7 @@ export function useSettlementEngine() {
           uploadFailedCount: uploadSync.failedCount,
           submittedCount: settlement.submittedCount,
           confirmedCount: settlement.confirmedCount + cleanup.deletedCount,
+          pendingCount: settlement.pendingCount,
           failedCount: settlement.failedCount,
           deleteFailedCount: settlement.deleteFailedCount + cleanup.failedCount,
         };
@@ -484,6 +485,7 @@ export function useSettlementEngine() {
 
         if (
           uploadSync.failedCount > 0 ||
+          settlement.pendingCount > 0 ||
           settlement.failedCount > 0 ||
           settlement.deleteFailedCount > 0 ||
           cleanup.failedCount > 0
@@ -491,7 +493,9 @@ export function useSettlementEngine() {
           const retryMessage =
             settlement.failedCount > 0 || uploadSync.failedCount > 0
               ? 'Some queued payments need another settlement attempt.'
-              : 'Settled payment cleanup will retry.';
+              : settlement.pendingCount > 0
+                ? 'Some submitted payments are waiting for on-chain confirmation.'
+                : 'Settled payment cleanup will retry.';
           const nextRetryAt = Date.now() + backoffMsRef.current;
           useSettlementEngineStore.getState().setBackoff({
             trigger,

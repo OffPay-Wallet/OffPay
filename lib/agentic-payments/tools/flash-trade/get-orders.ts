@@ -1,18 +1,25 @@
 import type { AgenticToolDefinition } from '../types';
 import { getFlashTradeClient } from '@/lib/flash-trade';
-import { requireMainnet, requireWallet, errorCodeFromUnknown } from './helpers';
+import {
+  requireMainnet,
+  requireWallet,
+  errorCodeFromUnknown,
+  orderRef,
+  sortedOrders,
+} from './helpers';
 
 export const flashGetOrdersTool: AgenticToolDefinition = {
   name: 'flash_get_orders',
   schema: {
     name: 'flash_get_orders',
-    description: 'Get all trigger orders (take-profit and stop-loss) for the user wallet on Flash Trade (mainnet only).',
+    description:
+      'Get all trigger orders (take-profit and stop-loss) for the user wallet on Flash Trade (mainnet only).',
     parameters: {
       type: 'object',
       properties: {
-        positionKey: {
+        marketSymbol: {
           type: 'string',
-          description: 'Optional filter by position pubkey. Returns all trigger orders if omitted.',
+          description: 'Optional market-symbol filter. Returns every trigger order if omitted.',
         },
       },
     },
@@ -32,32 +39,31 @@ export const flashGetOrdersTool: AgenticToolDefinition = {
       return { error: { code: 'network_unavailable' } };
     }
 
-    const positionKey = call.args.positionKey as string | undefined;
+    const marketSymbol = call.args.marketSymbol as string | undefined;
 
     try {
       const client = getFlashTradeClient();
-      const orders = await client.getOwnerOrders(
-        context.scope.walletAddress!,
-        context.signal,
-      );
+      const orders = await client.getOwnerOrders(context.scope.walletAddress!, context.signal);
 
-      const openOrders = orders.filter((o) => o.status === 'open');
+      const openOrders = sortedOrders(orders.filter((o) => o.status === 'open'));
 
-      const filtered = positionKey
-        ? openOrders.filter((o) => o.positionKey === positionKey)
+      const filtered = marketSymbol
+        ? openOrders.filter(
+            (order) => order.marketSymbol.toUpperCase() === marketSymbol.toUpperCase(),
+          )
         : openOrders;
 
       return {
         result: {
           status: filtered.length === 0 ? 'empty' : 'ok',
           orders: filtered.map((o) => ({
-            orderId: o.orderId,
-            positionKey: o.positionKey,
+            orderRef: orderRef(o),
             marketSymbol: o.marketSymbol,
             side: o.side,
             triggerPrice: o.triggerPrice,
             sizeUsd: o.sizeUsd,
             sizePercent: o.sizePercent,
+            sizeAmountUi: o.sizeAmountUi,
             isStopLoss: o.isStopLoss,
             orderType: o.isStopLoss ? 'stop_loss' : 'take_profit',
           })),

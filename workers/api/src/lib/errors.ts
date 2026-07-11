@@ -11,11 +11,13 @@ type ErrorCode =
   | 'INVALID_INVITE_CODE'
   | 'INVALID_NONCE'
   | 'INVALID_REQUEST'
+  | 'MAGICBLOCK_AUTH_REQUIRED'
   | 'NOT_FOUND'
   | 'NOT_IMPLEMENTED'
   | 'OUTDATED_APP'
   | 'QUOTE_EXPIRED'
   | 'RATE_LIMITED'
+  | 'RWA_ELIGIBILITY_REQUIRED'
   | 'SESSION_EXPIRED'
   | 'SECRET_ROTATED'
   | 'SIGNATURE_INVALID'
@@ -107,9 +109,7 @@ function errorResponse(
   }
 
   return new Response(
-    JSON.stringify(
-      createErrorEnvelope(code, message, options.retryable ?? false, retryAfterMs),
-    ),
+    JSON.stringify(createErrorEnvelope(code, message, options.retryable ?? false, retryAfterMs)),
     {
       status,
       headers,

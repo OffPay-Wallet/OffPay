@@ -1,4 +1,4 @@
-import { isPayrollRowSendable } from '@/lib/payroll/payroll-types';
+import { getPayrollSubmissionAttemptId, isPayrollRowSendable } from '@/lib/payroll/payroll-types';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { isAbortError } from '@/lib/perf/abort';
 
@@ -22,6 +22,11 @@ export interface PayrollExecutorHooks {
    * marks the row failed; returning an outcome locks the row against resend.
    */
   submitRow: (context: PayrollRowSubmitContext) => Promise<PayrollSubmitOutcome>;
+  /**
+   * Atomically persists the durable submission tombstone and changes the row
+   * from `ready` to `sending`. False means another executor already claimed it.
+   */
+  onRowSubmissionStart: (rowId: string, attemptId: string, startedAt: number) => boolean;
   /** Persisted after every row mutation so a crash mid-run is recoverable. */
   onRowUpdate: (rowId: string, patch: Partial<Omit<PayrollRow, 'id'>>) => void;
   /** Advances the persisted resume cursor. */
@@ -55,14 +60,14 @@ export interface PayrollBatchSummary {
  *
  * Guarantees:
  *  - A row with any signature / tx id / deposit signature is never resent.
+ *  - A durable attempt tombstone is claimed before route submission. An
+ *    uncertain outcome is reconciliation-only and is never auto-retried.
  *  - Umbra success is recorded as `deposited_unclaimed` (recipient must
  *    claim), not `submitted`.
  *  - Pause/cancel (via `signal`) stops after the current row; completed rows
  *    persist and the cursor points at the next pending row.
  */
-export async function runPayrollBatch(
-  params: RunPayrollBatchParams,
-): Promise<PayrollBatchSummary> {
+export async function runPayrollBatch(params: RunPayrollBatchParams): Promise<PayrollBatchSummary> {
   const { rows, hooks } = params;
   const summary: PayrollBatchSummary = {
     submitted: 0,
@@ -84,10 +89,9 @@ export async function runPayrollBatch(
     const row = rows[index];
 
     // Only `ready` rows are sent. `failed` rows are NOT auto-resent on a
-    // resume — they require the explicit retry path (which resets them to
-    // `ready` first), so an interrupted/failed row can be verified before
-    // re-attempting. The artifact guard in `isPayrollRowSendable` is the
-    // final double-pay backstop.
+    // resume. Only pre-submission failures can be reset by the explicit retry
+    // path; a durable attempt tombstone makes an uncertain row reconciliation-
+    // only. `isPayrollRowSendable` is the final double-pay backstop.
     if (row.route == null || row.status !== 'ready' || !isPayrollRowSendable(row)) {
       if (row.status === 'skipped' || row.status === 'invalid') summary.skipped += 1;
       summary.nextCursor = index + 1;
@@ -95,10 +99,28 @@ export async function runPayrollBatch(
       continue;
     }
 
-    hooks.onRowUpdate(row.id, { status: 'sending' });
+    const submissionAttemptId = getPayrollSubmissionAttemptId(row.idempotencyKey);
+    const submissionStartedAt = Date.now();
+    if (!hooks.onRowSubmissionStart(row.id, submissionAttemptId, submissionStartedAt)) {
+      // A concurrent executor or a prior persisted attempt owns this row.
+      summary.nextCursor = index + 1;
+      hooks.onCursorAdvance(summary.nextCursor);
+      continue;
+    }
 
     try {
-      const outcome = await hooks.submitRow({ row, route: row.route, signal: params.signal });
+      const claimedRow: PayrollRow = {
+        ...row,
+        status: 'sending',
+        submissionAttemptId,
+        submissionStartedAt,
+        reconciliationRequired: false,
+      };
+      const outcome = await hooks.submitRow({
+        row: claimedRow,
+        route: row.route,
+        signal: params.signal,
+      });
 
       if (outcome.status === 'submitted') {
         hooks.onRowUpdate(row.id, {
@@ -107,6 +129,7 @@ export async function runPayrollBatch(
           txId: outcome.txId ?? null,
           initSignature: outcome.initSignature ?? null,
           requiresRecipientClaim: false,
+          reconciliationRequired: false,
           validationError: null,
         });
         summary.submitted += 1;
@@ -117,6 +140,7 @@ export async function runPayrollBatch(
           signature: outcome.signature ?? null,
           initSignature: outcome.initSignature ?? null,
           requiresRecipientClaim: false,
+          reconciliationRequired: false,
           validationError: null,
         });
         summary.queued += 1;
@@ -127,25 +151,33 @@ export async function runPayrollBatch(
           signature: outcome.signature,
           initSignature: outcome.initSignature ?? null,
           requiresRecipientClaim: true,
+          reconciliationRequired: false,
           validationError: null,
         });
         summary.depositedUnclaimed += 1;
       }
     } catch (error) {
-      if (isAbortError(error)) {
-        // Roll the in-flight row back to ready so resume re-attempts it.
-        hooks.onRowUpdate(row.id, { status: 'ready' });
-        summary.interrupted = true;
-        summary.nextCursor = index;
-        return summary;
-      }
-      const message = error instanceof Error ? error.message : 'Payment failed.';
+      const aborted = isAbortError(error);
+      const cause = error instanceof Error ? error.message.trim() : '';
+      const message = aborted
+        ? 'Submission was interrupted after execution started. Its outcome is unknown. Verify on-chain before any manual retry.'
+        : `Submission outcome is unknown after execution started${
+            cause.length > 0 ? ` (${cause})` : ''
+          }. Verify on-chain before any manual retry.`;
       hooks.onRowUpdate(row.id, {
         status: 'failed',
+        reconciliationRequired: true,
         validationError: message,
         retryCount: row.retryCount + 1,
       });
       summary.failed += 1;
+
+      if (aborted) {
+        summary.interrupted = true;
+        summary.nextCursor = index + 1;
+        hooks.onCursorAdvance(summary.nextCursor);
+        return summary;
+      }
     }
 
     summary.nextCursor = index + 1;

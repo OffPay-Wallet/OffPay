@@ -105,11 +105,13 @@ export interface PendingBackupUploadSyncResult {
 export interface PendingBackupSettlementResult {
   submittedCount: number;
   confirmedCount: number;
+  pendingCount: number;
   failedCount: number;
   deleteFailedCount: number;
   batches: PaymentSettleResponse[];
   submittedTxIds: string[];
   confirmedTxIds: string[];
+  pendingTxIds: string[];
   failedTxIds: string[];
 }
 
@@ -201,7 +203,10 @@ function normalizeSettlementSignature(value: string | null | undefined): string 
   return trimmed ? trimmed : null;
 }
 
-function readShortVecLength(buffer: Uint8Array, offset: number): { value: number; offset: number } | null {
+function readShortVecLength(
+  buffer: Uint8Array,
+  offset: number,
+): { value: number; offset: number } | null {
   let value = 0;
   let shift = 0;
   let cursor = offset;
@@ -224,7 +229,8 @@ function decodeSignedBlobBytes(signedBlob: string): Uint8Array | null {
   if (normalized.length === 0) return null;
 
   try {
-    const base64Candidate = /^[A-Za-z0-9+/]+={0,2}$/.test(normalized) && normalized.length % 4 === 0;
+    const base64Candidate =
+      /^[A-Za-z0-9+/]+={0,2}$/.test(normalized) && normalized.length % 4 === 0;
     if (base64Candidate) {
       return Uint8Array.from(Buffer.from(normalized, 'base64'));
     }
@@ -354,18 +360,21 @@ function isQueueItem(value: unknown): value is PendingBackupQueueItem {
 }
 
 async function readQueue(): Promise<PendingBackupQueueItem[]> {
-  const payload = await readPersistedJson(STORAGE_KEY, (value): PendingBackupStoragePayload | null => {
-    if (!isRecord(value)) return null;
-    const candidate = value as Partial<PendingBackupStoragePayload>;
-    if (candidate.version !== STORAGE_VERSION || !Array.isArray(candidate.items)) {
-      return null;
-    }
+  const payload = await readPersistedJson(
+    STORAGE_KEY,
+    (value): PendingBackupStoragePayload | null => {
+      if (!isRecord(value)) return null;
+      const candidate = value as Partial<PendingBackupStoragePayload>;
+      if (candidate.version !== STORAGE_VERSION || !Array.isArray(candidate.items)) {
+        return null;
+      }
 
-    return {
-      version: STORAGE_VERSION,
-      items: candidate.items.filter(isQueueItem),
-    };
-  });
+      return {
+        version: STORAGE_VERSION,
+        items: candidate.items.filter(isQueueItem),
+      };
+    },
+  );
   return payload?.items ?? [];
 }
 
@@ -511,7 +520,10 @@ async function deriveBackupKey(params: {
   }
 }
 
-function encryptPlaintext(plaintext: PendingBackupPlaintext, key: Uint8Array): PendingBackupUploadBody {
+function encryptPlaintext(
+  plaintext: PendingBackupPlaintext,
+  key: Uint8Array,
+): PendingBackupUploadBody {
   const nonce = new Uint8Array(nacl.secretbox.nonceLength);
   crypto.getRandomValues(nonce);
 
@@ -860,11 +872,13 @@ export async function settleQueuedPendingPayments(params: {
     return {
       submittedCount: 0,
       confirmedCount: 0,
+      pendingCount: 0,
       failedCount: 0,
       deleteFailedCount: 0,
       batches: [],
       submittedTxIds: [],
       confirmedTxIds: [],
+      pendingTxIds: [],
       failedTxIds: [],
     };
   }
@@ -921,11 +935,13 @@ export async function settleQueuedPendingPayments(params: {
 
   let submittedCount = 0;
   let confirmedCount = 0;
+  let pendingCount = 0;
   let failedCount = items.length - validEntries.length;
   let deleteFailedCount = 0;
   const batches: PaymentSettleResponse[] = [];
   const submittedTxIds: string[] = [];
   const confirmedTxIds: string[] = [];
+  const pendingTxIds: string[] = [];
   const failedTxIds: string[] = [];
 
   const chunks = chunkItems(validEntries, SETTLEMENT_BATCH_SIZE);
@@ -956,7 +972,7 @@ export async function settleQueuedPendingPayments(params: {
       let signatureState: 'confirmed' | 'failed' | 'unknown' =
         result.status === 'confirmed' && signature != null ? 'confirmed' : 'unknown';
 
-      if (result.status === 'failed' && signature != null) {
+      if (result.status !== 'confirmed' && signature != null) {
         signatureState = await getSettlementSignatureState({
           signature,
           network: params.network,
@@ -964,9 +980,7 @@ export async function settleQueuedPendingPayments(params: {
       }
 
       if (signatureState === 'confirmed' && signature != null) {
-        await runSettlementLifecycleCallback(
-          params.onOfflinePaymentConfirmed?.(txId, signature),
-        );
+        await runSettlementLifecycleCallback(params.onOfflinePaymentConfirmed?.(txId, signature));
         try {
           await deletePendingBackup(params.walletAddress, txId, params.network);
           await updateQueueItem(txId, () => null);
@@ -983,9 +997,9 @@ export async function settleQueuedPendingPayments(params: {
             updatedAt: Date.now(),
           }));
         }
-      } else if (result.status === 'failed' && signature != null && signatureState === 'unknown') {
-        failedCount += 1;
-        failedTxIds.push(txId);
+      } else if (signature != null && signatureState === 'unknown') {
+        pendingCount += 1;
+        pendingTxIds.push(txId);
         await updateQueueItem(txId, (current) => ({
           ...current,
           settlementStatus: 'pending',
@@ -999,10 +1013,10 @@ export async function settleQueuedPendingPayments(params: {
         const errorMessage =
           result.status === 'confirmed'
             ? 'Settlement confirmed without a transaction signature.'
-            : 'Settlement failed.';
-        await runSettlementLifecycleCallback(
-          params.onOfflinePaymentFailed?.(txId, errorMessage),
-        );
+            : result.status === 'pending'
+              ? 'Settlement is pending without a transaction signature.'
+              : 'Settlement failed.';
+        await runSettlementLifecycleCallback(params.onOfflinePaymentFailed?.(txId, errorMessage));
         await updateQueueItem(txId, (current) => ({
           ...current,
           settlementStatus: 'failed',
@@ -1021,11 +1035,13 @@ export async function settleQueuedPendingPayments(params: {
   return {
     submittedCount,
     confirmedCount,
+    pendingCount,
     failedCount,
     deleteFailedCount,
     batches,
     submittedTxIds,
     confirmedTxIds,
+    pendingTxIds,
     failedTxIds,
   };
 }

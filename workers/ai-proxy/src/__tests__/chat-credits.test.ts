@@ -8,6 +8,10 @@ import {
   type AiChatCreditStatus,
 } from '../chat-credits';
 import router from '../router';
+import {
+  buildTestAiSessionToken,
+  TEST_AI_SESSION_SECRET,
+} from '../test-helpers/ai-session-token';
 
 import type { AiProxyEnv } from '../types';
 
@@ -28,6 +32,7 @@ function status(overrides: Partial<AiChatCreditStatus> = {}): AiChatCreditStatus
 
 function envWithService(service: AiProxyEnv['OFFPAY_API_AI_CREDITS']): AiProxyEnv {
   return {
+    AI_PROXY_SESSION_SECRET: TEST_AI_SESSION_SECRET,
     OFFPAY_API_AI_CREDITS: service,
   };
 }
@@ -38,6 +43,7 @@ describe('AI chat credit service binding', () => {
   });
 
   it('serves current credits from the router status endpoint', async () => {
+    const sessionToken = await buildTestAiSessionToken();
     const env = envWithService({
       getStatus: async () => status(),
       consume: async () => ({
@@ -48,7 +54,10 @@ describe('AI chat credit service binding', () => {
     });
 
     const response = await router.fetch(
-      new Request('https://ai.offpay.test/api/ai/credits', { method: 'GET' }),
+      new Request('https://ai.offpay.test/api/ai/credits', {
+        method: 'GET',
+        headers: { 'x-offpay-ai-session': sessionToken },
+      }),
       env,
     );
     const body = (await response.json()) as { credits?: unknown };
@@ -147,6 +156,7 @@ describe('AI chat credit service binding', () => {
   });
 
   it('releases a charged credit when the provider times out', async () => {
+    const sessionToken = await buildTestAiSessionToken();
     let releasePayload: unknown = null;
     let releaseReason: unknown = null;
     const service = {
@@ -176,6 +186,7 @@ describe('AI chat credit service binding', () => {
         headers: {
           'content-type': 'application/json',
           'x-offpay-ai-turn-id': 'ai-turn-timeout-1',
+          'x-offpay-ai-session': sessionToken,
         },
         body: JSON.stringify({
           responseMode: 'agent_turn',
@@ -204,6 +215,7 @@ describe('AI chat credit service binding', () => {
   });
 
   it('does not release a duplicate turn that was not newly charged', async () => {
+    const sessionToken = await buildTestAiSessionToken();
     const release = jest.fn(async () => status({ used: 0, remaining: 5 }));
     const service = {
       getStatus: async () => status(),
@@ -224,6 +236,7 @@ describe('AI chat credit service binding', () => {
         headers: {
           'content-type': 'application/json',
           'x-offpay-ai-turn-id': 'ai-turn-retry-1',
+          'x-offpay-ai-session': sessionToken,
         },
         body: JSON.stringify({
           responseMode: 'agent_turn',

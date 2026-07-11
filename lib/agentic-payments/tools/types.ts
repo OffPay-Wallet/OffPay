@@ -6,10 +6,15 @@ import type { AgentToolCall, AgentToolResult, AgentToolSchema } from '@/lib/agen
 import type {
   AgenticChatScope,
   AgenticPrivateSendAction,
+  AgenticUmbraClaimAction,
   AgenticUmbraVaultAction,
   AgenticSwapAction,
+  AgenticTriggerSwapAction,
+  AgenticRecurringSwapAction,
+  AgenticAdvancedSwapCancelAction,
   AgenticRwaTradeAction,
   AgenticFlashPositionAction,
+  AgenticFlashDepositAction,
 } from '@/store/agenticChatStore';
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
 import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
@@ -24,6 +29,10 @@ export type AgenticToolName =
   | 'get_swap_tokens'
   | 'get_swap_price'
   | 'prepare_swap_quote'
+  | 'prepare_trigger_swap'
+  | 'prepare_recurring_swap'
+  | 'get_advanced_swap_orders'
+  | 'prepare_advanced_swap_cancel'
   | 'get_rwa_assets'
   | 'get_rwa_holdings'
   | 'get_rwa_history'
@@ -42,6 +51,7 @@ export type AgenticToolName =
   | 'flash_get_positions'
   | 'flash_get_prices'
   | 'flash_get_orders'
+  | 'flash_fund_account'
   | 'flash_open_position'
   | 'flash_close_position'
   | 'flash_add_collateral'
@@ -117,6 +127,8 @@ export interface AgenticToolRunnerContext {
   signal?: AbortSignal;
   walletId?: string | null;
   walletImportMethod?: WalletImportMethod | null;
+  /** Exact model-facing tool names offered in the proxy request for this turn. */
+  offeredToolNames: readonly string[];
 }
 
 export type AgenticToolDraft =
@@ -137,8 +149,34 @@ export type AgenticToolDraft =
       >;
     }
   | {
+      kind: 'swap_trigger';
+      draft: Omit<AgenticTriggerSwapAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
+    }
+  | {
+      kind: 'swap_recurring';
+      draft: Omit<AgenticRecurringSwapAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
+    }
+  | {
+      kind: 'swap_trigger_cancel';
+      draft: Omit<
+        AgenticAdvancedSwapCancelAction,
+        'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'
+      >;
+    }
+  | {
+      kind: 'swap_recurring_cancel';
+      draft: Omit<
+        AgenticAdvancedSwapCancelAction,
+        'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'
+      >;
+    }
+  | {
       kind: 'rwa_trade';
       draft: Omit<AgenticRwaTradeAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
+    }
+  | {
+      kind: 'flash_deposit';
+      draft: Omit<AgenticFlashDepositAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
     }
   | {
       kind: 'flash_position';
@@ -147,6 +185,10 @@ export type AgenticToolDraft =
   | {
       kind: 'umbra_vault';
       draft: Omit<AgenticUmbraVaultAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
+    }
+  | {
+      kind: 'umbra_claim';
+      draft: Omit<AgenticUmbraClaimAction, 'id' | 'kind' | 'status' | 'createdAt' | 'updatedAt'>;
     };
 
 export interface PayrollStageIntent {
@@ -160,6 +202,8 @@ export interface AgenticToolRun {
   drafts: AgenticToolDraft[];
   /** Client-side UI intents (e.g. open payroll intake). Never leave device. */
   payrollIntents: PayrollStageIntent[];
+  /** True once a write-capable tool was accepted during this local run. */
+  writeIntentUsed: boolean;
 }
 
 export interface ToolHandlerOutcome {

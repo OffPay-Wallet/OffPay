@@ -46,6 +46,13 @@ interface CapabilitiesResponse {
       magicBlockIntent: CapabilityStatus;
       magicBlockTransfer: CapabilityStatus;
     };
+    perps: {
+      markets: CapabilityStatus;
+      trade: CapabilityStatus;
+      magicBlockExecution: CapabilityStatus;
+      funding: CapabilityStatus;
+      withdrawal: CapabilityStatus;
+    };
     payment: {
       privateInitMint: CapabilityStatus;
       privateBalance: CapabilityStatus;
@@ -104,9 +111,116 @@ function notImplemented(message: string): CapabilityStatus {
   };
 }
 
+function temporarilyUnavailable(message: string): CapabilityStatus {
+  return {
+    available: false,
+    reason: 'temporarily_unavailable',
+    message,
+  };
+}
+
+const FLASH_CAPABILITY_TTL_MS = 15_000;
+let flashCapabilityCache:
+  | { cacheKey: string; checkedAt: number; status: CapabilityStatus }
+  | undefined;
+
+async function getFlashV2Capability(
+  bindings: Bindings,
+  network: Network,
+): Promise<CapabilityStatus> {
+  if (network !== 'mainnet') {
+    return unsupportedNetwork('Flash Trade V2 perpetuals are available only on mainnet.');
+  }
+  if (!hasTruthyBinding(bindings, 'OFFPAY_FLASH_V2_ENABLED')) {
+    return notImplemented('Flash Trade V2 is disabled for this deployment.');
+  }
+
+  const apiBase = (bindings.OFFPAY_FLASH_V2_API_BASE_URL ?? 'https://flashapi.trade').replace(
+    /\/$/,
+    '',
+  );
+  const erRpc = (bindings.OFFPAY_FLASH_V2_ER_RPC_URL ?? 'https://flash.magicblock.xyz').replace(
+    /\/$/,
+    '',
+  );
+  const cacheKey = `${apiBase}|${erRpc}`;
+  if (
+    flashCapabilityCache?.cacheKey === cacheKey &&
+    Date.now() - flashCapabilityCache.checkedAt < FLASH_CAPABILITY_TTL_MS
+  ) {
+    return flashCapabilityCache.status;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2_500);
+  let status: CapabilityStatus;
+  try {
+    const [healthResponse, rpcResponse] = await Promise.all([
+      fetch(`${apiBase}/health`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      }),
+      fetch(erRpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getVersion' }),
+        signal: controller.signal,
+      }),
+    ]);
+    if (!healthResponse.ok || !rpcResponse.ok) {
+      throw new Error('provider health endpoint returned a non-success status');
+    }
+    const health = (await healthResponse.json()) as {
+      status?: unknown;
+      accounts?: { markets?: unknown };
+      config?: { markets?: unknown };
+    };
+    const rpc = (await rpcResponse.json()) as {
+      result?: { 'magicblock-core'?: unknown; 'solana-core'?: unknown };
+      error?: unknown;
+    };
+    const marketCount = Number(health.accounts?.markets ?? health.config?.markets ?? 0);
+    if (
+      health.status !== 'ok' ||
+      !Number.isFinite(marketCount) ||
+      marketCount <= 0 ||
+      rpc.error != null ||
+      typeof rpc.result?.['solana-core'] !== 'string' ||
+      typeof rpc.result?.['magicblock-core'] !== 'string'
+    ) {
+      throw new Error('provider health response is incomplete');
+    }
+    status = available(
+      `Flash Trade V2 mainnet is live with ${marketCount} protocol markets and MagicBlock ER execution.`,
+    );
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.name === 'AbortError'
+        ? 'provider health check timed out'
+        : error instanceof Error
+          ? error.message
+          : 'provider health check failed';
+    status = temporarilyUnavailable(`Flash Trade V2 is unavailable: ${reason}.`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  flashCapabilityCache = { cacheKey, checkedAt: Date.now(), status };
+  return status;
+}
+
 function hasConfiguredBinding(bindings: Bindings, key: keyof Bindings): boolean {
   const value = bindings[key];
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasConfiguredSharedState(bindings: Bindings): boolean {
+  return (
+    (hasConfiguredBinding(bindings, 'UPSTASH_REDIS_REST_URL') &&
+      hasConfiguredBinding(bindings, 'UPSTASH_REDIS_REST_TOKEN')) ||
+    (hasConfiguredBinding(bindings, 'KV_REST_API_URL') &&
+      hasConfiguredBinding(bindings, 'KV_REST_API_TOKEN'))
+  );
 }
 
 function hasTruthyBinding(bindings: Bindings, key: keyof Bindings): boolean {
@@ -157,6 +271,16 @@ function hasConfiguredSolanaAddress(bindings: Bindings, key: keyof Bindings): bo
   return typeof value === 'string' && isValidSolanaAddress(value.trim());
 }
 
+function hasConfiguredSolanaAddressList(bindings: Bindings, key: keyof Bindings): boolean {
+  const value = bindings[key];
+  if (typeof value !== 'string') return false;
+  const addresses = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return addresses.length > 0 && addresses.every(isValidSolanaAddress);
+}
+
 function hasConfiguredRwaDevnetSandbox(bindings: Bindings): boolean {
   const hasCatalog =
     hasConfiguredBinding(bindings, 'OFFPAY_RWA_DEVNET_ASSETS_JSON') ||
@@ -186,17 +310,13 @@ function hasMagicBlockNetworkConfig(bindings: Bindings, network: Network): boole
 }
 
 function hasRwaMagicBlockRouterConfig(bindings: Bindings, network: Network): boolean {
-  const key =
-    network === 'mainnet'
-      ? 'OFFPAY_RWA_MAGICBLOCK_ROUTER_MAINNET_URL'
-      : 'OFFPAY_RWA_MAGICBLOCK_ROUTER_DEVNET_URL';
-  return hasConfiguredBinding(bindings, key);
+  if (network === 'mainnet') return false;
+  return hasConfiguredBinding(bindings, 'OFFPAY_RWA_MAGICBLOCK_ROUTER_DEVNET_URL');
 }
 
 function isRwaDelegateEnabled(bindings: Bindings, network: Network): boolean {
-  return network === 'mainnet'
-    ? hasTruthyBinding(bindings, 'OFFPAY_RWA_DELEGATE_MAINNET_ENABLED')
-    : hasTruthyBinding(bindings, 'OFFPAY_RWA_DELEGATE_DEVNET_ENABLED');
+  if (network === 'mainnet') return false;
+  return hasTruthyBinding(bindings, 'OFFPAY_RWA_DELEGATE_DEVNET_ENABLED');
 }
 
 function buildRwaMagicBlockIntentCapability(
@@ -204,11 +324,9 @@ function buildRwaMagicBlockIntentCapability(
   configured: boolean,
 ): CapabilityStatus {
   if (network === 'mainnet') {
-    return configured
-      ? available('MagicBlock delegated RWA intent accounts are enabled on mainnet.')
-      : notImplemented(
-          'Mainnet MagicBlock RWA intents require OFFPAY_RWA_DELEGATE_PROGRAM_ID, OFFPAY_RWA_DELEGATE_MAINNET_ENABLED=1, MagicBlock validator config, and router config after audit.',
-        );
+    return notImplemented(
+      'Mainnet MagicBlock RWA intents are permanently disabled for the classic-SPL devnet sandbox; real Token-2022 xStocks settle through the verified Jupiter base-chain path.',
+    );
   }
 
   return configured
@@ -239,13 +357,19 @@ async function getCapabilities(
   const walletRpcConfigured = hasWalletRpcNetworkConfig(bindings, network);
   const riskProviderConfigured = hasRiskProviderNetworkConfig(bindings, network);
   const jupiterConfigured = hasConfiguredBinding(bindings, 'JUPITER_API_KEY');
+  const jupiterStatefulOrdersConfigured = jupiterConfigured && hasConfiguredSharedState(bindings);
   const rwaAllowlistConfigured = hasConfiguredMintAllowlist(
     bindings,
     'OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST',
   );
   const rwaMainnetEnabled = hasTruthyBinding(bindings, 'OFFPAY_RWA_MAINNET_ENABLED');
+  const rwaMainnetEligibilityConfigured =
+    hasConfiguredSolanaAddressList(bindings, 'OFFPAY_RWA_MAINNET_ELIGIBLE_WALLETS') &&
+    hasConfiguredBinding(bindings, 'OFFPAY_RWA_MAINNET_ELIGIBILITY_POLICY_VERSION');
   const rwaDevnetSandboxConfigured = hasConfiguredRwaDevnetSandbox(bindings);
   const magicBlockConfigured = hasMagicBlockNetworkConfig(bindings, network);
+  const magicBlockPrivateAuthConfigured =
+    magicBlockConfigured && hasConfiguredSharedState(bindings);
   const rwaDelegateProgramConfigured = hasConfiguredSolanaAddress(
     bindings,
     'OFFPAY_RWA_DELEGATE_PROGRAM_ID',
@@ -271,6 +395,7 @@ async function getCapabilities(
     : STREAM_DEFAULTS[network].walletActivity
       ? available('Live wallet activity streaming is available for this network.')
       : unsupportedNetwork('Live wallet activity streaming is not supported on this network.');
+  const flashV2Capability = await getFlashV2Capability(bindings, network);
 
   return {
     network,
@@ -308,26 +433,21 @@ async function getCapabilities(
           'This swap flow is currently available only on mainnet.',
           'This swap flow is not enabled for this deployment.',
         ),
-        privacySwap: buildMainnetOnlyCapability(
-          network,
-          jupiterConfigured && magicBlockConfigured,
-          'Privacy swap mode is available on mainnet.',
-          'Privacy swap mode depends on Jupiter order/execute and is currently available only on mainnet.',
-          'Privacy swap mode is not enabled for this deployment.',
+        // Fail closed until the randomized executor key is recoverable after
+        // process death. Funding a memory-only executor can otherwise strand
+        // user assets between the funding and settlement stages.
+        privacySwap: notImplemented(
+          'Privacy swap mode is paused until crash-safe executor recovery and resumable settlement are implemented.',
         ),
-        triggerOrders: buildMainnetOnlyCapability(
-          network,
-          jupiterConfigured,
-          'Trigger orders are available on mainnet.',
-          'Trigger orders are currently available only on mainnet.',
-          'Trigger orders are not enabled for this deployment.',
+        triggerOrders: notImplemented(
+          'Trigger creation is disabled until every Trigger V2 cancel-and-withdraw refund leg can be semantically verified before signing.',
         ),
         recurringSwap: buildMainnetOnlyCapability(
           network,
-          jupiterConfigured,
+          jupiterStatefulOrdersConfigured,
           'Recurring swaps are available on mainnet.',
           'Recurring swaps are currently available only on mainnet.',
-          'Recurring swaps are not enabled for this deployment.',
+          'Recurring swaps require Jupiter and shared Redis state for transaction binding and execution locks.',
         ),
       },
       rwa: {
@@ -343,7 +463,7 @@ async function getCapabilities(
             : buildMainnetOnlyCapability(
                 network,
                 jupiterConfigured && rwaAllowlistConfigured,
-                'Jupiter verified stocks catalog is available on mainnet.',
+                'Official issuer-verified Token-2022 stocks catalog is available on mainnet.',
                 'Real RWA secondary-market catalog is currently available only on mainnet.',
                 'RWA catalog requires JUPITER_API_KEY and OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST.',
               ),
@@ -374,10 +494,13 @@ async function getCapabilities(
                 )
             : buildMainnetOnlyCapability(
                 network,
-                jupiterConfigured && rwaAllowlistConfigured && rwaMainnetEnabled,
+                jupiterConfigured &&
+                  rwaAllowlistConfigured &&
+                  rwaMainnetEnabled &&
+                  rwaMainnetEligibilityConfigured,
                 'Jupiter RWA secondary-market quote creation is enabled on mainnet.',
                 'RWA secondary-market quotes are currently available only on mainnet.',
-                'RWA quote creation requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, and OFFPAY_RWA_MAINNET_ENABLED=1.',
+                'RWA quote creation requires Jupiter, an issuer-intersected mint allowlist, OFFPAY_RWA_MAINNET_ENABLED=1, and an approved server-side eligibility policy.',
               ),
         execute:
           network === 'devnet'
@@ -393,15 +516,33 @@ async function getCapabilities(
                 jupiterConfigured &&
                   rwaAllowlistConfigured &&
                   rwaMainnetEnabled &&
+                  rwaMainnetEligibilityConfigured &&
                   walletRpcConfigured,
                 'Signed Jupiter RWA swap transactions can be submitted on mainnet.',
                 'RWA secondary-market execution is currently available only on mainnet.',
-                'RWA execution requires JUPITER_API_KEY, OFFPAY_RWA_JUPITER_STOCKS_ALLOWLIST, OFFPAY_RWA_MAINNET_ENABLED=1, and mainnet RPC configuration.',
+                'RWA execution requires Jupiter, an issuer-intersected mint allowlist, OFFPAY_RWA_MAINNET_ENABLED=1, an approved server-side eligibility policy, and mainnet RPC configuration.',
               ),
         magicBlockIntent: buildRwaMagicBlockIntentCapability(network, rwaDelegateConfigured),
         magicBlockTransfer: notImplemented(
           'Direct MagicBlock RWA token transfers remain disabled; ER is only used for OffPay-owned delegated intent accounts, while Jupiter and Token-2022 settlement stay on base Solana.',
         ),
+      },
+      perps: {
+        markets: flashV2Capability,
+        trade: flashV2Capability,
+        magicBlockExecution: flashV2Capability,
+        funding:
+          network === 'mainnet'
+            ? notImplemented(
+                'Flash V2 deposits are disabled while OffPay withdrawal is unavailable, preventing new lifecycle entry and trapped user funds.',
+              )
+            : unsupportedNetwork('Flash Trade V2 funding is available only on mainnet.'),
+        withdrawal:
+          network === 'mainnet'
+            ? notImplemented(
+                'Flash V2 withdrawal is disabled: the live request transaction requires a distinct co-signer, and OffPay has no authorized withdrawal co-signer service. Settlement cannot begin safely without both signatures.',
+              )
+            : unsupportedNetwork('Flash Trade V2 withdrawals are available only on mainnet.'),
       },
       payment: {
         privateInitMint:
@@ -411,10 +552,10 @@ async function getCapabilities(
                 'Private payment mint initialization is not enabled for this network in this deployment.',
               ),
         privateBalance:
-          magicBlockConfigured && hasEnabledStablecoin
-            ? available('Private payment balance lookup is currently enabled on this network.')
+          magicBlockPrivateAuthConfigured && hasEnabledStablecoin
+            ? available('Authenticated private payment balance lookup is enabled on this network.')
             : notImplemented(
-                'Private payment balance lookup is not enabled for this network in this deployment.',
+                'Private payment balance lookup requires MagicBlock validators and shared authentication state.',
               ),
         privateSend:
           magicBlockConfigured && hasEnabledStablecoin

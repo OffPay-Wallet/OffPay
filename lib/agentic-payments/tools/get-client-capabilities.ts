@@ -87,6 +87,24 @@ export const getClientCapabilitiesTool: AgenticToolDefinition = {
             isOffpayFeatureAvailable(capabilities, 'swap.privacySwap'),
             capabilities.swap.privacySwap.reason,
           ),
+          flashTrade: capabilityResult(
+            isOffpayFeatureAvailable(capabilities, 'perps.trade'),
+            capabilities.perps?.trade?.reason,
+          ),
+          flashFunding: {
+            available: isOffpayFeatureAvailable(capabilities, 'perps.funding'),
+            reason: capabilities.perps?.funding?.reason ?? 'not_implemented',
+            message:
+              capabilities.perps?.funding?.message ??
+              'Flash funding is not available from this deployment.',
+          },
+          flashWithdrawal: {
+            available: isOffpayFeatureAvailable(capabilities, 'perps.withdrawal'),
+            reason: capabilities.perps?.withdrawal?.reason ?? 'not_implemented',
+            message:
+              capabilities.perps?.withdrawal?.message ??
+              'Flash withdrawal is not available from this deployment.',
+          },
         },
       },
     };

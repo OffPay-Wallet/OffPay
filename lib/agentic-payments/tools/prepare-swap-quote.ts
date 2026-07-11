@@ -139,7 +139,6 @@ export const prepareSwapQuoteTool: AgenticToolDefinition = {
           outputMint: output.token.mint,
           amount: amount.rawAmount,
           network: scope.network,
-          receiverAddress: scope.walletAddress,
           ...(slippage.slippageBps == null
             ? {}
             : { slippageBps: slippage.slippageBps, useManualSlippage: slippage.manual }),
@@ -183,6 +182,7 @@ export const prepareSwapQuoteTool: AgenticToolDefinition = {
             outputDecimals: output.token.decimals,
             outputAmount,
             outputRawAmount: quote.outAmount,
+            minimumOutputAmount: quote.minimumOutputAmount,
             slippageBps: quote.slippageBps ?? null,
             slippageMode: quote.slippageMode ?? null,
             priceImpactPct: quote.priceImpactPct,

@@ -19,6 +19,7 @@ const TIMESTAMP_MAX_AGE_MS = 60_000;
 const TIMESTAMP_FUTURE_SKEW_MS = 5_000;
 const HEX_PATTERN = /^[a-f0-9]+$/i;
 const PROTECTED_ROUTE_PREFIXES = [
+  '/api/ai/',
   '/api/market/',
   '/api/wallet/',
   '/api/risk/',
@@ -281,8 +282,16 @@ function parseAuthHeaders(context: Context<AppEnv>): AuthHeaders {
   }
 
   let network: Network;
+  const networkHeader = context.req.header('X-Network')?.trim();
+  if (!networkHeader) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_NETWORK',
+      message: 'Explicit network selection is required.',
+    });
+  }
   try {
-    network = parseNetwork(context.req.header('X-Network') ?? 'mainnet');
+    network = parseNetwork(networkHeader);
   } catch {
     throw new AppError({
       status: 400,

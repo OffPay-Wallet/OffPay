@@ -8,7 +8,12 @@ import {
 } from '@solana/web3.js';
 import { AppError } from './errors.js';
 import { broadcastRawTransaction, getLatestBlockhash, getRpcSignatureStatuses } from './helius.js';
-import { createSwapQuote, executeSwapQuote, type SwapQuoteResponse } from './jupiter.js';
+import {
+  createSwapQuote,
+  executeSwapQuote,
+  getSwapQuoteContext,
+  type SwapQuoteResponse,
+} from './jupiter.js';
 import {
   getRequiredBinding,
   readFiniteNumber,
@@ -55,6 +60,13 @@ interface RwaAsset {
   logo?: string | null;
   underlyingSymbol: string | null;
   complianceLabel: string;
+  issuerAssetId: string | null;
+  scaledUiMultiplier: string | null;
+  pendingScaledUiMultiplier: string | null;
+  multiplierActivationAt: number | null;
+  tradingHalted: boolean;
+  multiplierTransitionActive: boolean;
+  supportsAtomicSwaps: boolean;
   execution: RwaExecutionPolicy;
 }
 
@@ -87,6 +99,7 @@ interface RwaQuoteRequest {
   side?: 'buy' | 'sell';
   network: Network;
   walletAddress: string;
+  countryCode?: string;
 }
 
 interface RwaQuoteResponse {
@@ -106,6 +119,7 @@ interface RwaQuoteResponse {
   expiresAt: number | null;
   provider: RwaProvider;
   providerEnvironment: RwaProviderEnvironment;
+  scaledUiMultiplier?: string | null;
   unsignedTransaction: string;
   transactionFormat: 'solana_legacy_transaction_base64' | 'solana_versioned_transaction_base64';
   unsignedTransactions?: RwaUnsignedTransactionStep[];
@@ -151,17 +165,18 @@ interface RwaExecuteRequest {
   signedTransactions?: RwaSignedTransactionStep[];
   network: Network;
   walletAddress: string;
+  countryCode?: string;
 }
 
 interface RwaExecuteResponse {
   quoteId: string;
   network: Network;
   signature: string;
-  signatures?: Array<{
+  signatures?: {
     id: string;
     target: RwaTransactionTarget;
     signature: string;
-  }>;
+  }[];
   status: 'submitted';
   submittedAt: number;
   provider: RwaProvider;
@@ -183,7 +198,25 @@ interface JupiterToken {
   audit?: unknown;
 }
 
+interface IssuerRwaAsset {
+  id: string;
+  symbol: string;
+  name: string;
+  underlyingSymbol: string | null;
+  logo: string | null;
+  mint: string;
+  isTradingHalted: boolean;
+  supportsAtomicSwaps: boolean;
+}
+
+interface IssuerMultiplier {
+  currentMultiplier: string;
+  pendingMultiplier: string | null;
+  activationAt: number | null;
+}
+
 const DEFAULT_JUPITER_API_BASE_URL = 'https://api.jup.ag';
+const DEFAULT_RWA_ISSUER_API_BASE_URL = 'https://api.backed.fi';
 const DEFAULT_MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const DEFAULT_DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const DEFAULT_RWA_DELEGATE_PROGRAM_ID = '4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7';
@@ -198,6 +231,7 @@ const MAX_PRICE_IMPACT_BPS_LIMIT = 10_000;
 const MIN_QUOTE_TTL_MS = 5_000;
 const DEVNET_SANDBOX_QUOTE_TTL_MS = 60_000;
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const ASSOCIATED_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const SYSVAR_RENT_PROGRAM_ID = 'SysvarRent111111111111111111111111111111111';
 const MAGIC_PROGRAM_ID = 'Magic11111111111111111111111111111111111111';
@@ -214,6 +248,14 @@ const DELEGATION_RECORD_SEED = 'delegation';
 const DELEGATION_METADATA_SEED = 'delegation-metadata';
 const DEFAULT_MAGICBLOCK_ER_DEVNET_RPC_URL = 'https://devnet-as.magicblock.app';
 const MAGICBLOCK_RPC_TIMEOUT_MS = 12_000;
+const ISSUER_API_TIMEOUT_MS = 12_000;
+const ISSUER_ASSET_PAGE_SIZE = 100;
+const ISSUER_ASSET_MAX_PAGES = 25;
+const MULTIPLIER_FETCH_CONCURRENCY = 8;
+const ISSUER_REGISTRY_CACHE_MS = 30_000;
+const ISSUER_MULTIPLIER_CACHE_MS = 15_000;
+const MULTIPLIER_TRANSITION_GUARD_MS = 15 * 60 * 1000;
+const DEFAULT_RESTRICTED_RWA_COUNTRIES = ['US', 'GB', 'CA', 'AU'] as const;
 
 interface DevnetSandboxConfig {
   settlementMint: string;
@@ -237,15 +279,24 @@ interface RwaStockCatalogFilter {
 }
 
 let rwaFetchImplementation: RwaFetchImplementation = (input, init) => fetch(input, init);
+let issuerAssetCache: {
+  key: string;
+  expiresAt: number;
+  value: Map<string, IssuerRwaAsset>;
+} | null = null;
+let issuerAssetInFlight: {
+  key: string;
+  promise: Promise<Map<string, IssuerRwaAsset>>;
+} | null = null;
+const issuerMultiplierCache = new Map<string, { expiresAt: number; value: IssuerMultiplier }>();
+const issuerMultiplierInFlight = new Map<string, Promise<IssuerMultiplier>>();
 
 function readJupiterApiBaseUrl(bindings: Bindings): string {
   const configuredUrl = bindings.JUPITER_API_BASE_URL?.trim() || DEFAULT_JUPITER_API_BASE_URL;
 
   try {
     const parsed = new URL(configuredUrl);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new Error('Unsupported Jupiter API protocol.');
-    }
+    if (parsed.protocol !== 'https:') throw new Error('Jupiter API must use HTTPS.');
     return parsed.toString().replace(/\/$/, '');
   } catch (error) {
     throw new AppError({
@@ -303,6 +354,263 @@ async function fetchJupiterJson(bindings: Bindings, path: string, init?: Request
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function readIssuerApiBaseUrl(bindings: Bindings): string {
+  const configuredUrl =
+    bindings.OFFPAY_RWA_ISSUER_API_BASE_URL?.trim() || DEFAULT_RWA_ISSUER_API_BASE_URL;
+
+  try {
+    const parsed = new URL(configuredUrl);
+    if (parsed.protocol !== 'https:') throw new Error('Issuer API must use HTTPS.');
+    return parsed.toString().replace(/\/$/, '');
+  } catch (error) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'RWA issuer registry configuration is unavailable.',
+      retryable: true,
+      cause: error,
+    });
+  }
+}
+
+async function fetchIssuerJson(bindings: Bindings, path: string): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ISSUER_API_TIMEOUT_MS);
+
+  try {
+    const response = await rwaFetchImplementation(`${readIssuerApiBaseUrl(bindings)}${path}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    const payload: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new AppError({
+        status: 502,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'The official RWA issuer registry is currently unavailable.',
+        retryable: response.status >= 500 || response.status === 429,
+      });
+    }
+    return payload;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'The official RWA issuer registry is currently unavailable.',
+      retryable: true,
+      cause: error,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function readIssuerAsset(entry: unknown): IssuerRwaAsset | null {
+  if (!isRecord(entry) || !Array.isArray(entry.deployments)) return null;
+  const id = sanitizeText(readTrimmedString(entry.id), 80);
+  const symbol = sanitizeText(readTrimmedString(entry.symbol), 24);
+  const name = sanitizeText(readTrimmedString(entry.name), 80);
+  if (!id || !symbol || !name) return null;
+
+  const solanaDeployment = entry.deployments.find(
+    (deployment) =>
+      isRecord(deployment) && readTrimmedString(deployment.network)?.toLowerCase() === 'solana',
+  );
+  if (!isRecord(solanaDeployment)) return null;
+  const mint = readTrimmedString(solanaDeployment.address);
+  if (!mint || !isValidSolanaAddress(mint)) return null;
+
+  return {
+    id,
+    symbol,
+    name,
+    underlyingSymbol: sanitizeText(readTrimmedString(entry.underlyingSymbol), 24),
+    logo: readHttpUrl(entry.logo),
+    mint,
+    isTradingHalted: entry.isTradingHalted === true,
+    supportsAtomicSwaps: solanaDeployment.supportsAtomicSwaps === true,
+  };
+}
+
+async function fetchOfficialIssuerAssetsUncached(
+  bindings: Bindings,
+): Promise<Map<string, IssuerRwaAsset>> {
+  const byMint = new Map<string, IssuerRwaAsset>();
+  for (let page = 0; page < ISSUER_ASSET_MAX_PAGES; page += 1) {
+    const payload = await fetchIssuerJson(
+      bindings,
+      `/api/v2/public/assets?page=${page}&pageSize=${ISSUER_ASSET_PAGE_SIZE}`,
+    );
+    if (
+      !isRecord(payload) ||
+      !Array.isArray(payload.nodes) ||
+      !isRecord(payload.page) ||
+      readFiniteNumber(payload.page.currentPage) !== page
+    ) {
+      throw new AppError({
+        status: 502,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'The official RWA issuer registry returned an invalid asset catalog.',
+        retryable: true,
+      });
+    }
+
+    for (const entry of payload.nodes) {
+      const asset = readIssuerAsset(entry);
+      if (asset == null) continue;
+      const existing = byMint.get(asset.mint);
+      if (existing != null && existing.id !== asset.id) {
+        throw new AppError({
+          status: 502,
+          code: 'UPSTREAM_UNAVAILABLE',
+          message: 'The official RWA issuer registry contains conflicting Solana deployments.',
+          retryable: true,
+        });
+      }
+      byMint.set(asset.mint, asset);
+    }
+
+    if (payload.page.hasNextPage !== true) return byMint;
+  }
+
+  throw new AppError({
+    status: 502,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message: 'The official RWA issuer registry exceeded the supported pagination limit.',
+    retryable: true,
+  });
+}
+
+async function fetchOfficialIssuerAssets(
+  bindings: Bindings,
+  forceRefresh = false,
+): Promise<Map<string, IssuerRwaAsset>> {
+  const key = readIssuerApiBaseUrl(bindings);
+  const now = Date.now();
+  if (!forceRefresh && issuerAssetCache?.key === key && issuerAssetCache.expiresAt > now) {
+    return issuerAssetCache.value;
+  }
+  if (issuerAssetInFlight?.key === key) return issuerAssetInFlight.promise;
+
+  const promise = fetchOfficialIssuerAssetsUncached(bindings);
+  issuerAssetInFlight = { key, promise };
+  try {
+    const value = await promise;
+    issuerAssetCache = { key, expiresAt: Date.now() + ISSUER_REGISTRY_CACHE_MS, value };
+    return value;
+  } finally {
+    if (issuerAssetInFlight?.promise === promise) issuerAssetInFlight = null;
+  }
+}
+
+function readPositiveDecimalString(value: unknown): string | null {
+  const normalized = typeof value === 'number' ? String(value) : readTrimmedString(value);
+  if (normalized == null || !/^\d+(?:\.\d+)?$/.test(normalized)) return null;
+  return Number(normalized) > 0 ? normalized : null;
+}
+
+function readActivationTimestamp(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value < 10_000_000_000 ? Math.trunc(value * 1000) : Math.trunc(value);
+  }
+  const raw = readTrimmedString(value);
+  if (!raw) return null;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric < 10_000_000_000 ? Math.trunc(numeric * 1000) : Math.trunc(numeric);
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function fetchIssuerMultiplierUncached(
+  bindings: Bindings,
+  symbol: string,
+): Promise<IssuerMultiplier> {
+  const payload = await fetchIssuerJson(
+    bindings,
+    `/api/v1/token/${encodeURIComponent(symbol)}/multiplier?network=Solana`,
+  );
+  if (!isRecord(payload)) {
+    throw new AppError({
+      status: 502,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'The official RWA issuer multiplier response is invalid.',
+      retryable: true,
+    });
+  }
+  const currentMultiplier = readPositiveDecimalString(payload.currentMultiplier);
+  if (currentMultiplier == null) {
+    throw new AppError({
+      status: 502,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'The official RWA issuer multiplier is unavailable.',
+      retryable: true,
+    });
+  }
+  const pendingMultiplier = readPositiveDecimalString(payload.newMultiplier);
+  const activationAt = readActivationTimestamp(payload.activationDateTime);
+  if ((pendingMultiplier == null) !== (activationAt == null)) {
+    throw new AppError({
+      status: 502,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'The official RWA issuer multiplier transition is incomplete.',
+      retryable: true,
+    });
+  }
+  return {
+    currentMultiplier,
+    pendingMultiplier,
+    activationAt,
+  };
+}
+
+async function fetchIssuerMultiplier(
+  bindings: Bindings,
+  symbol: string,
+  forceRefresh = false,
+): Promise<IssuerMultiplier> {
+  const key = `${readIssuerApiBaseUrl(bindings)}:${symbol.toUpperCase()}`;
+  const cached = issuerMultiplierCache.get(key);
+  if (!forceRefresh && cached != null && cached.expiresAt > Date.now()) return cached.value;
+  const existing = issuerMultiplierInFlight.get(key);
+  if (existing != null) return existing;
+
+  const promise = fetchIssuerMultiplierUncached(bindings, symbol);
+  issuerMultiplierInFlight.set(key, promise);
+  try {
+    const value = await promise;
+    issuerMultiplierCache.set(key, {
+      expiresAt: Date.now() + ISSUER_MULTIPLIER_CACHE_MS,
+      value,
+    });
+    return value;
+  } finally {
+    if (issuerMultiplierInFlight.get(key) === promise) issuerMultiplierInFlight.delete(key);
+  }
+}
+
+async function fetchIssuerMultipliers(
+  bindings: Bindings,
+  assets: IssuerRwaAsset[],
+  forceRefresh = false,
+): Promise<Map<string, IssuerMultiplier>> {
+  const byMint = new Map<string, IssuerMultiplier>();
+  for (let index = 0; index < assets.length; index += MULTIPLIER_FETCH_CONCURRENCY) {
+    const batch = assets.slice(index, index + MULTIPLIER_FETCH_CONCURRENCY);
+    const multipliers = await Promise.all(
+      batch.map(
+        async (asset) =>
+          [asset.mint, await fetchIssuerMultiplier(bindings, asset.symbol, forceRefresh)] as const,
+      ),
+    );
+    for (const [mint, multiplier] of multipliers) byMint.set(mint, multiplier);
+  }
+  return byMint;
 }
 
 function readTags(value: unknown): string[] {
@@ -671,6 +979,49 @@ function assertRwaMainnetTradingEnabled(bindings: Bindings): void {
   });
 }
 
+function readCommaSeparatedSet(value: string | undefined, normalize = false): Set<string> {
+  return new Set(
+    (value ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+      .map((entry) => (normalize ? entry.toUpperCase() : entry)),
+  );
+}
+
+function assertRwaMainnetEligibility(
+  bindings: Bindings,
+  request: { walletAddress: string; countryCode?: string },
+): string {
+  const policyVersion = bindings.OFFPAY_RWA_MAINNET_ELIGIBILITY_POLICY_VERSION?.trim() ?? '';
+  const eligibleWallets = readCommaSeparatedSet(bindings.OFFPAY_RWA_MAINNET_ELIGIBLE_WALLETS);
+  const countryCode = request.countryCode?.trim().toUpperCase() ?? '';
+  const restrictedCountries = new Set<string>(DEFAULT_RESTRICTED_RWA_COUNTRIES);
+  for (const country of readCommaSeparatedSet(
+    bindings.OFFPAY_RWA_MAINNET_RESTRICTED_COUNTRIES,
+    true,
+  )) {
+    restrictedCountries.add(country);
+  }
+
+  if (
+    policyVersion.length === 0 ||
+    eligibleWallets.size === 0 ||
+    !eligibleWallets.has(request.walletAddress) ||
+    !/^[A-Z]{2}$/.test(countryCode) ||
+    countryCode === 'XX' ||
+    restrictedCountries.has(countryCode)
+  ) {
+    throw new AppError({
+      status: 403,
+      code: 'RWA_ELIGIBILITY_REQUIRED',
+      message:
+        'Mainnet RWA trading requires a current server-side eligibility approval and a supported jurisdiction.',
+    });
+  }
+  return policyVersion;
+}
+
 function getProviderEnvironment(): RwaProviderEnvironment {
   return 'production';
 }
@@ -689,6 +1040,8 @@ function buildComplianceLabel(network: Network): string {
 
 function buildRwaAsset(params: {
   token: JupiterToken;
+  issuerAsset: IssuerRwaAsset;
+  multiplier: IssuerMultiplier;
   network: Network;
   settlementMint: string;
   priceUsd: number | null;
@@ -696,23 +1049,26 @@ function buildRwaAsset(params: {
 }): RwaAsset | null {
   const mint = readTokenMint(params.token);
   const decimals = readTokenDecimals(params.token);
-  const symbol = sanitizeText(readTrimmedString(params.token.symbol), 24);
-  const name = sanitizeText(readTrimmedString(params.token.name), 80);
-  if (!mint || decimals == null || !symbol || !name) return null;
+  if (!mint || decimals == null || mint !== params.issuerAsset.mint) return null;
 
   const verified = isVerifiedJupiterStockToken(params.token);
-  const tradable = params.network === 'mainnet';
+  const multiplierTransitionActive = isMultiplierTransitionActive(params.multiplier, Date.now());
+  const tradable =
+    params.network === 'mainnet' &&
+    verified &&
+    !params.issuerAsset.isTradingHalted &&
+    !multiplierTransitionActive;
 
   return {
     id: mint,
-    symbol,
-    name,
+    symbol: params.issuerAsset.symbol,
+    name: params.issuerAsset.name,
     mint,
     decimals,
     network: params.network,
-    category: inferCategory(name, symbol),
+    category: inferCategory(params.issuerAsset.name, params.issuerAsset.symbol),
     provider: 'jupiter_stocks',
-    providerLabel: 'Jupiter verified stocks',
+    providerLabel: 'xStocks issuer registry + Jupiter liquidity',
     providerEnvironment: getProviderEnvironment(),
     tokenProgramId: readTrimmedString(params.token.tokenProgram),
     settlementMint: params.settlementMint,
@@ -724,9 +1080,20 @@ function buildRwaAsset(params: {
     devnetSandbox: false,
     magicBlockEligible: false,
     riskLevel: 'regulated',
-    logo: readTrimmedString(params.token.icon) ?? readTrimmedString(params.token.logoURI),
-    underlyingSymbol: inferUnderlyingSymbol(symbol),
+    logo:
+      params.issuerAsset.logo ??
+      readTrimmedString(params.token.icon) ??
+      readTrimmedString(params.token.logoURI),
+    underlyingSymbol:
+      params.issuerAsset.underlyingSymbol ?? inferUnderlyingSymbol(params.issuerAsset.symbol),
     complianceLabel: buildComplianceLabel(params.network),
+    issuerAssetId: params.issuerAsset.id,
+    scaledUiMultiplier: params.multiplier.currentMultiplier,
+    pendingScaledUiMultiplier: params.multiplier.pendingMultiplier,
+    multiplierActivationAt: params.multiplier.activationAt,
+    tradingHalted: params.issuerAsset.isTradingHalted,
+    multiplierTransitionActive,
+    supportsAtomicSwaps: params.issuerAsset.supportsAtomicSwaps,
     execution: {
       buy: tradable ? 'jupiter_swap' : 'disabled',
       sell: tradable ? 'jupiter_swap' : 'disabled',
@@ -736,19 +1103,18 @@ function buildRwaAsset(params: {
   };
 }
 
-function isJupiterXStockToken(token: JupiterToken): boolean {
-  const symbol = readTrimmedString(token.symbol) ?? '';
-  const name = readTrimmedString(token.name) ?? '';
-  const icon = readTrimmedString(token.icon) ?? readTrimmedString(token.logoURI) ?? '';
-
-  return /x$/i.test(symbol) && (/xstock/i.test(name) || /xstocks-metadata\.backed\.fi/i.test(icon));
+function isMultiplierTransitionActive(multiplier: IssuerMultiplier, now: number): boolean {
+  if (multiplier.pendingMultiplier == null || multiplier.activationAt == null) return false;
+  return multiplier.activationAt <= now + MULTIPLIER_TRANSITION_GUARD_MS;
 }
 
 function isVerifiedJupiterStockToken(token: JupiterToken): boolean {
   const tags = readTags(token.tags);
   const audit = isRecord(token.audit) ? token.audit : null;
   return (
-    (token.isVerified === true || tags.includes('verified') || isJupiterXStockToken(token)) &&
+    (token.isVerified === true || tags.includes('verified')) &&
+    tags.includes('stocks') &&
+    readTrimmedString(token.tokenProgram) === TOKEN_2022_PROGRAM_ID &&
     audit?.isSus !== true
   );
 }
@@ -789,6 +1155,13 @@ function buildDevnetSandboxRwaAsset(params: {
     underlyingSymbol: params.assetConfig.underlyingSymbol,
     complianceLabel:
       'Devnet sandbox RWA backed by OffPay vault liquidity. Price is read from the configured Jupiter stock reference mint; issuer redemption and compliance are not simulated.',
+    issuerAssetId: null,
+    scaledUiMultiplier: '1',
+    pendingScaledUiMultiplier: null,
+    multiplierActivationAt: null,
+    tradingHalted: false,
+    multiplierTransitionActive: false,
+    supportsAtomicSwaps: false,
     execution: {
       buy: 'devnet_sandbox',
       sell: 'devnet_sandbox',
@@ -960,7 +1333,11 @@ async function fetchJupiterPricePoints(
   return prices;
 }
 
-async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAssetsResponse> {
+async function getRwaAssets(
+  bindings: Bindings,
+  network: Network,
+  requestedAsset?: { mint?: string; symbol?: string; fresh?: boolean },
+): Promise<RwaAssetsResponse> {
   const fetchedAt = Date.now();
   if (network === 'devnet') {
     const config = readDevnetSandboxConfig(bindings);
@@ -1011,11 +1388,28 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
     };
   }
 
+  const officialIssuerAssets = await fetchOfficialIssuerAssets(bindings, requestedAsset?.fresh);
+  const requestedSymbol = requestedAsset?.symbol?.trim().toUpperCase();
   const tokens = (await fetchJupiterStockTokens(bindings, network)).filter((token) => {
     const mint = readTokenMint(token);
     if (mint == null || !isVerifiedJupiterStockToken(token)) return false;
+    const issuerAsset = officialIssuerAssets.get(mint);
+    if (issuerAsset == null) return false;
+    if (requestedAsset?.mint != null && mint !== requestedAsset.mint) return false;
+    if (requestedSymbol != null && issuerAsset.symbol.toUpperCase() !== requestedSymbol)
+      return false;
     return catalogFilter.includeAllVerifiedStocks || catalogFilter.mints.has(mint);
   });
+  const selectedIssuerAssets = tokens.flatMap((token) => {
+    const mint = readTokenMint(token);
+    const issuerAsset = mint == null ? null : officialIssuerAssets.get(mint);
+    return issuerAsset == null ? [] : [issuerAsset];
+  });
+  const multipliers = await fetchIssuerMultipliers(
+    bindings,
+    selectedIssuerAssets,
+    requestedAsset?.fresh,
+  );
   const prices = await fetchJupiterPricePoints(
     bindings,
     tokens.flatMap((token) => {
@@ -1031,9 +1425,14 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
     providerEnvironment,
     assets: tokens.flatMap((token) => {
       const mint = readTokenMint(token);
+      const issuerAsset = mint == null ? null : (officialIssuerAssets.get(mint) ?? null);
+      const multiplier = mint == null ? null : (multipliers.get(mint) ?? null);
       const pricePoint = mint == null ? null : (prices.get(mint) ?? null);
+      if (issuerAsset == null || multiplier == null) return [];
       const asset = buildRwaAsset({
         token,
+        issuerAsset,
+        multiplier,
         network,
         settlementMint,
         priceUsd: pricePoint?.usdPrice ?? null,
@@ -1047,9 +1446,9 @@ async function getRwaAssets(bindings: Bindings, network: Network): Promise<RwaAs
 
 async function resolveRwaAsset(
   bindings: Bindings,
-  request: { mint?: string; symbol?: string; network: Network },
+  request: { mint?: string; symbol?: string; network: Network; fresh?: boolean },
 ): Promise<RwaAsset> {
-  const assets = (await getRwaAssets(bindings, request.network)).assets;
+  const assets = (await getRwaAssets(bindings, request.network, request)).assets;
   const symbol = request.symbol?.trim().toUpperCase() ?? null;
   const asset = assets.find(
     (entry) =>
@@ -1138,6 +1537,84 @@ function formatAtomicAmount(amount: string, decimals: number): string {
   const whole = padded.slice(0, -decimals).replace(/^0+(?=\d)/, '') || '0';
   const fraction = padded.slice(-decimals).replace(/0+$/, '');
   return fraction.length === 0 ? whole : `${whole}.${fraction}`;
+}
+
+function decimalToFraction(
+  value: string,
+  label: string,
+): { numerator: bigint; denominator: bigint } {
+  const normalized = value.trim();
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    throw new AppError({
+      status: 502,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: `${label} is invalid.`,
+      retryable: true,
+    });
+  }
+  const [whole, fraction = ''] = normalized.split('.');
+  const denominator = 10n ** BigInt(fraction.length);
+  const numerator = BigInt(`${whole}${fraction}`);
+  if (numerator <= 0n) {
+    throw new AppError({
+      status: 502,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: `${label} must be greater than zero.`,
+      retryable: true,
+    });
+  }
+  return { numerator, denominator };
+}
+
+function parseDisplayAmountToRawAtomic(
+  displayAmount: string,
+  decimals: number,
+  multiplier: string,
+  label: string,
+): string {
+  parseDecimalToAtomic(displayAmount, 18, label);
+  const display = decimalToFraction(displayAmount, label);
+  const scaledUi = decimalToFraction(multiplier, 'RWA scaled UI multiplier');
+  const numerator = display.numerator * pow10(decimals) * scaledUi.denominator;
+  const denominator = display.denominator * scaledUi.numerator;
+  const rawAtoms = numerator / denominator;
+  if (rawAtoms <= 0n || rawAtoms > U64_MAX) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: `${label} is outside the supported token amount range.`,
+    });
+  }
+  return rawAtoms.toString();
+}
+
+function formatFractionDecimal(
+  numerator: bigint,
+  denominator: bigint,
+  maximumFractionDigits: number,
+): string {
+  const whole = numerator / denominator;
+  let remainder = numerator % denominator;
+  if (remainder === 0n || maximumFractionDigits === 0) return whole.toString();
+
+  let fraction = '';
+  for (let index = 0; index < maximumFractionDigits && remainder > 0n; index += 1) {
+    remainder *= 10n;
+    fraction += (remainder / denominator).toString();
+    remainder %= denominator;
+  }
+  const trimmed = fraction.replace(/0+$/, '');
+  return trimmed.length === 0 ? whole.toString() : `${whole}.${trimmed}`;
+}
+
+function formatRawAtomicToDisplay(rawAmount: string, decimals: number, multiplier: string): string {
+  if (!/^\d+$/.test(rawAmount)) return rawAmount;
+  const scaledUi = decimalToFraction(multiplier, 'RWA scaled UI multiplier');
+  return formatFractionDecimal(
+    BigInt(rawAmount) * scaledUi.numerator,
+    pow10(decimals) * scaledUi.denominator,
+    Math.min(18, Math.max(12, decimals)),
+  );
 }
 
 function inferQuotePriceUsd(params: {
@@ -1944,6 +2421,7 @@ async function createRwaQuote(
 
   assertRwaTradingNetwork(request.network);
   assertRwaMainnetTradingEnabled(bindings);
+  const eligibilityPolicyVersion = assertRwaMainnetEligibility(bindings, request);
   if (request.side == null) {
     throw new AppError({
       status: 400,
@@ -1956,6 +2434,7 @@ async function createRwaQuote(
     mint: request.assetMint,
     symbol: request.assetSymbol,
     network: request.network,
+    fresh: true,
   });
   if (!asset.tradable || asset.execution[request.side] !== 'jupiter_swap') {
     throw new AppError({
@@ -1965,11 +2444,24 @@ async function createRwaQuote(
         'This RWA asset is not currently tradable through Jupiter secondary-market liquidity.',
     });
   }
+  if (asset.scaledUiMultiplier == null || asset.issuerAssetId == null) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'The official RWA scaled UI multiplier is unavailable.',
+      retryable: true,
+    });
+  }
 
   const amount =
     request.side === 'buy'
       ? parseDecimalToAtomic(request.cashAmount ?? '', USDC_DECIMALS, 'Cash amount')
-      : parseDecimalToAtomic(request.quantity ?? '', asset.decimals ?? 0, 'Quantity');
+      : parseDisplayAmountToRawAtomic(
+          request.quantity ?? '',
+          asset.decimals ?? 0,
+          asset.scaledUiMultiplier,
+          'Quantity',
+        );
   const inputMint = request.side === 'buy' ? asset.settlementMint : asset.mint;
   const outputMint = request.side === 'buy' ? asset.mint : asset.settlementMint;
   const quote = await createSwapQuote(bindings, {
@@ -1978,6 +2470,14 @@ async function createRwaQuote(
     outputMint,
     amount,
     network: request.network,
+    context: {
+      purpose: 'rwa',
+      assetMint: asset.mint,
+      issuerAssetId: asset.issuerAssetId,
+      scaledUiMultiplier: asset.scaledUiMultiplier,
+      eligibilityPolicyVersion,
+      side: request.side,
+    },
   });
   assertQuoteSafety({
     quote,
@@ -1998,10 +2498,26 @@ function buildRwaQuoteResponse(params: {
   quote: SwapQuoteResponse;
   side: 'buy' | 'sell';
 }): RwaQuoteResponse {
+  if (params.asset.scaledUiMultiplier == null) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'The official RWA scaled UI multiplier is unavailable.',
+      retryable: true,
+    });
+  }
   const quantity =
     params.side === 'buy'
-      ? formatAtomicAmount(params.quote.outAmount, params.asset.decimals ?? 0)
-      : formatAtomicAmount(params.quote.inAmount, params.asset.decimals ?? 0);
+      ? formatRawAtomicToDisplay(
+          params.quote.outAmount,
+          params.asset.decimals ?? 0,
+          params.asset.scaledUiMultiplier,
+        )
+      : formatRawAtomicToDisplay(
+          params.quote.inAmount,
+          params.asset.decimals ?? 0,
+          params.asset.scaledUiMultiplier,
+        );
   const cashAmount =
     params.side === 'buy'
       ? formatAtomicAmount(params.quote.inAmount, USDC_DECIMALS)
@@ -2024,6 +2540,7 @@ function buildRwaQuoteResponse(params: {
     expiresAt: params.quote.expiresAt,
     provider: 'jupiter_stocks',
     providerEnvironment: params.asset.providerEnvironment,
+    scaledUiMultiplier: params.asset.scaledUiMultiplier,
     unsignedTransaction: params.quote.unsignedTransaction,
     transactionFormat: 'solana_versioned_transaction_base64',
   };
@@ -2186,11 +2703,43 @@ async function executeRwaQuote(
 
   assertRwaTradingNetwork(request.network);
   assertRwaMainnetTradingEnabled(bindings);
+  const eligibilityPolicyVersion = assertRwaMainnetEligibility(bindings, request);
+  const quoteContext = await getSwapQuoteContext(bindings, {
+    quoteId: request.quoteId,
+    takerAddress: request.walletAddress,
+    network: request.network,
+  });
+  if (quoteContext == null) {
+    throw new AppError({
+      status: 409,
+      code: 'QUOTE_EXPIRED',
+      message: 'The RWA quote is missing, expired, or was not created by the RWA route.',
+    });
+  }
+  const currentAsset = await resolveRwaAsset(bindings, {
+    mint: quoteContext.assetMint,
+    network: request.network,
+    fresh: true,
+  });
+  if (
+    !currentAsset.tradable ||
+    currentAsset.issuerAssetId !== quoteContext.issuerAssetId ||
+    currentAsset.scaledUiMultiplier !== quoteContext.scaledUiMultiplier ||
+    eligibilityPolicyVersion !== quoteContext.eligibilityPolicyVersion
+  ) {
+    throw new AppError({
+      status: 409,
+      code: 'QUOTE_EXPIRED',
+      message:
+        'The issuer status or scaled UI multiplier changed. Request and sign a fresh RWA quote.',
+    });
+  }
   const result = await executeSwapQuote(bindings, {
     takerAddress: request.walletAddress,
     quoteId: request.quoteId,
     signedTransaction: request.signedTransaction,
     network: request.network,
+    contextPurpose: 'rwa',
   });
 
   return {
@@ -2205,10 +2754,18 @@ async function executeRwaQuote(
 
 function setRwaFetchImplementation(implementation: RwaFetchImplementation): void {
   rwaFetchImplementation = implementation;
+  issuerAssetCache = null;
+  issuerAssetInFlight = null;
+  issuerMultiplierCache.clear();
+  issuerMultiplierInFlight.clear();
 }
 
 function resetRwaFetchImplementation(): void {
   rwaFetchImplementation = (input, init) => fetch(input, init);
+  issuerAssetCache = null;
+  issuerAssetInFlight = null;
+  issuerMultiplierCache.clear();
+  issuerMultiplierInFlight.clear();
 }
 
 export {

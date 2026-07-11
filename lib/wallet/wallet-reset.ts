@@ -76,7 +76,7 @@ function resetWalletScopedStores(): void {
     recipientHistoryClearedAtByWallet: {},
   });
   usePrivatePaymentStore.setState({ receipts: [] });
-  useAdvancedSwapStore.setState({ receipts: [] });
+  useAdvancedSwapStore.setState({ receipts: [], recurringOperationIdentities: {} });
   useContactsStore.getState().clearContacts();
   useUmbraPrivacyStore.setState({
     receipts: [],

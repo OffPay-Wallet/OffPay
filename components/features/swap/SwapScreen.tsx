@@ -117,6 +117,11 @@ import {
   executePrivacyEnvelopeSwap,
   type PrivacyEnvelopeSwapResult,
 } from '@/lib/swap/advanced-swap';
+import {
+  executeNormalSwapWithReviewGate,
+  resolveSwapExecutionAmounts,
+  type NormalSwapExecutionGateResult,
+} from '@/lib/swap/normal-swap-execution';
 import { observeOfflineTokenMetadataFromSwapTokens } from '@/lib/offline/offline-token-metadata';
 import { scheduleUiWorkAfterFirstPaint } from '@/lib/perf/ui-work-scheduler';
 import { formatTokenBalance, shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
@@ -130,10 +135,11 @@ import { useTabHistoryStore, TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import { useWalletStore } from '@/store/walletStore';
 
-import type { SwapQuoteResponse } from '@/types/offpay-api';
+import type { SwapExecuteResponse, SwapQuoteResponse } from '@/types/offpay-api';
 
 interface SwapReviewState {
   quote: SwapQuoteResponse;
+  refreshedQuote: boolean;
   payLeg: {
     label: string;
     amount: string;
@@ -152,6 +158,13 @@ interface SwapReviewState {
   slippageLabel: string;
   priceImpactLabel: string;
   feeLabel: string;
+  minimumReceiveLabel: string;
+}
+
+interface NormalSwapMutationRequest {
+  quote: SwapQuoteResponse;
+  refreshedQuote: boolean;
+  refreshOnly?: boolean;
 }
 
 interface PrivateSwapReviewState {
@@ -879,6 +892,7 @@ export function SwapScreen(): React.JSX.Element {
         { label: 'Route', value: reviewSwap.routeLabel },
         { label: 'Price impact', value: reviewSwap.priceImpactLabel },
         { label: 'Quote fee', value: reviewSwap.feeLabel },
+        { label: 'Minimum receive', value: reviewSwap.minimumReceiveLabel },
         {
           label: 'Slippage',
           value: reviewSwap.slippageLabel,
@@ -900,8 +914,7 @@ export function SwapScreen(): React.JSX.Element {
     }): SwapProcessResultState | null => {
       const quote = params.quote ?? reviewSwap?.quote ?? null;
       const payLeg =
-        reviewSwap?.payLeg ??
-        (quote != null && payToken.decimals != null
+        quote != null && params.quote != null && payToken.decimals != null
           ? {
               label: 'You paid',
               amount: formatAtomicAmount(quote.inAmount, payToken.decimals, 6),
@@ -909,10 +922,9 @@ export function SwapScreen(): React.JSX.Element {
               name: payToken.name,
               logo: payToken.logo,
             }
-          : null);
+          : (reviewSwap?.payLeg ?? null);
       const receiveLeg =
-        reviewSwap?.receiveLeg ??
-        (quote != null && receiveToken.decimals != null
+        quote != null && params.quote != null && receiveToken.decimals != null
           ? {
               label: 'You received',
               amount: formatAtomicAmount(quote.outAmount, receiveToken.decimals, 6),
@@ -920,7 +932,7 @@ export function SwapScreen(): React.JSX.Element {
               name: receiveToken.name,
               logo: receiveToken.logo,
             }
-          : null);
+          : (reviewSwap?.receiveLeg ?? null);
 
       if (payLeg == null || receiveLeg == null) return null;
 
@@ -975,7 +987,41 @@ export function SwapScreen(): React.JSX.Element {
     [],
   );
 
-  const signAndExecuteQuote = async (quote: SwapQuoteResponse): Promise<{ signature: string }> => {
+  const buildNormalSwapReviewState = useCallback(
+    (quote: SwapQuoteResponse, refreshedQuote: boolean): SwapReviewState | null => {
+      if (payToken.decimals == null || receiveToken.decimals == null) return null;
+      return {
+        quote,
+        refreshedQuote,
+        payLeg: {
+          label: 'You pay',
+          amount: formatAtomicAmount(quote.inAmount, payToken.decimals, 6),
+          symbol: payToken.symbol,
+          name: payToken.name,
+          logo: payToken.logo,
+        },
+        receiveLeg: {
+          label: 'You receive',
+          amount: formatAtomicAmount(quote.outAmount, receiveToken.decimals, 6),
+          symbol: receiveToken.symbol,
+          name: receiveToken.name,
+          logo: receiveToken.logo,
+        },
+        routeLabel: quote.routeSummary,
+        slippageLabel: formatQuoteSlippageLabel(quote),
+        priceImpactLabel: formatPriceImpactLabel(quote.priceImpactPct),
+        feeLabel: `${formatAtomicAmount(quote.fee, payToken.decimals, 6)} ${payToken.symbol}`,
+        minimumReceiveLabel: `${formatAtomicAmount(
+          quote.minimumOutputAmount,
+          receiveToken.decimals,
+          6,
+        )} ${receiveToken.symbol}`,
+      };
+    },
+    [payToken, receiveToken],
+  );
+
+  const signAndExecuteQuote = async (quote: SwapQuoteResponse): Promise<SwapExecuteResponse> => {
     if (walletAddress == null) {
       throw new Error('Unlock an active wallet before executing a swap.');
     }
@@ -996,9 +1042,7 @@ export function SwapScreen(): React.JSX.Element {
     });
   };
 
-  const fetchFreshQuoteForExecution = async (
-    quote: SwapQuoteResponse,
-  ): Promise<SwapQuoteResponse> => {
+  const fetchFreshQuoteForReview = async (quote: SwapQuoteResponse): Promise<SwapQuoteResponse> => {
     if (network == null) {
       throw new Error('Swap retry requires a supported network.');
     }
@@ -1012,6 +1056,12 @@ export function SwapScreen(): React.JSX.Element {
           outputMint: quote.outputMint,
           amount: quote.inAmount,
           network,
+          ...(quote.slippageBps == null
+            ? {}
+            : {
+                slippageBps: quote.slippageBps,
+                useManualSlippage: quote.slippageMode === 'manual',
+              }),
         },
         { signal },
       );
@@ -1020,44 +1070,84 @@ export function SwapScreen(): React.JSX.Element {
     }
   };
 
-  const executeSwapMutation = useMutation<SwapExecutionResult, unknown, SwapQuoteResponse>({
-    mutationFn: async (quote) => {
+  const executeSwapMutation = useMutation<
+    NormalSwapExecutionGateResult,
+    unknown,
+    NormalSwapMutationRequest
+  >({
+    mutationFn: async ({ quote, refreshedQuote, refreshOnly = false }) => {
       if (network == null) {
         throw new Error('A live quote is required before executing a swap.');
       }
 
-      try {
-        const result = await signAndExecuteQuote(quote);
-        return { ...result, refreshedQuote: false } satisfies SwapExecutionResult;
-      } catch (error) {
-        if (!shouldRefreshSwapExecution(error)) throw error;
-
-        const freshQuote = await fetchFreshQuoteForExecution(quote);
-        const result = await signAndExecuteQuote(freshQuote);
-        return { ...result, refreshedQuote: true } satisfies SwapExecutionResult;
-      }
+      return executeNormalSwapWithReviewGate({
+        quote,
+        refreshedQuote,
+        refreshOnly,
+        executeQuote: signAndExecuteQuote,
+        fetchFreshQuote: fetchFreshQuoteForReview,
+        shouldRefresh: shouldRefreshSwapExecution,
+      });
     },
-    onSuccess: async (result, quote) => {
+    onSuccess: async (result) => {
       if (!mountedRef.current) return;
-      swapInputActions.setLastSwapResult(result);
+      if (result.kind === 'needs_confirmation') {
+        const refreshedReview = buildNormalSwapReviewState(result.quote, true);
+        if (refreshedReview == null) {
+          setReviewSwap(null);
+          showToast({
+            title: 'Refreshed quote unavailable',
+            message: 'Token metadata changed. Return to the swap form and request another quote.',
+            variant: 'error',
+          });
+          return;
+        }
+        swapInputActions.setLastSwapResult(null);
+        swapInputActions.setProcessResult(null);
+        setReviewSwap(refreshedReview);
+        showToast({
+          title: 'Swap quote refreshed',
+          message: 'Review the refreshed output and minimum receive, then confirm again.',
+          variant: 'info',
+        });
+        return;
+      }
+
+      const { execution, quote, refreshedQuote } = result;
+      const { inputRawAmount: executedInputRawAmount, outputRawAmount: executedOutputRawAmount } =
+        resolveSwapExecutionAmounts({ execution, quote });
+      const executedQuote = {
+        ...quote,
+        inAmount: executedInputRawAmount,
+        outAmount: executedOutputRawAmount,
+      };
+      const storedResult = {
+        signature: execution.signature,
+        refreshedQuote,
+      } satisfies SwapExecutionResult;
+      swapInputActions.setLastSwapResult(storedResult);
       swapInputActions.clearActionState();
 
-      const sentAmount = formatAtomicAmount(quote.inAmount, payToken.decimals ?? 6, 6);
-      const receivedAmount = formatAtomicAmount(quote.outAmount, receiveToken.decimals ?? 6, 6);
+      const sentAmount = formatAtomicAmount(executedInputRawAmount, payToken.decimals ?? 6, 6);
+      const receivedAmount = formatAtomicAmount(
+        executedOutputRawAmount,
+        receiveToken.decimals ?? 6,
+        6,
+      );
       if (network != null) {
         void presentWalletTransactionEventNotification({
-          identifier: `wallet-transaction-${network}-${result.signature}`,
+          identifier: `wallet-transaction-${network}-${execution.signature}`,
           type: 'swap',
           amountLabel: `+${receivedAmount} ${receiveToken.symbol}`,
           secondaryAmountLabel: `-${sentAmount} ${payToken.symbol}`,
-          signature: result.signature,
+          signature: execution.signature,
         });
         addSwapReceipt({
-          id: result.signature,
+          id: execution.signature,
           mode: 'normal',
           title: 'Swap complete',
           subtitle: `${sentAmount} ${payToken.symbol} to ${receivedAmount} ${receiveToken.symbol}`,
-          signature: result.signature,
+          signature: execution.signature,
           network,
           walletAddress,
           createdAt: Date.now(),
@@ -1067,7 +1157,7 @@ export function SwapScreen(): React.JSX.Element {
             name: payToken.name,
             logo: payToken.logo,
             decimals: payToken.decimals,
-            rawAmount: quote.inAmount,
+            rawAmount: executedInputRawAmount,
             amountLabel: `-${sentAmount} ${payToken.symbol}`,
           },
           output: {
@@ -1076,7 +1166,7 @@ export function SwapScreen(): React.JSX.Element {
             name: receiveToken.name,
             logo: receiveToken.logo,
             decimals: receiveToken.decimals,
-            rawAmount: quote.outAmount,
+            rawAmount: executedOutputRawAmount,
             amountLabel: `+${receivedAmount} ${receiveToken.symbol}`,
           },
         });
@@ -1085,12 +1175,12 @@ export function SwapScreen(): React.JSX.Element {
         variant: 'success',
         title: 'Swap complete',
         message: `${sentAmount} ${payToken.symbol} swapped to ${receivedAmount} ${receiveToken.symbol}.`,
-        statusLabel: result.refreshedQuote ? 'Refreshed' : 'Done',
-        quote,
+        statusLabel: refreshedQuote ? 'Refreshed' : 'Done',
+        quote: executedQuote,
         extraRows: [
           {
             label: 'Signature',
-            value: shortenWalletAddress(result.signature, 5),
+            value: shortenWalletAddress(execution.signature, 5),
             selectable: true,
           },
         ],
@@ -1147,9 +1237,9 @@ export function SwapScreen(): React.JSX.Element {
         variant: 'error',
       });
     },
-    onSettled: () => {
+    onSettled: (result) => {
       if (!mountedRef.current) return;
-      setReviewSwap(null);
+      if (result?.kind !== 'needs_confirmation') setReviewSwap(null);
       setSliderResetNonce((value) => value + 1);
     },
   });
@@ -1590,7 +1680,13 @@ export function SwapScreen(): React.JSX.Element {
   ]);
   const activeSwapButtonFeedback = privateSwapMode ? privateSwapFeedback : swapButtonFeedback;
   const reviewStatusLabel =
-    reviewSwap == null ? 'Review' : reviewQuoteExpired ? 'Expired' : 'Review';
+    reviewSwap == null
+      ? 'Review'
+      : reviewQuoteExpired
+        ? 'Expired'
+        : reviewSwap.refreshedQuote
+          ? 'Refreshed'
+          : 'Review';
   const reviewDetailRows = useMemo<SwapReviewDetailRow[]>(
     () =>
       buildReviewDetailRows().map((row) =>
@@ -1842,36 +1938,20 @@ export function SwapScreen(): React.JSX.Element {
       return;
     }
 
-    const reviewPayAmount = formatAtomicAmount(quoteForReview.inAmount, payToken.decimals, 6);
-    const reviewReceiveAmount = formatAtomicAmount(
-      quoteForReview.outAmount,
-      receiveToken.decimals,
-      6,
-    );
-    setReviewSwap({
-      quote: quoteForReview,
-      payLeg: {
-        label: 'You pay',
-        amount: reviewPayAmount,
-        symbol: payToken.symbol,
-        name: payToken.name,
-        logo: payToken.logo,
-      },
-      receiveLeg: {
-        label: 'You receive',
-        amount: reviewReceiveAmount,
-        symbol: receiveToken.symbol,
-        name: receiveToken.name,
-        logo: receiveToken.logo,
-      },
-      routeLabel: quoteForReview.routeSummary,
-      slippageLabel: formatQuoteSlippageLabel(quoteForReview),
-      priceImpactLabel,
-      feeLabel: quoteFeeLabel,
-    });
+    const nextReview = buildNormalSwapReviewState(quoteForReview, false);
+    if (nextReview == null) {
+      showToast({
+        title: 'Token metadata missing',
+        message: 'Choose supported tokens before reviewing.',
+        variant: 'warning',
+      });
+      resetReviewSlider();
+      return;
+    }
+    setReviewSwap(nextReview);
     showToast({
       title: 'Review swap',
-      message: `${reviewPayAmount} ${payToken.symbol} → ${reviewReceiveAmount} ${receiveToken.symbol}`,
+      message: `${nextReview.payLeg.amount} ${payToken.symbol} → ${nextReview.receiveLeg.amount} ${receiveToken.symbol}`,
       variant: 'info',
     });
   };
@@ -1914,7 +1994,16 @@ export function SwapScreen(): React.JSX.Element {
       return;
     }
     if (reviewQuoteExpired) {
-      quoteController.refreshOnExpiry();
+      showToast({
+        title: 'Refreshing expired quote',
+        message: 'A fresh quote will return for another review before signing.',
+        variant: 'info',
+      });
+      executeSwapMutation.mutate({
+        quote: reviewSwap.quote,
+        refreshedQuote: true,
+        refreshOnly: true,
+      });
       return;
     }
 
@@ -1924,7 +2013,10 @@ export function SwapScreen(): React.JSX.Element {
       variant: 'info',
       durationMs: 1800,
     });
-    executeSwapMutation.mutate(reviewSwap.quote);
+    executeSwapMutation.mutate({
+      quote: reviewSwap.quote,
+      refreshedQuote: reviewSwap.refreshedQuote,
+    });
   };
 
   const handleCancelReviewSwap = () => {

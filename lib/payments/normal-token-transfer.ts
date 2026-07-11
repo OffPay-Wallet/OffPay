@@ -7,6 +7,7 @@ import {
   broadcastRawTransaction,
   getRpcAccounts,
   getRpcLatestBlockhash,
+  simulateRawTransaction,
 } from '@/lib/api/offpay-api-client';
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -78,6 +79,14 @@ async function signAndBroadcastTransaction(params: {
   const unsignedTransaction = params.transaction
     .serialize({ requireAllSignatures: false, verifySignatures: false })
     .toString('base64');
+  const simulation = await simulateRawTransaction({
+    transactionBase64: unsignedTransaction,
+    network: params.network,
+  });
+  if (!simulation.success) {
+    const detail = simulation.error ?? 'The transfer cannot succeed with the current balances.';
+    throw new Error(`Transfer preflight failed: ${detail}`);
+  }
   const signedTransaction = await signSerializedTransactionForWallet({
     unsignedTransaction,
     walletAddress: params.walletAddress,

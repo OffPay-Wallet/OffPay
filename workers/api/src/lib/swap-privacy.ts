@@ -529,6 +529,7 @@ async function buildExecutorFeeTopUpTransaction(params: {
       validator: null,
       transferQueue: null,
       rentPda: null,
+      fees: null,
     },
   };
 }

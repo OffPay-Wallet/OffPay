@@ -16,6 +16,11 @@ export type OffpayFeature =
   | 'rwa.execute'
   | 'rwa.magicBlockIntent'
   | 'rwa.magicBlockTransfer'
+  | 'perps.markets'
+  | 'perps.trade'
+  | 'perps.magicBlockExecution'
+  | 'perps.funding'
+  | 'perps.withdrawal'
   | 'payment.privateInitMint'
   | 'payment.privateBalance'
   | 'payment.privateSend'
@@ -62,6 +67,14 @@ const OFFPAY_FEATURE_SELECTORS: Record<OffpayFeature, CapabilitySelector> = {
     capabilities.rwa?.magicBlockIntent ?? CAPABILITY_NOT_IMPLEMENTED,
   'rwa.magicBlockTransfer': (capabilities) =>
     capabilities.rwa?.magicBlockTransfer ?? CAPABILITY_NOT_IMPLEMENTED,
+  'perps.markets': (capabilities) => capabilities.perps?.markets ?? CAPABILITY_NOT_IMPLEMENTED,
+  'perps.trade': (capabilities) => capabilities.perps?.trade ?? CAPABILITY_NOT_IMPLEMENTED,
+  'perps.magicBlockExecution': (capabilities) =>
+    capabilities.perps?.magicBlockExecution ?? CAPABILITY_NOT_IMPLEMENTED,
+  'perps.funding': (capabilities) =>
+    capabilities.perps?.funding ?? CAPABILITY_NOT_IMPLEMENTED,
+  'perps.withdrawal': (capabilities) =>
+    capabilities.perps?.withdrawal ?? CAPABILITY_NOT_IMPLEMENTED,
   'payment.privateInitMint': (capabilities) => capabilities.payment.privateInitMint,
   'payment.privateBalance': (capabilities) => capabilities.payment.privateBalance,
   'payment.privateSend': (capabilities) => capabilities.payment.privateSend,
@@ -70,7 +83,8 @@ const OFFPAY_FEATURE_SELECTORS: Record<OffpayFeature, CapabilitySelector> = {
   'payment.settle': (capabilities) => capabilities.payment.settle,
   'payment.rpcBroadcast': (capabilities) => capabilities.payment.rpcBroadcast,
   'umbra.execution': (capabilities) => capabilities.umbra?.execution ?? CAPABILITY_NOT_IMPLEMENTED,
-  'offline.noncePool': (capabilities) => capabilities.offline?.noncePool ?? CAPABILITY_NOT_IMPLEMENTED,
+  'offline.noncePool': (capabilities) =>
+    capabilities.offline?.noncePool ?? CAPABILITY_NOT_IMPLEMENTED,
   'offline.nonceCreate': (capabilities) =>
     capabilities.offline?.nonceCreate ?? CAPABILITY_NOT_IMPLEMENTED,
   'offline.nonceAdvance': (capabilities) =>

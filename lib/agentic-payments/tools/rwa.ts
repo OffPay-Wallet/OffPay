@@ -1,8 +1,4 @@
-import {
-  createRwaQuote,
-  getRwaAssets,
-  getWalletTransactions,
-} from '@/lib/api/offpay-api-client';
+import { createRwaQuote, getRwaAssets, getWalletTransactions } from '@/lib/api/offpay-api-client';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { offpayWalletTransactionsQueryKey } from '@/lib/api/offpay-wallet-query-keys';
 import { getRwaDevnetSandboxFundingRequirement } from '@/lib/rwa/devnet-sandbox-funding';
@@ -54,9 +50,7 @@ function readRwaAssetArg(call: Parameters<AgenticToolDefinition['run']>[0]): str
   return '';
 }
 
-function readRwaSideArg(
-  call: Parameters<AgenticToolDefinition['run']>[0],
-): RwaTradeSide | null {
+function readRwaSideArg(call: Parameters<AgenticToolDefinition['run']>[0]): RwaTradeSide | null {
   const value = readStringArg(call, 'side')?.toLowerCase();
   if (value === 'buy' || value === 'sell') return value;
   return null;
@@ -192,7 +186,10 @@ function summarizeAsset(asset: RwaAsset, balance: WalletBalanceResponse | null |
     priceUsd: asset.priceUsd,
     change24hPct: asset.change24hPct,
     tradable: asset.tradable,
-    buyAvailable: asset.execution.buy === 'jupiter_swap' || asset.execution.buy === 'devnet_sandbox',
+    tradingHalted: asset.tradingHalted === true,
+    multiplierTransitionActive: asset.multiplierTransitionActive === true,
+    buyAvailable:
+      asset.execution.buy === 'jupiter_swap' || asset.execution.buy === 'devnet_sandbox',
     sellAvailable:
       asset.execution.sell === 'jupiter_swap' || asset.execution.sell === 'devnet_sandbox',
     settlementSymbol: getSettlementDisplaySymbol(asset),
@@ -300,8 +297,9 @@ function summarizeRwaTransactions(params: {
   for (const transaction of params.response.transactions) {
     const tokenMint = transaction.tokenMint ?? null;
     const tokenSymbol = transaction.tokenSymbol ?? null;
-    const matchedAsset = tokenMint == null ? null : assetsByMint.get(tokenMint) ?? null;
-    const isAssetToken = matchedAsset != null || (tokenSymbol != null && assetSymbols.has(tokenSymbol));
+    const matchedAsset = tokenMint == null ? null : (assetsByMint.get(tokenMint) ?? null);
+    const isAssetToken =
+      matchedAsset != null || (tokenSymbol != null && assetSymbols.has(tokenSymbol));
     const isSettlementSwap =
       transaction.type === 'swap' && tokenMint != null && settlementMints.has(tokenMint);
     if (!isAssetToken && !isSettlementSwap) continue;
@@ -345,8 +343,7 @@ export const getRwaAssetsTool: AgenticToolDefinition = {
         },
         limit: {
           type: 'number',
-          description:
-            'How many RWA assets to summarize when asset is omitted. Capped at 30.',
+          description: 'How many RWA assets to summarize when asset is omitted. Capped at 30.',
         },
       },
     },
@@ -372,7 +369,10 @@ export const getRwaAssetsTool: AgenticToolDefinition = {
     });
 
     try {
-      const assets = await readRwaAssets({ network: context.scope.network, signal: context.signal });
+      const assets = await readRwaAssets({
+        network: context.scope.network,
+        signal: context.signal,
+      });
       if (hasSpecificAssetRequest) {
         const resolved = resolveRwaAssetReference({ assets, value: assetText });
         if (!resolved.ok) return { error: { code: resolved.code } };
@@ -466,7 +466,10 @@ export const getRwaHistoryTool: AgenticToolDefinition = {
     if (!scope.ok) return { error: { code: scope.code } };
     if (!isNetworkReady(context)) return { error: { code: 'network_unavailable' } };
     if (context.capabilities == null) return { result: { status: 'loading' } };
-    if (!canReadRwa(context) || !isOffpayFeatureAvailable(context.capabilities, 'wallet.transactions')) {
+    if (
+      !canReadRwa(context) ||
+      !isOffpayFeatureAvailable(context.capabilities, 'wallet.transactions')
+    ) {
       return { error: { code: 'feature_unavailable' } };
     }
 
@@ -547,11 +550,13 @@ export const prepareRwaTradeTool: AgenticToolDefinition = {
     const side = readRwaSideArg(call);
     if (side == null) return { error: { code: 'rwa_side_missing' } };
 
-    const parsedAmount = parseRwaAmount(hydrateStringArg(
-      { ...call, args: { amount: readRwaAmountArg(call) } },
-      'amount',
-      context.redactions,
-    ));
+    const parsedAmount = parseRwaAmount(
+      hydrateStringArg(
+        { ...call, args: { amount: readRwaAmountArg(call) } },
+        'amount',
+        context.redactions,
+      ),
+    );
     if (!parsedAmount.ok) return { error: { code: parsedAmount.code } };
 
     try {
@@ -560,6 +565,10 @@ export const prepareRwaTradeTool: AgenticToolDefinition = {
       if (!resolved.ok) return { error: { code: resolved.code } };
       const { asset } = resolved;
 
+      if (asset.tradingHalted === true) return { error: { code: 'rwa_trading_halted' } };
+      if (asset.multiplierTransitionActive === true) {
+        return { error: { code: 'rwa_multiplier_transition' } };
+      }
       if (!asset.tradable) return { error: { code: 'rwa_not_tradable' } };
       if (asset.execution[side] !== 'jupiter_swap' && asset.execution[side] !== 'devnet_sandbox') {
         return { error: { code: 'rwa_side_unavailable' } };
@@ -575,7 +584,7 @@ export const prepareRwaTradeTool: AgenticToolDefinition = {
         side === 'buy'
           ? getTokenBalance(context.balance, asset.settlementMint)
           : getTokenBalance(context.balance, asset.mint);
-      const fallbackDecimals = side === 'buy' ? 6 : asset.decimals ?? 6;
+      const fallbackDecimals = side === 'buy' ? 6 : (asset.decimals ?? 6);
       if (!decimalAmountFitsBalance({ amount, fallbackDecimals, token: spendToken })) {
         return { error: { code: 'amount_exceeds_balance' } };
       }
@@ -633,10 +642,10 @@ function buildRwaDraftOutcome(params: {
   const settlementSymbol = getSettlementDisplaySymbol(params.asset);
   const payAmount =
     params.side === 'buy'
-      ? params.quote.cashAmount ?? params.amount
-      : params.quote.quantity ?? params.amount;
+      ? (params.quote.cashAmount ?? params.amount)
+      : (params.quote.quantity ?? params.amount);
   const receiveAmount =
-    params.side === 'buy' ? params.quote.quantity ?? '0' : params.quote.cashAmount ?? '0';
+    params.side === 'buy' ? (params.quote.quantity ?? '0') : (params.quote.cashAmount ?? '0');
   const paySymbol = params.side === 'buy' ? settlementSymbol : params.asset.symbol;
   const receiveSymbol = params.side === 'buy' ? params.asset.symbol : settlementSymbol;
 

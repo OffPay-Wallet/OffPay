@@ -1,8 +1,7 @@
 /**
  * X (Twitter) handle → Solana address resolution.
  *
- * Reads SNS's on-chain `.twitter` registry through the same RPC
- * fan-out we already use for `.sol` resolution (see `lib/sns.ts`).
+ * Reads SNS's on-chain `.twitter` registry through the official SNS SDK proxy.
  *
  * Handle ownership in the SNS Twitter registry is verified at
  * registration time: the user posts a tweet from their X account
@@ -14,7 +13,7 @@
  * Reference: https://docs.bonfida.org/help/solana-name-service-twitter
  *
  * Notes:
- *  - Resolution is fully client-side. No backend proxy, no API key.
+ *  - Resolution uses the public, official SNS SDK proxy. No API key.
  *  - We never call X's own API or Privy's user lookup endpoint —
  *    those would require a server-side credential.
  *  - X handles are case-insensitive at the platform level; we
@@ -22,13 +21,9 @@
  *    registry is case-sensitive so we let the SDK do the lookup
  *    against the user-supplied form first.
  */
-import { getRpcAccounts } from '@/lib/api/offpay-api-client';
 import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
+import { fetchSnsProxyResult } from '@/lib/identity/sns-proxy';
 
-import type { OffpayNetwork, RpcAccountRecord } from '@/types/offpay-api';
-import type { AccountInfo, Commitment, PublicKey } from '@solana/web3.js';
-
-const X_HANDLE_RESOLUTION_NETWORK: OffpayNetwork = 'mainnet';
 const X_HANDLE_CACHE_TTL_MS = 60 * 1000;
 const X_HANDLE_NEGATIVE_CACHE_TTL_MS = 10 * 1000;
 const X_HANDLE_RESOLUTION_TIMEOUT_MS = 6_000;
@@ -44,107 +39,12 @@ const X_HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 const X_URL_PATTERN =
   /^(?:https?:\/\/)?(?:www\.)?(?:x\.com|twitter\.com)\/(@?[A-Za-z0-9_]{1,15})\/?$/i;
 
-type PublicKeyCtor = typeof import('@solana/web3.js').PublicKey;
-
 interface CachedXResolution {
   address: string | null; // null encodes a negative result
   expiresAt: number;
 }
 
 const xResolutionCache = new Map<string, CachedXResolution>();
-let publicKeyCtorPromise: Promise<PublicKeyCtor> | null = null;
-
-function getPublicKeyCtor(): Promise<PublicKeyCtor> {
-  publicKeyCtorPromise ??= import('@solana/web3.js').then((module) => module.PublicKey);
-  return publicKeyCtorPromise;
-}
-
-function normalizeLamports(value: RpcAccountRecord['lamports']): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function normalizeRentEpoch(value: RpcAccountRecord['rentEpoch']): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function decodeRpcAccountData(account: RpcAccountRecord): Buffer {
-  const encoded = account.dataBase64 ?? account.data;
-  if (typeof encoded !== 'string' || encoded.length === 0) {
-    return Buffer.alloc(0);
-  }
-  return Buffer.from(encoded, 'base64');
-}
-
-function normalizeRpcAccount(
-  account: RpcAccountRecord | null,
-  PublicKeyValue: PublicKeyCtor,
-): AccountInfo<Buffer> | null {
-  if (account == null || account.owner == null || !isValidSolanaAddress(account.owner)) {
-    return null;
-  }
-
-  return {
-    data: decodeRpcAccountData(account),
-    executable: account.executable === true,
-    lamports: normalizeLamports(account.lamports),
-    owner: new PublicKeyValue(account.owner),
-    rentEpoch: normalizeRentEpoch(account.rentEpoch),
-  };
-}
-
-/**
- * Minimal Connection-like adapter sufficient for `getTwitterRegistry`.
- * Mirrors the shape `lib/sns.ts` uses so the same RPC plumbing
- * powers both lookups. We re-implement the adapter rather than
- * exporting it from `sns.ts` because the SNS module also exposes
- * `getTokenLargestAccounts` which the Twitter helper does not need.
- */
-class OffpayXHandleConnection {
-  async getAccountInfo(
-    publicKey: PublicKey,
-    _commitmentOrConfig?: Commitment | unknown,
-  ): Promise<AccountInfo<Buffer> | null> {
-    const [account] = await this.getMultipleAccountsInfo([publicKey]);
-    return account ?? null;
-  }
-
-  async getMultipleAccountsInfo(
-    publicKeys: PublicKey[],
-    _commitmentOrConfig?: Commitment | unknown,
-  ): Promise<Array<AccountInfo<Buffer> | null>> {
-    const response = await getRpcAccounts({
-      network: X_HANDLE_RESOLUTION_NETWORK,
-      addresses: publicKeys.map((publicKey) => publicKey.toBase58()),
-    });
-
-    const PublicKeyValue = await getPublicKeyCtor();
-    return publicKeys.map((_, index) =>
-      normalizeRpcAccount(response.accounts[index] ?? null, PublicKeyValue),
-    );
-  }
-}
-
-const xHandleConnection = new OffpayXHandleConnection();
-
-function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-  });
-  return Promise.race([operation, timeout]).finally(() => {
-    if (timeoutId != null) clearTimeout(timeoutId);
-  });
-}
 
 /**
  * Strips the `@` prefix and any URL chrome around an X handle.
@@ -178,23 +78,12 @@ export function isXHandleInput(value: string | null | undefined): boolean {
 }
 
 async function resolveXHandleWithoutTimeout(handle: string): Promise<string | null> {
-  const { getTwitterRegistry } = await import('@bonfida/spl-name-service');
-  let registry: Awaited<ReturnType<typeof getTwitterRegistry>>;
-  try {
-    registry = await getTwitterRegistry(xHandleConnection as never, handle);
-  } catch (error) {
-    // Bonfida throws when the registry account is missing — encode
-    // that as a `null` so the cache can short-circuit subsequent
-    // lookups for unregistered handles.
-    const message = error instanceof Error ? error.message : '';
-    if (/invalid name account|not\s*found|account does not exist/i.test(message)) {
-      return null;
-    }
-    throw error;
-  }
-
-  const owner = registry?.owner?.toBase58?.();
-  if (typeof owner !== 'string' || !isValidSolanaAddress(owner)) {
+  const owner = await fetchSnsProxyResult({
+    path: `twitter/get-key-by-handle/${encodeURIComponent(handle)}`,
+    timeoutMs: X_HANDLE_RESOLUTION_TIMEOUT_MS,
+    timeoutMessage: `@${handle} lookup timed out. Check your connection and try again.`,
+  });
+  if (owner != null && !isValidSolanaAddress(owner)) {
     return null;
   }
   return owner;
@@ -240,11 +129,7 @@ export async function resolveXHandle(value: string): Promise<ResolvedXHandle> {
     return { handle, address: cached.address, source: 'sns-twitter' };
   }
 
-  const address = await withTimeout(
-    resolveXHandleWithoutTimeout(handle),
-    X_HANDLE_RESOLUTION_TIMEOUT_MS,
-    `@${handle} lookup timed out. Check your connection and try again.`,
-  );
+  const address = await resolveXHandleWithoutTimeout(handle);
 
   xResolutionCache.set(cacheKey, {
     address,

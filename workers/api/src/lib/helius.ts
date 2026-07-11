@@ -357,6 +357,17 @@ interface RawTransactionBroadcastResponse {
   signature: string;
 }
 
+interface RawTransactionSimulationRequest {
+  transactionBase64: string;
+  network: Network;
+}
+
+interface RawTransactionSimulationResponse {
+  success: boolean;
+  error: string | null;
+  unitsConsumed: number | null;
+}
+
 interface WalletMintRawBalanceRequest {
   address: string;
   mint: string;
@@ -395,6 +406,8 @@ interface BalanceAccumulator {
   readonly mint: string;
   readonly decimals: number;
   rawAmount: bigint;
+  /** Current RPC-provided UI amount, including Token-2022 UI multipliers. */
+  displayAmount?: bigint;
 }
 
 interface TokenMetadata {
@@ -1727,14 +1740,10 @@ async function broadcastRawTransaction(
     try {
       const sendOptions: Record<string, unknown> = {
         encoding: 'base64',
-        skipPreflight: request.skipPreflight ?? true,
+        skipPreflight: request.skipPreflight ?? false,
+        maxRetries: request.maxRetries ?? 2,
+        preflightCommitment: request.preflightCommitment ?? 'confirmed',
       };
-      if (request.maxRetries !== undefined) {
-        sendOptions.maxRetries = request.maxRetries;
-      }
-      if (request.preflightCommitment !== undefined) {
-        sendOptions.preflightCommitment = request.preflightCommitment;
-      }
 
       response = await heliusFetchImplementation(candidate.url, {
         method: 'POST',
@@ -1795,6 +1804,43 @@ async function broadcastRawTransaction(
     'Transaction broadcaster is temporarily unavailable.',
     lastRetryableError ?? undefined,
   );
+}
+
+function describeSimulationError(value: Record<string, unknown>): string | null {
+  if (value.err == null) return null;
+  const logs = Array.isArray(value.logs)
+    ? value.logs.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const detail =
+    [...logs].reverse().find((entry) => /insufficient|failed|error|invalid/i.test(entry)) ??
+    JSON.stringify(value.err);
+  return sanitizeText(detail, 240) ?? 'Transaction simulation failed.';
+}
+
+async function simulateRawTransaction(
+  bindings: Bindings,
+  request: RawTransactionSimulationRequest,
+): Promise<RawTransactionSimulationResponse> {
+  const result = await heliusRpcRequest(bindings, request.network, 'simulateTransaction', [
+    request.transactionBase64,
+    {
+      encoding: 'base64',
+      sigVerify: false,
+      replaceRecentBlockhash: false,
+      commitment: 'confirmed',
+    },
+  ]);
+  const value = isRecord(result) && isRecord(result.value) ? result.value : null;
+  if (value == null) {
+    throw toUpstreamUnavailable(null, 'Transaction simulation is temporarily unavailable.');
+  }
+  const units = readFiniteNumber(value.unitsConsumed);
+  const error = describeSimulationError(value);
+  return {
+    success: error == null,
+    error,
+    unitsConsumed: units == null || units < 0 ? null : Math.trunc(units),
+  };
 }
 
 function sanitizeWalletToken(input: {
@@ -2145,6 +2191,7 @@ async function fetchTokenAccountsForProgram(
     const mint = info ? readTrimmedString(info.mint) : null;
     const amount = tokenAmount ? readTrimmedString(tokenAmount.amount) : null;
     const decimals = tokenAmount ? readFiniteNumber(tokenAmount.decimals) : null;
+    const uiAmountString = tokenAmount ? readTrimmedString(tokenAmount.uiAmountString) : null;
 
     if (!mint || !amount || decimals === null || !/^\d+$/.test(amount)) {
       continue;
@@ -2155,10 +2202,22 @@ async function fetchTokenAccountsForProgram(
     if (rawAmount <= 0n) {
       continue;
     }
+    const parsedDisplayAmount =
+      uiAmountString != null && /^\d+(?:\.\d+)?$/.test(uiAmountString)
+        ? decimalStringToScaledInteger(uiAmountString, normalizedDecimals)
+        : null;
+    // Token-2022 can apply a mutable ScaledUiAmount multiplier. Falling back
+    // to raw/10^decimals would display and submit the wrong quantity, so omit
+    // that holding when the RPC does not provide its authoritative UI amount.
+    if (programId === TOKEN_2022_PROGRAM_ID && parsedDisplayAmount == null) {
+      continue;
+    }
+    const displayAmount = parsedDisplayAmount ?? rawAmount;
 
     const existing = accumulators.get(mint);
     if (existing) {
       existing.rawAmount += rawAmount;
+      existing.displayAmount = (existing.displayAmount ?? 0n) + displayAmount;
       continue;
     }
 
@@ -2166,6 +2225,7 @@ async function fetchTokenAccountsForProgram(
       mint,
       decimals: normalizedDecimals,
       rawAmount,
+      displayAmount,
     });
   }
 
@@ -2359,6 +2419,9 @@ async function fetchWalletBalanceViaRpc(
     const existing = tokenMap.get(entry.mint);
     if (existing) {
       existing.rawAmount += entry.rawAmount;
+      existing.displayAmount =
+        (existing.displayAmount ?? existing.rawAmount - entry.rawAmount) +
+        (entry.displayAmount ?? entry.rawAmount);
       continue;
     }
 
@@ -2385,7 +2448,7 @@ async function fetchWalletBalanceViaRpc(
         network,
         {
           mint: entry.mint,
-          balance: formatTokenAmount(entry.rawAmount, entry.decimals),
+          balance: formatTokenAmount(entry.displayAmount ?? entry.rawAmount, entry.decimals),
           decimals: entry.decimals,
           name: null,
           symbol: null,
@@ -5394,9 +5457,12 @@ export {
   getWalletTransactions,
   resetHeliusFetchImplementation,
   setHeliusFetchImplementation,
+  simulateRawTransaction,
   walletHasMintAccount,
   type RawTransactionBroadcastRequest,
   type RawTransactionBroadcastResponse,
+  type RawTransactionSimulationRequest,
+  type RawTransactionSimulationResponse,
   type HeliusFetchImplementation,
   type FeeForMessageRequest,
   type MinimumRentExemptionRequest,

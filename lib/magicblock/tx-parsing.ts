@@ -35,6 +35,7 @@ export interface ParsedAddressTableLookup {
 }
 
 export interface ParsedTransactionMessage {
+  messageVersion: 'legacy' | 0;
   signatureCount: number;
   requiredSignerCount: number;
   accountKeys: string[];
@@ -214,6 +215,7 @@ export function parseSerializedTransaction(transactionBase64: string): ParsedTra
   }
 
   return {
+    messageVersion: isVersioned ? 0 : 'legacy',
     signatureCount: signatureCount.value,
     requiredSignerCount,
     accountKeys,

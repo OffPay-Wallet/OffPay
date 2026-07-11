@@ -81,6 +81,16 @@ export interface PayrollRow {
    * Used to guarantee a row is never paid twice across resume/retry.
    */
   idempotencyKey: string;
+  /**
+   * Durable local tombstone written atomically before any route submitter is
+   * invoked. Once present, this row is never automatically submitted again,
+   * even when the process dies before a signature can be persisted.
+   * Optional for backward compatibility with older persisted runs.
+   */
+  submissionAttemptId?: string | null;
+  submissionStartedAt?: number | null;
+  /** True when execution began but no definitive on-chain outcome was stored. */
+  reconciliationRequired?: boolean;
   retryCount: number;
   createdAt: number;
   updatedAt: number;
@@ -130,8 +140,28 @@ export function isPayrollRowSettled(status: PayrollRowStatus): boolean {
  * signature / tx id / deposit signature locks the row against resend even
  * if its status looks retryable, defending against double-pay.
  */
-export function isPayrollRowSendable(row: Pick<PayrollRow,
-  'status' | 'signature' | 'txId' | 'initSignature'>): boolean {
+export function isPayrollRowSendable(
+  row: Pick<
+    PayrollRow,
+    | 'status'
+    | 'signature'
+    | 'txId'
+    | 'initSignature'
+    | 'submissionAttemptId'
+    | 'reconciliationRequired'
+  >,
+): boolean {
   if (row.signature != null || row.txId != null || row.initSignature != null) return false;
+  if (row.submissionAttemptId != null && row.submissionAttemptId.trim().length > 0) return false;
+  if (row.reconciliationRequired === true) return false;
   return row.status === 'ready' || row.status === 'failed';
+}
+
+/** Stable across restarts so every local execution path claims the same row attempt. */
+export function getPayrollSubmissionAttemptId(idempotencyKey: string): string {
+  const normalized = idempotencyKey.trim();
+  if (normalized.length === 0) {
+    throw new Error('Payroll row is missing its idempotency key.');
+  }
+  return `payroll:${normalized}`;
 }

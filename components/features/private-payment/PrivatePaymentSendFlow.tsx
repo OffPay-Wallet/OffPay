@@ -151,6 +151,7 @@ const UMBRA_PRIVATE_P2P_SEND_TIMEOUT_MS = 300_000;
 const SEND_HEADER_SHADOW =
   '0 14px 30px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.14)';
 const SEND_STEP_TRANSITION_DURATION_MS = 260;
+const MAGICBLOCK_PRIVATE_TRANSFER_FEE_DIVISOR = 1_000n;
 const SEND_STEP_ORDER: Record<SendStep, number> = {
   token: 0,
   recipient: 1,
@@ -158,6 +159,20 @@ const SEND_STEP_ORDER: Record<SendStep, number> = {
   summary: 3,
   success: 4,
 };
+
+function getMagicBlockMaxTransferRaw(balanceRaw: string): string {
+  if (!/^\d+$/.test(balanceRaw)) return '0';
+  const balance = BigInt(balanceRaw);
+  let low = 0n;
+  let high = balance;
+  while (low < high) {
+    const candidate = (low + high + 1n) / 2n;
+    const total = candidate + candidate / MAGICBLOCK_PRIVATE_TRANSFER_FEE_DIVISOR;
+    if (total <= balance) low = candidate;
+    else high = candidate - 1n;
+  }
+  return low.toString();
+}
 
 function getSendStepTransitionDirection(
   currentStep: SendStep,
@@ -989,6 +1004,24 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     umbraFeeEstimate.isFetching,
     walletAddress,
   ]);
+  const protocolFeeLabel = useMemo(() => {
+    if (effectivePaymentRoute !== 'magicblock') return null;
+    if (feeEstimateMatchesAmount && magicBlockFeeEstimate.plan != null && selectedToken != null) {
+      return `${formatAtomicAmount(
+        magicBlockFeeEstimate.plan.tokenFeeRaw,
+        selectedToken.decimals,
+        selectedToken.decimals,
+      )} ${selectedToken.symbol}`;
+    }
+    if (!feeEstimateMatchesAmount || magicBlockFeeEstimate.isFetching) return 'Estimating';
+    return 'Fee unavailable';
+  }, [
+    effectivePaymentRoute,
+    feeEstimateMatchesAmount,
+    magicBlockFeeEstimate.isFetching,
+    magicBlockFeeEstimate.plan,
+    selectedToken,
+  ]);
   const viewportProfile = getViewportProfile({
     width,
     height,
@@ -1479,10 +1512,17 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
 
   const handleMaxAmount = useCallback(() => {
     if (selectedToken == null) return;
-    const nextAmount = sanitizeDecimalInput(selectedToken.balance, selectedToken.decimals);
+    const maxRaw =
+      effectivePaymentRoute === 'magicblock' && balanceRaw != null
+        ? getMagicBlockMaxTransferRaw(balanceRaw)
+        : balanceRaw;
+    const nextAmount =
+      maxRaw == null
+        ? sanitizeDecimalInput(selectedToken.balance, selectedToken.decimals)
+        : formatAtomicAmount(maxRaw, selectedToken.decimals, selectedToken.decimals);
     stopFeeEstimatesForAmountEdit();
     setAmount(nextAmount);
-  }, [selectedToken, stopFeeEstimatesForAmountEdit]);
+  }, [balanceRaw, effectivePaymentRoute, selectedToken, stopFeeEstimatesForAmountEdit]);
 
   const handleContinueRecipient = useCallback(async () => {
     Keyboard.dismiss();
@@ -1809,7 +1849,11 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
     effectiveWalletMode !== 'offline' &&
     effectivePaymentRoute === 'magicblock'
       ? feeEstimateMatchesAmount && magicBlockFeeEstimate.plan != null
-        ? null
+        ? amountRaw != null &&
+          balanceRaw != null &&
+          BigInt(amountRaw) + BigInt(magicBlockFeeEstimate.plan.tokenFeeRaw) <= BigInt(balanceRaw)
+          ? null
+          : 'Balance must cover the amount and MagicBlock protocol fee.'
         : magicBlockFeeEstimate.isFetching
           ? 'Preparing private transfer.'
           : magicBlockFeeEstimate.isError
@@ -2636,6 +2680,7 @@ export function PrivatePaymentSendFlow(): React.JSX.Element {
         recipientAddress={effectiveRecipientAddress ?? ''}
         network={network}
         modeLabel={paymentRouteModeLabel}
+        protocolFeeLabel={protocolFeeLabel}
         networkFeeLabel={networkFeeLabel}
         selfSend={selfSend}
         canSubmit={canSubmit}

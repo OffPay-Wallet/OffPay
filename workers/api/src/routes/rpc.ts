@@ -14,9 +14,11 @@ import {
   getRpcSignaturesForAddress,
   getRpcSlot,
   getRpcTokenLargestAccounts,
+  simulateRawTransaction,
 } from '../lib/helius.js';
 import { requestDevnetTreasuryAirdrop } from '../lib/devnet-faucet.js';
 import { AppError } from '../lib/errors.js';
+import { readBoundTransactionMessage } from '../lib/solana-transaction-binding.js';
 import type { AppEnv, Network } from '../lib/types.js';
 import {
   isValidEd25519Signature,
@@ -26,13 +28,24 @@ import {
   readSearchParams,
 } from '../lib/validation.js';
 
+const MAX_SOLANA_WIRE_BASE64_LENGTH = 10_000;
+
 const base64StringSchema = z
   .string()
   .trim()
+  .max(MAX_SOLANA_WIRE_BASE64_LENGTH, 'Expected a bounded base64-encoded string.')
   .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Expected a base64-encoded string.');
 
 const broadcastBodySchema = z.object({
   rawTransaction: base64StringSchema,
+  network: networkSchema,
+  skipPreflight: z.boolean().optional(),
+  maxRetries: z.number().int().min(0).max(20).optional(),
+  preflightCommitment: z.enum(['processed', 'confirmed', 'finalized']).optional(),
+});
+
+const simulationBodySchema = z.object({
+  transactionBase64: base64StringSchema,
   network: networkSchema,
 });
 
@@ -383,10 +396,47 @@ rpcRoutes.post('/broadcast', async (context) => {
   );
 
   assertRequestedNetwork(body.network, authenticatedContext.network);
+  readBoundTransactionMessage({
+    transactionBase64: body.rawTransaction,
+    requiredSignerAddress: authenticatedContext.wallet,
+    requiredFeePayerAddress: authenticatedContext.wallet,
+    requireSignerSignature: true,
+    label: 'Broadcast',
+  });
 
   const response = context.json(
     await broadcastRawTransaction(context.env, {
       rawTransaction: body.rawTransaction,
+      network: body.network,
+      skipPreflight: body.skipPreflight,
+      maxRetries: body.maxRetries,
+      preflightCommitment: body.preflightCommitment,
+    }),
+  );
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+});
+
+rpcRoutes.post('/simulate', async (context) => {
+  const authenticatedContext = getAuthenticatedContext(context);
+  const body = await readJsonBody(
+    context.req.raw,
+    simulationBodySchema,
+    'Request body is required.',
+    'Malformed transaction simulation request body.',
+  );
+
+  assertRequestedNetwork(body.network, authenticatedContext.network);
+  readBoundTransactionMessage({
+    transactionBase64: body.transactionBase64,
+    requiredSignerAddress: authenticatedContext.wallet,
+    requiredFeePayerAddress: authenticatedContext.wallet,
+    requireSignerSignature: false,
+    label: 'Simulation',
+  });
+  const response = context.json(
+    await simulateRawTransaction(context.env, {
+      transactionBase64: body.transactionBase64,
       network: body.network,
     }),
   );
@@ -414,6 +464,9 @@ rpcRoutes.post('/offline-slot-broadcast', async (context) => {
     await broadcastRawTransaction(context.env, {
       rawTransaction: body.rawTransaction,
       network: body.network,
+      skipPreflight: body.skipPreflight,
+      maxRetries: body.maxRetries,
+      preflightCommitment: body.preflightCommitment,
     }),
   );
   response.headers.set('Cache-Control', 'no-store');

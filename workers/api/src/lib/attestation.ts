@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { decode as decodeCbor } from 'cbor-x';
 import { X509Certificate, X509ChainBuilder } from '@peculiar/x509';
+import { hasValidAndroidRequestBinding } from './android-attestation-binding.js';
 import { AppError } from './errors.js';
 import type { Bindings } from './types.js';
 
@@ -29,6 +30,7 @@ interface GooglePlayIntegrityPayload {
   requestDetails?: {
     requestPackageName?: string;
     nonce?: string;
+    requestHash?: string;
     timestampMillis?: string;
   };
   appIntegrity?: {
@@ -74,7 +76,6 @@ const DEFAULT_ANDROID_ATTESTATION_MODE: AndroidAttestationMode = 'play_integrity
 const GOOGLE_PLAY_INTEGRITY_SCOPE = 'https://www.googleapis.com/auth/playintegrity';
 const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_PLAY_INTEGRITY_API_BASE = 'https://playintegrity.googleapis.com/v1';
-const ATTESTATION_FRESHNESS_WINDOW_MS = 5 * 60_000;
 const APP_ATTEST_AAGUID_PRODUCTION = 'appattest\0\0\0\0\0\0\0';
 const APP_ATTEST_AAGUID_SANDBOX = 'appattestsandbox';
 const APP_ATTEST_AAGUID_DEVELOP = 'appattestdevelop';
@@ -387,18 +388,16 @@ async function verifyAndroidIntegrity(
 
   const packageName = getRequiredBinding(bindings, 'OFFPAY_ANDROID_PACKAGE_NAME');
   const verdict = await decodeGoogleIntegrityToken(bindings, input.attestationToken);
-  const expectedNonce = base64UrlEncodeBytes(await sha256Text(input.challengeNonce));
+  const expectedRequestHash = base64UrlEncodeBytes(await sha256Text(input.challengeNonce));
   const requestDetails = verdict.requestDetails;
   const appIntegrity = verdict.appIntegrity;
   const deviceIntegrity = verdict.deviceIntegrity;
 
-  const requestTimestamp = Number(requestDetails?.timestampMillis ?? 0);
-  if (
-    requestDetails?.requestPackageName !== packageName ||
-    requestDetails?.nonce !== expectedNonce ||
-    !Number.isFinite(requestTimestamp) ||
-    Math.abs(Date.now() - requestTimestamp) > ATTESTATION_FRESHNESS_WINDOW_MS
-  ) {
+  if (!hasValidAndroidRequestBinding({
+    requestDetails,
+    packageName,
+    expectedRequestHash,
+  })) {
     throwAttestationFailed();
   }
 

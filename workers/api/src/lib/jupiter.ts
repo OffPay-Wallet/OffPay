@@ -7,18 +7,38 @@ import {
   runKvPipeline,
   sanitizeText,
 } from './provider-utils.js';
-import { broadcastRawTransaction } from './helius.js';
-import { isRecord, isValidSolanaAddress } from './validation.js';
+import {
+  broadcastRawTransaction,
+  getRpcAccounts,
+  getRpcSignatureStatuses,
+} from './helius.js';
+import {
+  TOKEN_PROGRAM_ID,
+  verifyJupiterTransaction,
+} from './jupiter-transaction-verifier.js';
+import { acquireRedisLock, releaseRedisLock } from './redis-lock.js';
+import { readBoundTransactionDetails } from './solana-transaction-binding.js';
+import {
+  isRecord,
+  isValidEd25519Signature,
+  isValidSolanaAddress,
+} from './validation.js';
 import type { Bindings, Network } from './types.js';
 
 const DEFAULT_JUPITER_API_BASE_URL = 'https://api.jup.ag';
 const SWAP_TOKENS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SWAP_PRICE_CACHE_TTL_MS = 10 * 1000;
 const DEFAULT_QUOTE_TTL_MS = 45 * 1000;
+const QUOTE_RESULT_TTL_MS = 24 * 60 * 60_000;
 const DEFAULT_SWAP_SLIPPAGE_BPS = 50;
-const QUOTE_STATE_KEY_PREFIX = 'swap-quote:v1';
+const QUOTE_STATE_KEY_PREFIX = 'swap-quote:v2';
 const QUOTE_EXECUTE_LOCK_KEY_PREFIX = 'swap-quote-execute-lock:v1';
 const QUOTE_EXECUTE_LOCK_TTL_SEC = 120;
+const RECURRING_STATE_KEY_PREFIX = 'swap-recurring:v1';
+const RECURRING_EXECUTE_LOCK_KEY_PREFIX = 'swap-recurring-execute-lock:v1';
+const RECURRING_IDEMPOTENCY_KEY_PREFIX = 'swap-recurring-idempotency:v1';
+const RECURRING_DRAFT_TTL_MS = 60_000;
+const RECURRING_RESULT_TTL_MS = 24 * 60 * 60_000;
 const QUOTE_EXECUTE_EXPIRED_CODES = new Set([-1004, -2003]);
 const QUOTE_EXECUTE_INVALID_CODES = new Set([-2, -3, -1002, -1003]);
 const MAINNET_ONLY_JUPITER_ROUTES = new Set(['quote', 'execute', 'recurring']);
@@ -62,6 +82,16 @@ interface SwapQuoteRequest {
   useManualSlippage?: boolean;
   network: Network;
   receiverAddress?: string;
+  context?: SwapQuoteContext;
+}
+
+interface SwapQuoteContext {
+  purpose: 'rwa';
+  assetMint: string;
+  issuerAssetId: string;
+  scaledUiMultiplier: string;
+  eligibilityPolicyVersion: string;
+  side: 'buy' | 'sell';
 }
 
 interface SwapQuoteResponse {
@@ -70,6 +100,7 @@ interface SwapQuoteResponse {
   outputMint: string;
   inAmount: string;
   outAmount: string;
+  minimumOutputAmount: string;
   slippageBps: number | null;
   slippageMode: 'auto' | 'manual';
   priceImpactPct: number;
@@ -84,6 +115,7 @@ interface SwapExecuteRequest {
   quoteId: string;
   signedTransaction: string;
   network: Network;
+  contextPurpose?: 'rwa';
 }
 
 interface SwapExecuteResponse {
@@ -104,6 +136,7 @@ interface SwapRecurringCreateRequest {
   outputMint: string;
   amount: string;
   frequency: string;
+  idempotencyKey: string;
   network: Network;
 }
 
@@ -116,6 +149,7 @@ interface SwapRecurringCreateResponse {
 interface SwapRecurringExecuteRequest {
   recurringId: string;
   signedTransaction: string;
+  walletAddress: string;
   network: Network;
 }
 
@@ -123,6 +157,58 @@ interface SwapRecurringExecuteResponse {
   recurringId: string;
   status: 'Success' | 'Failed';
   signature: string;
+  orderId: string | null;
+  operation: 'create' | 'cancel';
+}
+
+interface RecurringOrderSummary {
+  orderId: string;
+  inputMint: string;
+  outputMint: string;
+  rawInDeposited: string;
+  rawInWithdrawn: string;
+  rawInUsed: string;
+  rawOutReceived: string;
+  rawOutWithdrawn: string;
+  rawInAmountPerCycle: string;
+  cycleFrequency: string;
+  userClosed: boolean;
+  openSignature: string | null;
+  closeSignature: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+interface RecurringOrderListRequest {
+  walletAddress: string;
+  network: Network;
+  status: 'active' | 'history';
+  page?: number;
+  mint?: string;
+  includeFailedTransactions?: boolean;
+}
+
+interface RecurringOrderListResponse {
+  walletAddress: string;
+  status: 'active' | 'history';
+  orders: RecurringOrderSummary[];
+  page: number;
+  totalPages: number;
+}
+
+interface RecurringCancelPrepareRequest {
+  walletAddress: string;
+  network: Network;
+  orderId: string;
+  inputMint: string;
+  outputMint: string;
+}
+
+interface RecurringCancelPrepareResponse {
+  recurringId: string;
+  orderId: string;
+  status: 'requires_signature';
+  unsignedTransaction: string;
 }
 
 interface StoredSwapQuoteState {
@@ -132,6 +218,32 @@ interface StoredSwapQuoteState {
   network: Network;
   expiresAt: number;
   lastValidBlockHeight: string | null;
+  transactionMessageBase64: string;
+  context: SwapQuoteContext | null;
+  status: 'prepared' | 'submitting' | 'completed';
+  expectedSignature: string | null;
+  result: SwapExecuteDetailedResponse | null;
+}
+
+interface StoredRecurringOrderState {
+  walletAddress: string;
+  network: Network;
+  transactionMessageBase64: string;
+  unsignedTransaction: string;
+  providerRequestId: string;
+  operation: 'create' | 'cancel';
+  orderId: string;
+  status: 'pending' | 'submitting' | 'completed';
+  expectedSignature: string | null;
+  signature: string | null;
+  completedOrderId: string | null;
+  expiresAt: number;
+}
+
+interface StoredRecurringIdempotencyState {
+  intentFingerprint: string;
+  recurringId: string;
+  expiresAt: number;
 }
 
 interface JupiterHttpResult {
@@ -146,6 +258,34 @@ interface ParsedRecurringFrequency {
 
 function isPositiveIntegerString(value: string): boolean {
   return /^\d+$/.test(value) && value !== '0';
+}
+
+function readSwapQuoteContext(value: unknown): SwapQuoteContext | null {
+  if (!isRecord(value) || value.purpose !== 'rwa') return null;
+  const assetMint = readTrimmedString(value.assetMint);
+  const issuerAssetId = readTrimmedString(value.issuerAssetId);
+  const scaledUiMultiplier = readTrimmedString(value.scaledUiMultiplier);
+  const eligibilityPolicyVersion = readTrimmedString(value.eligibilityPolicyVersion);
+  const side = readTrimmedString(value.side);
+  if (
+    !assetMint ||
+    !isValidSolanaAddress(assetMint) ||
+    !issuerAssetId ||
+    !scaledUiMultiplier ||
+    !eligibilityPolicyVersion ||
+    !/^\d+(?:\.\d+)?$/.test(scaledUiMultiplier) ||
+    (side !== 'buy' && side !== 'sell')
+  ) {
+    return null;
+  }
+  return {
+    purpose: 'rwa',
+    assetMint,
+    issuerAssetId,
+    scaledUiMultiplier,
+    eligibilityPolicyVersion,
+    side,
+  };
 }
 
 function isBase64String(value: string): boolean {
@@ -241,9 +381,7 @@ function readJupiterApiBaseUrl(bindings: Bindings): string {
 
   try {
     const parsed = new URL(configuredUrl);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new Error('Unsupported Jupiter API protocol.');
-    }
+    if (parsed.protocol !== 'https:') throw new Error('Jupiter API must use HTTPS.');
     return parsed.toString().replace(/\/$/, '');
   } catch (error) {
     throw new AppError({
@@ -256,8 +394,8 @@ function readJupiterApiBaseUrl(bindings: Bindings): string {
   }
 }
 
-function buildQuoteStateKey(quoteId: string): string {
-  return `${QUOTE_STATE_KEY_PREFIX}:${quoteId}`;
+function buildQuoteStateKey(network: Network, walletAddress: string, quoteId: string): string {
+  return `${QUOTE_STATE_KEY_PREFIX}:${network}:${walletAddress}:${quoteId}`;
 }
 
 function buildSwapTokenRegistryKey(network: Network): string {
@@ -305,8 +443,211 @@ async function writeHotSwapTokens(
   });
 }
 
-function buildQuoteExecuteLockKey(quoteId: string): string {
-  return `${QUOTE_EXECUTE_LOCK_KEY_PREFIX}:${quoteId}`;
+function buildQuoteExecuteLockKey(
+  network: Network,
+  walletAddress: string,
+  quoteId: string,
+): string {
+  return `${QUOTE_EXECUTE_LOCK_KEY_PREFIX}:${network}:${walletAddress}:${quoteId}`;
+}
+
+function buildRecurringStateKey(
+  network: Network,
+  walletAddress: string,
+  recurringId: string,
+): string {
+  return `${RECURRING_STATE_KEY_PREFIX}:${network}:${walletAddress}:${recurringId}`;
+}
+
+function buildRecurringExecuteLockKey(
+  network: Network,
+  walletAddress: string,
+  recurringId: string,
+): string {
+  return `${RECURRING_EXECUTE_LOCK_KEY_PREFIX}:${network}:${walletAddress}:${recurringId}`;
+}
+
+function buildRecurringIdempotencyKey(
+  network: Network,
+  walletAddress: string,
+  idempotencyKey: string,
+): string {
+  return `${RECURRING_IDEMPOTENCY_KEY_PREFIX}:${network}:${walletAddress}:${idempotencyKey}`;
+}
+
+async function storeRecurringOrderState(
+  bindings: Bindings,
+  recurringId: string,
+  state: StoredRecurringOrderState,
+): Promise<void> {
+  const ttlSeconds = Math.max(1, Math.ceil((state.expiresAt - Date.now()) / 1000));
+  await runKvPipeline(
+    bindings,
+    [[
+      'SET',
+      buildRecurringStateKey(state.network, state.walletAddress, recurringId),
+      JSON.stringify(state),
+      'EX',
+      ttlSeconds,
+    ]],
+    'Recurring order state storage is unavailable.',
+  );
+}
+
+async function getRecurringOrderState(
+  bindings: Bindings,
+  network: Network,
+  walletAddress: string,
+  recurringId: string,
+): Promise<StoredRecurringOrderState | null> {
+  const [result] = await runKvPipeline(
+    bindings,
+    [['GET', buildRecurringStateKey(network, walletAddress, recurringId)]],
+    'Recurring order state storage is unavailable.',
+  );
+  if (typeof result !== 'string' || result.trim().length === 0) return null;
+
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (!isRecord(parsed)) return null;
+    const walletAddress = readTrimmedString(parsed.walletAddress);
+    const network = readTrimmedString(parsed.network);
+    const transactionMessageBase64 = readTrimmedString(parsed.transactionMessageBase64);
+    const unsignedTransaction = readTrimmedString(parsed.unsignedTransaction);
+    const providerRequestId = readTrimmedString(parsed.providerRequestId);
+    const operation = readTrimmedString(parsed.operation);
+    const orderId = readTrimmedString(parsed.orderId);
+    const status = readTrimmedString(parsed.status);
+    const expectedSignature = readTrimmedString(parsed.expectedSignature);
+    const signature = readTrimmedString(parsed.signature);
+    const completedOrderId = readTrimmedString(parsed.completedOrderId);
+    const expiresAt = readFiniteNumber(parsed.expiresAt);
+    if (
+      !walletAddress ||
+      !isValidSolanaAddress(walletAddress) ||
+      (network !== 'mainnet' && network !== 'devnet') ||
+      !transactionMessageBase64 ||
+      !unsignedTransaction ||
+      !providerRequestId ||
+      (operation !== 'create' && operation !== 'cancel') ||
+      !orderId ||
+      !isValidSolanaAddress(orderId) ||
+      (status !== 'pending' && status !== 'submitting' && status !== 'completed') ||
+      (status === 'submitting' && (!expectedSignature || !isValidEd25519Signature(expectedSignature))) ||
+      (status === 'completed' &&
+        (!signature ||
+          !isValidEd25519Signature(signature) ||
+          !completedOrderId ||
+          !isValidSolanaAddress(completedOrderId))) ||
+      expiresAt == null
+    ) {
+      return null;
+    }
+    return {
+      walletAddress,
+      network,
+      transactionMessageBase64,
+      unsignedTransaction,
+      providerRequestId,
+      operation,
+      orderId,
+      status,
+      expectedSignature,
+      signature,
+      completedOrderId,
+      expiresAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function deleteRecurringOrderState(
+  bindings: Bindings,
+  network: Network,
+  walletAddress: string,
+  recurringId: string,
+): Promise<void> {
+  await runKvPipeline(
+    bindings,
+    [['DEL', buildRecurringStateKey(network, walletAddress, recurringId)]],
+    'Recurring order state storage is unavailable.',
+  );
+}
+
+async function storeRecurringIdempotencyState(
+  bindings: Bindings,
+  params: {
+    network: Network;
+    walletAddress: string;
+    idempotencyKey: string;
+    state: StoredRecurringIdempotencyState;
+  },
+): Promise<void> {
+  const ttlSeconds = Math.max(1, Math.ceil((params.state.expiresAt - Date.now()) / 1000));
+  await runKvPipeline(
+    bindings,
+    [[
+      'SET',
+      buildRecurringIdempotencyKey(
+        params.network,
+        params.walletAddress,
+        params.idempotencyKey,
+      ),
+      JSON.stringify(params.state),
+      'EX',
+      ttlSeconds,
+    ]],
+    'Recurring order idempotency storage is unavailable.',
+  );
+}
+
+async function getRecurringIdempotencyState(
+  bindings: Bindings,
+  params: { network: Network; walletAddress: string; idempotencyKey: string },
+): Promise<StoredRecurringIdempotencyState | null> {
+  const [result] = await runKvPipeline(
+    bindings,
+    [[
+      'GET',
+      buildRecurringIdempotencyKey(
+        params.network,
+        params.walletAddress,
+        params.idempotencyKey,
+      ),
+    ]],
+    'Recurring order idempotency storage is unavailable.',
+  );
+  if (typeof result !== 'string' || result.trim().length === 0) return null;
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (!isRecord(parsed)) return null;
+    const intentFingerprint = readTrimmedString(parsed.intentFingerprint);
+    const recurringId = readTrimmedString(parsed.recurringId);
+    const expiresAt = readFiniteNumber(parsed.expiresAt);
+    if (!intentFingerprint || !recurringId || expiresAt == null) return null;
+    return { intentFingerprint, recurringId, expiresAt };
+  } catch {
+    return null;
+  }
+}
+
+async function deleteRecurringIdempotencyState(
+  bindings: Bindings,
+  params: { network: Network; walletAddress: string; idempotencyKey: string },
+): Promise<void> {
+  await runKvPipeline(
+    bindings,
+    [[
+      'DEL',
+      buildRecurringIdempotencyKey(
+        params.network,
+        params.walletAddress,
+        params.idempotencyKey,
+      ),
+    ]],
+    'Recurring order idempotency storage is unavailable.',
+  );
 }
 
 async function storeQuoteState(
@@ -316,22 +657,28 @@ async function storeQuoteState(
 ): Promise<void> {
   const ttlSeconds = Math.max(1, Math.ceil((quoteState.expiresAt - Date.now()) / 1000));
 
-  await runKvPipeline(bindings, [[
-    'SET',
-    buildQuoteStateKey(quoteId),
-    JSON.stringify(quoteState),
-    'EX',
-    ttlSeconds,
-  ]], 'Quote state storage is unavailable.');
+  await runKvPipeline(
+    bindings,
+    [[
+      'SET',
+      buildQuoteStateKey(quoteState.network, quoteState.takerAddress, quoteId),
+      JSON.stringify(quoteState),
+      'EX',
+      ttlSeconds,
+    ]],
+    'Quote state storage is unavailable.',
+  );
 }
 
 async function getQuoteState(
   bindings: Bindings,
+  network: Network,
+  takerAddress: string,
   quoteId: string,
 ): Promise<StoredSwapQuoteState | null> {
   const [result] = await runKvPipeline(
     bindings,
-    [['GET', buildQuoteStateKey(quoteId)]],
+    [['GET', buildQuoteStateKey(network, takerAddress, quoteId)]],
     'Quote state storage is unavailable.',
   );
   if (typeof result !== 'string' || result.trim().length === 0) {
@@ -351,17 +698,64 @@ async function getQuoteState(
 
   const requestId = readTrimmedString(parsed.requestId);
   const parsedProvider = readTrimmedString(parsed.provider);
-  const takerAddress =
+  const storedTakerAddress =
     readTrimmedString(parsed.takerAddress) ?? readTrimmedString(parsed.walletAddress);
-  const network = readTrimmedString(parsed.network);
+  const storedNetwork = readTrimmedString(parsed.network);
   const expiresAt = readFiniteNumber(parsed.expiresAt);
   const lastValidBlockHeight = readTrimmedString(parsed.lastValidBlockHeight);
+  const transactionMessageBase64 = readTrimmedString(parsed.transactionMessageBase64);
+  const context = readSwapQuoteContext(parsed.context);
+  const parsedStatus = readTrimmedString(parsed.status);
+  const status =
+    parsedStatus == null
+      ? 'prepared'
+      : parsedStatus === 'prepared' || parsedStatus === 'submitting' || parsedStatus === 'completed'
+        ? parsedStatus
+        : null;
+  const expectedSignature = readTrimmedString(parsed.expectedSignature);
+  const rawResult = isRecord(parsed.result) ? parsed.result : null;
+  const resultSignature = readTrimmedString(rawResult?.signature);
+  const resultCode = readFiniteNumber(rawResult?.code);
+  const readResultAmount = (value: unknown): string | null | undefined => {
+    if (value == null) return null;
+    const amount = readTrimmedString(value);
+    return amount != null && /^\d+$/.test(amount) ? amount : undefined;
+  };
+  const inputAmountResult = readResultAmount(rawResult?.inputAmountResult);
+  const outputAmountResult = readResultAmount(rawResult?.outputAmountResult);
+  const totalInputAmount = readResultAmount(rawResult?.totalInputAmount);
+  const totalOutputAmount = readResultAmount(rawResult?.totalOutputAmount);
+  const storedResult =
+    rawResult != null &&
+    resultSignature != null &&
+    isValidEd25519Signature(resultSignature) &&
+    resultCode != null &&
+    Number.isInteger(resultCode) &&
+    inputAmountResult !== undefined &&
+    outputAmountResult !== undefined &&
+    totalInputAmount !== undefined &&
+    totalOutputAmount !== undefined
+      ? {
+          signature: resultSignature,
+          code: resultCode,
+          inputAmountResult,
+          outputAmountResult,
+          totalInputAmount,
+          totalOutputAmount,
+        }
+      : null;
 
   if (
     !requestId ||
-    !takerAddress ||
-    (network !== 'devnet' && network !== 'mainnet') ||
-    expiresAt === null
+    !storedTakerAddress ||
+    (storedNetwork !== 'devnet' && storedNetwork !== 'mainnet') ||
+    expiresAt === null ||
+    !transactionMessageBase64 ||
+    status == null ||
+    ((status === 'submitting' || status === 'completed') &&
+      (!expectedSignature || !isValidEd25519Signature(expectedSignature))) ||
+    (status === 'completed' && storedResult == null) ||
+    (parsed.context != null && context == null)
   ) {
     return null;
   }
@@ -369,51 +763,95 @@ async function getQuoteState(
   return {
     requestId,
     provider: parsedProvider === 'metis' ? 'metis' : 'ultra',
-    takerAddress,
-    network,
+    takerAddress: storedTakerAddress,
+    network: storedNetwork,
     expiresAt,
     lastValidBlockHeight,
+    transactionMessageBase64,
+    context,
+    status,
+    expectedSignature,
+    result: storedResult,
   };
 }
 
-async function deleteQuoteState(bindings: Bindings, quoteId: string): Promise<void> {
+async function getSwapQuoteContext(
+  bindings: Bindings,
+  request: { quoteId: string; takerAddress: string; network: Network },
+): Promise<SwapQuoteContext | null> {
+  const quoteState = await getQuoteState(
+    bindings,
+    request.network,
+    request.takerAddress,
+    request.quoteId,
+  );
+  if (
+    quoteState == null ||
+    quoteState.takerAddress !== request.takerAddress ||
+    quoteState.network !== request.network ||
+    (quoteState.status === 'prepared' && quoteState.expiresAt <= Date.now())
+  ) {
+    return null;
+  }
+  return quoteState.context;
+}
+
+async function deleteQuoteState(
+  bindings: Bindings,
+  network: Network,
+  takerAddress: string,
+  quoteId: string,
+): Promise<void> {
   await runKvPipeline(
     bindings,
-    [['DEL', buildQuoteStateKey(quoteId)]],
+    [['DEL', buildQuoteStateKey(network, takerAddress, quoteId)]],
     'Quote state storage is unavailable.',
   );
 }
 
-async function acquireQuoteExecuteLock(bindings: Bindings, quoteId: string): Promise<string | null> {
-  const lockToken = crypto.randomUUID();
-  const [result] = await runKvPipeline(
-    bindings,
-    [['SET', buildQuoteExecuteLockKey(quoteId), lockToken, 'NX', 'EX', QUOTE_EXECUTE_LOCK_TTL_SEC]],
-    'Quote state storage is unavailable.',
-  );
+async function acquireQuoteExecuteLock(
+  bindings: Bindings,
+  network: Network,
+  takerAddress: string,
+  quoteId: string,
+): Promise<string | null> {
+  return acquireNamedLock(bindings, buildQuoteExecuteLockKey(network, takerAddress, quoteId));
+}
 
-  return result === 'OK' ? lockToken : null;
+async function acquireNamedLock(bindings: Bindings, lockKey: string): Promise<string | null> {
+  return acquireRedisLock({
+    bindings,
+    key: lockKey,
+    ttlSeconds: QUOTE_EXECUTE_LOCK_TTL_SEC,
+    unavailableMessage: 'Quote state storage is unavailable.',
+  });
 }
 
 async function releaseQuoteExecuteLock(
   bindings: Bindings,
+  network: Network,
+  takerAddress: string,
   quoteId: string,
   lockToken: string,
 ): Promise<void> {
-  const lockKey = buildQuoteExecuteLockKey(quoteId);
-  const [currentValue] = await runKvPipeline(
+  await releaseNamedLock(
     bindings,
-    [['GET', lockKey]],
-    'Quote state storage is unavailable.',
+    buildQuoteExecuteLockKey(network, takerAddress, quoteId),
+    lockToken,
   );
+}
 
-  if (currentValue === lockToken) {
-    await runKvPipeline(
-      bindings,
-      [['DEL', lockKey]],
-      'Quote state storage is unavailable.',
-    );
-  }
+async function releaseNamedLock(
+  bindings: Bindings,
+  lockKey: string,
+  lockToken: string,
+): Promise<void> {
+  await releaseRedisLock({
+    bindings,
+    key: lockKey,
+    token: lockToken,
+    unavailableMessage: 'Quote state storage is unavailable.',
+  });
 }
 
 function parseProviderDateToMs(value: string | null): number | null {
@@ -457,9 +895,9 @@ function extractProviderMessage(payload: unknown): string | null {
   }
 
   const nestedError = isRecord(payload.error)
-    ? readTrimmedString(payload.error.message) ??
+    ? (readTrimmedString(payload.error.message) ??
       readTrimmedString(payload.error.error) ??
-      readTrimmedString(payload.error.status)
+      readTrimmedString(payload.error.status))
     : null;
 
   return sanitizeText(
@@ -487,7 +925,10 @@ function toQuoteExpiredError(): AppError {
 
 function parseRecurringFrequency(frequency: string): ParsedRecurringFrequency {
   const normalized = frequency.trim().toLowerCase();
-  const validateRecurringRange = (interval: number, numberOfOrders: number): ParsedRecurringFrequency => {
+  const validateRecurringRange = (
+    interval: number,
+    numberOfOrders: number,
+  ): ParsedRecurringFrequency => {
     if (!Number.isSafeInteger(interval) || interval <= 0 || interval > MAX_RECURRING_INTERVAL_SEC) {
       throw new AppError({
         status: 400,
@@ -512,8 +953,7 @@ function parseRecurringFrequency(frequency: string): ParsedRecurringFrequency {
       throw new AppError({
         status: 400,
         code: 'INVALID_REQUEST',
-        message:
-          'Recurring schedules cannot span more than 365 days in total duration.',
+        message: 'Recurring schedules cannot span more than 365 days in total duration.',
       });
     }
 
@@ -565,10 +1005,7 @@ function parseRecurringFrequency(frequency: string): ParsedRecurringFrequency {
   });
 }
 
-async function getSwapTokens(
-  bindings: Bindings,
-  network: Network,
-): Promise<SwapTokensResponse> {
+async function getSwapTokens(bindings: Bindings, network: Network): Promise<SwapTokensResponse> {
   const cacheKey = createNetworkCacheKey(network, 'swap-tokens', ['verified']);
 
   return memoryCache.getOrSet(cacheKey, SWAP_TOKENS_CACHE_TTL_MS, async () => {
@@ -615,14 +1052,16 @@ async function getSwapTokens(
           return [];
         }
 
-        return [{
-          mint,
-          name,
-          symbol,
-          logo,
-          decimals,
-          verified: true,
-        } satisfies SwapToken];
+        return [
+          {
+            mint,
+            name,
+            symbol,
+            logo,
+            decimals,
+            verified: true,
+          } satisfies SwapToken,
+        ];
       })
       .sort((left, right) => left.symbol.localeCompare(right.symbol));
 
@@ -766,10 +1205,50 @@ async function createMetisSwapQuote(
     readFiniteNumber(dynamicSlippageReport?.slippageBps) ??
     readFiniteNumber(quotePayload.slippageBps) ??
     slippageBps;
+  const minimumOutputAmount = readTrimmedString(quotePayload.otherAmountThreshold);
+  const platformFeeBps =
+    readFiniteNumber(isRecord(quotePayload.platformFee) ? quotePayload.platformFee.feeBps : null) ??
+    0;
+  if (
+    !minimumOutputAmount ||
+    !/^\d+$/.test(minimumOutputAmount) ||
+    !Number.isInteger(responseSlippageBps) ||
+    responseSlippageBps < 0 ||
+    responseSlippageBps > 10_000 ||
+    !Number.isInteger(platformFeeBps) ||
+    platformFeeBps < 0 ||
+    platformFeeBps > 10_000
+  ) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Swap quote safety terms are unavailable.',
+      retryable: true,
+    });
+  }
   const priceImpactPct = readFiniteNumber(quotePayload.priceImpactPct) ?? 0;
   const fee =
-    readTrimmedString(isRecord(quotePayload.platformFee) ? quotePayload.platformFee.amount : null) ??
-    '0';
+    readTrimmedString(
+      isRecord(quotePayload.platformFee) ? quotePayload.platformFee.amount : null,
+    ) ?? '0';
+
+  const verifiedTransaction = await verifyJupiterTransaction({
+    bindings,
+    network: request.network,
+    transactionBase64: unsignedTransaction,
+    intent: {
+      kind: 'swap',
+      walletAddress: request.takerAddress,
+      inputMint: request.inputMint,
+      outputMint: request.outputMint,
+      inputAmount: inAmount,
+      outputAmount: outAmount,
+      minimumOutputAmount,
+      slippageBps: responseSlippageBps,
+      platformFeeBps,
+      providerRequestId: quoteId,
+    },
+  });
 
   await storeQuoteState(bindings, quoteId, {
     requestId: quoteId,
@@ -778,6 +1257,11 @@ async function createMetisSwapQuote(
     network: request.network,
     expiresAt,
     lastValidBlockHeight,
+    transactionMessageBase64: verifiedTransaction.transactionMessageBase64,
+    context: request.context ?? null,
+    status: 'prepared',
+    expectedSignature: null,
+    result: null,
   });
 
   return {
@@ -786,6 +1270,7 @@ async function createMetisSwapQuote(
     outputMint: request.outputMint,
     inAmount,
     outAmount,
+    minimumOutputAmount,
     slippageBps: responseSlippageBps,
     slippageMode: 'manual',
     priceImpactPct,
@@ -804,6 +1289,19 @@ async function createSwapQuote(
   assertSolanaAddress(request.inputMint, 'Input mint address is invalid.');
   assertSolanaAddress(request.outputMint, 'Output mint address is invalid.');
   assertPositiveIntegerAmount(request.amount, 'Swap amount must be a positive integer string.');
+  if (
+    request.useManualSlippage === true &&
+    (request.slippageBps == null ||
+      !Number.isInteger(request.slippageBps) ||
+      request.slippageBps < 0 ||
+      request.slippageBps > 10_000)
+  ) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Manual slippage requires an integer between 0 and 10000 basis points.',
+    });
+  }
 
   if (request.receiverAddress) {
     assertSolanaAddress(request.receiverAddress, 'Receiver wallet address is invalid.');
@@ -822,6 +1320,10 @@ async function createSwapQuote(
     amount: request.amount,
     taker: request.takerAddress,
     swapMode: 'ExactIn',
+    // Only the Jupiter V6/Metis transaction format has a fully decoded,
+    // fail-closed semantic verifier. RFQ/DFlow/OKX transactions use unrelated
+    // programs and must never reach a wallet under a generic allowlist.
+    excludeRouters: 'jupiterz,dflow,okx',
   });
 
   if (request.useManualSlippage === true && request.slippageBps !== undefined) {
@@ -868,10 +1370,9 @@ async function createSwapQuote(
   const inAmount = readTrimmedString(payload.inAmount);
   const outAmount = readTrimmedString(payload.outAmount);
   const providerMessage = extractProviderMessage(payload);
-  const quoteId = readTrimmedString(payload.quoteId) ?? crypto.randomUUID();
+  const quoteId = crypto.randomUUID();
   const expiresAt =
-    parseProviderDateToMs(readTrimmedString(payload.expireAt)) ??
-    Date.now() + DEFAULT_QUOTE_TTL_MS;
+    parseProviderDateToMs(readTrimmedString(payload.expireAt)) ?? Date.now() + DEFAULT_QUOTE_TTL_MS;
   const lastValidBlockHeight = readTrimmedString(payload.lastValidBlockHeight);
 
   if (!requestId || !inAmount || !outAmount || !unsignedTransaction) {
@@ -903,16 +1404,78 @@ async function createSwapQuote(
     throw toQuoteExpiredError();
   }
 
+  const router = readTrimmedString(payload.router)?.toLowerCase();
+  const signatureFeePayer = readTrimmedString(payload.signatureFeePayer);
+  if (
+    router !== 'metis' ||
+    payload.gasless === true ||
+    (signatureFeePayer != null && signatureFeePayer !== request.takerAddress)
+  ) {
+    if (!request.receiverAddress) return createMetisSwapQuote(bindings, request);
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'A wallet-paid Metis route is unavailable for this receiver swap.',
+      retryable: true,
+    });
+  }
+
   const priceImpactPct =
-    readFiniteNumber(payload.priceImpactPct) ??
-    readFiniteNumber(payload.priceImpact) ??
-    0;
+    readFiniteNumber(payload.priceImpactPct) ?? readFiniteNumber(payload.priceImpact) ?? 0;
   const slippageBps = readFiniteNumber(payload.slippageBps);
   const providerMode = readTrimmedString(payload.mode)?.toLowerCase();
   const slippageMode = providerMode === 'manual' ? 'manual' : 'auto';
 
   const fee =
     readTrimmedString(isRecord(payload.platformFee) ? payload.platformFee.amount : null) ?? '0';
+  const minimumOutputAmount = readTrimmedString(payload.otherAmountThreshold);
+  const platformFeeBps =
+    readFiniteNumber(payload.feeBps) ??
+    readFiniteNumber(isRecord(payload.platformFee) ? payload.platformFee.feeBps : null) ??
+    0;
+  if (
+    !minimumOutputAmount ||
+    !/^\d+$/.test(minimumOutputAmount) ||
+    slippageBps == null ||
+    !Number.isInteger(slippageBps) ||
+    slippageBps < 0 ||
+    slippageBps > 10_000 ||
+    !Number.isInteger(platformFeeBps) ||
+    platformFeeBps < 0 ||
+    platformFeeBps > 10_000
+  ) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Swap quote safety terms are unavailable.',
+      retryable: true,
+    });
+  }
+
+  let verifiedTransaction: Awaited<ReturnType<typeof verifyJupiterTransaction>>;
+  try {
+    verifiedTransaction = await verifyJupiterTransaction({
+      bindings,
+      network: request.network,
+      transactionBase64: unsignedTransaction,
+      intent: {
+        kind: 'swap',
+        walletAddress: request.takerAddress,
+        inputMint: request.inputMint,
+        outputMint: request.outputMint,
+        inputAmount: inAmount,
+        outputAmount: outAmount,
+        minimumOutputAmount,
+        slippageBps,
+        platformFeeBps,
+        receiverAddress: request.receiverAddress,
+        providerRequestId: requestId,
+      },
+    });
+  } catch (error) {
+    if (!request.receiverAddress) return createMetisSwapQuote(bindings, request);
+    throw error;
+  }
 
   await storeQuoteState(bindings, quoteId, {
     requestId,
@@ -921,6 +1484,11 @@ async function createSwapQuote(
     network: request.network,
     expiresAt,
     lastValidBlockHeight,
+    transactionMessageBase64: verifiedTransaction.transactionMessageBase64,
+    context: request.context ?? null,
+    status: 'prepared',
+    expectedSignature: null,
+    result: null,
   });
 
   return {
@@ -929,6 +1497,7 @@ async function createSwapQuote(
     outputMint: request.outputMint,
     inAmount,
     outAmount,
+    minimumOutputAmount,
     slippageBps,
     slippageMode,
     priceImpactPct,
@@ -949,40 +1518,142 @@ async function executeSwapQuoteDetailed(
     'Signed transaction must be a base64-encoded string.',
   );
 
-  const lockToken = await acquireQuoteExecuteLock(bindings, request.quoteId);
+  const lockToken = await acquireQuoteExecuteLock(
+    bindings,
+    request.network,
+    request.takerAddress,
+    request.quoteId,
+  );
   if (!lockToken) {
     throw new AppError({
       status: 409,
       code: 'INVALID_REQUEST',
-      message: 'This swap quote is already being executed. Please wait for the current attempt to finish.',
+      message:
+        'This swap quote is already being executed. Please wait for the current attempt to finish.',
       retryable: true,
       retryAfterMs: 1000,
     });
   }
 
   try {
-    const quoteState = await getQuoteState(bindings, request.quoteId);
+    const quoteState = await getQuoteState(
+      bindings,
+      request.network,
+      request.takerAddress,
+      request.quoteId,
+    );
+    if (!quoteState) throw toQuoteExpiredError();
     if (
-      !quoteState ||
-      quoteState.takerAddress !== request.takerAddress ||
-      quoteState.network !== request.network ||
-      quoteState.expiresAt <= Date.now()
+      (quoteState.context?.purpose === 'rwa' && request.contextPurpose !== 'rwa') ||
+      (quoteState.context == null && request.contextPurpose === 'rwa')
     ) {
-      if (quoteState) {
-        await deleteQuoteState(bindings, request.quoteId);
-      }
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'This quote must be executed through the route that created it.',
+      });
+    }
 
+    const signedTransaction = readBoundTransactionDetails({
+      transactionBase64: request.signedTransaction,
+      requiredSignerAddress: request.takerAddress,
+      requiredFeePayerAddress: request.takerAddress,
+      requireSignerSignature: true,
+      label: 'Swap',
+    });
+    if (signedTransaction.transactionMessageBase64 !== quoteState.transactionMessageBase64) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed swap transaction does not match the quoted transaction.',
+      });
+    }
+    const expectedSignature = signedTransaction.transactionSignature;
+    if (!expectedSignature || !isValidEd25519Signature(expectedSignature)) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed swap transaction has an invalid transaction signature.',
+      });
+    }
+    if (quoteState.expectedSignature && quoteState.expectedSignature !== expectedSignature) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed swap transaction does not match the in-progress submission.',
+      });
+    }
+    if (quoteState.status === 'completed' && quoteState.result) return quoteState.result;
+    if (quoteState.status === 'prepared' && quoteState.expiresAt <= Date.now()) {
+      await deleteQuoteState(
+        bindings,
+        request.network,
+        request.takerAddress,
+        request.quoteId,
+      );
       throw toQuoteExpiredError();
     }
+
+    if (quoteState.status === 'submitting') {
+      const status = (
+        await getRpcSignatureStatuses(bindings, {
+          network: request.network,
+          signatures: [expectedSignature],
+        })
+      ).statuses[0];
+      if (status?.err != null) {
+        throw new AppError({
+          status: 400,
+          code: 'INVALID_REQUEST',
+          message: 'The submitted swap transaction failed on-chain.',
+        });
+      }
+      if (
+        status?.confirmationStatus === 'confirmed' ||
+        status?.confirmationStatus === 'finalized'
+      ) {
+        const reconciled: SwapExecuteDetailedResponse = {
+          signature: expectedSignature,
+          code: 0,
+          inputAmountResult: null,
+          outputAmountResult: null,
+          totalInputAmount: null,
+          totalOutputAmount: null,
+        };
+        await storeQuoteState(bindings, request.quoteId, {
+          ...quoteState,
+          status: 'completed',
+          expectedSignature,
+          result: reconciled,
+          expiresAt: Date.now() + QUOTE_RESULT_TTL_MS,
+        }).catch(() => undefined);
+        return reconciled;
+      }
+    }
+
+    const submittingState: StoredSwapQuoteState = {
+      ...quoteState,
+      status: 'submitting',
+      expectedSignature,
+      result: null,
+      expiresAt: Date.now() + QUOTE_RESULT_TTL_MS,
+    };
+    await storeQuoteState(bindings, request.quoteId, submittingState);
 
     if (quoteState.provider === 'metis') {
       const { signature } = await broadcastRawTransaction(bindings, {
         rawTransaction: request.signedTransaction,
         network: request.network,
       });
-      await deleteQuoteState(bindings, request.quoteId);
-
-      return {
+      if (signature !== expectedSignature) {
+        throw new AppError({
+          status: 503,
+          code: 'UPSTREAM_UNAVAILABLE',
+          message: 'The transaction broadcaster returned an unexpected signature.',
+          retryable: true,
+        });
+      }
+      const result: SwapExecuteDetailedResponse = {
         signature,
         code: 0,
         inputAmountResult: null,
@@ -990,6 +1661,13 @@ async function executeSwapQuoteDetailed(
         totalInputAmount: null,
         totalOutputAmount: null,
       };
+      await storeQuoteState(bindings, request.quoteId, {
+        ...submittingState,
+        status: 'completed',
+        result,
+        expiresAt: Date.now() + QUOTE_RESULT_TTL_MS,
+      }).catch(() => undefined);
+      return result;
     }
 
     const body = {
@@ -1000,7 +1678,7 @@ async function executeSwapQuoteDetailed(
         : {}),
     };
 
-    const { payload } = await fetchJupiterJson(
+    const { response, payload } = await fetchJupiterJson(
       bindings,
       `${readJupiterApiBaseUrl(bindings)}/swap/v2/execute`,
       {
@@ -1013,7 +1691,7 @@ async function executeSwapQuoteDetailed(
       'Swap execution is currently unavailable.',
     );
 
-    if (!isRecord(payload)) {
+    if (!response.ok || !isRecord(payload)) {
       throw new AppError({
         status: 503,
         code: 'UPSTREAM_UNAVAILABLE',
@@ -1022,39 +1700,78 @@ async function executeSwapQuoteDetailed(
       });
     }
 
-    const code = readFiniteNumber(payload.code) ?? 0;
+    const code = readFiniteNumber(payload.code);
     const status = readTrimmedString(payload.status);
     const signature = readTrimmedString(payload.signature);
     const errorMessage = extractProviderMessage(payload);
 
-    if (QUOTE_EXECUTE_EXPIRED_CODES.has(code)) {
-      await deleteQuoteState(bindings, request.quoteId);
+    if (code != null && QUOTE_EXECUTE_EXPIRED_CODES.has(code)) {
+      await deleteQuoteState(
+        bindings,
+        request.network,
+        request.takerAddress,
+        request.quoteId,
+      );
       throw toQuoteExpiredError();
     }
 
-    if (MISSING_CACHED_ORDER_EXECUTE_CODES.has(code)) {
-      await deleteQuoteState(bindings, request.quoteId);
+    if (code != null && MISSING_CACHED_ORDER_EXECUTE_CODES.has(code)) {
+      await deleteQuoteState(
+        bindings,
+        request.network,
+        request.takerAddress,
+        request.quoteId,
+      );
       throw new AppError({
         status: 409,
         code: 'INVALID_REQUEST',
-        message: 'The swap order is no longer available. Please request a fresh quote and sign again.',
+        message:
+          'The swap order is no longer available. Please request a fresh quote and sign again.',
         retryable: true,
       });
     }
 
-    if (status === 'Success' && signature) {
-      await deleteQuoteState(bindings, request.quoteId);
-      return {
+    if (status === 'Success' && code === 0 && signature === expectedSignature) {
+      const readExecutionAmount = (value: unknown): string | null => {
+        if (value == null) return null;
+        const amount = readTrimmedString(value);
+        if (amount == null || !/^\d+$/.test(amount)) {
+          throw new AppError({
+            status: 503,
+            code: 'UPSTREAM_UNAVAILABLE',
+            message: 'Swap execution returned malformed settlement amounts.',
+            retryable: true,
+          });
+        }
+        return amount;
+      };
+      const result: SwapExecuteDetailedResponse = {
         signature,
         code,
-        inputAmountResult: readTrimmedString(payload.inputAmountResult),
-        outputAmountResult: readTrimmedString(payload.outputAmountResult),
-        totalInputAmount: readTrimmedString(payload.totalInputAmount),
-        totalOutputAmount: readTrimmedString(payload.totalOutputAmount),
+        inputAmountResult: readExecutionAmount(payload.inputAmountResult),
+        outputAmountResult: readExecutionAmount(payload.outputAmountResult),
+        totalInputAmount: readExecutionAmount(payload.totalInputAmount),
+        totalOutputAmount: readExecutionAmount(payload.totalOutputAmount),
       };
+      await storeQuoteState(bindings, request.quoteId, {
+        ...submittingState,
+        status: 'completed',
+        result,
+        expiresAt: Date.now() + QUOTE_RESULT_TTL_MS,
+      }).catch(() => undefined);
+      return result;
     }
 
-    if (QUOTE_EXECUTE_INVALID_CODES.has(code) || status === 'Failed') {
+    if (status === 'Success' || signature != null) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'Swap execution response could not be bound to the signed transaction.',
+        retryable: true,
+      });
+    }
+
+    if ((code != null && QUOTE_EXECUTE_INVALID_CODES.has(code)) || status === 'Failed') {
       throw new AppError({
         status: 400,
         code: 'INVALID_REQUEST',
@@ -1069,16 +1786,315 @@ async function executeSwapQuoteDetailed(
       retryable: true,
     });
   } finally {
-    await releaseQuoteExecuteLock(bindings, request.quoteId, lockToken);
+    await releaseQuoteExecuteLock(
+      bindings,
+      request.network,
+      request.takerAddress,
+      request.quoteId,
+      lockToken,
+    ).catch(() => undefined);
   }
 }
 
 async function executeSwapQuote(
   bindings: Bindings,
   request: SwapExecuteRequest,
-): Promise<SwapExecuteResponse> {
-  const result = await executeSwapQuoteDetailed(bindings, request);
-  return { signature: result.signature };
+): Promise<SwapExecuteDetailedResponse> {
+  return executeSwapQuoteDetailed(bindings, request);
+}
+
+function readRequiredRawAmount(value: unknown, label: string): string {
+  const amount = readTrimmedString(value);
+  if (amount == null || !/^\d+$/.test(amount)) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: `Recurring order ${label} is invalid.`,
+      retryable: true,
+    });
+  }
+  return amount;
+}
+
+function parseRecurringOrderSummary(value: unknown, walletAddress: string): RecurringOrderSummary {
+  if (!isRecord(value)) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Recurring order history returned an invalid order.',
+      retryable: true,
+    });
+  }
+  const userPubkey = readTrimmedString(value.userPubkey);
+  const orderId = readTrimmedString(value.orderKey);
+  const inputMint = readTrimmedString(value.inputMint);
+  const outputMint = readTrimmedString(value.outputMint);
+  const cycleFrequencyValue =
+    readTrimmedString(value.cycleFrequency) ??
+    (readFiniteNumber(value.cycleFrequency) != null
+      ? String(readFiniteNumber(value.cycleFrequency))
+      : null);
+  if (
+    userPubkey !== walletAddress ||
+    !orderId ||
+    !isValidSolanaAddress(orderId) ||
+    !inputMint ||
+    !isValidSolanaAddress(inputMint) ||
+    !outputMint ||
+    !isValidSolanaAddress(outputMint) ||
+    !cycleFrequencyValue ||
+    (value.userClosed !== true && value.userClosed !== false)
+  ) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Recurring order history could not be verified for this wallet.',
+      retryable: true,
+    });
+  }
+  return {
+    orderId,
+    inputMint,
+    outputMint,
+    rawInDeposited: readRequiredRawAmount(value.rawInDeposited, 'deposit amount'),
+    rawInWithdrawn: readRequiredRawAmount(value.rawInWithdrawn, 'withdrawn input amount'),
+    rawInUsed: readRequiredRawAmount(value.rawInUsed, 'used input amount'),
+    rawOutReceived: readRequiredRawAmount(value.rawOutReceived, 'received output amount'),
+    rawOutWithdrawn: readRequiredRawAmount(value.rawOutWithdrawn, 'withdrawn output amount'),
+    rawInAmountPerCycle: readRequiredRawAmount(value.rawInAmountPerCycle, 'cycle amount'),
+    cycleFrequency: cycleFrequencyValue,
+    userClosed: value.userClosed,
+    openSignature: readTrimmedString(value.openTx),
+    closeSignature: readTrimmedString(value.closeTx),
+    createdAt: readTrimmedString(value.createdAt),
+    updatedAt: readTrimmedString(value.updatedAt),
+  };
+}
+
+async function listRecurringOrders(
+  bindings: Bindings,
+  request: RecurringOrderListRequest,
+): Promise<RecurringOrderListResponse> {
+  assertJupiterWriteNetwork(request.network, 'recurring');
+  assertSolanaAddress(request.walletAddress, 'Wallet address is invalid.');
+  if (request.mint) assertSolanaAddress(request.mint, 'Recurring order mint is invalid.');
+  const page = request.page ?? 1;
+  if (!Number.isInteger(page) || page < 1 || page > 10_000) {
+    throw new AppError({ status: 400, code: 'INVALID_REQUEST', message: 'Page is invalid.' });
+  }
+  const params = new URLSearchParams({
+    recurringType: 'time',
+    orderStatus: request.status,
+    user: request.walletAddress,
+    page: String(page),
+    includeFailedTx: request.includeFailedTransactions === true ? 'true' : 'false',
+  });
+  if (request.mint) params.set('mint', request.mint);
+  const { response, payload } = await fetchJupiterJson(
+    bindings,
+    `${readJupiterApiBaseUrl(bindings)}/recurring/v1/getRecurringOrders?${params.toString()}`,
+    { method: 'GET' },
+    'Recurring order history is currently unavailable.',
+  );
+  if (!response.ok || !isRecord(payload) || !Array.isArray(payload.time)) {
+    throw new AppError({
+      status: response.status === 400 ? 400 : 503,
+      code: response.status === 400 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
+      message:
+        extractProviderMessage(payload) ?? 'Recurring order history is currently unavailable.',
+      retryable: response.status !== 400,
+    });
+  }
+  const responseWallet = readTrimmedString(payload.user);
+  const responseStatus = readTrimmedString(payload.orderStatus);
+  const responsePage = readFiniteNumber(payload.page);
+  const totalPages = readFiniteNumber(payload.totalPages);
+  if (
+    responseWallet !== request.walletAddress ||
+    responseStatus !== request.status ||
+    responsePage == null ||
+    totalPages == null ||
+    !Number.isInteger(responsePage) ||
+    !Number.isInteger(totalPages) ||
+    responsePage !== page ||
+    totalPages < 1
+  ) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Recurring order history pagination could not be verified.',
+      retryable: true,
+    });
+  }
+  return {
+    walletAddress: request.walletAddress,
+    status: request.status,
+    orders: payload.time.map((order) => parseRecurringOrderSummary(order, request.walletAddress)),
+    page: responsePage,
+    totalPages,
+  };
+}
+
+async function assertClassicRecurringMints(
+  bindings: Bindings,
+  request: { network: Network; inputMint: string; outputMint: string },
+): Promise<void> {
+  if (request.inputMint === request.outputMint) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Recurring input and output mints must differ.',
+    });
+  }
+
+  const mintAddresses = [request.inputMint, request.outputMint];
+  const { accounts } = await getRpcAccounts(bindings, {
+    addresses: mintAddresses,
+    network: request.network,
+  });
+  const accountsByAddress = new Map(accounts.map((account) => [account.address, account]));
+  const unsupported = mintAddresses.some((address) => {
+    const account = accountsByAddress.get(address);
+    return (
+      account?.exists !== true ||
+      account.executable !== false ||
+      account.owner !== TOKEN_PROGRAM_ID
+    );
+  });
+  if (unsupported) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Jupiter Recurring supports only classic SPL token mints.',
+    });
+  }
+}
+
+function readRecurringIdempotencyKey(value: string): string {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(normalized)) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Recurring idempotency key is invalid.',
+    });
+  }
+  return normalized;
+}
+
+function buildRecurringIntentFingerprint(request: {
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  interval: number;
+  numberOfOrders: number;
+}): string {
+  return JSON.stringify([
+    request.inputMint,
+    request.outputMint,
+    request.amount,
+    request.interval,
+    request.numberOfOrders,
+  ]);
+}
+
+function toRecurringStateUnavailableError(): AppError {
+  return new AppError({
+    status: 409,
+    code: 'INVALID_REQUEST',
+    message:
+      'A previous recurring-order attempt could not be reconciled. Start a new intent before signing.',
+    retryable: false,
+  });
+}
+
+async function prepareRecurringOrderCancellation(
+  bindings: Bindings,
+  request: RecurringCancelPrepareRequest,
+): Promise<RecurringCancelPrepareResponse> {
+  assertJupiterWriteNetwork(request.network, 'recurring');
+  assertSolanaAddress(request.walletAddress, 'Wallet address is invalid.');
+  assertSolanaAddress(request.orderId, 'Recurring order ID is invalid.');
+  assertSolanaAddress(request.inputMint, 'Input mint address is invalid.');
+  assertSolanaAddress(request.outputMint, 'Output mint address is invalid.');
+  await assertClassicRecurringMints(bindings, request);
+
+  const { response, payload } = await fetchJupiterJson(
+    bindings,
+    `${readJupiterApiBaseUrl(bindings)}/recurring/v1/cancelOrder`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order: request.orderId,
+        user: request.walletAddress,
+        recurringType: 'time',
+      }),
+    },
+    'Recurring order cancellation is currently unavailable.',
+  );
+  if (!response.ok || !isRecord(payload)) {
+    throw new AppError({
+      status: response.status === 400 ? 400 : 503,
+      code: response.status === 400 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
+      message:
+        extractProviderMessage(payload) ?? 'Recurring order cancellation is currently unavailable.',
+      retryable: response.status !== 400,
+    });
+  }
+  const providerRequestId = readTrimmedString(payload.requestId);
+  const unsignedTransaction = readTrimmedString(payload.transaction);
+  if (!providerRequestId || providerRequestId.length > 128 || !unsignedTransaction) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Recurring cancellation response is incomplete.',
+      retryable: true,
+    });
+  }
+  const verifiedTransaction = await verifyJupiterTransaction({
+    bindings,
+    network: request.network,
+    transactionBase64: unsignedTransaction,
+    intent: {
+      kind: 'recurringCancel',
+      walletAddress: request.walletAddress,
+      orderAddress: request.orderId,
+      inputMint: request.inputMint,
+      outputMint: request.outputMint,
+      providerRequestId,
+    },
+  });
+  if (verifiedTransaction.recurringOrderAddress !== request.orderId) {
+    throw new AppError({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Recurring cancellation transaction returned an unexpected order account.',
+      retryable: true,
+    });
+  }
+
+  const recurringId = crypto.randomUUID();
+  await storeRecurringOrderState(bindings, recurringId, {
+    walletAddress: request.walletAddress,
+    network: request.network,
+    transactionMessageBase64: verifiedTransaction.transactionMessageBase64,
+    unsignedTransaction,
+    providerRequestId,
+    operation: 'cancel',
+    orderId: request.orderId,
+    status: 'pending',
+    expectedSignature: null,
+    signature: null,
+    completedOrderId: null,
+    expiresAt: Date.now() + RECURRING_DRAFT_TTL_MS,
+  });
+  return {
+    recurringId,
+    orderId: request.orderId,
+    status: 'requires_signature',
+    unsignedTransaction,
+  };
 }
 
 async function createRecurringOrder(
@@ -1086,6 +2102,7 @@ async function createRecurringOrder(
   request: SwapRecurringCreateRequest,
 ): Promise<SwapRecurringCreateResponse> {
   assertJupiterWriteNetwork(request.network, 'recurring');
+  assertSolanaAddress(request.walletAddress, 'Wallet address is invalid.');
   assertSolanaAddress(request.inputMint, 'Input mint address is invalid.');
   assertSolanaAddress(request.outputMint, 'Output mint address is invalid.');
   assertPositiveIntegerAmount(
@@ -1102,125 +2119,395 @@ async function createRecurringOrder(
   }
 
   const recurringFrequency = parseRecurringFrequency(request.frequency);
-
-  const providerBody = {
-    user: request.walletAddress,
+  const idempotencyKey = readRecurringIdempotencyKey(request.idempotencyKey);
+  const intentFingerprint = buildRecurringIntentFingerprint({
     inputMint: request.inputMint,
     outputMint: request.outputMint,
-    params: {
-      time: {
-        inAmount: recurringInAmount,
-        numberOfOrders: recurringFrequency.numberOfOrders,
-        interval: recurringFrequency.interval,
-        minPrice: null,
-        maxPrice: null,
-        startAt: null,
-      },
-    },
-  };
+    amount: request.amount,
+    interval: recurringFrequency.interval,
+    numberOfOrders: recurringFrequency.numberOfOrders,
+  });
+  await assertClassicRecurringMints(bindings, request);
 
-  const { response, payload } = await fetchJupiterJson(
-    bindings,
-    `${readJupiterApiBaseUrl(bindings)}/recurring/v1/createOrder`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(providerBody),
-    },
-    'Recurring order creation is currently unavailable.',
+  const idempotencyRedisKey = buildRecurringIdempotencyKey(
+    request.network,
+    request.walletAddress,
+    idempotencyKey,
   );
-
-  if (!isRecord(payload)) {
+  const lockToken = await acquireNamedLock(bindings, `${idempotencyRedisKey}:lock`);
+  if (!lockToken) {
     throw new AppError({
-      status: response.ok ? 503 : 400,
-      code: response.ok ? 'UPSTREAM_UNAVAILABLE' : 'INVALID_REQUEST',
-      message: response.ok
-        ? 'Recurring order creation is currently unavailable.'
-        : extractProviderMessage(payload) ?? 'Recurring order request was rejected.',
-      retryable: response.ok,
-    });
-  }
-
-  if (!response.ok) {
-    throw new AppError({
-      status: 400,
+      status: 409,
       code: 'INVALID_REQUEST',
-      message: extractProviderMessage(payload) ?? 'Recurring order request was rejected.',
-    });
-  }
-
-  const recurringId = readTrimmedString(payload.requestId);
-  const unsignedTransaction = readTrimmedString(payload.transaction);
-
-  if (!recurringId || !unsignedTransaction) {
-    throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: 'Unable to build a recurring transaction at the moment.',
+      message: 'This recurring order is already being prepared.',
       retryable: true,
+      retryAfterMs: 1000,
     });
   }
 
-  return {
-    recurringId,
-    status: 'requires_signature',
-    unsignedTransaction,
-  };
+  let ownsIdempotencyReservation = false;
+  try {
+    const existingIdempotency = await getRecurringIdempotencyState(bindings, {
+      network: request.network,
+      walletAddress: request.walletAddress,
+      idempotencyKey,
+    });
+    if (existingIdempotency && existingIdempotency.expiresAt > Date.now()) {
+      if (existingIdempotency.intentFingerprint !== intentFingerprint) {
+        throw new AppError({
+          status: 409,
+          code: 'INVALID_REQUEST',
+          message: 'This recurring idempotency key is already bound to a different intent.',
+        });
+      }
+      const existingState = await getRecurringOrderState(
+        bindings,
+        request.network,
+        request.walletAddress,
+        existingIdempotency.recurringId,
+      );
+      if (!existingState || existingState.operation !== 'create') {
+        throw toRecurringStateUnavailableError();
+      }
+      return {
+        recurringId: existingIdempotency.recurringId,
+        status: 'requires_signature',
+        unsignedTransaction: existingState.unsignedTransaction,
+      };
+    }
+
+    const recurringId = crypto.randomUUID();
+    const idempotencyExpiresAt = Date.now() + RECURRING_RESULT_TTL_MS;
+    await storeRecurringIdempotencyState(bindings, {
+      network: request.network,
+      walletAddress: request.walletAddress,
+      idempotencyKey,
+      state: { intentFingerprint, recurringId, expiresAt: idempotencyExpiresAt },
+    });
+    ownsIdempotencyReservation = true;
+
+    const providerBody = {
+      user: request.walletAddress,
+      inputMint: request.inputMint,
+      outputMint: request.outputMint,
+      params: {
+        time: {
+          inAmount: recurringInAmount,
+          numberOfOrders: recurringFrequency.numberOfOrders,
+          interval: recurringFrequency.interval,
+          minPrice: null,
+          maxPrice: null,
+          startAt: null,
+        },
+      },
+    };
+
+    const { response, payload } = await fetchJupiterJson(
+      bindings,
+      `${readJupiterApiBaseUrl(bindings)}/recurring/v1/createOrder`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(providerBody),
+      },
+      'Recurring order creation is currently unavailable.',
+    );
+
+    if (!isRecord(payload)) {
+      throw new AppError({
+        status: response.ok ? 503 : 400,
+        code: response.ok ? 'UPSTREAM_UNAVAILABLE' : 'INVALID_REQUEST',
+        message: response.ok
+          ? 'Recurring order creation is currently unavailable.'
+          : (extractProviderMessage(payload) ?? 'Recurring order request was rejected.'),
+        retryable: response.ok,
+      });
+    }
+
+    if (!response.ok) {
+      throw new AppError({
+        status: response.status === 400 ? 400 : 503,
+        code: response.status === 400 ? 'INVALID_REQUEST' : 'UPSTREAM_UNAVAILABLE',
+        message: extractProviderMessage(payload) ?? 'Recurring order request was rejected.',
+        retryable: response.status !== 400,
+      });
+    }
+
+    const providerRequestId = readTrimmedString(payload.requestId);
+    const unsignedTransaction = readTrimmedString(payload.transaction);
+
+    if (!providerRequestId || providerRequestId.length > 128 || !unsignedTransaction) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'Unable to build a recurring transaction at the moment.',
+        retryable: true,
+      });
+    }
+
+    const verifiedTransaction = await verifyJupiterTransaction({
+      bindings,
+      network: request.network,
+      transactionBase64: unsignedTransaction,
+      intent: {
+        kind: 'recurringCreate',
+        walletAddress: request.walletAddress,
+        inputMint: request.inputMint,
+        outputMint: request.outputMint,
+        inputAmount: request.amount,
+        numberOfOrders: recurringFrequency.numberOfOrders,
+        intervalSeconds: recurringFrequency.interval,
+        providerRequestId,
+      },
+    });
+    const orderId = verifiedTransaction.recurringOrderAddress;
+    if (!orderId || !isValidSolanaAddress(orderId)) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'Recurring creation transaction did not bind an order account.',
+        retryable: true,
+      });
+    }
+
+    await storeRecurringOrderState(bindings, recurringId, {
+      walletAddress: request.walletAddress,
+      network: request.network,
+      transactionMessageBase64: verifiedTransaction.transactionMessageBase64,
+      unsignedTransaction,
+      providerRequestId,
+      operation: 'create',
+      orderId,
+      status: 'pending',
+      expectedSignature: null,
+      signature: null,
+      completedOrderId: null,
+      expiresAt: Date.now() + RECURRING_DRAFT_TTL_MS,
+    });
+
+    return {
+      recurringId,
+      status: 'requires_signature',
+      unsignedTransaction,
+    };
+  } catch (error) {
+    if (ownsIdempotencyReservation) {
+      await deleteRecurringIdempotencyState(bindings, {
+        network: request.network,
+        walletAddress: request.walletAddress,
+        idempotencyKey,
+      }).catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    await releaseNamedLock(bindings, `${idempotencyRedisKey}:lock`, lockToken).catch(
+      () => undefined,
+    );
+  }
 }
 
 async function executeRecurringOrder(
   bindings: Bindings,
   request: SwapRecurringExecuteRequest,
-) : Promise<SwapRecurringExecuteResponse> {
+): Promise<SwapRecurringExecuteResponse> {
   assertJupiterWriteNetwork(request.network, 'recurring');
+  assertSolanaAddress(request.walletAddress, 'Wallet address is invalid.');
   assertBase64Transaction(
     request.signedTransaction,
     'Signed transaction must be a base64-encoded string.',
   );
 
-  const { payload } = await fetchJupiterJson(
+  const lockToken = await acquireNamedLock(
     bindings,
-    `${readJupiterApiBaseUrl(bindings)}/recurring/v1/execute`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        requestId: request.recurringId,
-        signedTransaction: request.signedTransaction,
-      }),
-    },
-    'Recurring order execution is currently unavailable.',
+    buildRecurringExecuteLockKey(request.network, request.walletAddress, request.recurringId),
   );
-
-  if (!isRecord(payload)) {
+  if (!lockToken) {
     throw new AppError({
-      status: 503,
-      code: 'UPSTREAM_UNAVAILABLE',
-      message: 'Recurring order execution is currently unavailable.',
+      status: 409,
+      code: 'INVALID_REQUEST',
+      message: 'This recurring order is already being submitted.',
       retryable: true,
+      retryAfterMs: 1000,
     });
   }
 
-  const status = readTrimmedString(payload.status);
-  const signature = readTrimmedString(payload.signature);
+  try {
+    const state = await getRecurringOrderState(
+      bindings,
+      request.network,
+      request.walletAddress,
+      request.recurringId,
+    );
+    if (state == null) throw toQuoteExpiredError();
+    if (state.status === 'pending' && state.expiresAt <= Date.now()) {
+      await deleteRecurringOrderState(
+        bindings,
+        request.network,
+        request.walletAddress,
+        request.recurringId,
+      );
+      throw toQuoteExpiredError();
+    }
 
-  if (status === 'Success' && signature) {
-    return {
-      recurringId: request.recurringId,
-      status: 'Success',
-      signature,
+    const signedTransaction = readBoundTransactionDetails({
+      transactionBase64: request.signedTransaction,
+      requiredSignerAddress: request.walletAddress,
+      requiredFeePayerAddress: request.walletAddress,
+      requireSignerSignature: true,
+      label: 'Recurring order',
+    });
+    if (signedTransaction.transactionMessageBase64 !== state.transactionMessageBase64) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed recurring transaction does not match the prepared order.',
+      });
+    }
+    const expectedSignature = signedTransaction.transactionSignature;
+    if (!expectedSignature || !isValidEd25519Signature(expectedSignature)) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed recurring transaction has an invalid transaction signature.',
+      });
+    }
+    if (state.expectedSignature && state.expectedSignature !== expectedSignature) {
+      throw new AppError({
+        status: 400,
+        code: 'INVALID_REQUEST',
+        message: 'The signed recurring transaction does not match the in-progress submission.',
+      });
+    }
+    if (state.status === 'completed' && state.signature && state.completedOrderId) {
+      return {
+        recurringId: request.recurringId,
+        status: 'Success',
+        signature: state.signature,
+        orderId: state.completedOrderId,
+        operation: state.operation,
+      };
+    }
+
+    if (state.status === 'submitting') {
+      const rpcStatus = (
+        await getRpcSignatureStatuses(bindings, {
+          network: request.network,
+          signatures: [expectedSignature],
+        })
+      ).statuses[0];
+      if (rpcStatus?.err != null) {
+        throw new AppError({
+          status: 400,
+          code: 'INVALID_REQUEST',
+          message: 'The submitted recurring transaction failed on-chain.',
+        });
+      }
+      if (
+        rpcStatus?.confirmationStatus === 'confirmed' ||
+        rpcStatus?.confirmationStatus === 'finalized'
+      ) {
+        const reconciled: SwapRecurringExecuteResponse = {
+          recurringId: request.recurringId,
+          status: 'Success',
+          signature: expectedSignature,
+          orderId: state.orderId,
+          operation: state.operation,
+        };
+        await storeRecurringOrderState(bindings, request.recurringId, {
+          ...state,
+          status: 'completed',
+          expectedSignature,
+          signature: expectedSignature,
+          completedOrderId: state.orderId,
+          expiresAt: Date.now() + RECURRING_RESULT_TTL_MS,
+        }).catch(() => undefined);
+        return reconciled;
+      }
+    }
+
+    const submittingState: StoredRecurringOrderState = {
+      ...state,
+      status: 'submitting',
+      expectedSignature,
+      expiresAt: Date.now() + RECURRING_RESULT_TTL_MS,
     };
-  }
+    await storeRecurringOrderState(bindings, request.recurringId, submittingState);
 
-  throw new AppError({
-    status: 400,
-    code: 'INVALID_REQUEST',
-    message: extractProviderMessage(payload) ?? 'Recurring transaction execution failed.',
-  });
+    const { response, payload } = await fetchJupiterJson(
+      bindings,
+      `${readJupiterApiBaseUrl(bindings)}/recurring/v1/execute`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requestId: state.providerRequestId,
+          signedTransaction: request.signedTransaction,
+        }),
+      },
+      'Recurring order execution is currently unavailable.',
+    );
+
+    if (!response.ok || !isRecord(payload)) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'Recurring order execution is currently unavailable.',
+        retryable: true,
+      });
+    }
+
+    const status = readTrimmedString(payload.status);
+    const signature = readTrimmedString(payload.signature);
+    const orderId = readTrimmedString(payload.order);
+
+    if (
+      status === 'Success' &&
+      signature === expectedSignature &&
+      orderId === state.orderId
+    ) {
+      const result: SwapRecurringExecuteResponse = {
+        recurringId: request.recurringId,
+        status: 'Success',
+        signature,
+        orderId,
+        operation: state.operation,
+      };
+      await storeRecurringOrderState(bindings, request.recurringId, {
+        ...submittingState,
+        status: 'completed',
+        expectedSignature,
+        signature,
+        completedOrderId: orderId,
+        expiresAt: Date.now() + RECURRING_RESULT_TTL_MS,
+      }).catch(() => undefined);
+      return result;
+    }
+
+    if (status === 'Success' || signature != null || orderId != null) {
+      throw new AppError({
+        status: 503,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'Recurring execution response could not be bound to the signed transaction.',
+        retryable: true,
+      });
+    }
+
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: extractProviderMessage(payload) ?? 'Recurring transaction execution failed.',
+    });
+  } finally {
+    await releaseNamedLock(
+      bindings,
+      buildRecurringExecuteLockKey(request.network, request.walletAddress, request.recurringId),
+      lockToken,
+    ).catch(() => undefined);
+  }
 }
 
 export {
@@ -1231,13 +2518,22 @@ export {
   executeRecurringOrder,
   executeSwapQuote,
   executeSwapQuoteDetailed,
+  getSwapQuoteContext,
   getSwapPrice,
   getSwapTokens,
+  listRecurringOrders,
+  prepareRecurringOrderCancellation,
+  type RecurringCancelPrepareRequest,
+  type RecurringCancelPrepareResponse,
+  type RecurringOrderListRequest,
+  type RecurringOrderListResponse,
+  type RecurringOrderSummary,
   type SwapExecuteDetailedResponse,
   type SwapExecuteRequest,
   type SwapExecuteResponse,
   type SwapPriceResponse,
   type SwapQuoteRequest,
+  type SwapQuoteContext,
   type SwapQuoteResponse,
   type SwapRecurringCreateRequest,
   type SwapRecurringCreateResponse,

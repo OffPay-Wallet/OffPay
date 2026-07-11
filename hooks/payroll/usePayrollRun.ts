@@ -65,6 +65,7 @@ export function usePayrollRun(params: UsePayrollRunParams): UsePayrollRunResult 
   const setRunStatus = usePayrollStore((state) => state.setRunStatus);
   const setRunCursor = usePayrollStore((state) => state.setRunCursor);
   const updateRow = usePayrollStore((state) => state.updateRow);
+  const claimRowSubmission = usePayrollStore((state) => state.claimRowSubmission);
   const prepareRetryFailedRows = usePayrollStore((state) => state.prepareRetryFailedRows);
   const reconcileInterruptedRows = usePayrollStore((state) => state.reconcileInterruptedRows);
 
@@ -114,6 +115,8 @@ export function usePayrollRun(params: UsePayrollRunParams): UsePayrollRunResult 
           signal: controller.signal,
           hooks: {
             submitRow: submitter,
+            onRowSubmissionStart: (rowId, attemptId, startedAt) =>
+              claimRowSubmission(runId, rowId, { attemptId, startedAt }),
             onRowUpdate: (rowId, patch) => updateRow(runId, rowId, patch),
             onCursorAdvance: (cursor) => setRunCursor(runId, cursor),
           },
@@ -131,7 +134,15 @@ export function usePayrollRun(params: UsePayrollRunParams): UsePayrollRunResult 
         setIsExecuting(false);
       }
     },
-    [runId, walletId, setRunStatus, setRunCursor, updateRow, reconcileInterruptedRows],
+    [
+      runId,
+      walletId,
+      setRunStatus,
+      setRunCursor,
+      updateRow,
+      claimRowSubmission,
+      reconcileInterruptedRows,
+    ],
   );
 
   const execute = useCallback(async () => {

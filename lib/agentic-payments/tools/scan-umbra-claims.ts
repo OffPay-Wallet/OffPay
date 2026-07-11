@@ -1,10 +1,15 @@
+import { Platform } from 'react-native';
+
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
+import { buildAgenticUmbraClaimCandidate } from '@/lib/agentic-payments/umbra-claim-action';
 import { scanUmbraPrivateP2PClaims } from '@/lib/umbra/umbra-execution';
+import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
 import { walletCanSignWithApp } from '@/lib/wallet/wallet-capabilities';
 
 import {
   errorCodeFromUnknown,
+  isExplicitUmbraClaimExecutionRequest,
   isExplicitUmbraClaimScanRequest,
   isNetworkReady,
   readCappedInteger,
@@ -18,10 +23,15 @@ export const scanUmbraClaimsTool: AgenticToolDefinition = {
   schema: {
     name: 'scan_umbra_claims',
     description:
-      'Explicit Umbra-only read. Scans for pending Umbra private P2P claims and returns counts/status only. Does not claim; claims are manual in the app.',
+      'Scans pending Umbra private P2P claims. With action=claim, creates an exact on-device confirmation draft; it never signs without user confirmation. Results expose counts/status only.',
     parameters: {
       type: 'object',
       properties: {
+        action: {
+          type: 'string',
+          enum: ['scan', 'claim'],
+          description: 'Use claim only for an explicit request to claim Umbra funds.',
+        },
         scanMode: {
           type: 'string',
           enum: ['recent', 'range'],
@@ -39,8 +49,24 @@ export const scanUmbraClaimsTool: AgenticToolDefinition = {
       network: context.scope.network,
     });
     if (!scope.ok) return { error: { code: scope.code } };
-    if (!isExplicitUmbraClaimScanRequest(context.userText)) {
-      return { error: { code: 'requires_explicit_umbra_scan_request' } };
+    const requestedAction = readStringArg(call, 'action')?.toLowerCase();
+    if (requestedAction != null && requestedAction !== 'scan' && requestedAction !== 'claim') {
+      return { error: { code: 'invalid_umbra_claim_action' } };
+    }
+    const action = requestedAction === 'claim' ? 'claim' : 'scan';
+    if (
+      action === 'claim'
+        ? !isExplicitUmbraClaimExecutionRequest(context.userText)
+        : !isExplicitUmbraClaimScanRequest(context.userText)
+    ) {
+      return {
+        error: {
+          code:
+            action === 'claim'
+              ? 'requires_explicit_umbra_claim_request'
+              : 'requires_explicit_umbra_scan_request',
+        },
+      };
     }
     if (!isNetworkReady(context)) return { error: { code: 'network_unavailable' } };
     if (context.walletId == null) return { error: { code: 'wallet_locked' } };
@@ -56,9 +82,14 @@ export const scanUmbraClaimsTool: AgenticToolDefinition = {
     if (context.capabilities == null) return { result: { status: 'loading' } };
     if (
       !isOffpayFeatureAvailable(context.capabilities, 'umbra.execution') ||
-      !isOffpayFeatureAvailable(context.capabilities, 'payment.umbraPrivateP2p')
+      !isOffpayFeatureAvailable(context.capabilities, 'payment.umbraPrivateP2p') ||
+      (action === 'claim' &&
+        !isOffpayFeatureAvailable(context.capabilities, 'payment.rpcBroadcast'))
     ) {
       return { error: { code: 'feature_unavailable' } };
+    }
+    if (action === 'claim' && (Platform.OS === 'web' || !isRnZkProverNativeModuleAvailable())) {
+      return { error: { code: 'native_umbra_required' } };
     }
 
     const requestedScanMode = readStringArg(call, 'scanMode');
@@ -98,22 +129,76 @@ export const scanUmbraClaimsTool: AgenticToolDefinition = {
         network: scope.network,
         scanMode,
         recentLeafLimit,
-        pageLimit: 2,
         ...(scanMode === 'range' ? { startInsertionIndex, endInsertionIndex } : {}),
         signal: context.signal,
+        pageLimit: 48,
       });
+      const candidate = buildAgenticUmbraClaimCandidate(result);
+      if (action === 'claim') {
+        if (!candidate.ok) {
+          if (candidate.code === 'no_pending_umbra_claims') {
+            return {
+              result: {
+                status: 'ok',
+                pendingClaimCount: 0,
+                pendingClaimUtxoCount: 0,
+                claimExecution: 'nothing_to_claim',
+                claimToolAvailable: false,
+              },
+            };
+          }
+          return { error: { code: candidate.code } };
+        }
+
+        return {
+          result: {
+            status: 'drafted',
+            pendingClaimCount: candidate.claimCount,
+            pendingClaimUtxoCount: candidate.claimCount,
+            vaultState: result.vaultState ?? null,
+            vaultRegistered: result.vaultRegistered ?? null,
+            vaultCanShield: result.vaultCanShield ?? null,
+            mixerRegistered: result.mixerRegistered ?? null,
+            claimExecution: 'confirmation_required',
+            claimToolAvailable: true,
+            destination: 'umbra_encrypted_balance',
+          },
+          draft: {
+            kind: 'umbra_claim',
+            draft: {
+              walletAddress: scope.walletAddress,
+              network: scope.network,
+              utxoInsertionIndices: candidate.utxoInsertionIndices,
+              claimCount: candidate.claimCount,
+              destination: 'umbra_encrypted_balance',
+            },
+          },
+        };
+      }
+
+      const nativeClaimAvailable =
+        Platform.OS !== 'web' && isRnZkProverNativeModuleAvailable() && candidate.ok;
       return {
         result: {
           status: 'ok',
           pendingClaimCount: result.pendingClaimCount ?? 0,
           pendingClaimUtxoCount: result.pendingClaimUtxoInsertionIndices?.length ?? 0,
-          nextScanStartIndex: result.nextScanStartIndex ?? null,
           vaultState: result.vaultState ?? null,
           vaultRegistered: result.vaultRegistered ?? null,
           vaultCanShield: result.vaultCanShield ?? null,
           mixerRegistered: result.mixerRegistered ?? null,
-          claimExecution: 'manual_only',
-          claimToolAvailable: false,
+          claimExecution: nativeClaimAvailable
+            ? 'confirmation_required'
+            : candidate.ok
+              ? 'native_app_required'
+              : candidate.code === 'no_pending_umbra_claims'
+                ? 'nothing_to_claim'
+                : candidate.code === 'umbra_claim_setup_required'
+                  ? 'setup_required'
+                  : candidate.code === 'umbra_claim_batch_too_large'
+                    ? 'smaller_range_required'
+                    : 'unavailable',
+          claimToolAvailable: nativeClaimAvailable,
         },
       };
     } catch (error) {

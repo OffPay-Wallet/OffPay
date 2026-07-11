@@ -3,6 +3,7 @@ import bs58 from 'bs58';
 import { QueryClient } from '@tanstack/react-query';
 
 import {
+  AGENTIC_TOOL_DEFINITIONS,
   AGENTIC_TOOL_SCHEMAS,
   formatAgenticToolProcessingLabel,
   getAgenticToolMetadata,
@@ -80,6 +81,11 @@ const capabilities: CapabilitiesResponse['capabilities'] = {
     magicBlockIntent: available,
     magicBlockTransfer: available,
   },
+  perps: {
+    markets: available,
+    trade: available,
+    magicBlockExecution: available,
+  },
   payment: {
     privateInitMint: available,
     privateBalance: available,
@@ -130,17 +136,39 @@ const baseContext: AgenticToolRunnerContext = {
   redactions: [],
   userText: 'irrelevant',
   walletImportMethod: 'generated',
+  offeredToolNames: AGENTIC_TOOL_SCHEMAS.map((schema) => schema.name),
 };
 
 describe('runAgenticTools', () => {
   it('keeps core Flash Trade tools inside the model declaration budget', () => {
     const toolNames = AGENTIC_TOOL_SCHEMAS.map((schema) => schema.name);
 
-    expect(AGENTIC_TOOL_SCHEMAS.length).toBeLessThanOrEqual(geminiToolDeclarationBudget);
+    expect(AGENTIC_TOOL_SCHEMAS).toHaveLength(geminiToolDeclarationBudget);
     expect(toolNames).toEqual(expect.arrayContaining([...modelVisibleFlashToolNames]));
     for (const hiddenToolName of modelHiddenFlashToolNames) {
       expect(toolNames).not.toContain(hiddenToolName);
     }
+  });
+
+  it('does not register hidden synthetic Flash analytics handlers', () => {
+    const registeredNames = AGENTIC_TOOL_DEFINITIONS.map((definition) => definition.name);
+
+    for (const hiddenToolName of modelHiddenFlashToolNames) {
+      expect(registeredNames).not.toContain(hiddenToolName);
+    }
+  });
+
+  it('fails closed if a proxy response names a synthetic Flash analytics tool', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-hidden-flash', name: 'flash_get_hedge_suggestions', args: {} }],
+      {
+        ...baseContext,
+        offeredToolNames: ['flash_get_hedge_suggestions'],
+      },
+    );
+
+    expect(run.results[0].error?.code).toBe('unknown_tool');
+    expect(run.drafts).toHaveLength(0);
   });
 
   it('attaches model-facing metadata and refined instructions to tool schemas', () => {
@@ -151,6 +179,18 @@ describe('runAgenticTools', () => {
       (schema) => schema.name === 'list_local_contacts',
     );
     const swapSchema = AGENTIC_TOOL_SCHEMAS.find((schema) => schema.name === 'prepare_swap_quote');
+    const triggerSwapSchema = AGENTIC_TOOL_SCHEMAS.find(
+      (schema) => schema.name === 'prepare_trigger_swap',
+    );
+    const recurringSwapSchema = AGENTIC_TOOL_SCHEMAS.find(
+      (schema) => schema.name === 'prepare_recurring_swap',
+    );
+    const advancedOrderListSchema = AGENTIC_TOOL_SCHEMAS.find(
+      (schema) => schema.name === 'get_advanced_swap_orders',
+    );
+    const advancedOrderCancelSchema = AGENTIC_TOOL_SCHEMAS.find(
+      (schema) => schema.name === 'prepare_advanced_swap_cancel',
+    );
     const rwaSchema = AGENTIC_TOOL_SCHEMAS.find((schema) => schema.name === 'prepare_rwa_trade');
 
     expect(balanceSchema?.xOffpay).toMatchObject({
@@ -171,12 +211,57 @@ describe('runAgenticTools', () => {
       pendingLabel: 'Quoting swap',
     });
     expect(swapSchema?.description).toContain('mainnet only');
+    expect(triggerSwapSchema?.xOffpay).toMatchObject({
+      category: 'swap',
+      networkScope: 'mainnet_only',
+    });
+    expect(recurringSwapSchema?.xOffpay).toMatchObject({
+      category: 'swap',
+      networkScope: 'mainnet_only',
+    });
+    expect(advancedOrderListSchema?.xOffpay).toMatchObject({
+      category: 'swap',
+      networkScope: 'mainnet_only',
+    });
+    expect(advancedOrderCancelSchema?.xOffpay).toMatchObject({
+      category: 'swap',
+      networkScope: 'mainnet_only',
+    });
     expect(rwaSchema?.xOffpay).toMatchObject({
       category: 'rwa_draft',
       networkScope: 'devnet_and_mainnet',
       pendingLabel: 'Quoting RWA trade',
     });
     expect(rwaSchema?.description).toContain('tokenized stock');
+  });
+
+  it('does not expose write tools while backend capabilities are unresolved', () => {
+    const toolNames = getAvailableAgenticModelToolSchemas({
+      network: 'mainnet',
+      walletAddress,
+      walletId: 'wallet-1',
+      walletMode: 'online',
+      canUseNetwork: true,
+      canUseUmbraWallet: true,
+      capabilities: null,
+    }).map((schema) => schema.name);
+
+    expect(toolNames).toContain('get_client_capabilities');
+    expect(toolNames).not.toEqual(
+      expect.arrayContaining([
+        'draft_normal_send',
+        'draft_private_send',
+        'draft_umbra_vault_action',
+        'stage_payroll',
+        'prepare_swap_quote',
+        'prepare_trigger_swap',
+        'prepare_recurring_swap',
+        'get_advanced_swap_orders',
+        'prepare_advanced_swap_cancel',
+        'prepare_rwa_trade',
+        'flash_open_position',
+      ]),
+    );
   });
 
   it('scopes model-visible tools by active network while preserving both-network tools', () => {
@@ -220,6 +305,8 @@ describe('runAgenticTools', () => {
       expect.arrayContaining([
         'get_wallet_balance',
         'prepare_swap_quote',
+        'prepare_trigger_swap',
+        'prepare_recurring_swap',
         'prepare_rwa_trade',
         'flash_get_markets',
         'flash_open_position',
@@ -980,6 +1067,7 @@ describe('runAgenticTools', () => {
         tokenSymbol: 'dUSDC',
       },
     });
+    queryClient.clear();
   });
 
   it('rejects Umbra withdraw drafts that exceed cached vault balance', async () => {
@@ -1019,6 +1107,7 @@ describe('runAgenticTools', () => {
 
     expect(run.drafts).toHaveLength(0);
     expect(run.results[0].error?.code).toBe('amount_exceeds_umbra_vault_balance');
+    queryClient.clear();
   });
 
   it('reports unknown_tool when the model calls a tool not in the catalog', async () => {
@@ -1029,6 +1118,47 @@ describe('runAgenticTools', () => {
 
     expect(run.drafts).toHaveLength(0);
     expect(run.results[0].error?.code).toBe('unknown_tool');
+  });
+
+  it('rejects a registered tool that was not offered for the active turn', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-not-offered', name: 'stage_payroll', args: { source: 'paste' } }],
+      {
+        ...baseContext,
+        offeredToolNames: ['get_wallet_balance'],
+      },
+    );
+
+    expect(run.payrollIntents).toHaveLength(0);
+    expect(run.results[0].error?.code).toBe('tool_not_available');
+    expect(run.writeIntentUsed).toBe(false);
+  });
+
+  it('accepts at most one successful write intent in a tool-call batch', async () => {
+    const run = await runAgenticTools(
+      [
+        { id: 'call-write-1', name: 'stage_payroll', args: { source: 'upload' } },
+        { id: 'call-write-2', name: 'stage_payroll', args: { source: 'paste' } },
+      ],
+      baseContext,
+    );
+
+    expect(run.payrollIntents).toEqual([{ toolCallId: 'call-write-1', source: 'upload' }]);
+    expect(run.results[0].result).toMatchObject({ status: 'opening_payroll_intake' });
+    expect(run.results[1].error?.code).toBe('write_intent_already_created');
+    expect(run.writeIntentUsed).toBe(true);
+  });
+
+  it('rejects write intents after an earlier agent-loop turn already created one', async () => {
+    const run = await runAgenticTools(
+      [{ id: 'call-write-later', name: 'stage_payroll', args: { source: 'paste' } }],
+      baseContext,
+      { allowWriteIntent: false },
+    );
+
+    expect(run.payrollIntents).toHaveLength(0);
+    expect(run.results[0].error?.code).toBe('write_intent_already_created');
+    expect(run.writeIntentUsed).toBe(false);
   });
 
   it('emits a payroll intake intent without exposing payroll data', async () => {

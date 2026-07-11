@@ -87,7 +87,7 @@ describe('buildAgenticToolResultCards', () => {
           pendingClaimCount: 1,
           pendingClaimUtxoCount: 1,
           vaultRegistered: true,
-          claimExecution: 'manual_only',
+          claimExecution: 'confirmation_required',
         },
       },
     ]);

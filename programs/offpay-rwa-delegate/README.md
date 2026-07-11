@@ -1,8 +1,15 @@
 # OffPay RWA Delegate Program
 
-This Anchor program is Phase 4 of the OffPay RWA path. It creates and delegates
-OffPay-owned RWA intent PDAs for MagicBlock Ephemeral Rollups. It does not move
-RWA tokens and does not accelerate arbitrary Jupiter or Token-2022 transfers.
+This is a **devnet-only sandbox**. It creates and delegates OffPay-owned RWA
+intent PDAs for MagicBlock Ephemeral Rollups. Its `settle_sandbox` instruction
+also moves configured classic-SPL sandbox assets between user and vault token
+accounts.
+
+Do not deploy or fund this program on mainnet. Sandbox quote amounts are stored
+from owner-supplied intent arguments and are not authorized by an on-chain
+oracle or independent settlement signer. Real mainnet xStocks are Token-2022
+assets and use the separately verified Jupiter base-chain settlement path; the
+delegate-program mainnet capability remains disabled.
 
 ## Tech
 

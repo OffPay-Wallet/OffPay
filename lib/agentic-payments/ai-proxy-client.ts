@@ -6,14 +6,16 @@ import type {
   AgentProxyErrorEvent,
   AgentTurn,
   AgentTurnRequest,
+  AgentToolResult,
   AiChatCreditStatus,
   VoiceSpeechRequest,
   VoiceSpeechResult,
   VoiceTranscriptionResult,
 } from '@/lib/agentic-payments/types';
+import { projectAgenticToolResultForModel } from '@/lib/agentic-payments/tool-result-projection';
 import {
   buildOffpayAiSessionToken,
-  isOffpayAiSessionTokenConfigured,
+  clearOffpayAiSessionTokenCache,
   OffpayAiSessionTokenUnavailableError,
 } from '@/lib/agentic-payments/session-token';
 import { sanitizeTextForCloudTts } from '@/lib/agentic-payments/voice-privacy';
@@ -116,7 +118,7 @@ export async function sendAgentChat(
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      ...request,
+      ...projectToolResultsForProxy(request),
       stream: false,
     }),
     signal: options.signal,
@@ -171,7 +173,7 @@ export async function sendAgentTurn(
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      ...request,
+      ...projectToolResultsForProxy(request),
       responseMode: 'agent_turn',
       stream: false,
     }),
@@ -236,7 +238,7 @@ export async function streamAgentChat(
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      ...request,
+      ...projectToolResultsForProxy(request),
       stream: true,
     }),
     signal: options.signal,
@@ -273,6 +275,15 @@ export async function streamAgentChat(
       dispatchChatEvent(event, handlers);
     }
   }
+}
+
+function projectToolResultsForProxy<T extends { toolResults?: AgentToolResult[] }>(request: T): T {
+  if (request.toolResults == null) return request;
+
+  return {
+    ...request,
+    toolResults: projectAgenticToolResultForModel(request.toolResults) as AgentToolResult[],
+  };
 }
 
 export async function transcribeAgentVoice(
@@ -382,7 +393,11 @@ export async function speakAgentText(
 
 async function proxyFetch(
   path: string,
-  init: RequestInit & { timeoutMs: number; userTurnId?: string },
+  init: RequestInit & {
+    timeoutMs: number;
+    userTurnId?: string;
+    retrySessionAuth?: boolean;
+  },
 ): Promise<Response> {
   if (!isAgenticPaymentsProxyConfigured()) {
     throw new AgenticPaymentsProxyError({
@@ -393,9 +408,10 @@ async function proxyFetch(
   }
 
   const headers = await buildProxyHeaders(init.headers, init.userTurnId);
+  const { timeoutMs, userTurnId: _userTurnId, retrySessionAuth, ...requestInit } = init;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort('ai proxy timeout'), init.timeoutMs);
+  const timeout = setTimeout(() => controller.abort('ai proxy timeout'), timeoutMs);
   const abortListener = () => controller.abort(init.signal?.reason);
   const startedAt = mark();
   let responseStatus: number | null = null;
@@ -404,7 +420,7 @@ async function proxyFetch(
 
   try {
     const response = await fetch(buildProxyUrl(path), {
-      ...init,
+      ...requestInit,
       headers,
       signal: controller.signal,
     });
@@ -412,6 +428,14 @@ async function proxyFetch(
 
     if (!response.ok) {
       const proxyError = await errorFromResponse(response);
+      if (
+        proxyError.code === 'SESSION_TOKEN_INVALID' &&
+        retrySessionAuth !== false &&
+        init.signal?.aborted !== true
+      ) {
+        clearOffpayAiSessionTokenCache();
+        return proxyFetch(path, { ...init, retrySessionAuth: false });
+      }
       errorCode = proxyError.code;
       throw proxyError;
     }
@@ -452,6 +476,7 @@ async function proxyUploadFile(
     headers: HeadersInit;
     signal?: AbortSignal;
     timeoutMs: number;
+    retrySessionAuth?: boolean;
   },
 ): Promise<{ status: number; body: string; headers: Record<string, string> }> {
   if (!isAgenticPaymentsProxyConfigured()) {
@@ -482,6 +507,10 @@ async function proxyUploadFile(
       signal: controller.signal,
     });
     responseStatus = result.status;
+    if (result.status === 401 && params.retrySessionAuth !== false) {
+      clearOffpayAiSessionTokenCache();
+      return proxyUploadFile(path, { ...params, retrySessionAuth: false });
+    }
     return result;
   } catch (error) {
     if (controller.signal.aborted && params.signal?.aborted !== true) {
@@ -511,19 +540,14 @@ async function proxyUploadFile(
 }
 
 /**
- * If the AI session secret is configured for this build, mint a short-lived
- * signed token and attach it on every proxy request. Build-time configs
- * that don't have the secret skip this; the Worker decides whether to
- * enforce it via `AI_PROXY_REQUIRE_SESSION_TOKEN`.
+ * Fetches a short-lived opaque token from the attested OffPay API and attaches
+ * it to every AI request. No signing secret is shipped in the mobile bundle.
  */
 async function attachSessionTokenHeader(
   headers: HeadersInit | undefined,
 ): Promise<HeadersInit | undefined> {
-  if (!isOffpayAiSessionTokenConfigured()) return headers;
-
   try {
     const session = await buildOffpayAiSessionToken();
-    if (session == null) return headers;
     const merged = new Headers(headers);
     merged.set('x-offpay-ai-session', session.token);
     return merged;

@@ -16,7 +16,44 @@ const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = '#000000';
 const ANDROID_NOTIFICATION_COLOR = '#F7F7F2';
 const ANDROID_PHONE_BUILD_ARCHS = ['armeabi-v7a', 'arm64-v8a'];
 
+function getAppAttestEnvironment(): 'development' | 'production' {
+  return process.env.OFFPAY_APP_ATTEST_ENVIRONMENT?.trim().toLowerCase() === 'development'
+    ? 'development'
+    : 'production';
+}
+
+function readOptionalEnvironmentValue(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value == null || value.length === 0 ? undefined : value;
+}
+
+function assertProductionAttestationBuildConfig(): void {
+  if (process.env.EAS_BUILD_PROFILE !== 'production') return;
+
+  const platform = process.env.EAS_BUILD_PLATFORM;
+  if (platform === 'android') {
+    const projectNumber = readOptionalEnvironmentValue(
+      'EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER',
+    );
+    if (projectNumber == null || !/^\d{6,20}$/.test(projectNumber)) {
+      throw new Error(
+        'Production Android builds require EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER for Play Integrity.',
+      );
+    }
+  }
+
+  if (platform === 'ios') {
+    const teamId = readOptionalEnvironmentValue('OFFPAY_IOS_TEAM_ID');
+    if (teamId == null || !/^[A-Z0-9]{10}$/.test(teamId)) {
+      throw new Error('Production iOS builds require OFFPAY_IOS_TEAM_ID for App Attest.');
+    }
+  }
+}
+
 export default function appConfig(_context: ConfigContext): ExpoConfig {
+  assertProductionAttestationBuildConfig();
+  const appleTeamId = readOptionalEnvironmentValue('OFFPAY_IOS_TEAM_ID');
+
   return {
     name: APP_NAME,
     slug: APP_SLUG,
@@ -32,6 +69,10 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
       supportsTablet: true,
       icon: APP_ICON_PATH,
       bundleIdentifier: IOS_BUNDLE_IDENTIFIER,
+      ...(appleTeamId == null ? {} : { appleTeamId }),
+      entitlements: {
+        'com.apple.developer.devicecheck.appattest-environment': getAppAttestEnvironment(),
+      },
       infoPlist: {
         NSBluetoothAlwaysUsageDescription:
           'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',

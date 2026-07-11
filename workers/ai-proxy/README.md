@@ -41,7 +41,7 @@ npx wrangler secret put AI_PROXY_SESSION_SECRET --config workers/ai-proxy/wrangl
 | `SARVAM_API_KEY`          | Yes         | Primary voice STT and TTS provider                                                                                                                                                                                                                                        |
 | `ELEVENLABS_API_KEY`      | No          | Voice fallback when Sarvam fails and strict privacy gates allow fallback                                                                                                                                                                                                  |
 | `ELEVENLABS_VOICE_ID`     | No          | ElevenLabs TTS fallback voice                                                                                                                                                                                                                                             |
-| `AI_PROXY_SESSION_SECRET` | Conditional | HMAC secret used to verify the `x-offpay-ai-session` token. Required when `AI_PROXY_REQUIRE_SESSION_TOKEN=true`. The same value must be set on the client as `EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET` until a backend-issued token endpoint replaces the pre-shared secret. |
+| `AI_PROXY_SESSION_SECRET` | Yes         | Random 32+ character HMAC secret shared only by the OffPay API issuer and AI proxy verifier. Never expose it through `EXPO_PUBLIC_*`.                                                                                                                                        |
 
 ## Worker Vars
 
@@ -79,7 +79,7 @@ These are non-secret Worker variables. The defaults are already in `wrangler.tom
 | `AI_PROXY_ALLOWED_ORIGINS`                     | empty                                 |
 | `AI_PROXY_RATE_LIMIT_WINDOW_MS`                | `60000`                               |
 | `AI_PROXY_RATE_LIMIT_MAX`                      | `40`                                  |
-| `AI_PROXY_REQUIRE_SESSION_TOKEN`               | `false`                               |
+| `AI_PROXY_REQUIRE_SESSION_TOKEN`               | `true`                                |
 
 `AI_PROXY_ALLOWED_ORIGINS` is only for browser/web clients that send an `Origin` header. Native app requests do not send `Origin`, so this is not a replacement for the planned attestation and rate-limit gate.
 
@@ -123,11 +123,9 @@ EXPO_PUBLIC_OFFPAY_AI_PROXY_URL=https://ai.offpay.app
 EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS=https://ai.offpay.app
 ```
 
-When `AI_PROXY_REQUIRE_SESSION_TOKEN=true` is set on the Worker, the app must also ship the matching shared secret in `EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET`. Until the backend mints session tokens server-side, the client signs them locally with this shared HMAC secret. Both values rotate together.
-
-```sh
-EXPO_PUBLIC_OFFPAY_AI_SESSION_SECRET=<same value set as AI_PROXY_SESSION_SECRET>
-```
+The app obtains a five-minute opaque token from the authenticated
+`POST /api/ai/session` API route. Set the same `AI_PROXY_SESSION_SECRET` on
+both Workers; the app never receives that signing key.
 
 ## Deploy
 

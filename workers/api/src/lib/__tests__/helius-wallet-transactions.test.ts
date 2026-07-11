@@ -82,6 +82,7 @@ function rpcTokenAccountEntry(params: {
   mint: string;
   amount: string;
   decimals: number;
+  uiAmountString?: string;
 }): Record<string, unknown> {
   return {
     pubkey: params.pubkey,
@@ -93,6 +94,9 @@ function rpcTokenAccountEntry(params: {
             tokenAmount: {
               amount: params.amount,
               decimals: params.decimals,
+              ...(params.uiAmountString == null
+                ? {}
+                : { uiAmountString: params.uiAmountString }),
             },
           },
         },
@@ -787,6 +791,66 @@ function createGetTransactionsForAddressMock(
 describe('wallet transaction history (standard Solana RPC)', () => {
   afterEach(() => {
     resetHeliusFetchImplementation();
+  });
+
+  it('uses RPC scaled UI amounts for Token-2022 balances when Wallet API falls back', async () => {
+    const token2022Mint = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
+    const fetchMock = jest.fn(async (input: string, init: RequestInit) => {
+      if (input.startsWith('https://api.helius.xyz/v1/wallet/')) {
+        return new Response(JSON.stringify({ error: 'temporary' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const requestBody =
+        typeof init.body === 'string'
+          ? JSON.parse(init.body)
+          : JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
+      const respond = (request: Record<string, unknown>) => {
+        if (request.method === 'getBalance') {
+          return { jsonrpc: '2.0', id: request.id, result: { value: 1_000_000_000 } };
+        }
+        if (request.method === 'getTokenAccountsByOwner') {
+          const params = Array.isArray(request.params) ? request.params : [];
+          const filter = (params[1] ?? {}) as Record<string, unknown>;
+          const isToken2022 = String(filter.programId ?? '').startsWith('TokenzQ');
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              value: isToken2022
+                ? [
+                    rpcTokenAccountEntry({
+                      pubkey: TOKEN_ACCOUNT,
+                      mint: token2022Mint,
+                      amount: '10000000',
+                      decimals: 6,
+                      uiAmountString: '20',
+                    }),
+                  ]
+                : [],
+            },
+          };
+        }
+        if (request.method === 'getAssetBatch') {
+          return { jsonrpc: '2.0', id: request.id, result: [] };
+        }
+        throw new Error(`Unexpected RPC method: ${String(request.method)}`);
+      };
+      return jsonResponse(
+        Array.isArray(requestBody) ? requestBody.map(respond) : respond(requestBody),
+      );
+    });
+
+    setHeliusFetchImplementation(fetchMock);
+    const response = await getWalletBalance(bindings, {
+      address: WALLET,
+      network: 'mainnet',
+      useCache: false,
+    });
+
+    expect(response.tokens.find((token) => token.mint === token2022Mint)?.balance).toBe('20');
   });
 
   it('labels devnet RWA sandbox balances from the configured catalog', async () => {
