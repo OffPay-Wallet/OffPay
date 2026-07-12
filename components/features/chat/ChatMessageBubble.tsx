@@ -17,6 +17,7 @@ import {
   type PayrollOutcomeAnnouncement,
 } from '@/components/features/payroll/PayrollChatController';
 import { useAgentThinkingPhrase } from '@/hooks/agentic-chat/useAgentThinkingPhrase';
+import { humanizeAssistantTextForDisplay } from '@/lib/agentic-payments/assistant-text';
 
 import type {
   AgenticChatAction,
@@ -111,7 +112,10 @@ function ChatMessageBubbleComponent({
   onAnnouncePayrollOutcome,
 }: ChatMessageBubbleProps): React.JSX.Element | null {
   const fromUser = message.role === 'user';
-  const hasText = message.text.trim().length > 0;
+  const visibleMessageText = fromUser
+    ? message.text
+    : humanizeAssistantTextForDisplay(message.text);
+  const hasText = visibleMessageText.trim().length > 0;
   const agentPending = !fromUser && message.pending === true;
   const showThinkingOnly = agentPending && !hasText;
   const showStreamRow = agentPending && hasText;
@@ -137,7 +141,7 @@ function ChatMessageBubbleComponent({
         style={[styles.messageRow, styles.messageRowUser]}
       >
         <ChatBubble variant="user">
-          <MarkdownText text={message.text} variant="user" />
+          <MarkdownText text={visibleMessageText} variant="user" />
         </ChatBubble>
       </Animated.View>
     );
@@ -165,7 +169,7 @@ function ChatMessageBubbleComponent({
         style={[styles.messageRow, styles.messageRowAgent]}
       >
         <ChatBubble variant="agent">
-          <AgentStreamContent text={message.text} />
+          <AgentStreamContent text={visibleMessageText} />
         </ChatBubble>
       </Animated.View>
     );
@@ -187,7 +191,7 @@ function ChatMessageBubbleComponent({
       <View style={styles.agentMessageStack}>
         {hasText ? (
           <ChatBubble variant="agent">
-            <MarkdownText text={message.text} variant="agent" />
+            <MarkdownText text={visibleMessageText} variant="agent" />
           </ChatBubble>
         ) : null}
         {hasToolCards

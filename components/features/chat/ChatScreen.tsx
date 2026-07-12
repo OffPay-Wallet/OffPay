@@ -595,7 +595,7 @@ export function ChatScreen(): React.JSX.Element {
       const controller = new AbortController();
       payrollReplyControllersRef.current.add(controller);
       try {
-        const reply = await generatePayrollAgentReply(event, { signal: controller.signal });
+        const reply = await generatePayrollAgentReply(event);
         await revealAssistantMessageText(messageId, reply, { signal: controller.signal });
       } catch {
         if (!controller.signal.aborted) {

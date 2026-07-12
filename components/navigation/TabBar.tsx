@@ -340,6 +340,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   // every primary tab should render in its inactive style.
   const hasPrimaryActiveRoute = visualActivePrimaryIndex >= 0;
   const optimisticActivePrimaryIndex = useSharedValue(visualActivePrimaryIndex);
+  // Mirror the committed visual index in a ref so async callbacks (which run a
+  // frame or more after a press) settle against the *current* selection rather
+  // than a value captured in a stale closure at press time.
+  const visualActivePrimaryIndexRef = useRef(visualActivePrimaryIndex);
+  visualActivePrimaryIndexRef.current = visualActivePrimaryIndex;
 
   const barVisibility = useDerivedValue(
     () => withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING),
@@ -530,10 +535,15 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
 
   const settleCancelledPrimaryTabPress = useCallback((): void => {
     runAfterNavigationFrame(() => {
+      // A navigation is still in flight — the commit effect will settle the
+      // pill onto the target tab, so leave the optimistic value alone.
       if (pendingTabOriginalIndexRef.current != null) return;
-      optimisticActivePrimaryIndex.value = visualActivePrimaryIndex;
+      // Read the latest committed selection (via ref) instead of a stale
+      // closure capture, so a completed navigation doesn't snap the pill back
+      // to the previously active tab.
+      optimisticActivePrimaryIndex.value = visualActivePrimaryIndexRef.current;
     });
-  }, [optimisticActivePrimaryIndex, visualActivePrimaryIndex]);
+  }, [optimisticActivePrimaryIndex]);
 
   const recordTabSwitchAfterNavigation = useCallback(
     (fromIndex: number, fromRoute: string): void => {

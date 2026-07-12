@@ -18,7 +18,7 @@ import {
   useState,
   type ComponentProps,
 } from 'react';
-import { Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useIsFocused } from 'expo-router/react-navigation';
@@ -1253,7 +1253,6 @@ export function HomeScreenContent(): React.JSX.Element {
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={Platform.OS === 'android'}
       >
         <View style={styles.homeContentFrame}>
           <HomeHeader

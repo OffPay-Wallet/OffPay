@@ -75,36 +75,6 @@ export const confirmationStyles = StyleSheet.create({
   routeChoiceBlock: {
     gap: spacing.xs,
   },
-  routeChoice: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    padding: 4,
-    borderRadius: radii.full,
-    backgroundColor: colors.surface.solidControl,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border.subtle,
-  },
-  routeChoiceOption: {
-    flex: 1,
-    minHeight: 34,
-    borderRadius: radii.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xs,
-  },
-  routeChoiceOptionSelected: {
-    backgroundColor: colors.brand.whiteStream,
-  },
-  routeChoiceOptionPressed: {
-    backgroundColor: colors.glass.clearFill,
-  },
-  routeChoiceText: {
-    fontFamily: fontFamily.uiSemiBold,
-    fontSize: 12,
-  },
-  routeChoiceTextSelected: {
-    color: colors.brand.deepShadow,
-  },
   confirmationActions: {
     flexDirection: 'row',
     gap: spacing.sm,

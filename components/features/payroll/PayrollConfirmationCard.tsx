@@ -10,6 +10,10 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import {
+  AnimatedSegmentedControl,
+  type AnimatedSegmentedOption,
+} from '@/components/ui/AnimatedSegmentedControl';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -37,10 +41,14 @@ interface PayrollConfirmationCardProps {
   setupBusy?: boolean;
 }
 
-const ROUTE_POLICY_OPTIONS: { policy: PayrollRoutePolicy; label: string }[] = [
-  { policy: 'private_auto', label: 'Auto' },
-  { policy: 'umbra_only', label: 'Umbra' },
-  { policy: 'magicblock_only', label: 'MagicBlock' },
+const ROUTE_POLICY_OPTIONS: readonly AnimatedSegmentedOption<PayrollRoutePolicy>[] = [
+  { value: 'private_auto', label: 'Auto', accessibilityLabel: 'Use Auto batch send route' },
+  { value: 'umbra_only', label: 'Umbra', accessibilityLabel: 'Use Umbra batch send route' },
+  {
+    value: 'magicblock_only',
+    label: 'MagicBlock',
+    accessibilityLabel: 'Use MagicBlock batch send route',
+  },
 ];
 
 function Stat({
@@ -106,7 +114,7 @@ export function PayrollConfirmationCard({
     busy,
   });
   const routePolicyLabel =
-    ROUTE_POLICY_OPTIONS.find((option) => option.policy === summary.routePolicy)?.label ??
+    ROUTE_POLICY_OPTIONS.find((option) => option.value === summary.routePolicy)?.label ??
     payrollRoutePolicyCopy(summary.routePolicy);
 
   return (
@@ -139,39 +147,12 @@ export function PayrollConfirmationCard({
 
       <View style={styles.routePickerBlock}>
         <Text style={styles.statLabel}>Route</Text>
-        <View style={styles.routePicker}>
-          {ROUTE_POLICY_OPTIONS.map((option) => {
-            const selected = summary.routePolicy === option.policy;
-            return (
-              <Pressable
-                key={option.policy}
-                onPress={() => onRoutePolicyChange?.(option.policy)}
-                disabled={busy || selected || onRoutePolicyChange == null}
-                style={({ pressed }) => [
-                  styles.routePickerOption,
-                  selected && styles.routePickerOptionSelected,
-                  pressed && !selected && styles.routePickerOptionPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={`Use ${option.label} batch send route`}
-                accessibilityState={{ selected, disabled: busy || onRoutePolicyChange == null }}
-              >
-                <Text
-                  style={[
-                    styles.routePickerText,
-                    selected && styles.routePickerTextSelected,
-                    busy && styles.routePickerTextDisabled,
-                  ]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.82}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <AnimatedSegmentedControl
+          options={ROUTE_POLICY_OPTIONS}
+          value={summary.routePolicy}
+          onChange={onRoutePolicyChange}
+          disabled={busy}
+        />
       </View>
 
       <View style={styles.badgeRow}>

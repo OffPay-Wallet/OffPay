@@ -29,7 +29,10 @@ import {
   type AgenticToolDraft,
   type AgenticToolRunnerContext,
 } from '@/lib/agentic-payments/agent-tools';
-import { sanitizeAssistantText } from '@/lib/agentic-payments/assistant-text';
+import {
+  buildAgenticDraftReadyText,
+  sanitizeAssistantText,
+} from '@/lib/agentic-payments/assistant-text';
 import { hydrateAssistantToolResultPlaceholders } from '@/lib/agentic-payments/assistant-tool-placeholders';
 import type { AgenticKnownWallet } from '@/lib/agentic-payments/private-send-intent';
 import { buildAgenticToolResultCards } from '@/lib/agentic-payments/tool-result-cards';
@@ -62,6 +65,7 @@ import { createAgenticId, getProxyErrorMessage } from '@/components/features/cha
 import { revealAssistantMessageText } from './revealAssistantMessageText';
 
 const MAX_TOOL_TURNS = 6;
+const EMPTY_ASSISTANT_REPLY = 'I could not prepare a clear response. Please try again.';
 
 interface UseAgenticAgentSubmitParams {
   scope: AgenticChatScope;
@@ -407,7 +411,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       );
       const cleaned =
         sanitizeAssistantText(textWithToolValues, attachedActionId != null) ||
-        textWithToolValues.trim();
+        EMPTY_ASSISTANT_REPLY;
 
       // Start voice synthesis immediately in parallel with text reveal
       if (cleaned.length > 0) {
@@ -478,6 +482,22 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       0,
       3,
     );
+
+    if (attachedActionId != null) {
+      const action = useAgenticChatStore
+        .getState()
+        .actions.find((candidate) => candidate.id === attachedActionId);
+      const cleaned = buildAgenticDraftReadyText(action?.kind);
+      params.onReplyText?.(cleaned);
+      await revealAssistantMessageText(params.assistantMessageId, cleaned, {
+        signal: params.controller.signal,
+        patch: buildAssistantRevealPatch({
+          actionId: attachedActionId,
+          toolCards: attachedToolCards,
+        }),
+      });
+      return;
+    }
 
     if (run.payrollIntents.length > 0 && params.onPayrollIntent != null) {
       params.onPayrollIntent(run.payrollIntents[0].source);

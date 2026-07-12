@@ -15,6 +15,8 @@
  * unit-tested without pulling in React Native.
  */
 
+import type { AgenticChatAction } from '@/store/agenticChatStore';
+
 const SCRATCHPAD_LINE_PATTERNS: readonly RegExp[] = [
   // Reasoning / plan section headers.
   /^(?:tool[\s_-]*call|function[\s_-]*call|reasoning|thought|thinking|analysis|plan|step\s*\d+|chain[\s_-]*of[\s_-]*thought)\s*[:.\-—]/i,
@@ -55,6 +57,9 @@ const ANSWER_MARKER_PATTERN =
 
 const MAX_VISIBLE_ASSISTANT_CHARS = 480;
 const MIN_TEXT_WITH_DRAFT_CHARS = 36;
+const VISIBLE_RECIPIENT_PLACEHOLDER_PATTERN = /\[(?:ADDRESS|EVM_ADDRESS|SNS)(?:_\d+)?\]/gi;
+const VISIBLE_ROUTE_EXECUTION_DETAIL_PATTERN =
+  /\s+(?:using|via|through)\s+(?:the\s+)?(?:normal|public|private|magic\s*block|magicblock|umbra)\s+route\b/gi;
 const ACTIVITY_ITEM_START_PATTERN =
   /\b(Sent|Received|Swapped|Bought|Sold|Claimed|Deposited|Withdrew|Paid|Queued|Submitted)\b/g;
 
@@ -94,8 +99,44 @@ function formatDenseActivitySummary(text: string): string {
   return intro.length > 0 ? `${intro}\n${formattedBody}` : formattedBody;
 }
 
+export function humanizeAssistantTextForDisplay(text: string): string {
+  return text
+    .replace(VISIBLE_ROUTE_EXECUTION_DETAIL_PATTERN, '')
+    .replace(VISIBLE_RECIPIENT_PLACEHOLDER_PATTERN, 'the recipient')
+    .replace(/\s+([.,!?])/g, '$1');
+}
+
 function formatAssistantTextForChat(text: string): string {
-  return formatDenseActivitySummary(normalizeMarkdownListMarkers(text));
+  return humanizeAssistantTextForDisplay(
+    formatDenseActivitySummary(normalizeMarkdownListMarkers(text)),
+  );
+}
+
+export function buildAgenticDraftReadyText(
+  kind: AgenticChatAction['kind'] | null | undefined,
+): string {
+  if (kind === 'normal_send' || kind === 'private_send') {
+    return 'Your transfer is ready. Review the recipient and amount below, then confirm.';
+  }
+  if (kind === 'payroll') {
+    return 'Your batch send is ready. Review the recipients and totals below, then confirm.';
+  }
+  if (
+    kind === 'swap' ||
+    kind === 'swap_trigger' ||
+    kind === 'swap_recurring' ||
+    kind === 'swap_trigger_cancel' ||
+    kind === 'swap_recurring_cancel'
+  ) {
+    return 'Your swap is ready. Review the details below, then confirm.';
+  }
+  if (kind === 'rwa_trade' || kind === 'flash_position' || kind === 'flash_deposit') {
+    return 'Your trade is ready. Review the details below, then confirm.';
+  }
+  if (kind === 'umbra_vault' || kind === 'umbra_claim') {
+    return 'Your Umbra action is ready. Review the details below, then confirm.';
+  }
+  return 'Your action is ready. Review the details below, then confirm.';
 }
 
 /**

@@ -1,4 +1,4 @@
-import { shouldRunLoopingProgress } from '@/hooks/useLoopingProgress';
+import { shouldRunLoopingProgress } from '@/hooks/looping-progress-policy';
 
 describe('looping progress animation policy', () => {
   it('runs while active when reduced motion is disabled', () => {

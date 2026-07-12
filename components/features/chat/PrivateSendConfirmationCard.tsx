@@ -8,6 +8,10 @@ import React, { useCallback } from 'react';
 import { Pressable, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 
+import {
+  AnimatedSegmentedControl,
+  type AnimatedSegmentedOption,
+} from '@/components/ui/AnimatedSegmentedControl';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
@@ -32,10 +36,10 @@ interface PrivateSendConfirmationCardProps {
   ) => void;
 }
 
-const ROUTE_OPTIONS: { route: AgenticPrivateSendAction['route']; label: string }[] = [
-  { route: 'normal', label: 'Normal' },
-  { route: 'umbra', label: 'Umbra' },
-  { route: 'magicblock', label: 'MagicBlock' },
+const ROUTE_OPTIONS: readonly AnimatedSegmentedOption<AgenticPrivateSendAction['route']>[] = [
+  { value: 'normal', label: 'Normal', accessibilityLabel: 'Use Normal route' },
+  { value: 'umbra', label: 'Umbra', accessibilityLabel: 'Use Umbra route' },
+  { value: 'magicblock', label: 'MagicBlock', accessibilityLabel: 'Use MagicBlock route' },
 ];
 
 function routeLabel(route: AgenticPrivateSendAction['route']): string {
@@ -91,36 +95,12 @@ export function PrivateSendConfirmationCard({
             <Text variant="small" color={colors.text.tertiary} style={styles.confirmationRowLabel}>
               Route
             </Text>
-            <View style={styles.routeChoice}>
-              {ROUTE_OPTIONS.map((option) => {
-                const selected = action.route === option.route;
-                return (
-                  <Pressable
-                    key={option.route}
-                    onPress={() => onRouteChange(action, option.route)}
-                    disabled={selected || submitting}
-                    style={({ pressed }) => [
-                      styles.routeChoiceOption,
-                      selected && styles.routeChoiceOptionSelected,
-                      pressed && !selected && styles.routeChoiceOptionPressed,
-                      submitting && styles.actionButtonDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Use ${option.label} route`}
-                    accessibilityState={{ selected, disabled: selected || submitting }}
-                  >
-                    <Text
-                      variant="small"
-                      color={selected ? colors.text.onAccent : colors.text.secondary}
-                      style={[styles.routeChoiceText, selected && styles.routeChoiceTextSelected]}
-                      numberOfLines={1}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <AnimatedSegmentedControl
+              options={ROUTE_OPTIONS}
+              value={action.route}
+              onChange={(route) => onRouteChange(action, route)}
+              disabled={submitting}
+            />
           </View>
         ) : (
           <ConfirmationRow label="Route" value={routeLabel(action.route)} />

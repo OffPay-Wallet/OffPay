@@ -213,44 +213,6 @@ export const payrollStyles = StyleSheet.create({
   routePickerBlock: {
     gap: spacing.xs,
   },
-  routePicker: {
-    minHeight: 40,
-    borderRadius: 22,
-    borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.backgroundTint,
-    padding: 3,
-    flexDirection: 'row',
-    gap: 3,
-  },
-  routePickerOption: {
-    flex: 1,
-    minHeight: 34,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  routePickerOptionSelected: {
-    backgroundColor: colors.brand.whiteStream,
-  },
-  routePickerOptionPressed: {
-    backgroundColor: colors.surface.pressed,
-  },
-  routePickerText: {
-    fontFamily: fontFamily.uiSemiBold,
-    fontSize: 11,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  routePickerTextSelected: {
-    color: colors.text.onAccent,
-  },
-  routePickerTextDisabled: {
-    opacity: 0.64,
-  },
   warningText: {
     fontFamily: fontFamily.ui,
     fontSize: 13,

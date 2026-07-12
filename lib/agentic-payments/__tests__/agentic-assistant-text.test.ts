@@ -1,4 +1,9 @@
-import { sanitizeAssistantText } from '@/lib/agentic-payments/assistant-text';
+import {
+  buildAgenticDraftReadyText,
+  humanizeAssistantTextForDisplay,
+  sanitizeAssistantText,
+} from '@/lib/agentic-payments/assistant-text';
+import { generatePayrollAgentReply } from '@/lib/agentic-payments/payroll-agent-reply';
 
 describe('sanitizeAssistantText', () => {
   it('drops chain-of-thought scratchpad before the visible answer', () => {
@@ -68,6 +73,46 @@ describe('sanitizeAssistantText', () => {
     const raw = 'Tell me which token to send: USDC or USDT.';
 
     expect(sanitizeAssistantText(raw, false)).toBe(raw);
+  });
+
+  it('never exposes redacted recipient placeholders in visible copy', () => {
+    expect(
+      sanitizeAssistantText('Your draft is ready to send 1 USDC to [ADDRESS_1].', true),
+    ).toBe('Your draft is ready to send 1 USDC to the recipient.');
+  });
+
+  it('cleans legacy draft messages already stored in chat history', () => {
+    expect(
+      humanizeAssistantTextForDisplay(
+        'Your draft is ready to send 1 USDC to [ADDRESS_1] using the normal route.',
+      ),
+    ).toBe('Your draft is ready to send 1 USDC to the recipient.');
+  });
+
+  it('uses recipient-safe deterministic copy for single and batch drafts', () => {
+    const single = buildAgenticDraftReadyText('normal_send');
+    const batch = buildAgenticDraftReadyText('payroll');
+
+    expect(single).toContain('the recipient');
+    expect(single).not.toMatch(/address|route|tool/i);
+    expect(batch).toContain('the recipients');
+    expect(batch).not.toMatch(/address|route|tool/i);
+  });
+
+  it('uses singular and plural recipient copy for batch sends without backend fields', async () => {
+    const base = {
+      kind: 'staged' as const,
+      blockedCount: 0,
+      network: 'devnet' as const,
+      routePolicy: 'private_auto' as const,
+      requiresUmbraSetup: false,
+    };
+    const single = await generatePayrollAgentReply({ ...base, recipientCount: 1 });
+    const batch = await generatePayrollAgentReply({ ...base, recipientCount: 3 });
+
+    expect(single).toContain('1 recipient.');
+    expect(batch).toContain('3 recipients.');
+    expect(`${single} ${batch}`).not.toMatch(/routePolicy|private_auto|JSON|tool/i);
   });
 
   it('caps runaway output at the visible char limit', () => {

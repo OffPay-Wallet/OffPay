@@ -10,15 +10,13 @@ import {
 
 import type { EasingFunction, SharedValue } from 'react-native-reanimated';
 
+import { shouldRunLoopingProgress } from '@/hooks/looping-progress-policy';
+
 interface UseLoopingProgressOptions {
   active?: boolean;
   durationMs: number;
   easing?: EasingFunction;
   reverse?: boolean;
-}
-
-export function shouldRunLoopingProgress(active: boolean, reduceMotion: boolean): boolean {
-  return active && !reduceMotion;
 }
 
 /**
