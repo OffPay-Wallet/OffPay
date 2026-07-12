@@ -59,6 +59,7 @@ import {
 import { getAppLockSuppressionRemainingMs } from '@/lib/wallet/app-lock-suppression';
 import { AppProviders } from '@/providers';
 import { hydrateAppStore, useAppStore } from '@/store/app';
+import { hydrateContactsStore } from '@/store/contactsStore';
 import { useWalletStore } from '@/store/walletStore';
 import { hydrateCriticalPreferencesFallback, usePreferencesStore } from '@/store/preferencesStore';
 import { waitForMmkvEncryption } from '@/lib/cache/mmkv-storage';
@@ -184,7 +185,7 @@ export default function RootLayout(): React.JSX.Element | null {
   }, []);
 
   // Wait for MMKV encryption to be applied before reading persisted
-  // app-state/preferences. These stores use manual hydration so
+  // app-state/preferences/contacts. These stores use manual hydration so
   // default onboarding or network values never leak into routing or
   // data hooks before the previous session's persisted values are
   // readable.
@@ -201,13 +202,10 @@ export default function RootLayout(): React.JSX.Element | null {
       try {
         await waitForMmkvEncryption();
 
+        await Promise.all([hydrateAppStore(), hydrateContactsStore()]);
+
         if (!cancelled) {
           setMmkvReady(true);
-        }
-
-        await hydrateAppStore();
-
-        if (!cancelled) {
           setAppStoreHydrated(true);
         }
 

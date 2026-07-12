@@ -6,6 +6,7 @@ import { fontFamily } from '@/constants/typography';
 
 export const confirmationStyles = StyleSheet.create({
   confirmationCard: {
+    width: '100%',
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -45,20 +46,34 @@ export const confirmationStyles = StyleSheet.create({
     gap: spacing.lg,
     minHeight: 30,
   },
+  confirmationRowCompact: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 2,
+  },
   confirmationRowLabel: {
     width: 82,
     flexShrink: 0,
+  },
+  confirmationRowLabelCompact: {
+    width: 'auto',
   },
   confirmationRowValue: {
     flex: 1,
     textAlign: 'right',
     fontFamily: fontFamily.uiSemiBold,
   },
+  confirmationRowValueCompact: {
+    textAlign: 'left',
+  },
   confirmationRowValueLink: {
     textDecorationLine: 'underline',
   },
   confirmationRowLink: {
     flex: 1,
+  },
+  confirmationRowLinkCompact: {
+    alignSelf: 'stretch',
   },
   confirmationRowLinkPressed: {
     opacity: 0.6,
@@ -77,10 +92,12 @@ export const confirmationStyles = StyleSheet.create({
   },
   confirmationActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   primaryActionButton: {
     flex: 1,
+    minWidth: 120,
     minHeight: 46,
     borderRadius: 23,
     alignItems: 'center',
@@ -90,6 +107,7 @@ export const confirmationStyles = StyleSheet.create({
   },
   secondaryActionButton: {
     flex: 1,
+    minWidth: 120,
     minHeight: 46,
     borderRadius: 23,
     alignItems: 'center',

@@ -6,6 +6,7 @@ describe('agent turn prompt', () => {
     expect(OFFPAY_AGENT_TURN_PROMPT).toContain('matching local draft tool returned a draft');
     expect(OFFPAY_AGENT_TURN_PROMPT).toContain('after a read or lookup tool returns');
     expect(OFFPAY_AGENT_TURN_PROMPT).toContain('Never repeat an identical tool call');
+    expect(OFFPAY_AGENT_TURN_PROMPT).toContain('Use recipient "self" only');
   });
 
   it('keeps RWA buy and sell phrasing routed to RWA tools', () => {

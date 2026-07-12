@@ -4,6 +4,7 @@ import { useWindowDimensions } from 'react-native';
 
 import { colors } from '@/constants/colors';
 
+import { isCompactChatCardLayout } from './constants';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 const ACTION_CARD_GRADIENT_COLORS = [
@@ -18,7 +19,7 @@ export function ConfirmationCardSurface({
   children: React.ReactNode;
 }): React.JSX.Element {
   const { width: windowWidth, fontScale } = useWindowDimensions();
-  const compact = windowWidth < 390 || fontScale > 1.05;
+  const compact = isCompactChatCardLayout(windowWidth, fontScale);
 
   return (
     <LinearGradient

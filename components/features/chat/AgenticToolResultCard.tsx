@@ -8,6 +8,7 @@ import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
 
+import { isCompactChatCardLayout } from './constants';
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 
 import type {
@@ -28,6 +29,8 @@ function colorForTone(tone: AgenticToolCardTone | undefined): string {
 }
 
 export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): React.JSX.Element {
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const compact = isCompactChatCardLayout(windowWidth, fontScale);
   const rows = card.rows ?? [];
   const items = card.items ?? [];
 
@@ -51,7 +54,7 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
             <Text
               variant="small"
               color={colorForTone(card.tone)}
-              numberOfLines={1}
+              numberOfLines={compact ? 2 : 1}
               maxFontSizeMultiplier={1.15}
             >
               {card.subtitle}
@@ -63,11 +66,14 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
       {rows.length > 0 ? (
         <View style={styles.rows}>
           {rows.map((row) => (
-            <View key={`${row.label}:${row.value}`} style={styles.row}>
+            <View
+              key={`${row.label}:${row.value}`}
+              style={[styles.row, compact && styles.rowCompact]}
+            >
               <Text
                 variant="small"
                 color={colors.text.tertiary}
-                style={styles.rowLabel}
+                style={[styles.rowLabel, compact && styles.rowLabelCompact]}
                 maxFontSizeMultiplier={1.15}
               >
                 {row.label}
@@ -75,7 +81,11 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
               <Text
                 variant="captionBold"
                 color={colorForTone(row.tone)}
-                style={[styles.rowValue, row.mono === true && styles.mono]}
+                style={[
+                  styles.rowValue,
+                  compact && styles.rowValueCompact,
+                  row.mono === true && styles.mono,
+                ]}
                 numberOfLines={1}
                 ellipsizeMode="middle"
                 adjustsFontSizeToFit
@@ -99,7 +109,7 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
                   variant="captionBold"
                   color={colorForTone(item.tone)}
                   style={styles.itemTitle}
-                  numberOfLines={1}
+                  numberOfLines={compact ? 2 : 1}
                   maxFontSizeMultiplier={1.15}
                 >
                   {item.title}
@@ -109,7 +119,7 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
                     variant="small"
                     color={colors.text.tertiary}
                     style={styles.itemDetail}
-                    numberOfLines={1}
+                    numberOfLines={compact ? 2 : 1}
                     maxFontSizeMultiplier={1.15}
                   >
                     {item.detail}
@@ -141,7 +151,7 @@ function RwaAssetPreviewToolCard({
   asset: AgenticRwaAssetCardPreview;
 }): React.JSX.Element {
   const { width: windowWidth, fontScale } = useWindowDimensions();
-  const compact = windowWidth < 390 || fontScale > 1.05;
+  const compact = isCompactChatCardLayout(windowWidth, fontScale);
   const detail = [
     asset.categoryLabel,
     asset.underlyingSymbol ?? asset.symbol,
@@ -272,15 +282,28 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
   },
+  rowCompact: {
+    alignItems: 'stretch',
+    gap: 2,
+    flexDirection: 'column',
+  },
   rowLabel: {
     flex: 1,
     minWidth: 0,
+  },
+  rowLabelCompact: {
+    flex: 0,
   },
   rowValue: {
     maxWidth: '62%',
     flexShrink: 1,
     textAlign: 'right',
     fontFamily: fontFamily.uiSemiBold,
+  },
+  rowValueCompact: {
+    alignSelf: 'stretch',
+    maxWidth: '100%',
+    textAlign: 'left',
   },
   mono: {
     fontFamily: fontFamily.mono,

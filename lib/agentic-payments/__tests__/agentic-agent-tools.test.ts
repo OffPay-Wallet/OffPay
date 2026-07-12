@@ -563,6 +563,53 @@ describe('runAgenticTools', () => {
     expect(JSON.stringify(run.results[0].result)).not.toContain(contactRecipient);
   });
 
+  it('uses the latest contact instead of a stale active-wallet recipient', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-fresh-contact-draft',
+          name: 'draft_normal_send',
+          args: { amount: '3', token: 'USDC', recipient: walletAddress },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          { name: 'Karan', address: walletAddress, active: true, source: 'wallet' },
+          { name: 'Karan', address: contactRecipient, active: false, source: 'contact' },
+        ],
+        userText: 'send 1 USDC to my own wallet\nsend 3 USDC to Karan',
+      },
+    );
+
+    expect(run.drafts[0]).toMatchObject({
+      kind: 'normal_send',
+      draft: { recipient: contactRecipient },
+    });
+  });
+
+  it('does not treat an active-wallet owner name as an explicit self-send', async () => {
+    const run = await runAgenticTools(
+      [
+        {
+          id: 'call-owner-name-draft',
+          name: 'draft_normal_send',
+          args: { amount: '3', token: 'USDC', recipient: 'Karan' },
+        },
+      ],
+      {
+        ...baseContext,
+        knownWallets: [
+          { name: 'Karan', address: walletAddress, active: true, source: 'wallet' },
+        ],
+        userText: 'send 3 USDC to Karan',
+      },
+    );
+
+    expect(run.drafts).toHaveLength(0);
+    expect(run.results[0].error?.code).toBe('recipient_missing');
+  });
+
   it('builds a MagicBlock draft when the model passes a saved contact name', async () => {
     const run = await runAgenticTools(
       [

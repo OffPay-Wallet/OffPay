@@ -27,6 +27,9 @@ export const messageStyles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingRight: CHAT_BUBBLE_OPPOSITE_GUTTER,
   },
+  messageRowAgentCard: {
+    paddingRight: 0,
+  },
   chatBubble: {
     maxWidth: '100%',
     flexShrink: 1,
@@ -92,17 +95,18 @@ export const messageStyles = StyleSheet.create({
     color: colors.brand.whiteStream,
   },
   agentMessageStack: {
-    maxWidth: '100%',
-    flexShrink: 1,
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'flex-start',
   },
   actionCardWrap: {
     marginTop: spacing.sm,
-    maxWidth: '100%',
-    flexShrink: 1,
+    width: '100%',
+    minWidth: 0,
   },
   toolCardWrap: {
     marginTop: spacing.sm,
-    maxWidth: '100%',
-    flexShrink: 1,
+    width: '100%',
+    minWidth: 0,
   },
 });

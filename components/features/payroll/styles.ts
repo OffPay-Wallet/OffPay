@@ -6,6 +6,8 @@ import { fontFamily } from '@/constants/typography';
 
 export const payrollStyles = StyleSheet.create({
   card: {
+    width: '100%',
+    minWidth: 0,
     borderRadius: spacing.lg,
     borderCurve: 'continuous',
     backgroundColor: colors.surface.cardElevated,
@@ -332,6 +334,7 @@ export const payrollStyles = StyleSheet.create({
   },
   secondaryRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.md,
   },
   payrollActionStack: {
@@ -339,6 +342,7 @@ export const payrollStyles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 1,
+    minWidth: 120,
     height: 40,
     borderRadius: 20,
     borderCurve: 'continuous',

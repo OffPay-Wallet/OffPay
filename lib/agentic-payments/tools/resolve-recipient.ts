@@ -2,11 +2,7 @@ import { isValidSolanaAddress } from '@/lib/crypto/solana-address';
 import { parseRecipientInput } from '@/lib/identity/recipient-parser';
 import { resolveSnsName } from '@/lib/identity/sns';
 import { resolveXHandle, XHandleNotRegisteredError } from '@/lib/identity/x-handle';
-import {
-  isSelfRecipientIntent,
-  resolveKnownWalletReferenceFromText,
-  resolveAgenticPrivateSendRecipient,
-} from '@/lib/agentic-payments/private-send-intent';
+import { resolveAgenticPrivateSendRecipient } from '@/lib/agentic-payments/private-send-intent';
 
 import {
   hydrateStringArg,
@@ -55,16 +51,6 @@ function resolveKnownWalletAddress(
   };
 }
 
-function resolveKnownWalletAddressFromText(
-  context: AgenticToolRunnerContext,
-): { address: string; source: ToolRecipientSource } | null {
-  const matchedWallet = resolveKnownWalletReferenceFromText(context.userText, [
-    ...context.knownWallets,
-  ]);
-  if (matchedWallet == null) return null;
-  return { address: matchedWallet.address, source: 'known_wallet' };
-}
-
 export async function resolveRecipientForDraft(params: {
   rawRecipient: string;
   context: AgenticToolRunnerContext;
@@ -84,22 +70,29 @@ export async function resolveRecipientForDraft(params: {
   }
 
   if (normalized.length === 0) {
-    if (walletAddress != null && isSelfRecipientIntent(params.context.userText)) {
-      return {
-        ok: true,
-        recipient: walletAddress,
-        allowSelfRecipient: true,
-        source: 'self',
-      };
-    }
-    const knownFromText = resolveKnownWalletAddressFromText(params.context);
-    if (knownFromText != null) {
-      return {
-        ok: true,
-        recipient: knownFromText.address,
-        allowSelfRecipient: knownFromText.address === walletAddress,
-        source: knownFromText.source,
-      };
+    if (walletAddress != null) {
+      const inferred = resolveAgenticPrivateSendRecipient({
+        aiRecipient: '',
+        userText: params.context.userText,
+        walletAddress,
+        knownWallets: [...params.context.knownWallets],
+      });
+      if (isValidSolanaAddress(inferred.recipient)) {
+        const matchedWallet = params.context.knownWallets.find(
+          (wallet) => wallet.address === inferred.recipient,
+        );
+        const source = inferred.selfRecipientRequested
+          ? 'self'
+          : matchedWallet == null
+            ? 'user_text'
+            : 'known_wallet';
+        return {
+          ok: true,
+          recipient: inferred.recipient,
+          allowSelfRecipient: inferred.selfRecipientRequested,
+          source,
+        };
+      }
     }
     return { ok: true, recipient: '', allowSelfRecipient: false, source: 'user_text' };
   }
@@ -109,7 +102,7 @@ export async function resolveRecipientForDraft(params: {
     return {
       ok: true,
       recipient: known.address,
-      allowSelfRecipient: known.address === walletAddress,
+      allowSelfRecipient: false,
       source: known.source,
     };
   }
@@ -119,7 +112,7 @@ export async function resolveRecipientForDraft(params: {
     return {
       ok: true,
       recipient: candidate.address,
-      allowSelfRecipient: candidate.address === walletAddress,
+      allowSelfRecipient: false,
       source: 'address',
     };
   }
@@ -140,7 +133,7 @@ export async function resolveRecipientForDraft(params: {
       return {
         ok: true,
         recipient: address,
-        allowSelfRecipient: address === walletAddress,
+        allowSelfRecipient: false,
         source: 'sns',
       };
     }
@@ -149,7 +142,7 @@ export async function resolveRecipientForDraft(params: {
     return {
       ok: true,
       recipient: resolved.address,
-      allowSelfRecipient: resolved.address === walletAddress,
+      allowSelfRecipient: false,
       source: 'x',
     };
   } catch (error) {

@@ -186,7 +186,11 @@ function ChatMessageBubbleComponent({
     <Animated.View
       entering={actionOnly || cardOnly ? undefined : messageEntering}
       layout={messageLayout}
-      style={[styles.messageRow, styles.messageRowAgent]}
+      style={[
+        styles.messageRow,
+        styles.messageRowAgent,
+        (visibleAction != null || hasToolCards) && styles.messageRowAgentCard,
+      ]}
     >
       <View style={styles.agentMessageStack}>
         {hasText ? (

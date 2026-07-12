@@ -4,8 +4,10 @@ import bs58 from 'bs58';
 import {
   buildFrequentRecipientOptions,
   getContactByAddress,
+  hydrateContactsStore,
   useContactsStore,
 } from '@/store/contactsStore';
+import { mmkvStorage } from '@/lib/cache/mmkv-storage';
 
 function addressFromSeedByte(byte: number): string {
   return bs58.encode(ed25519.getPublicKey(new Uint8Array(32).fill(byte)));
@@ -42,6 +44,36 @@ describe('contactsStore', () => {
       address: karanAddress,
     });
     expect(useContactsStore.getState().contacts).toHaveLength(1);
+  });
+
+  it('hydrates saved contacts only when boot explicitly opens MMKV', async () => {
+    expect(useContactsStore.persist.getOptions().skipHydration).toBe(true);
+    mmkvStorage.setItem(
+      'offpay-contacts',
+      JSON.stringify({
+        state: {
+          contacts: [
+            {
+              id: 'contact:karan',
+              name: 'Karan',
+              address: karanAddress,
+              createdAt: 1,
+              updatedAt: 2,
+            },
+          ],
+          usageByWalletAddress: {},
+          recentClearedAtByWalletAddress: {},
+          hiddenRecentRecipientsByWalletAddress: {},
+        },
+        version: 1,
+      }),
+    );
+
+    await hydrateContactsStore();
+
+    expect(useContactsStore.getState().contacts).toEqual([
+      expect.objectContaining({ name: 'Karan', address: karanAddress }),
+    ]);
   });
 
   it('rejects duplicate contact addresses unless editing that contact', () => {

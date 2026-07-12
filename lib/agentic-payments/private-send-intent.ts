@@ -79,45 +79,36 @@ export function resolveAgenticPrivateSendRecipient(params: {
   walletAddress: string;
   knownWallets?: AgenticKnownWallet[];
 }): AgenticRecipientResolution {
-  const selfRecipientRequested = isSelfRecipientIntent(params.userText);
-  const userTextRecipient = extractUserTextRecipient(params.userText, params.walletAddress);
-  const knownWalletRecipient = !isValidSolanaAddress(params.aiRecipient)
-    ? resolveKnownWalletReference(params.aiRecipient, params.knownWallets)
-    : null;
+  const turns = (params.userText ?? '')
+    .split('\n')
+    .map((turn) => turn.trim())
+    .filter((turn) => turn.length > 0)
+    .reverse();
 
-  if (userTextRecipient != null && params.aiRecipient === params.walletAddress) {
-    return { recipient: userTextRecipient, selfRecipientRequested };
-  }
-
-  if (knownWalletRecipient != null) {
-    return {
-      recipient: knownWalletRecipient.address,
-      selfRecipientRequested,
-    };
-  }
-
-  if (!isValidSolanaAddress(params.aiRecipient)) {
+  for (const turn of turns) {
+    const userTextRecipient = extractUserTextRecipient(turn, params.walletAddress);
     if (userTextRecipient != null) {
-      return { recipient: userTextRecipient, selfRecipientRequested };
+      return { recipient: userTextRecipient, selfRecipientRequested: false };
     }
-
+    if (isSelfRecipientIntent(turn)) {
+      return { recipient: params.walletAddress, selfRecipientRequested: true };
+    }
     const knownWalletTextRecipient = resolveKnownWalletReferenceFromText(
-      params.userText,
+      turn,
       params.knownWallets,
     );
     if (knownWalletTextRecipient != null) {
-      return {
-        recipient: knownWalletTextRecipient.address,
-        selfRecipientRequested,
-      };
-    }
-
-    if (selfRecipientRequested) {
-      return { recipient: params.walletAddress, selfRecipientRequested: true };
+      return { recipient: knownWalletTextRecipient.address, selfRecipientRequested: false };
     }
   }
 
-  return { recipient: params.aiRecipient, selfRecipientRequested };
+  const knownWalletRecipient = !isValidSolanaAddress(params.aiRecipient)
+    ? resolveKnownWalletReference(params.aiRecipient, params.knownWallets)
+    : null;
+  return {
+    recipient: knownWalletRecipient?.address ?? params.aiRecipient,
+    selfRecipientRequested: false,
+  };
 }
 
 function getRequestedToken(input: AgenticPrivateSendToolInput): string {
@@ -225,8 +216,9 @@ function turnMentionsKnownWalletRecipient(turn: string, name: string): boolean {
 }
 
 function getUniqueKnownWalletMatch(matches: AgenticKnownWallet[]): AgenticKnownWallet | null {
+  const contacts = matches.filter((match) => match.source === 'contact');
   const byAddress = new Map<string, AgenticKnownWallet>();
-  for (const match of matches) {
+  for (const match of contacts.length > 0 ? contacts : matches) {
     byAddress.set(match.address, match);
   }
   return byAddress.size === 1 ? ([...byAddress.values()][0] ?? null) : null;

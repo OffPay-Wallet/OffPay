@@ -4,11 +4,12 @@
  */
 
 import React from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, useWindowDimensions, View } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 
+import { isCompactChatCardLayout } from './constants';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface ConfirmationRowProps {
@@ -28,12 +29,15 @@ export function ConfirmationRow({
   accessibilityLabel,
   valueColor,
 }: ConfirmationRowProps): React.JSX.Element {
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const compact = isCompactChatCardLayout(windowWidth, fontScale);
   const valueElement = (
     <Text
       variant="captionBold"
       color={valueColor ?? (onPress != null ? colors.brand.glossAccent : colors.text.primary)}
       style={[
         styles.confirmationRowValue,
+        compact && styles.confirmationRowValueCompact,
         mono === true && styles.monoText,
         onPress != null && styles.confirmationRowValueLink,
       ]}
@@ -48,11 +52,11 @@ export function ConfirmationRow({
   );
 
   return (
-    <View style={styles.confirmationRow}>
+    <View style={[styles.confirmationRow, compact && styles.confirmationRowCompact]}>
       <Text
         variant="small"
         color={colors.text.tertiary}
-        style={styles.confirmationRowLabel}
+        style={[styles.confirmationRowLabel, compact && styles.confirmationRowLabelCompact]}
         numberOfLines={2}
         maxFontSizeMultiplier={1.15}
       >
@@ -66,6 +70,7 @@ export function ConfirmationRow({
           hitSlop={6}
           style={({ pressed }) => [
             styles.confirmationRowLink,
+            compact && styles.confirmationRowLinkCompact,
             pressed && styles.confirmationRowLinkPressed,
           ]}
         >

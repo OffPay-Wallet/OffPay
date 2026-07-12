@@ -349,18 +349,20 @@ export function ContactsModal({ visible, onClose }: ContactsModalProps): React.J
                 </Text>
               </View>
             ) : (
-              <FlashList<SavedContact>
-                data={sortedContacts}
-                renderItem={renderContact}
-                keyExtractor={contactKeyExtractor}
-                ItemSeparatorComponent={ContactSeparator}
-                style={{ height: contactListHeight }}
-                contentContainerStyle={styles.contactList}
-                contentInsetAdjustmentBehavior="automatic"
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                drawDistance={240}
-              />
+              <View style={{ height: contactListHeight }}>
+                <FlashList<SavedContact>
+                  data={sortedContacts}
+                  renderItem={renderContact}
+                  keyExtractor={contactKeyExtractor}
+                  ItemSeparatorComponent={ContactSeparator}
+                  style={styles.contactListFrame}
+                  contentContainerStyle={styles.contactList}
+                  contentInsetAdjustmentBehavior="automatic"
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  drawDistance={240}
+                />
+              </View>
             )}
           </View>
         </View>
@@ -584,6 +586,9 @@ const styles = StyleSheet.create({
   },
   contactList: {
     paddingBottom: spacing.sm,
+  },
+  contactListFrame: {
+    flex: 1,
   },
   contactSeparator: {
     height: spacing.sm,

@@ -36,3 +36,8 @@ export const CHAT_BUBBLE_OPPOSITE_GUTTER = 48;
 
 /** Sharp corner on the bubble “tail” side. */
 export const CHAT_BUBBLE_TAIL_RADIUS = 4;
+
+/** Compact cards before content becomes cramped or enlarged text starts wrapping. */
+export function isCompactChatCardLayout(windowWidth: number, fontScale: number): boolean {
+  return windowWidth < 390 || fontScale > 1.05;
+}

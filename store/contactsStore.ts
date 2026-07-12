@@ -390,6 +390,7 @@ export const useContactsStore = create<ContactsState>()(
     {
       name: 'offpay-contacts',
       storage: createJSONStorage(() => mmkvStorage),
+      skipHydration: true,
       version: 1,
       migrate: (persisted) => {
         if (typeof persisted !== 'object' || persisted == null) return persisted;
@@ -420,3 +421,7 @@ export const useContactsStore = create<ContactsState>()(
     },
   ),
 );
+
+export async function hydrateContactsStore(): Promise<void> {
+  await useContactsStore.persist.rehydrate();
+}
