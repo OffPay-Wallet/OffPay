@@ -28,7 +28,6 @@ import Animated, {
   useDerivedValue,
   useSharedValue,
   withDelay,
-  withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,6 +39,7 @@ import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useLoopingProgress } from '@/hooks/useLoopingProgress';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
 
 import type { useOffpayNetwork } from '@/hooks/useOffpayNetwork';
@@ -137,13 +137,7 @@ export function SendSummarySheet({
 
   const progress = useSharedValue(0);
   const dragY = useSharedValue(0);
-  const ringSpin = useDerivedValue(
-    () =>
-      phase === 'sending'
-        ? withRepeat(withTiming(1, { duration: 900, easing: Easing.linear }), -1, false)
-        : 0,
-    [phase],
-  );
+  const ringSpin = useLoopingProgress({ active: phase === 'sending', durationMs: 900 });
   const sheetHeightRef = useRef(0);
   const lockedRef = useRef(phase !== 'review');
   lockedRef.current = phase !== 'review';

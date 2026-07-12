@@ -4,15 +4,13 @@ import Animated, {
   Easing,
   interpolate,
   useAnimatedStyle,
-  useDerivedValue,
   useReducedMotion,
   useSharedValue,
-  withRepeat,
-  withTiming,
 } from 'react-native-reanimated';
 
 import { colors } from '@/constants/colors';
 import { radii } from '@/constants/spacing';
+import { useLoopingProgress } from '@/hooks/useLoopingProgress';
 
 import type { StyleProp, ViewStyle } from 'react-native';
 
@@ -40,6 +38,7 @@ const SWEEP_LOCATIONS = [0, 0.42, 0.5, 0.58, 1] as const;
 /** Slight diagonal gives the moving highlight a visible sweep instead of a flat flash. */
 const SWEEP_START = { x: 0, y: 0.36 };
 const SWEEP_END = { x: 1, y: 0.64 };
+const SKELETON_PULSE_EASING = Easing.inOut(Easing.cubic);
 
 interface SkeletonBlockProps {
   width: number | `${number}%`;
@@ -56,36 +55,12 @@ export function SkeletonBlock({
 }: SkeletonBlockProps): React.JSX.Element {
   const reduceMotion = useReducedMotion();
   const blockWidth = useSharedValue(typeof width === 'number' ? width : 0);
-
-  const pulse = useDerivedValue(
-    () =>
-      reduceMotion
-        ? 0
-        : withRepeat(
-            withTiming(1, {
-              duration: SKELETON_PULSE_MS,
-              easing: Easing.inOut(Easing.cubic),
-            }),
-            -1,
-            true,
-          ),
-    [reduceMotion],
-  );
-
-  const sweep = useDerivedValue(
-    () =>
-      reduceMotion
-        ? 0
-        : withRepeat(
-            withTiming(1, {
-              duration: SKELETON_SWEEP_MS,
-              easing: Easing.linear,
-            }),
-            -1,
-            false,
-          ),
-    [reduceMotion],
-  );
+  const pulse = useLoopingProgress({
+    durationMs: SKELETON_PULSE_MS,
+    easing: SKELETON_PULSE_EASING,
+    reverse: true,
+  });
+  const sweep = useLoopingProgress({ durationMs: SKELETON_SWEEP_MS });
 
   const blockStyle = useAnimatedStyle(() => ({
     opacity: 0.94 + pulse.value * 0.06,

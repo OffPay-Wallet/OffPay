@@ -1610,7 +1610,12 @@ async function confirmRwaTradeAction(params: {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to submit RWA trade.';
     updateAction(action.id, { status: 'failed', errorMessage: message });
-    showToast({ title: 'RWA trade failed', message, variant: 'error' });
+    showToast({
+      title: 'RWA trade failed',
+      message,
+      variant: 'error',
+      notificationId: `rwa-trade-failed-${action.network}-${action.walletAddress}`,
+    });
   }
 }
 

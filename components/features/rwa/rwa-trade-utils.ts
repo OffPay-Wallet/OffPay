@@ -52,6 +52,7 @@ export interface RwaProcessResultState {
   variant: Extract<RwaSwapReviewScreenPhase, 'success' | 'error'>;
   tokenLegs: RwaSwapReviewScreenTokenLeg[];
   detailRows: RwaSwapReviewScreenDetailRow[];
+  repeatTradeDraft: RwaTradeDraftState;
 }
 
 interface WalletBalanceLike {
@@ -184,7 +185,10 @@ export function parseRwaTradeAmount(input: string, label: string): ParsedRwaCash
 export function getRwaErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     if (/transaction simulation failed/i.test(error.message)) {
-      return 'RWA settlement simulation failed. Refresh the quote and make sure this Devnet wallet has RWAUSDC for buys or the selected sandbox asset for sells.';
+      const detail = error.message.replace(/^.*transaction simulation failed[:.]?\s*/i, '').trim();
+      return detail.length > 0
+        ? `RWA settlement failed: ${detail}`
+        : 'RWA settlement simulation failed. Request a fresh quote and try again.';
     }
 
     return error.message;
@@ -275,6 +279,11 @@ export function buildRwaProcessResult({
 
   return {
     variant,
+    repeatTradeDraft: {
+      assetId: review.asset.id,
+      side: review.side,
+      amountInput: review.inputAmount,
+    },
     tokenLegs: [
       { ...legs.payLeg, label: paidLabel },
       { ...legs.receiveLeg, label: receivedLabel },

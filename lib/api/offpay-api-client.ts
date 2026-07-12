@@ -226,6 +226,7 @@ interface OffpayRequestOptions {
   body?: unknown;
   network: OffpayNetwork;
   signal?: AbortSignal;
+  timeoutMs?: number | null;
   accept?: string;
   headers?: Record<string, string>;
   walletId?: string;
@@ -1084,8 +1085,16 @@ export async function offpayApiRequest<T>(options: OffpayRequestOptions): Promis
       init.body = await stringifyJsonAdaptive(options.body);
     }
 
-    const handle = withTimeout(options.signal);
-    init.signal = handle.signal;
+    const handle =
+      options.timeoutMs === null
+        ? {
+            signal: options.signal,
+            cleanup: () => undefined,
+          }
+        : withTimeout(options.signal, options.timeoutMs);
+    if (handle.signal != null) {
+      init.signal = handle.signal;
+    }
 
     const fetchStartedAt = mark();
     try {
@@ -1704,6 +1713,7 @@ export function executeRwaQuote(request: RwaExecuteRequest): Promise<RwaExecuteR
     method: 'POST',
     body: request,
     network: request.network,
+    timeoutMs: request.network === 'devnet' ? 45_000 : undefined,
   });
 }
 

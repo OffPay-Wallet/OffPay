@@ -44,6 +44,31 @@ describe('notificationStore', () => {
     expect(useNotificationStore.getState().unreadCount).toBe(2);
   });
 
+  it('replaces a repeated operation failure with the same stable id', () => {
+    useNotificationStore.getState().addNotification({
+      id: 'rwa-swap-failed-devnet-wallet',
+      title: 'RWA swap failed',
+      message: 'First failure.',
+      variant: 'error',
+      createdAt: 1000,
+    });
+    useNotificationStore.getState().addNotification({
+      id: 'rwa-swap-failed-devnet-wallet',
+      title: 'RWA swap failed',
+      message: 'Latest actionable failure.',
+      variant: 'error',
+      createdAt: 10_000,
+    });
+
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        id: 'rwa-swap-failed-devnet-wallet',
+        message: 'Latest actionable failure.',
+      }),
+    ]);
+    expect(useNotificationStore.getState().unreadCount).toBe(1);
+  });
+
   it('stores compact notification text for the modal rows', () => {
     useNotificationStore.getState().addNotification({
       title: 'A very long notification title that should not flood the modal row',

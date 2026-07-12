@@ -7,7 +7,12 @@ import {
   type AccountMeta,
 } from '@solana/web3.js';
 import { AppError } from './errors.js';
-import { broadcastRawTransaction, getLatestBlockhash, getRpcSignatureStatuses } from './helius.js';
+import {
+  broadcastRawTransaction,
+  getLatestBlockhash,
+  getRpcAccounts,
+  getRpcSignatureStatuses,
+} from './helius.js';
 import {
   createSwapQuote,
   executeSwapQuote,
@@ -2551,6 +2556,12 @@ const DEVNET_RWA_MAGICBLOCK_STEP_IDS = [
   'er-approve-undelegate',
   'base-settle',
 ] as const;
+const DEVNET_RWA_INTENT_ACCOUNT_BYTES = 291;
+const DEVNET_RWA_INTENT_STATUS_OFFSET = 290;
+const DEVNET_RWA_INTENT_STATUS_APPROVED = 1;
+const DEVNET_RWA_SIGNATURE_POLL_ATTEMPTS = 20;
+const DEVNET_RWA_RESTORE_POLL_ATTEMPTS = 24;
+const DEVNET_RWA_RESTORE_POLL_INTERVAL_MS = 500;
 
 async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => {
@@ -2597,7 +2608,7 @@ function assertDevnetRwaSignedSteps(
 }
 
 async function waitForDevnetSignature(bindings: Bindings, signature: string): Promise<void> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < DEVNET_RWA_SIGNATURE_POLL_ATTEMPTS; attempt += 1) {
     const response = await getRpcSignatureStatuses(bindings, {
       network: 'devnet',
       signatures: [signature],
@@ -2613,13 +2624,96 @@ async function waitForDevnetSignature(bindings: Bindings, signature: string): Pr
     if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') {
       return;
     }
-    await delay(500);
+    if (attempt < DEVNET_RWA_SIGNATURE_POLL_ATTEMPTS - 1) {
+      await delay(500);
+    }
   }
+
+  throw new AppError({
+    status: 503,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message: 'Devnet RWA transaction confirmation timed out. Please try again.',
+    retryable: true,
+  });
+}
+
+function readDevnetRwaIntentStatus(dataBase64: string | null): number | null {
+  if (dataBase64 == null) return null;
+
+  const data = Buffer.from(dataBase64, 'base64');
+  if (data.length !== DEVNET_RWA_INTENT_ACCOUNT_BYTES) return null;
+  return data[DEVNET_RWA_INTENT_STATUS_OFFSET] ?? null;
+}
+
+function deriveDevnetRwaIntentAddress(params: {
+  programId: string;
+  quoteId: string;
+  walletAddress: string;
+}): string {
+  const nonceHex = params.quoteId.startsWith('devnet-') ? params.quoteId.slice(7) : '';
+  if (!/^[0-9a-f]{32}$/i.test(nonceHex)) {
+    throw new AppError({
+      status: 400,
+      code: 'INVALID_REQUEST',
+      message: 'Devnet RWA execution received an invalid quote identifier.',
+    });
+  }
+
+  const intent = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from(INTENT_SEED),
+      new PublicKey(params.walletAddress).toBuffer(),
+      Buffer.from(nonceHex, 'hex'),
+    ],
+    new PublicKey(params.programId),
+  )[0];
+  return intent.toBase58();
+}
+
+async function waitForDevnetRwaIntentRestored(params: {
+  bindings: Bindings;
+  intentAddress: string;
+  programId: string;
+}): Promise<void> {
+  let lastStatus: number | null = null;
+
+  for (let attempt = 0; attempt < DEVNET_RWA_RESTORE_POLL_ATTEMPTS; attempt += 1) {
+    const response = await getRpcAccounts(params.bindings, {
+      addresses: [params.intentAddress],
+      network: 'devnet',
+      useCache: false,
+    });
+    const intent = response.accounts[0];
+    lastStatus = readDevnetRwaIntentStatus(intent?.dataBase64 ?? null);
+
+    if (
+      intent?.exists === true &&
+      intent.owner === params.programId &&
+      lastStatus === DEVNET_RWA_INTENT_STATUS_APPROVED
+    ) {
+      return;
+    }
+
+    if (attempt < DEVNET_RWA_RESTORE_POLL_ATTEMPTS - 1) {
+      await delay(DEVNET_RWA_RESTORE_POLL_INTERVAL_MS);
+    }
+  }
+
+  throw new AppError({
+    status: 503,
+    code: 'UPSTREAM_UNAVAILABLE',
+    message:
+      lastStatus == null
+        ? 'MagicBlock is still restoring the RWA intent to Devnet. Please try again.'
+        : 'The restored RWA intent is not ready for settlement. Request a fresh quote and try again.',
+    retryable: true,
+  });
 }
 
 async function broadcastDevnetRwaMagicBlockSequence(
   bindings: Bindings,
   signedSteps: RwaSignedTransactionStep[],
+  context: { intentAddress: string; programId: string },
 ): Promise<NonNullable<RwaExecuteResponse['signatures']>> {
   const erRpcUrl = readRwaMagicBlockErRpcUrl(bindings, 'devnet');
   const signatures: NonNullable<RwaExecuteResponse['signatures']> = [];
@@ -2645,7 +2739,11 @@ async function broadcastDevnetRwaMagicBlockSequence(
     if (step.target === 'solana_devnet') {
       await waitForDevnetSignature(bindings, result.signature);
     } else {
-      await delay(750);
+      await waitForDevnetRwaIntentRestored({
+        bindings,
+        intentAddress: context.intentAddress,
+        programId: context.programId,
+      });
     }
   }
 
@@ -2667,9 +2765,23 @@ async function executeRwaQuote(
 
     const signedSteps = request.signedTransactions;
     if (signedSteps != null && signedSteps.length > 0) {
+      const config = readDevnetSandboxConfig(bindings);
+      if (config == null) {
+        throw new AppError({
+          status: 501,
+          code: 'NOT_IMPLEMENTED',
+          message: 'Devnet RWA sandbox is not configured for this deployment.',
+        });
+      }
+      const intentAddress = deriveDevnetRwaIntentAddress({
+        programId: config.programId,
+        quoteId: request.quoteId,
+        walletAddress: request.walletAddress,
+      });
       const signatures = await broadcastDevnetRwaMagicBlockSequence(
         bindings,
         assertDevnetRwaSignedSteps(signedSteps),
+        { intentAddress, programId: config.programId },
       );
 
       return {

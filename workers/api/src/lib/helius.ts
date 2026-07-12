@@ -203,6 +203,7 @@ interface RpcAccountInfo {
 interface RpcAccountsRequest {
   addresses: string[];
   network: Network;
+  useCache?: boolean;
 }
 
 interface RpcAccountsResponse {
@@ -1437,7 +1438,7 @@ async function getRpcAccounts(
 
   request.addresses.forEach((address, index) => {
     const cacheKey = createNetworkCacheKey(request.network, 'rpc-accounts', [address]);
-    const cached = memoryCache.get<RpcAccountInfo>(cacheKey);
+    const cached = request.useCache === false ? null : memoryCache.get<RpcAccountInfo>(cacheKey);
     if (cached != null) {
       accounts[index] = cached;
       return;
@@ -1463,11 +1464,13 @@ async function getRpcAccounts(
     uncachedAddresses.forEach((address, sliceIndex) => {
       const parsed = parseRpcAccount(address, values[sliceIndex]);
       accounts[uncachedIndices[sliceIndex]] = parsed;
-      memoryCache.set(
-        createNetworkCacheKey(request.network, 'rpc-accounts', [address]),
-        parsed,
-        RPC_ACCOUNTS_CACHE_TTL_MS,
-      );
+      if (request.useCache !== false) {
+        memoryCache.set(
+          createNetworkCacheKey(request.network, 'rpc-accounts', [address]),
+          parsed,
+          RPC_ACCOUNTS_CACHE_TTL_MS,
+        );
+      }
     });
   }
 
@@ -1786,11 +1789,15 @@ async function broadcastRawTransaction(
         continue;
       }
 
+      const simulationDetail = isRecord(errorValue.data)
+        ? describeSimulationError(errorValue.data)
+        : null;
       throw new AppError({
         status: 400,
         code: 'INVALID_REQUEST',
         message:
-          sanitizeText(readTrimmedString(errorValue.message), 160) ??
+          simulationDetail ??
+          sanitizeText(readTrimmedString(errorValue.message), 240) ??
           'Transaction broadcast failed.',
         retryable: false,
       });
@@ -1812,6 +1819,7 @@ function describeSimulationError(value: Record<string, unknown>): string | null 
     ? value.logs.filter((entry): entry is string => typeof entry === 'string')
     : [];
   const detail =
+    logs.find((entry) => /program log:.*(?:insufficient|error|invalid)/i.test(entry)) ??
     [...logs].reverse().find((entry) => /insufficient|failed|error|invalid/i.test(entry)) ??
     JSON.stringify(value.err);
   return sanitizeText(detail, 240) ?? 'Transaction simulation failed.';

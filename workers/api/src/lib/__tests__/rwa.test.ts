@@ -720,6 +720,9 @@ describe('RWA Jupiter stocks integration', () => {
   it('executes devnet MagicBlock RWA steps through base, ER, then base RPCs', async () => {
     const events: string[] = [];
     let baseSendCount = 0;
+    let intentLookupCount = 0;
+    const restoredIntentData = Buffer.alloc(291);
+    restoredIntentData[290] = 1;
     jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       expect(String(input)).toBe(DEVNET_RPC_URL);
       const request = JSON.parse(String(init?.body ?? '{}')) as {
@@ -744,6 +747,24 @@ describe('RWA Jupiter stocks integration', () => {
           ],
         });
       }
+      if (request.method === 'getMultipleAccounts') {
+        intentLookupCount += 1;
+        return jsonRpcResponse(request.id, {
+          value:
+            intentLookupCount === 1
+              ? [null]
+              : [
+                  {
+                    data: [restoredIntentData.toString('base64'), 'base64'],
+                    executable: false,
+                    lamports: 2_916_240,
+                    owner: RWA_DELEGATE_PROGRAM_ID,
+                    rentEpoch: 0,
+                    space: restoredIntentData.length,
+                  },
+                ],
+        });
+      }
       throw new Error(`Unexpected Solana RPC method: ${request.method}`);
     });
     setRwaTestFetchImplementation(async (input, init) => {
@@ -757,7 +778,7 @@ describe('RWA Jupiter stocks integration', () => {
     });
 
     const response = await executeRwaQuote(devnetSandboxBindings, {
-      quoteId: 'devnet-test',
+      quoteId: `devnet-${'ab'.repeat(16)}`,
       signedTransaction: 'AQIDBA==',
       signedTransactions: [
         {
@@ -784,6 +805,8 @@ describe('RWA Jupiter stocks integration', () => {
       'base:sendTransaction',
       'base:getSignatureStatuses',
       'er:sendTransaction',
+      'base:getMultipleAccounts',
+      'base:getMultipleAccounts',
       'base:sendTransaction',
       'base:getSignatureStatuses',
     ]);

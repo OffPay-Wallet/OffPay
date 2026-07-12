@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
+  broadcastRawTransaction,
   resetHeliusFetchImplementation,
   setHeliusFetchImplementation,
   simulateRawTransaction,
@@ -77,5 +78,37 @@ describe('simulateRawTransaction', () => {
       error: 'Program failed: insufficient funds for fee',
       unitsConsumed: 3_100,
     });
+  });
+
+  it('preserves the actionable program log from sendTransaction preflight failures', async () => {
+    setHeliusFetchImplementation(
+      jest.fn(async () =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'test',
+            error: {
+              code: -32002,
+              message: 'Transaction simulation failed',
+              data: {
+                err: { InstructionError: [1, 'Custom'] },
+                logs: [
+                  'Program log: Error: the RWA intent account is not initialized',
+                  'Program failed: custom program error: 0xbc4',
+                ],
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(
+      broadcastRawTransaction(bindings, {
+        rawTransaction: 'AQIDBA==',
+        network: 'mainnet',
+      }),
+    ).rejects.toThrow('Program log: Error: the RWA intent account is not initialized');
   });
 });

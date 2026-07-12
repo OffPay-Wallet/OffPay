@@ -8,9 +8,7 @@ import Animated, {
   LinearTransition,
   runOnJS,
   useAnimatedStyle,
-  useDerivedValue,
   useSharedValue,
-  withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +22,7 @@ import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useLoopingProgress } from '@/hooks/useLoopingProgress';
 import { useOverlayVisibilityStore } from '@/store/overlayVisibilityStore';
 
 import { useQuoteExpiryDetailLabel } from '@/components/features/swap/quote-expiry-label';
@@ -60,6 +59,7 @@ interface RwaSwapReviewScreenProps {
   canSubmit: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  onTradeAgain: () => void;
   onDone: () => void;
 }
 
@@ -70,8 +70,7 @@ const DISMISS_DRAG_RATIO = 0.32;
 const CIRCLE_SIZE = 112;
 const RESULT_MARK_SIZE = 156;
 const RING_THICKNESS = 4;
-const RESULT_AUTO_DISMISS_MS = 2200;
-const RESULT_LINK_AUTO_DISMISS_MS = 8000;
+const ERROR_AUTO_DISMISS_MS = 2200;
 const OVERLAY_ID = 'rwa-swap-review';
 
 function SheetDetailValue({
@@ -201,6 +200,7 @@ export function RwaSwapReviewScreen({
   canSubmit,
   onCancel,
   onConfirm,
+  onTradeAgain,
   onDone,
 }: RwaSwapReviewScreenProps): React.JSX.Element | null {
   const insets = useSafeAreaInsets();
@@ -226,13 +226,7 @@ export function RwaSwapReviewScreen({
     ? detailRows.filter((row) => row.signature != null && row.network != null)
     : [];
 
-  const ringSpin = useDerivedValue(
-    () =>
-      processing
-        ? withRepeat(withTiming(1, { duration: 900, easing: Easing.linear }), -1, false)
-        : 0,
-    [processing],
-  );
+  const ringSpin = useLoopingProgress({ active: processing, durationMs: 900 });
 
   useEffect(() => {
     if (visible) {
@@ -265,13 +259,10 @@ export function RwaSwapReviewScreen({
   }, [hideOverlay, mounted, showOverlay, visible]);
 
   useEffect(() => {
-    if (!visible || !result) return undefined;
-    const timeout = setTimeout(
-      onDone,
-      resultLinkRows.length > 0 ? RESULT_LINK_AUTO_DISMISS_MS : RESULT_AUTO_DISMISS_MS,
-    );
+    if (!visible || phase !== 'error') return undefined;
+    const timeout = setTimeout(onDone, ERROR_AUTO_DISMISS_MS);
     return () => clearTimeout(timeout);
-  }, [onDone, result, resultLinkRows.length, visible]);
+  }, [onDone, phase, visible]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -318,7 +309,7 @@ export function RwaSwapReviewScreen({
           style={StyleSheet.absoluteFill}
           onPress={() => {
             if (review) onCancel();
-            if (result) onDone();
+            if (phase === 'error') onDone();
           }}
           accessibilityLabel={review ? 'Dismiss RWA swap review' : 'Dismiss RWA swap result'}
         />
@@ -360,6 +351,16 @@ export function RwaSwapReviewScreen({
                 <ResultLottie phase={phase} />
               )}
             </View>
+            {result ? (
+              <Text
+                variant="bodyBold"
+                color={colors.text.primary}
+                align="center"
+                style={styles.resultTitle}
+              >
+                {phase === 'success' ? (side === 'sell' ? 'Sold!' : 'Bought!') : 'Trade failed'}
+              </Text>
+            ) : null}
             {resultLinkRows.length > 0 ? (
               <View style={styles.resultDetailCard}>
                 {resultLinkRows.map((row, index) => (
@@ -370,6 +371,33 @@ export function RwaSwapReviewScreen({
                     visible={visible}
                   />
                 ))}
+              </View>
+            ) : null}
+            {phase === 'success' ? (
+              <View style={styles.successActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.tradeAgainButton,
+                    pressed && styles.actionPressed,
+                  ]}
+                  onPress={onTradeAgain}
+                  accessibilityRole="button"
+                  accessibilityLabel={side === 'sell' ? 'Sell this asset again' : 'Buy this asset again'}
+                >
+                  <Text variant="button" color={colors.text.primary}>
+                    {side === 'sell' ? 'Sell again' : 'Buy again'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.doneButton, pressed && styles.actionPressed]}
+                  onPress={onDone}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done"
+                >
+                  <Text variant="button" color={colors.text.onAccent}>
+                    Done
+                  </Text>
+                </Pressable>
               </View>
             ) : null}
           </Animated.View>
@@ -645,6 +673,41 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.brand.glassTint,
     overflow: 'hidden',
+  },
+  resultTitle: {
+    fontFamily: fontFamily.semiBold,
+  },
+  successActions: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  tradeAgainButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rim,
+    backgroundColor: colors.brand.glassTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: [
+      '0 10px 24px rgba(0, 0, 0, 0.28)',
+      'inset 0 1px 1px rgba(255, 255, 255, 0.14)',
+    ].join(', '),
+  },
+  doneButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: radii.full,
+    borderCurve: 'continuous',
+    backgroundColor: colors.brand.glossAccent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionPressed: {
+    opacity: 0.82,
   },
   textButton: {
     minHeight: 44,

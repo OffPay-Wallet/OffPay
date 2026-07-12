@@ -1,14 +1,9 @@
 import { StyleSheet } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useDerivedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Line } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
+import { useLoopingProgress } from '@/hooks/useLoopingProgress';
 
 /**
  * iOS-style activity indicator — the classic 12 tapered bars arranged
@@ -63,18 +58,7 @@ export function LazyLoadingSpinner({
   size = 32,
   color = colors.text.primary,
 }: LazyLoadingSpinnerProps): React.JSX.Element {
-  const rotation = useDerivedValue(
-    () =>
-      withRepeat(
-        withTiming(1, {
-          duration: SPIN_DURATION_MS,
-          easing: Easing.linear,
-        }),
-        -1,
-        false,
-      ),
-    [],
-  );
+  const rotation = useLoopingProgress({ durationMs: SPIN_DURATION_MS });
 
   const rotateStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value * 360}deg` }],
@@ -84,6 +68,8 @@ export function LazyLoadingSpinner({
     <Animated.View
       pointerEvents="none"
       style={[styles.spinner, { width: size, height: size }, rotateStyle]}
+      accessibilityRole="progressbar"
+      accessibilityLabel="Loading"
     >
       <Svg width={size} height={size} viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}>
         {BARS.map((bar, index) => (

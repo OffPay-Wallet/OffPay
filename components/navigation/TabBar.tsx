@@ -6,11 +6,11 @@ import Animated, {
   useDerivedValue,
   useSharedValue,
   withSpring,
-  type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabBarBackdrop } from '@/components/navigation/TabBarBackdrop';
+import { shouldSyncCommittedTabVisual } from '@/components/navigation/tab-bar-state';
 import { PuffyChatIcon } from '@/components/ui/icons/PuffyChatIcon';
 import { PuffyHistoryIcon } from '@/components/ui/icons/PuffyHistoryIcon';
 import { PuffyHomeIcon } from '@/components/ui/icons/PuffyHomeIcon';
@@ -103,8 +103,8 @@ const TAB_VISIBILITY_SPRING = SETTINGS_SPRING;
 const FAB_EXPANSION_SPRING = SETTINGS_SPRING;
 const TAB_PILL_FEEDBACK_SPRING = SETTINGS_PRESS_SPRING;
 const TAB_PILL_SLIDE_SPRING = SETTINGS_SPRING;
-const TAB_ITEM_STATE_SPRING = SETTINGS_SPRING;
 const TAB_PILL_PRESS_SCALE = 0.96;
+const TAB_ITEM_PRESS_SCALE = 0.96;
 const HISTORY_PRELOAD_FALLBACK_DELAY_MS = 180;
 const HISTORY_PRELOAD_TIMEOUT_MS = 1600;
 
@@ -175,33 +175,22 @@ function renderRouteIcon(
 }
 
 interface PrimaryTabContentProps {
-  activePrimaryIndexValue: SharedValue<number>;
   focused: boolean;
   iconSize: number;
   label: string;
   labelFontSize: number;
   labelLineHeight: number;
-  primaryIndex: number;
   routeName: string;
 }
 
 function PrimaryTabContent({
-  activePrimaryIndexValue,
   focused,
   iconSize,
   label,
   labelFontSize,
   labelLineHeight,
-  primaryIndex,
   routeName,
 }: PrimaryTabContentProps): React.JSX.Element {
-  const activeProgress = useDerivedValue(() =>
-    withSpring(activePrimaryIndexValue.value === primaryIndex ? 1 : 0, TAB_ITEM_STATE_SPRING),
-  );
-  const contentStyle = useAnimatedStyle(() => ({
-    opacity: 0.72 + activeProgress.value * 0.28,
-    transform: [{ scale: 0.96 + activeProgress.value * 0.04 }],
-  }));
   const labelMetrics = {
     fontSize: labelFontSize,
     lineHeight: labelLineHeight,
@@ -209,11 +198,11 @@ function PrimaryTabContent({
 
   return (
     <View style={styles.tabContent}>
-      <Animated.View
+      <View
         pointerEvents="none"
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={[styles.tabVisualLayer, contentStyle]}
+        style={styles.tabVisualLayer}
       >
         <View style={styles.tabVisualContent}>
           {renderRouteIcon(routeName, focused ? TAB_ACTIVE_TINT : TAB_INACTIVE_TINT, iconSize)}
@@ -230,8 +219,73 @@ function PrimaryTabContent({
             {label}
           </Text>
         </View>
-      </Animated.View>
+      </View>
     </View>
+  );
+}
+
+interface PrimaryTabButtonProps extends PrimaryTabContentProps {
+  accessibilitySelected: boolean;
+  height: number;
+  left: number;
+  onLongPress: () => void;
+  onPress: () => void;
+  onPressIn: () => void;
+  onPressOut: () => void;
+  width: number;
+}
+
+function PrimaryTabButton({
+  accessibilitySelected,
+  height,
+  left,
+  onLongPress,
+  onPress,
+  onPressIn,
+  onPressOut,
+  width,
+  ...contentProps
+}: PrimaryTabButtonProps): React.JSX.Element {
+  const pressProgress = useSharedValue(0);
+  const pressStyle = useAnimatedStyle(() => ({
+    opacity: 1 - pressProgress.value * 0.12,
+    transform: [{ scale: 1 - pressProgress.value * (1 - TAB_ITEM_PRESS_SCALE) }],
+  }));
+
+  const handlePressIn = useCallback((): void => {
+    pressProgress.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
+    onPressIn();
+  }, [onPressIn, pressProgress]);
+
+  const handlePressOut = useCallback((): void => {
+    pressProgress.value = withSpring(0, TAB_PILL_FEEDBACK_SPRING);
+    onPressOut();
+  }, [onPressOut, pressProgress]);
+
+  return (
+    <Pressable
+      style={[
+        styles.tabItem,
+        {
+          height,
+          left,
+          top: 0,
+          width,
+        },
+      ]}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      unstable_pressDelay={0}
+      accessibilityRole="tab"
+      accessibilityLabel={contentProps.label}
+      accessibilityState={{ selected: accessibilitySelected }}
+    >
+      <Animated.View style={[styles.tabVisualLayer, pressStyle]}>
+        <PrimaryTabContent {...contentProps} />
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -262,6 +316,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const historyPreloadTaskRef = useRef<ScheduledUiWork | null>(null);
   const fabExpansion = useSharedValue(0);
   const activePillFeedback = useSharedValue(1);
+  const pendingTabOriginalIndexRef = useRef<number | null>(null);
 
   const primaryRoutes = useMemo(
     () =>
@@ -284,6 +339,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   // not in the primary set, so the slider pill should fade away and
   // every primary tab should render in its inactive style.
   const hasPrimaryActiveRoute = visualActivePrimaryIndex >= 0;
+  const optimisticActivePrimaryIndex = useSharedValue(visualActivePrimaryIndex);
 
   const barVisibility = useDerivedValue(
     () => withSpring(tabBarHidden ? 0 : 1, TAB_VISIBILITY_SPRING),
@@ -311,6 +367,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     if (tabBarHidden) return;
     lastVisibleTabIndexRef.current = committedActiveIndex;
   }, [committedActiveIndex, tabBarHidden]);
+
+  useEffect(() => {
+    const pendingIndex = pendingTabOriginalIndexRef.current;
+    if (!shouldSyncCommittedTabVisual(pendingIndex, committedActiveIndex)) return;
+
+    pendingTabOriginalIndexRef.current = null;
+    optimisticActivePrimaryIndex.value = visualActivePrimaryIndex;
+  }, [committedActiveIndex, optimisticActivePrimaryIndex, visualActivePrimaryIndex]);
 
   useEffect(() => {
     if (tabBarHidden && fabExpandedRef.current) {
@@ -428,12 +492,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
   const actionRowRight = windowWidth - (fabCenterX + QUICK_ACTION_PUCK_SIZE / 2);
   const actionStackBottom = bottomGap + barHeight + QUICK_ACTION_ROW_GAP;
   const activePillTranslateX = useDerivedValue(
-    () => withSpring(activePillX, TAB_PILL_SLIDE_SPRING),
-    [activePillX],
-  );
-  const activePrimaryIndexValue = useDerivedValue(
-    () => visualActivePrimaryIndex,
-    [visualActivePrimaryIndex],
+    () =>
+      withSpring(
+        optimisticActivePrimaryIndex.value >= 0
+          ? optimisticActivePrimaryIndex.value * tabSlotWidth + pillInsetX
+          : activePillX,
+        TAB_PILL_SLIDE_SPRING,
+      ),
+    [activePillX, pillInsetX, tabSlotWidth],
   );
 
   const handleTabLongPress = useCallback(
@@ -453,10 +519,21 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     [handleTabLongPress],
   );
 
-  const primePrimaryTabFeedback = useCallback(() => {
-    activePillFeedback.value = TAB_PILL_PRESS_SCALE;
-    activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
-  }, [activePillFeedback]);
+  const primePrimaryTabFeedback = useCallback(
+    (primaryIndex: number) => {
+      optimisticActivePrimaryIndex.value = primaryIndex;
+      activePillFeedback.value = TAB_PILL_PRESS_SCALE;
+      activePillFeedback.value = withSpring(1, TAB_PILL_FEEDBACK_SPRING);
+    },
+    [activePillFeedback, optimisticActivePrimaryIndex],
+  );
+
+  const settleCancelledPrimaryTabPress = useCallback((): void => {
+    runAfterNavigationFrame(() => {
+      if (pendingTabOriginalIndexRef.current != null) return;
+      optimisticActivePrimaryIndex.value = visualActivePrimaryIndex;
+    });
+  }, [optimisticActivePrimaryIndex, visualActivePrimaryIndex]);
 
   const recordTabSwitchAfterNavigation = useCallback(
     (fromIndex: number, fromRoute: string): void => {
@@ -498,16 +575,23 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
     });
 
     if (event.defaultPrevented) {
+      pendingTabOriginalIndexRef.current = null;
+      optimisticActivePrimaryIndex.value = visualActivePrimaryIndex;
       return;
     }
 
     if (!isFocused) {
+      pendingTabOriginalIndexRef.current = originalIndex;
       const currentRoute = state.routes[committedActiveIndex];
       if (currentRoute != null) {
         recordTabSwitchAfterNavigation(committedActiveIndex, currentRoute.name);
       }
       navigation.navigate(route.name, route.params);
+      return;
     }
+
+    pendingTabOriginalIndexRef.current = null;
+    optimisticActivePrimaryIndex.value = visualActivePrimaryIndex;
   }
 
   const handleFabToggle = useCallback(() => {
@@ -624,39 +708,23 @@ export function TabBar({ state, navigation }: BottomTabBarProps): React.JSX.Elem
             const label = TAB_LABELS[route.name] ?? route.name;
 
             return (
-              <Pressable
+              <PrimaryTabButton
                 key={route.key}
-                style={({ pressed }) => [
-                  styles.tabItem,
-                  {
-                    height: barHeight,
-                    left: primaryIndex * tabSlotWidth,
-                    top: 0,
-                    width: tabSlotWidth,
-                  },
-                  pressed && !visuallyFocused && styles.tabItemPressed,
-                ]}
-                onPressIn={() => {
-                  primePrimaryTabFeedback();
-                }}
+                height={barHeight}
+                left={primaryIndex * tabSlotWidth}
+                width={tabSlotWidth}
+                onPressIn={() => primePrimaryTabFeedback(primaryIndex)}
+                onPressOut={settleCancelledPrimaryTabPress}
                 onPress={() => handleTabPress(route, originalIndex)}
                 onLongPress={() => handlePrimaryTabLongPress(route)}
-                unstable_pressDelay={0}
-                accessibilityRole="tab"
-                accessibilityLabel={label}
-                accessibilityState={{ selected: focused }}
-              >
-                <PrimaryTabContent
-                  activePrimaryIndexValue={activePrimaryIndexValue}
-                  focused={visuallyFocused}
-                  iconSize={iconSize}
-                  label={label}
-                  labelFontSize={labelFontSize}
-                  labelLineHeight={labelLineHeight}
-                  primaryIndex={primaryIndex}
-                  routeName={route.name}
-                />
-              </Pressable>
+                accessibilitySelected={focused}
+                focused={visuallyFocused}
+                iconSize={iconSize}
+                label={label}
+                labelFontSize={labelFontSize}
+                labelLineHeight={labelLineHeight}
+                routeName={route.name}
+              />
             );
           })}
         </View>
@@ -851,9 +919,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  tabItemPressed: {
-    opacity: 0.65,
   },
   tabContent: {
     width: '100%',

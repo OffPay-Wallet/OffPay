@@ -1,17 +1,14 @@
 import { StyleProp, ViewStyle } from 'react-native';
 import Animated, {
-  Easing,
   Extrapolation,
   interpolate,
   useAnimatedProps,
-  useDerivedValue,
-  withRepeat,
-  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors } from '@/constants/colors';
+import { useLoopingProgress } from '@/hooks/useLoopingProgress';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
@@ -80,10 +77,7 @@ export function AnimatedOffPayLogo({
   lookDownOffset,
   style,
 }: AnimatedOffPayLogoProps): React.JSX.Element {
-  const progress = useDerivedValue(
-    () => withRepeat(withTiming(1, { duration: 9000, easing: Easing.linear }), -1, false),
-    [],
-  );
+  const progress = useLoopingProgress({ durationMs: 9000 });
 
   const leftEyeProps = useAnimatedProps(() => {
     const offsetX = interpolate(progress.value, KEYFRAME_POINTS, EYE_X, Extrapolation.CLAMP);

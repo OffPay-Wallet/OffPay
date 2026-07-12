@@ -295,6 +295,7 @@ export function RwaScreenContent(): React.JSX.Element {
         title: 'RWA swap failed',
         message,
         variant: 'error',
+        notificationId: `rwa-swap-failed-${variables.review.network}-${variables.review.walletAddress}`,
       });
     },
   });
@@ -610,6 +611,12 @@ export function RwaScreenContent(): React.JSX.Element {
     setProcessResult(null);
   }, []);
 
+  const handleTradeAgain = useCallback((): void => {
+    if (processResult?.variant !== 'success') return;
+    setTradeDraft(processResult.repeatTradeDraft);
+    setProcessResult(null);
+  }, [processResult]);
+
   const reviewLegs = useMemo(
     () => (reviewQuote == null ? null : buildRwaReviewTokenLegs(reviewQuote)),
     [reviewQuote],
@@ -639,7 +646,10 @@ export function RwaScreenContent(): React.JSX.Element {
   }, [processResult, reviewLegs]);
   const rwaSwapReviewDetailRows = processResult?.detailRows ?? reviewDetailRows;
   const rwaSwapReviewSide: RwaSwapReviewScreenSide | null =
-    reviewQuote?.side ?? rwaExecuteMutation.variables?.review.side ?? null;
+    processResult?.repeatTradeDraft.side ??
+    reviewQuote?.side ??
+    rwaExecuteMutation.variables?.review.side ??
+    null;
 
   const tradeDraftAsset = useMemo(
     () =>
@@ -763,6 +773,7 @@ export function RwaScreenContent(): React.JSX.Element {
         canSubmit={reviewQuote != null && !rwaExecuteMutation.isPending}
         onCancel={handleCancelReview}
         onConfirm={handleConfirmReview}
+        onTradeAgain={handleTradeAgain}
         onDone={handleCloseProcessResult}
       />
     </View>
