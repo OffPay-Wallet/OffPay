@@ -135,14 +135,24 @@ function buildToolResultCard(toolResult: AgentToolResult): AgenticChatToolCard |
 }
 
 function buildErrorCard(toolResult: AgentToolResult): AgenticChatToolCard {
+  const subtitle = userFacingErrorSubtitle(toolResult.error?.code);
   return {
     id: `${toolResult.toolCallId}:error`,
     toolName: toolResult.name,
     title: titleForTool(toolResult.name),
-    subtitle: 'Could not complete',
-    tone: 'danger',
-    rows: [row('Code', toolResult.error?.code ?? 'tool_failed', 'danger', true)],
+    subtitle,
+    tone: subtitle === 'Not found' ? 'default' : 'danger',
   };
+}
+
+function userFacingErrorSubtitle(code: string | null | undefined): string {
+  const normalized = code?.trim().toLowerCase() ?? '';
+  if (/(?:^|_)(?:not_found|unknown)$/.test(normalized)) return 'Not found';
+  if (normalized.includes('rate_limit')) return 'Try again shortly';
+  if (normalized.includes('unavailable') || normalized.includes('network')) return 'Unavailable';
+  if (normalized.includes('ambiguous')) return 'More details needed';
+  if (normalized.includes('missing') || normalized.includes('invalid')) return 'Check the request';
+  return 'Could not complete';
 }
 
 function buildWalletBalanceCard(

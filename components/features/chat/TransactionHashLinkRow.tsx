@@ -16,9 +16,8 @@ interface TransactionHashLinkRowProps {
 }
 
 /**
- * Compact, left-aligned tx row used inside the timeline result block. The
- * fixed-width label keeps the hashes aligned when several rows stack (e.g. the
- * RWA Delegate / Finalize / Settle signatures).
+ * Compact tx row used inside the timeline result block. Multi-step labels keep
+ * a small shared width; the default Tx label uses its natural width.
  */
 export function TransactionHashLinkRow({
   label = 'Tx',
@@ -28,7 +27,12 @@ export function TransactionHashLinkRow({
 }: TransactionHashLinkRowProps): React.JSX.Element {
   return (
     <View style={styles.row}>
-      <Text variant="small" color={colors.text.tertiary} style={styles.label} numberOfLines={1}>
+      <Text
+        variant="small"
+        color={colors.text.tertiary}
+        style={[styles.label, label === 'Tx' ? styles.compactLabel : null]}
+        numberOfLines={1}
+      >
         {label}
       </Text>
       <SolscanTransactionLink
@@ -46,15 +50,17 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.xs,
     minHeight: 24,
   },
   label: {
-    width: 64,
+    width: 60,
     flexShrink: 0,
   },
+  compactLabel: {
+    width: 'auto',
+  },
   link: {
-    flexGrow: 0,
     flexShrink: 1,
     minHeight: 24,
   },

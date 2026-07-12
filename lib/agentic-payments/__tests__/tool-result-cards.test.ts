@@ -261,22 +261,37 @@ describe('buildAgenticToolResultCards', () => {
     expect(cards).toHaveLength(0);
   });
 
-  it('keeps error cards for failed tools', () => {
-    const cards = buildAgenticToolResultCards([
+  it('uses plain statuses instead of backend codes on failed tool cards', () => {
+    const unavailable = buildAgenticToolResultCards([
       {
         toolCallId: 'call-error',
         name: 'get_swap_price',
         error: { code: 'feature_unavailable' },
       },
     ]);
+    const notFound = buildAgenticToolResultCards([
+      {
+        toolCallId: 'call-rwa-error',
+        name: 'get_rwa_assets',
+        error: { code: 'rwa_asset_unknown' },
+      },
+    ]);
 
-    expect(cards).toEqual([
+    expect(unavailable).toEqual([
       expect.objectContaining({
         title: 'Token price',
-        subtitle: 'Could not complete',
+        subtitle: 'Unavailable',
         tone: 'danger',
-        rows: [expect.objectContaining({ label: 'Code', value: 'feature_unavailable' })],
       }),
     ]);
+    expect(unavailable[0]?.rows).toBeUndefined();
+    expect(notFound).toEqual([
+      expect.objectContaining({
+        title: 'RWA assets',
+        subtitle: 'Not found',
+        tone: 'default',
+      }),
+    ]);
+    expect(notFound[0]?.rows).toBeUndefined();
   });
 });

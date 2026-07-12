@@ -6,32 +6,29 @@
  * The rail is a dashed flight trail whose green segment fills forward as the
  * real action status advances (Approved -> Broadcast -> Confirmed). The stage
  * still in progress shows the paper-plane glyph (from the supplied
- * Arrow/QuiverAI SVG) spinning in place as a lightweight processing spinner.
+ * Arrow/QuiverAI SVG) moving forward along the rail to the active node.
  * Cleared stages flip their empty circle into a green tick; failure/rejection
  * flips the terminal node into a red cross — both with a spring ZoomIn.
  *
- * Flow: while a transaction is broadcasting the plane sits on the Broadcast
- * node; once a signature exists it hands off to the final "Confirming" node and
- * keeps spinning there until the network confirms on-chain, then the node ticks
- * green. This mirrors the real status (`submitting` + signature = confirming).
+ * Flow: while a transaction is broadcasting the plane moves to the Broadcast
+ * node. Once a signature exists it progresses slowly toward confirmation;
+ * confirmation accelerates the final hop before the node ticks green.
  *
- * All motion runs on the Reanimated UI thread (shared values + transforms /
- * opacity, plus a lightweight ZoomIn on the tick) and honours reduced motion.
+ * All motion runs on the Reanimated UI thread (shared values + transforms,
+ * plus a lightweight ZoomIn on the tick) and honours reduced motion.
  * This component is intentionally scoped to the chat confirmation cards.
  */
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Path } from 'react-native-svg';
 import Animated, {
   Easing,
   ZoomIn,
-  cancelAnimation,
+  runOnJS,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withRepeat,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -67,7 +64,7 @@ interface TransactionTimelineProps {
   noun?: string;
   /**
    * Live tx signature. When present while `submitting`, the timeline advances
-   * to the final "Confirming" stage and spins there until confirmed on-chain.
+   * to the final "Confirming" stage until confirmed on-chain.
    */
   signature?: string | null;
   /** Live failure reason surfaced on the terminal node when the txn fails. */
@@ -89,8 +86,10 @@ const CENTER_X = RAIL_W / 2;
 const TOP_Y = ROW_PAD_TOP + TITLE_CENTER;
 
 // --- Motion ---------------------------------------------------------------
-const TRAIL_SPRING = { damping: 18, stiffness: 130, mass: 0.9 } as const;
-const SPIN_MS = 1500;
+const MOVE_MS = 240;
+const CONFIRMING_TARGET = 1.92;
+const CONFIRMING_MOVE_MS = 20_000;
+const CONFIRMED_MOVE_MS = 260;
 const TICK_ENTER = ZoomIn.springify().damping(13).stiffness(210).mass(0.6);
 
 function nodeCenterY(index: number): number {
@@ -105,7 +104,7 @@ export function hasTransactionStarted(status: AgenticActionStatus): boolean {
   return status !== 'needs_confirmation';
 }
 
-function deriveTimeline(
+export function deriveTimeline(
   status: AgenticActionStatus,
   hasSignature: boolean,
   noun: string,
@@ -114,7 +113,7 @@ function deriveTimeline(
   switch (status) {
     case 'submitting':
       // A signature means the tx is broadcast and now confirming on-chain, so
-      // the plane hands off to the final stage and spins there.
+      // the plane starts moving toward the final stage.
       if (hasSignature) {
         return {
           steps: [
@@ -213,6 +212,20 @@ function deriveTimeline(
   }
 }
 
+export function derivePlaneMotion(
+  status: AgenticActionStatus,
+  hasSignature: boolean,
+  frontier: number,
+): { target: number; duration: number; completesSuccess: boolean } {
+  if (status === 'submitting' && hasSignature) {
+    return { target: CONFIRMING_TARGET, duration: CONFIRMING_MOVE_MS, completesSuccess: false };
+  }
+  if (status === 'submitted' && hasSignature) {
+    return { target: 2, duration: CONFIRMED_MOVE_MS, completesSuccess: true };
+  }
+  return { target: frontier, duration: MOVE_MS, completesSuccess: false };
+}
+
 function titleColor(state: TimelineNodeState): string {
   if (state === 'success') return colors.semantic.receive;
   if (state === 'error') return colors.semantic.error;
@@ -234,8 +247,8 @@ function PlaneGlyph({ size, color }: { size: number; color: string }): React.JSX
 
 /**
  * Milestone node. Cleared stages show a green tick (red cross on failure) that
- * zooms in; the in-progress stage shows the plane spinning inside an accent
- * ring; upcoming stages show a dim hollow ring.
+ * zooms in; the in-progress stage shows an accent ring while the shared plane
+ * moves to it; upcoming stages show a dim hollow ring.
  */
 function TimelineNode({
   state,
@@ -244,23 +257,6 @@ function TimelineNode({
   state: TimelineNodeState;
   reduceMotion: boolean;
 }): React.JSX.Element {
-  const spin = useSharedValue(0);
-
-  useEffect(() => {
-    if (state === 'active' && !reduceMotion) {
-      spin.value = 0;
-      spin.value = withRepeat(withTiming(1, { duration: SPIN_MS, easing: Easing.linear }), -1);
-    } else {
-      cancelAnimation(spin);
-      spin.value = 0;
-    }
-    return () => cancelAnimation(spin);
-  }, [state, reduceMotion, spin]);
-
-  const spinStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${spin.value * 360}deg` }],
-  }));
-
   if (state === 'done' || state === 'success' || state === 'error') {
     const isError = state === 'error';
     return (
@@ -285,11 +281,7 @@ function TimelineNode({
   if (state === 'active') {
     return (
       <View style={styles.node}>
-        <View style={styles.activeRing}>
-          <Animated.View style={spinStyle}>
-            <PlaneGlyph size={PLANE} color={colors.text.primary} />
-          </Animated.View>
-        </View>
+        <View style={styles.activeRing} />
       </View>
     );
   }
@@ -310,20 +302,51 @@ export function TransactionTimeline({
 }: TransactionTimelineProps): React.JSX.Element | null {
   const reduceMotion = useReducedMotion();
   const hasSignature = signature != null && signature.length > 0;
+  const [successArrived, setSuccessArrived] = useState(false);
+  const successArrivalPending =
+    status === 'submitted' && hasSignature && !successArrived && !reduceMotion;
+  const displayStatus = successArrivalPending ? 'submitting' : status;
   const model = useMemo(
-    () => deriveTimeline(status, hasSignature, noun, errorMessage),
-    [status, hasSignature, noun, errorMessage],
+    () => deriveTimeline(displayStatus, hasSignature, noun, errorMessage),
+    [displayStatus, hasSignature, noun, errorMessage],
   );
   const { steps, frontier, failed } = model;
 
-  const trail = useSharedValue(frontier);
+  const trail = useSharedValue(0);
 
   useEffect(() => {
-    trail.value = reduceMotion ? frontier : withSpring(frontier, TRAIL_SPRING);
-  }, [frontier, reduceMotion, trail]);
+    if (status !== 'submitted') setSuccessArrived(false);
+  }, [status]);
+
+  useEffect(() => {
+    const motion = derivePlaneMotion(status, hasSignature, frontier);
+    if (reduceMotion) {
+      trail.value = motion.target;
+      return;
+    }
+
+    trail.value = withTiming(
+      motion.target,
+      {
+        duration: motion.duration,
+        easing:
+          motion.completesSuccess || motion.target <= 1
+            ? Easing.in(Easing.cubic)
+            : Easing.linear,
+      },
+      (finished) => {
+        if (finished && motion.completesSuccess && !successArrived) {
+          runOnJS(setSuccessArrived)(true);
+        }
+      },
+    );
+  }, [frontier, hasSignature, reduceMotion, status, successArrived, trail]);
 
   const trailStyle = useAnimatedStyle(() => ({
     height: Math.max(0, trail.value * ROW_H),
+  }));
+  const planeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: trail.value * ROW_H }, { rotate: '180deg' }],
   }));
 
   if (steps.length === 0) return null;
@@ -358,6 +381,12 @@ export function TransactionTimeline({
             <TimelineNode state={step.state} reduceMotion={reduceMotion} />
           </View>
         ))}
+
+        {steps.some((step) => step.state === 'active') ? (
+          <Animated.View pointerEvents="none" style={[styles.planeMarker, planeStyle]}>
+            <PlaneGlyph size={PLANE} color={colors.text.primary} />
+          </Animated.View>
+        ) : null}
       </View>
 
       {/* Right column: milestone labels aligned to each node row. */}
@@ -437,6 +466,15 @@ const styles = StyleSheet.create({
     left: CENTER_X - NODE_R,
     width: NODE,
     height: NODE,
+  },
+  planeMarker: {
+    position: 'absolute',
+    top: TOP_Y - NODE_R,
+    left: CENTER_X - NODE_R,
+    width: NODE,
+    height: NODE,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   node: {
     width: NODE,

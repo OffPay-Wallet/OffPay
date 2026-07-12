@@ -108,6 +108,7 @@ export function RwaTradeConfirmationCard({
         <TransactionTimeline
           status={action.status}
           noun="trade"
+          signature={action.signature ?? null}
           errorMessage={action.errorMessage}
           resultContent={
             signatureLinks.length > 0 ? (
