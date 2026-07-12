@@ -21,31 +21,41 @@ jest.mock('react-native-reanimated', () => {
     useAnimatedStyle: jest.fn(),
     useReducedMotion: () => false,
     useSharedValue: (value: number) => ({ value }),
+    withSequence: (...animations: number[]) => animations[animations.length - 1],
     withTiming: (value: number) => value,
   };
 });
 
 describe('transaction timeline progression', () => {
-  it('moves from broadcast to confirmation and keeps the result on success', () => {
-    const broadcasting = deriveTimeline('submitting', false, 'transfer', null);
+  it('moves between two nodes until backend confirmation completes the arrival', () => {
+    const confirmingWithoutSignature = deriveTimeline('submitting', false, 'transfer', null);
     const confirming = deriveTimeline('submitting', true, 'transfer', null);
     const confirmed = deriveTimeline('submitted', true, 'transfer', null);
 
-    expect(broadcasting).toMatchObject({ frontier: 1 });
-    expect(broadcasting.steps[1]).toMatchObject({ key: 'broadcast', state: 'active' });
-    expect(confirming).toMatchObject({ frontier: 2 });
-    expect(confirming.steps[2]).toMatchObject({ key: 'settle', state: 'active' });
-    expect(derivePlaneMotion('submitting', true, confirming.frontier)).toMatchObject({
-      target: 1.92,
-      duration: 20_000,
+    expect(confirmingWithoutSignature.steps).toHaveLength(2);
+    expect(confirmingWithoutSignature.steps[1]).toMatchObject({
+      key: 'settle',
+      title: 'Confirmation',
+      state: 'active',
+    });
+    expect(confirming).toMatchObject({ frontier: 1 });
+    expect(confirming.steps[1]).toMatchObject({
+      key: 'settle',
+      state: 'active',
+      subtitle: 'Finalizing on-chain',
+    });
+    expect(derivePlaneMotion('submitting')).toMatchObject({
+      target: 0.92,
+      duration: 40_000,
       completesSuccess: false,
     });
-    expect(derivePlaneMotion('submitted', true, confirmed.frontier)).toMatchObject({
-      target: 2,
-      duration: 260,
+    expect(derivePlaneMotion('submitted')).toMatchObject({
+      target: 1,
+      duration: 1_200,
       completesSuccess: true,
     });
-    expect(confirmed.steps[2]).toMatchObject({
+    expect(confirmed.steps).toHaveLength(2);
+    expect(confirmed.steps[1]).toMatchObject({
       key: 'settle',
       state: 'success',
       hostsResult: true,

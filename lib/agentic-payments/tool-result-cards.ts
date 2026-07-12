@@ -1,4 +1,4 @@
-import type { AgentToolResult } from '@/lib/agentic-payments/types';
+import type { AgentToolCall, AgentToolResult } from '@/lib/agentic-payments/types';
 import type {
   AgenticChatToolCard,
   AgenticRwaAssetCardPreview,
@@ -78,6 +78,31 @@ export function buildAgenticToolResultCards(
     if (cards.length >= MAX_TOOL_CARDS) break;
   }
   return cards;
+}
+
+export function mergeAgenticToolResultCards(
+  cards: readonly AgenticChatToolCard[],
+): AgenticChatToolCard[] {
+  const unique = new Map<string, AgenticChatToolCard>();
+  for (const card of cards) {
+    const { id: _id, ...visibleContent } = card;
+    const key = JSON.stringify(visibleContent);
+    if (!unique.has(key)) unique.set(key, card);
+  }
+  return [...unique.values()].slice(0, MAX_TOOL_CARDS);
+}
+
+export function takeNewAgenticToolCalls(
+  calls: readonly AgentToolCall[],
+  seen: Set<string>,
+): AgentToolCall[] {
+  return calls.filter((call) => {
+    const args = Object.entries(call.args).sort(([left], [right]) => left.localeCompare(right));
+    const key = `${call.name}:${JSON.stringify(args)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function buildToolResultCard(toolResult: AgentToolResult): AgenticChatToolCard | null {

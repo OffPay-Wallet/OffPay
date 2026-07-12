@@ -62,6 +62,10 @@ const VISIBLE_ROUTE_EXECUTION_DETAIL_PATTERN =
   /\s+(?:using|via|through)\s+(?:the\s+)?(?:normal|public|private|magic\s*block|magicblock|umbra)\s+route\b/gi;
 const ACTIVITY_ITEM_START_PATTERN =
   /\b(Sent|Received|Swapped|Bought|Sold|Claimed|Deposited|Withdrew|Paid|Queued|Submitted)\b/g;
+const FALSE_CONFIRMATION_CLAIM_PATTERNS: readonly RegExp[] = [
+  /\b(?:draft|transfer|payment|swap|trade|order|transaction|action|claim)\b.{0,80}\b(?:ready|prepared|review|confirm(?:ation)?)\b/i,
+  /\b(?:ready|prepared|review|confirm)\b.{0,80}\b(?:draft|transfer|payment|swap|trade|order|transaction|action|claim)\b/i,
+];
 
 function normalizeMarkdownListMarkers(text: string): string {
   const withDashBullets = text.replace(/(^|\n)(\s*)\*\s+(?=\S)/g, '$1$2- ');
@@ -137,6 +141,26 @@ export function buildAgenticDraftReadyText(
     return 'Your Umbra action is ready. Review the details below, then confirm.';
   }
   return 'Your action is ready. Review the details below, then confirm.';
+}
+
+/**
+ * Catch a model reply that promises confirmation UI without producing the
+ * local draft that the UI needs. The caller gives the model one bounded retry.
+ */
+export function shouldRetryMissingConfirmationDraft({
+  assistantText,
+  hasConfirmationTool,
+  retryUsed,
+}: {
+  assistantText: string;
+  hasConfirmationTool: boolean;
+  retryUsed: boolean;
+}): boolean {
+  return (
+    hasConfirmationTool &&
+    !retryUsed &&
+    FALSE_CONFIRMATION_CLAIM_PATTERNS.some((pattern) => pattern.test(assistantText))
+  );
 }
 
 /**

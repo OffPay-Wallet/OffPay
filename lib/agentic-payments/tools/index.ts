@@ -3,6 +3,7 @@ export {
   AGENTIC_TOOL_SCHEMAS,
   formatAgenticToolProcessingLabel,
   getAgenticToolMetadata,
+  isAgenticWriteIntentTool,
   isAgenticToolParallelSafe,
 } from './registry';
 export { runAgenticTools } from './runner';

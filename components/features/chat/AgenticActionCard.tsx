@@ -66,10 +66,7 @@ export function isAgenticTransactionAction(
 export function isAgenticDraftSheetAction(
   action: AgenticChatAction | null | undefined,
 ): action is AgenticTransactionAction {
-  return (
-    isAgenticTransactionAction(action) &&
-    (action.status === 'needs_confirmation' || action.status === 'submitting')
-  );
+  return isAgenticTransactionAction(action) && action.status === 'needs_confirmation';
 }
 
 export function AgenticActionCard({

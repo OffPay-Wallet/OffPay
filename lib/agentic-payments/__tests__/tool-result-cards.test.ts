@@ -1,6 +1,45 @@
-import { buildAgenticToolResultCards } from '@/lib/agentic-payments/tool-result-cards';
+import {
+  buildAgenticToolResultCards,
+  mergeAgenticToolResultCards,
+  takeNewAgenticToolCalls,
+} from '@/lib/agentic-payments/tool-result-cards';
 
 describe('buildAgenticToolResultCards', () => {
+  it('drops an exact repeated tool call while keeping a different call', () => {
+    const seen = new Set<string>();
+    const first = { id: '1', name: 'get_client_capabilities', args: {} };
+
+    expect(takeNewAgenticToolCalls([first], seen)).toEqual([first]);
+    expect(
+      takeNewAgenticToolCalls(
+        [
+          { id: '2', name: 'get_client_capabilities', args: {} },
+          { id: '3', name: 'get_wallet_balance', args: {} },
+        ],
+        seen,
+      ),
+    ).toEqual([{ id: '3', name: 'get_wallet_balance', args: {} }]);
+  });
+
+  it('deduplicates equivalent cards from repeated tool attempts', () => {
+    const first = buildAgenticToolResultCards([
+      {
+        toolCallId: 'umbra-attempt-1',
+        name: 'draft_umbra_vault_action',
+        error: { code: 'amount_missing' },
+      },
+    ]);
+    const repeated = buildAgenticToolResultCards([
+      {
+        toolCallId: 'umbra-attempt-2',
+        name: 'draft_umbra_vault_action',
+        error: { code: 'amount_missing' },
+      },
+    ]);
+
+    expect(mergeAgenticToolResultCards([...first, ...repeated])).toEqual(first);
+  });
+
   it('builds a portfolio card from wallet balance results', () => {
     const cards = buildAgenticToolResultCards([
       {

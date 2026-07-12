@@ -24,6 +24,7 @@ import {
 import {
   formatAgenticToolProcessingLabel,
   getAvailableAgenticModelToolSchemas,
+  isAgenticWriteIntentTool,
   runAgenticTools,
   type AgenticPortfolioValuationSnapshot,
   type AgenticToolDraft,
@@ -32,10 +33,15 @@ import {
 import {
   buildAgenticDraftReadyText,
   sanitizeAssistantText,
+  shouldRetryMissingConfirmationDraft,
 } from '@/lib/agentic-payments/assistant-text';
 import { hydrateAssistantToolResultPlaceholders } from '@/lib/agentic-payments/assistant-tool-placeholders';
 import type { AgenticKnownWallet } from '@/lib/agentic-payments/private-send-intent';
-import { buildAgenticToolResultCards } from '@/lib/agentic-payments/tool-result-cards';
+import {
+  buildAgenticToolResultCards,
+  mergeAgenticToolResultCards,
+  takeNewAgenticToolCalls,
+} from '@/lib/agentic-payments/tool-result-cards';
 import {
   runAgenticPrivacyFirewall,
   sanitizeAgentMessagesForAi,
@@ -332,6 +338,8 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
   let attachedActionId: string | null = null;
   let attachedToolCards: AgenticChatToolCard[] = [];
   let writeIntentUsed = false;
+  let missingConfirmationRetryUsed = false;
+  const seenToolCalls = new Set<string>();
   const canReadUmbraVaultBalance = isOffpayFeatureAvailable(
     params.capabilities ?? null,
     'umbra.execution',
@@ -351,6 +359,12 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     capabilities: params.capabilities,
   });
   const offeredToolNames = toolSchemas.map((schema) => schema.name);
+  const hasConfirmationTool = offeredToolNames.some(
+    (name) => name !== 'stage_payroll' && isAgenticWriteIntentTool(name),
+  );
+  const latestUserMessage = [...conversationMessages]
+    .reverse()
+    .find((message) => message.role === 'user');
 
   for (let turnIndex = 0; turnIndex < MAX_TOOL_TURNS; turnIndex += 1) {
     const turn = await sendAgentTurn(
@@ -405,6 +419,29 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
     }
 
     if (turn.kind === 'agent_text') {
+      if (
+        !writeIntentUsed &&
+        turnIndex < MAX_TOOL_TURNS - 1 &&
+        latestUserMessage != null &&
+        shouldRetryMissingConfirmationDraft({
+          assistantText: turn.text,
+          hasConfirmationTool,
+          retryUsed: missingConfirmationRetryUsed,
+        })
+      ) {
+        missingConfirmationRetryUsed = true;
+        pendingToolCalls = [];
+        pendingToolResults = [];
+        conversationMessages.push({
+          role: 'user',
+          content: `${latestUserMessage.content}\n\nCall the matching available draft tool now using the details above. Do not say it is ready unless the tool returns a draft for the app confirmation card.`,
+        });
+        store.updateMessage(params.assistantMessageId, {
+          processingLabel: 'Preparing confirmation',
+        });
+        continue;
+      }
+
       const textWithToolValues = hydrateAssistantToolResultPlaceholders(
         turn.text,
         pendingToolResults,
@@ -429,14 +466,30 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       return;
     }
 
+    const toolCalls = takeNewAgenticToolCalls(turn.toolCalls, seenToolCalls);
+    if (toolCalls.length === 0) {
+      await revealAssistantMessageText(
+        params.assistantMessageId,
+        attachedToolCards.length > 0 ? '' : EMPTY_ASSISTANT_REPLY,
+        {
+          signal: params.controller.signal,
+          patch: buildAssistantRevealPatch({
+            actionId: attachedActionId,
+            toolCards: attachedToolCards,
+          }),
+        },
+      );
+      return;
+    }
+
     // tool-calls turn — run them on-device
     store.updateMessage(params.assistantMessageId, {
-      processingLabel: formatAgenticToolProcessingLabel(turn.toolCalls),
+      processingLabel: formatAgenticToolProcessingLabel(toolCalls),
     });
     let portfolioValuation = params.portfolioValuation;
     if (
       params.resolvePortfolioValuation != null &&
-      shouldResolvePortfolioValuation(turn.toolCalls)
+      shouldResolvePortfolioValuation(toolCalls)
     ) {
       try {
         portfolioValuation = (await params.resolvePortfolioValuation()) ?? portfolioValuation;
@@ -461,7 +514,7 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       walletImportMethod: params.walletImportMethod ?? null,
       offeredToolNames,
     };
-    const run = await runAgenticTools(turn.toolCalls, toolContext, {
+    const run = await runAgenticTools(toolCalls, toolContext, {
       allowWriteIntent: !writeIntentUsed,
       onToolStart: (toolCalls) => {
         store.updateMessage(params.assistantMessageId, {
@@ -478,9 +531,8 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
       });
     }
 
-    attachedToolCards = [...attachedToolCards, ...buildAgenticToolResultCards(run.results)].slice(
-      0,
-      3,
+    attachedToolCards = mergeAgenticToolResultCards(
+      [...attachedToolCards, ...buildAgenticToolResultCards(run.results)],
     );
 
     if (attachedActionId != null) {
@@ -513,7 +565,9 @@ async function runAgentLoop(params: RunAgentLoopParams): Promise<void> {
   // Loop hit its budget without a final text turn.
   await revealAssistantMessageText(
     params.assistantMessageId,
-    'I could not finish that in one pass. Send one clear action with the amount, token or market, and any trade details like side, leverage, collateral, and order type.',
+    attachedToolCards.length > 0
+      ? ''
+      : 'I could not finish that in one pass. Send one clear action with the amount, token or market, and any trade details like side, leverage, collateral, and order type.',
     {
       signal: params.controller.signal,
       patch: buildAssistantRevealPatch({

@@ -547,7 +547,7 @@ async function fetchCloudflareAiAgentTurn(
 ): Promise<AgentTurn> {
   const model = cloudflareAiModel(env);
   const requestKind = cloudflareAiAgentTurnRequestKind(body, env);
-  if (!hasReplayedToolTrace(body) && cloudflareAiUsesJsonAgentProtocol(model)) {
+  if (hasReplayedToolTrace(body) || cloudflareAiUsesJsonAgentProtocol(model)) {
     return parseJsonAgentTurn(
       await fetchCloudflareAiJson(
         buildCloudflareAiJsonAgentTurnRequest(body),
@@ -559,9 +559,7 @@ async function fetchCloudflareAiAgentTurn(
     );
   }
 
-  const request = hasReplayedToolTrace(body)
-    ? buildCloudflareAiToolResultRequest(body, model)
-    : buildCloudflareAiAgentTurnRequest(body, model);
+  const request = buildCloudflareAiAgentTurnRequest(body, model);
   const result = await runCloudflareAiWithTimeout(env, model, request, requestKind, {
     sessionAffinity: options.sessionAffinity,
   });
@@ -569,7 +567,7 @@ async function fetchCloudflareAiAgentTurn(
 }
 
 function cloudflareAiAgentTurnRequestKind(body: AgentChatRequest, env: AiProxyEnv): string {
-  if (hasReplayedToolTrace(body)) return 'agent_text_after_tools';
+  if (hasReplayedToolTrace(body)) return 'agent_after_tools';
   return cloudflareAiUsesJsonAgentProtocol(cloudflareAiModel(env))
     ? 'agent_json_primary'
     : 'agent_native';
@@ -717,46 +715,6 @@ function buildCloudflareAiJsonAgentTurnRequest(body: AgentChatRequest): Record<s
     max_tokens: 256,
     top_p: 0.9,
   };
-}
-
-function buildCloudflareAiToolResultRequest(
-  body: AgentChatRequest,
-  model: string,
-): Record<string, unknown> {
-  const request: Record<string, unknown> = {
-    messages: [
-      {
-        role: 'system',
-        content: [
-          buildCloudflareAiAgentSystemPrompt(body),
-          '',
-          'The app already executed the requested local tool calls. Produce only the final user-facing answer.',
-          'Do not request more tools. Keep it short and do not include private wallet data.',
-        ].join('\n'),
-      },
-      ...buildCloudflareAiConversationMessages(body),
-      {
-        role: 'user',
-        content: [
-          'Local tool execution trace:',
-          safeJson(
-            {
-              assistantToolCalls: body.assistantToolCalls ?? [],
-              toolResults: body.toolResults ?? [],
-            },
-            8000,
-          ),
-          '',
-          'Reply with the final short answer for the user.',
-        ].join('\n'),
-      },
-    ],
-    temperature: 0.2,
-    max_tokens: 192,
-    top_p: 0.95,
-  };
-  applyCloudflareAiResponseControls(request, model, 'text');
-  return request;
 }
 
 function buildCloudflareAiAgentSystemPrompt(body: AgentChatRequest): string {

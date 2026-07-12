@@ -2,6 +2,7 @@ import {
   buildAgenticDraftReadyText,
   humanizeAssistantTextForDisplay,
   sanitizeAssistantText,
+  shouldRetryMissingConfirmationDraft,
 } from '@/lib/agentic-payments/assistant-text';
 import { generatePayrollAgentReply } from '@/lib/agentic-payments/payroll-agent-reply';
 
@@ -215,5 +216,34 @@ describe('sanitizeAssistantText', () => {
     expect(cleaned).toBe(
       ['Here is your activity:', '- Sent 2 USDC', '- Received 1 SOL', '- Sent 1 USDC'].join('\n'),
     );
+  });
+});
+
+describe('shouldRetryMissingConfirmationDraft', () => {
+  it('retries a false ready claim when confirmation tools are available', () => {
+    expect(
+      shouldRetryMissingConfirmationDraft({
+        assistantText: 'Your transfer is ready. Review it below, then confirm.',
+        hasConfirmationTool: true,
+        retryUsed: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('does not loop or retry ordinary assistant replies', () => {
+    expect(
+      shouldRetryMissingConfirmationDraft({
+        assistantText: 'Which token and amount would you like to send?',
+        hasConfirmationTool: true,
+        retryUsed: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryMissingConfirmationDraft({
+        assistantText: 'Your swap is ready for confirmation.',
+        hasConfirmationTool: true,
+        retryUsed: true,
+      }),
+    ).toBe(false);
   });
 });

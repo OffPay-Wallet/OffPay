@@ -4,15 +4,15 @@
  * a draft.
  *
  * The rail is a dashed flight trail whose green segment fills forward as the
- * real action status advances (Approved -> Broadcast -> Confirmed). The stage
+ * real action status advances (Approved -> Confirmed). The stage
  * still in progress shows the paper-plane glyph (from the supplied
  * Arrow/QuiverAI SVG) moving forward along the rail to the active node.
  * Cleared stages flip their empty circle into a green tick; failure/rejection
  * flips the terminal node into a red cross — both with a spring ZoomIn.
  *
- * Flow: while a transaction is broadcasting the plane moves to the Broadcast
- * node. Once a signature exists it progresses slowly toward confirmation;
- * confirmation accelerates the final hop before the node ticks green.
+ * Flow: after approval the plane moves slowly between the two nodes. A real
+ * backend confirmation completes the final smooth arrival before the node
+ * ticks green.
  *
  * All motion runs on the Reanimated UI thread (shared values + transforms,
  * plus a lightweight ZoomIn on the tick) and honours reduced motion.
@@ -29,6 +29,7 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -63,8 +64,8 @@ interface TransactionTimelineProps {
   /** Human noun used in subtitles, e.g. "transfer", "swap", "trade". */
   noun?: string;
   /**
-   * Live tx signature. When present while `submitting`, the timeline advances
-   * to the final "Confirming" stage until confirmed on-chain.
+   * Live tx signature. When present while `submitting`, the final stage label
+   * changes from broadcasting to confirming.
    */
   signature?: string | null;
   /** Live failure reason surfaced on the terminal node when the txn fails. */
@@ -87,9 +88,11 @@ const TOP_Y = ROW_PAD_TOP + TITLE_CENTER;
 
 // --- Motion ---------------------------------------------------------------
 const MOVE_MS = 240;
-const CONFIRMING_TARGET = 1.92;
-const CONFIRMING_MOVE_MS = 20_000;
-const CONFIRMED_MOVE_MS = 260;
+const DEPART_TARGET = 0.18;
+const DEPART_MS = 480;
+const CONFIRMING_TARGET = 0.92;
+const CONFIRMING_MOVE_MS = 40_000;
+const CONFIRMED_MOVE_MS = 1_200;
 const TICK_ENTER = ZoomIn.springify().damping(13).stiffness(210).mass(0.6);
 
 function nodeCenterY(index: number): number {
@@ -112,35 +115,16 @@ export function deriveTimeline(
 ): TimelineModel {
   switch (status) {
     case 'submitting':
-      // A signature means the tx is broadcast and now confirming on-chain, so
-      // the plane starts moving toward the final stage.
-      if (hasSignature) {
-        return {
-          steps: [
-            { key: 'approve', title: 'Approved', subtitle: 'You confirmed', state: 'done' },
-            { key: 'broadcast', title: 'Broadcast', subtitle: 'Sent to the network', state: 'done' },
-            {
-              key: 'settle',
-              title: 'Confirming',
-              subtitle: 'Finalizing on-chain',
-              state: 'active',
-              hostsResult: true,
-            },
-          ],
-          frontier: 2,
-          failed: false,
-        };
-      }
       return {
         steps: [
           { key: 'approve', title: 'Approved', subtitle: 'You confirmed', state: 'done' },
           {
-            key: 'broadcast',
-            title: 'Broadcasting',
-            subtitle: 'Sending to the network',
+            key: 'settle',
+            title: 'Confirmation',
+            subtitle: hasSignature ? 'Finalizing on-chain' : 'Waiting for the network',
             state: 'active',
+            hostsResult: true,
           },
-          { key: 'settle', title: 'Confirmation', subtitle: 'Waiting for the network', state: 'pending' },
         ],
         frontier: 1,
         failed: false,
@@ -149,7 +133,6 @@ export function deriveTimeline(
       return {
         steps: [
           { key: 'approve', title: 'Approved', state: 'done' },
-          { key: 'broadcast', title: 'Broadcast', subtitle: 'Sent to the network', state: 'done' },
           {
             key: 'settle',
             title: 'Confirmed',
@@ -158,14 +141,13 @@ export function deriveTimeline(
             hostsResult: true,
           },
         ],
-        frontier: 2,
+        frontier: 1,
         failed: false,
       };
     case 'queued':
       return {
         steps: [
           { key: 'approve', title: 'Approved', state: 'done' },
-          { key: 'broadcast', title: 'Broadcast', subtitle: 'Retrying automatically', state: 'done' },
           {
             key: 'settle',
             title: 'Queued',
@@ -174,14 +156,13 @@ export function deriveTimeline(
             hostsResult: true,
           },
         ],
-        frontier: 2,
+        frontier: 1,
         failed: false,
       };
     case 'failed':
       return {
         steps: [
           { key: 'approve', title: 'Approved', state: 'done' },
-          { key: 'broadcast', title: 'Broadcast', state: 'done' },
           {
             key: 'settle',
             title: 'Failed',
@@ -189,7 +170,7 @@ export function deriveTimeline(
             state: 'error',
           },
         ],
-        frontier: 2,
+        frontier: 1,
         failed: true,
       };
     case 'cancelled':
@@ -201,7 +182,6 @@ export function deriveTimeline(
             subtitle: `You cancelled the ${noun}`,
             state: 'error',
           },
-          { key: 'broadcast', title: 'Broadcast', state: 'pending' },
           { key: 'settle', title: 'Confirmation', state: 'pending' },
         ],
         frontier: 0,
@@ -214,16 +194,17 @@ export function deriveTimeline(
 
 export function derivePlaneMotion(
   status: AgenticActionStatus,
-  hasSignature: boolean,
-  frontier: number,
 ): { target: number; duration: number; completesSuccess: boolean } {
-  if (status === 'submitting' && hasSignature) {
+  if (status === 'submitting') {
     return { target: CONFIRMING_TARGET, duration: CONFIRMING_MOVE_MS, completesSuccess: false };
   }
-  if (status === 'submitted' && hasSignature) {
-    return { target: 2, duration: CONFIRMED_MOVE_MS, completesSuccess: true };
+  if (status === 'submitted') {
+    return { target: 1, duration: CONFIRMED_MOVE_MS, completesSuccess: true };
   }
-  return { target: frontier, duration: MOVE_MS, completesSuccess: false };
+  if (status === 'queued' || status === 'failed') {
+    return { target: 1, duration: MOVE_MS, completesSuccess: false };
+  }
+  return { target: 0, duration: MOVE_MS, completesSuccess: false };
 }
 
 function titleColor(state: TimelineNodeState): string {
@@ -303,14 +284,13 @@ export function TransactionTimeline({
   const reduceMotion = useReducedMotion();
   const hasSignature = signature != null && signature.length > 0;
   const [successArrived, setSuccessArrived] = useState(false);
-  const successArrivalPending =
-    status === 'submitted' && hasSignature && !successArrived && !reduceMotion;
+  const successArrivalPending = status === 'submitted' && !successArrived && !reduceMotion;
   const displayStatus = successArrivalPending ? 'submitting' : status;
   const model = useMemo(
     () => deriveTimeline(displayStatus, hasSignature, noun, errorMessage),
     [displayStatus, hasSignature, noun, errorMessage],
   );
-  const { steps, frontier, failed } = model;
+  const { steps, failed } = model;
 
   const trail = useSharedValue(0);
 
@@ -319,9 +299,17 @@ export function TransactionTimeline({
   }, [status]);
 
   useEffect(() => {
-    const motion = derivePlaneMotion(status, hasSignature, frontier);
+    const motion = derivePlaneMotion(status);
     if (reduceMotion) {
       trail.value = motion.target;
+      return;
+    }
+
+    if (status === 'submitting') {
+      trail.value = withSequence(
+        withTiming(DEPART_TARGET, { duration: DEPART_MS, easing: Easing.out(Easing.cubic) }),
+        withTiming(motion.target, { duration: motion.duration, easing: Easing.linear }),
+      );
       return;
     }
 
@@ -330,17 +318,19 @@ export function TransactionTimeline({
       {
         duration: motion.duration,
         easing:
-          motion.completesSuccess || motion.target <= 1
-            ? Easing.in(Easing.cubic)
+          motion.completesSuccess
+            ? Easing.inOut(Easing.cubic)
+            : motion.target <= 0
+              ? Easing.in(Easing.cubic)
             : Easing.linear,
       },
       (finished) => {
-        if (finished && motion.completesSuccess && !successArrived) {
+        if (finished && motion.completesSuccess) {
           runOnJS(setSuccessArrived)(true);
         }
       },
     );
-  }, [frontier, hasSignature, reduceMotion, status, successArrived, trail]);
+  }, [reduceMotion, status, trail]);
 
   const trailStyle = useAnimatedStyle(() => ({
     height: Math.max(0, trail.value * ROW_H),
@@ -361,11 +351,7 @@ export function TransactionTimeline({
         <View
           style={[styles.trailBase, { top: TOP_Y, height: trailFullHeight }]}
           pointerEvents="none"
-        >
-          {Array.from({ length: Math.ceil(trailFullHeight / 8) + 1 }).map((_, index) => (
-            <View key={index} style={styles.trailDash} />
-          ))}
-        </View>
+        />
 
         <Animated.View
           pointerEvents="none"
@@ -443,17 +429,12 @@ const styles = StyleSheet.create({
   },
   trailBase: {
     position: 'absolute',
-    left: CENTER_X - 0.75,
-    width: 1.5,
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  trailDash: {
-    width: 1.5,
-    height: 4,
-    borderRadius: 1,
-    marginBottom: 4,
-    backgroundColor: colors.border.subtle,
+    left: CENTER_X - 0.5,
+    width: 1,
+    borderLeftWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border.default,
+    opacity: 0.7,
   },
   trailProgress: {
     position: 'absolute',

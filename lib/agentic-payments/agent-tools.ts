@@ -5,6 +5,7 @@ export {
   getAgenticToolMetadata,
   getAvailableAgenticChatCtaIds,
   getAvailableAgenticModelToolSchemas,
+  isAgenticWriteIntentTool,
   isAgenticToolParallelSafe,
   runAgenticTools,
 } from '@/lib/agentic-payments/tools';

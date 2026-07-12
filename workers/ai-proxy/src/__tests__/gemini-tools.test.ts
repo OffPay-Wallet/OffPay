@@ -293,42 +293,42 @@ describe('Gemini tool declaration normalization', () => {
     }
   });
 
-  it('uses a compact Workers AI final-answer prompt for replayed tool traces', async () => {
+  it('keeps draft tools available after a Workers AI read-tool result', async () => {
     const aiRun = jest.fn().mockResolvedValue({
-      choices: [
-        {
-          message: {
-            content: 'Tool result handled.',
-          },
-        },
-      ],
+      response:
+        '{"kind":"agent_tool_calls","toolCalls":[{"name":"prepare_rwa_trade","args":{"asset":"SpaceX","side":"buy","amount":"2"}}]}',
     });
 
     const turn = await generateGeminiAgentTurn(
       {
         responseMode: 'agent_turn',
         messages: [
-          { role: 'user', content: 'Shield 5 usdc into Umbra' },
+          { role: 'user', content: 'Buy 2 usdc of SpaceX stock' },
           { role: 'assistant', content: '' },
         ],
         assistantToolCalls: [
           {
             id: 'tool-1',
-            name: 'draft_umbra_vault_action',
-            args: { action: 'shield', amount: '5', token: 'USDC' },
+            name: 'get_rwa_assets',
+            args: { asset: 'SpaceX' },
           },
         ],
         toolResults: [
           {
             toolCallId: 'tool-1',
-            name: 'draft_umbra_vault_action',
-            result: { status: 'draft_ready' },
+            name: 'get_rwa_assets',
+            result: { status: 'ok', asset: { symbol: 'SPCX', priceUsd: 145.83 } },
           },
         ],
         toolSchemas: [
           {
-            name: 'draft_umbra_vault_action',
-            description: 'Drafts an Umbra vault action.',
+            name: 'get_rwa_assets',
+            description: 'Looks up RWA assets.',
+            parameters: { type: 'object', properties: {} },
+          },
+          {
+            name: 'prepare_rwa_trade',
+            description: 'Prepares an RWA trade confirmation.',
             parameters: { type: 'object', properties: {} },
           },
         ],
@@ -343,14 +343,22 @@ describe('Gemini tool declaration normalization', () => {
     const serialized = JSON.stringify(providerBody);
     expect(providerBody).not.toHaveProperty('tools');
     expect(providerBody).toMatchObject({
-      max_tokens: 192,
+      max_tokens: 256,
     });
     expect(providerBody).not.toHaveProperty('response_format');
     expect(providerBody).not.toHaveProperty('chat_template_kwargs');
-    expect(serialized).toContain('Local tool execution trace');
-    expect(serialized).toContain('draft_umbra_vault_action');
-    expect(serialized).not.toContain('Available local tools');
-    expect(turn).toEqual({ kind: 'agent_text', text: 'Tool result handled.' });
+    expect(serialized).toContain('Available local tools');
+    expect(serialized).toContain('tool_results');
+    expect(serialized).toContain('prepare_rwa_trade');
+    expect(turn).toMatchObject({
+      kind: 'agent_tool_calls',
+      toolCalls: [
+        expect.objectContaining({
+          name: 'prepare_rwa_trade',
+          args: { asset: 'SpaceX', side: 'buy', amount: '2' },
+        }),
+      ],
+    });
   });
 
   it('falls back to Gemini when Workers AI fails', async () => {
