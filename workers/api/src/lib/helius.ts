@@ -839,6 +839,18 @@ function transactionTouchesUmbraProgram(value: unknown, network: Network): boole
   return containsStringValue(value, UMBRA_PROGRAM_IDS[network]);
 }
 
+function transactionTouchesRwaProgram(
+  value: unknown,
+  bindings: Bindings,
+  network: Network,
+): boolean {
+  if (network !== 'devnet') return false;
+  const programId = bindings.OFFPAY_RWA_DELEGATE_PROGRAM_ID?.trim();
+  return (
+    programId != null && isValidSolanaAddress(programId) && containsStringValue(value, programId)
+  );
+}
+
 function extractUmbraPoolCounterparties(
   value: unknown,
   network: Network,
@@ -2990,6 +3002,11 @@ function findCounterpartyAddress(
   );
 }
 
+function isSwapTransactionType(type: string): boolean {
+  const normalized = type.trim().toLowerCase();
+  return normalized.includes('swap') || normalized === 'rwa_buy' || normalized === 'rwa_sell';
+}
+
 function isDisplayableWalletTransactionRecord(transaction: WalletTransactionRecord): boolean {
   const normalizedType = transaction.type.trim().toLowerCase();
   if (
@@ -3028,7 +3045,7 @@ function isDisplayableWalletTransactionRecord(transaction: WalletTransactionReco
   return (
     transaction.direction === 'send' ||
     transaction.direction === 'receive' ||
-    normalizedType.includes('swap')
+    isSwapTransactionType(normalizedType)
   );
 }
 
@@ -3274,8 +3291,11 @@ function parseWalletTransactionDisplayAmounts(
 function getDisplayTitle(
   type: WalletTransactionDisplayType,
   status: WalletTransactionRecord['status'],
+  recordType: string,
 ): string {
   if (status === 'failed') return 'Failed';
+  if (recordType.trim().toLowerCase() === 'rwa_buy') return 'Bought';
+  if (recordType.trim().toLowerCase() === 'rwa_sell') return 'Sold';
   if (type === 'receive') return 'Received';
   if (type === 'swap') return 'Swapped';
   return 'Sent';
@@ -3431,7 +3451,7 @@ function buildWalletTransactionView(
   return {
     id: getWalletTransactionRecordIdentity(transaction),
     type,
-    title: getDisplayTitle(type, transaction.status),
+    title: getDisplayTitle(type, transaction.status, transaction.type),
     subtitle: swapSubtitle ?? buildDisplaySubtitle(type, transaction),
     sourceLabel: null,
     ...amountFields,
@@ -4224,6 +4244,21 @@ function inferTypeFromTokenBalanceDeltas(deltas: readonly TokenBalanceDelta[]): 
   return null;
 }
 
+function classifyDevnetRwaTradeType(
+  bindings: Bindings,
+  network: Network,
+  deltas: readonly TokenBalanceDelta[],
+): 'RWA_BUY' | 'RWA_SELL' | null {
+  if (network !== 'devnet' || deltas.length < 2) return null;
+  const catalog = readDevnetRwaCatalogTokenMap(bindings);
+  const settlement = deltas.find((delta) => catalog.get(delta.mint)?.settlement === true);
+  const asset = deltas.find((delta) => catalog.get(delta.mint)?.settlement === false);
+  if (settlement == null || asset == null) return null;
+  if (settlement.rawDelta < 0n && asset.rawDelta > 0n) return 'RWA_BUY';
+  if (asset.rawDelta < 0n && settlement.rawDelta > 0n) return 'RWA_SELL';
+  return null;
+}
+
 function getTokenBalanceDeltaDirection(delta: TokenBalanceDelta): 'send' | 'receive' {
   return delta.rawDelta > 0n ? 'receive' : 'send';
 }
@@ -4237,7 +4272,7 @@ function shouldExpandTokenBalanceDeltas(
   deltas: readonly TokenBalanceDelta[],
 ): boolean {
   if (deltas.length <= 1) return false;
-  if (type === 'SWAP') return false;
+  if (isSwapTransactionType(type)) return false;
 
   const hasDebit = deltas.some((delta) => delta.rawDelta < 0n);
   const hasCredit = deltas.some((delta) => delta.rawDelta > 0n);
@@ -4264,7 +4299,7 @@ function buildRpcTransactionTokenFields(
   const primaryDebit = deltas.find((delta) => delta.rawDelta < 0n) ?? null;
   const primary = primaryCredit ?? primaryDebit;
   const direction =
-    type === 'SWAP'
+    isSwapTransactionType(type)
       ? null
       : primaryCredit != null
         ? 'receive'
@@ -4291,7 +4326,7 @@ function buildRpcTokenBalanceDescription(
     return null;
   }
 
-  if (type === 'SWAP') {
+  if (isSwapTransactionType(type)) {
     const debit = deltas.find((delta) => delta.rawDelta < 0n);
     const credit = deltas.find((delta) => delta.rawDelta > 0n);
     if (debit && credit) {
@@ -4370,6 +4405,7 @@ async function buildRpcTransactionRecordFromResult(
   const fee = meta ? readFiniteNumber(meta.fee) : null;
   const hasError = meta ? meta.err !== null && meta.err !== undefined : fallbackStatus === 'failed';
   const touchesUmbra = transactionTouchesUmbraProgram(result, network);
+  const touchesRwa = transactionTouchesRwaProgram(result, bindings, network);
 
   const splTokenBalanceDeltas = extractWalletTokenBalanceDeltas(
     meta,
@@ -4377,7 +4413,7 @@ async function buildRpcTransactionRecordFromResult(
     walletTokenAccounts,
     accountKeys,
   );
-  const nativeSolBalanceDeltas = touchesUmbra
+  const nativeSolBalanceDeltas = touchesUmbra || touchesRwa
     ? []
     : extractWalletNativeSolTransferDeltas(
         parsedInstructions,
@@ -4395,6 +4431,7 @@ async function buildRpcTransactionRecordFromResult(
       tokenBalanceDeltas.map((delta) => delta.mint),
     ));
   const type =
+    classifyDevnetRwaTradeType(bindings, network, tokenBalanceDeltas) ??
     inferTypeFromTokenBalanceDeltas(tokenBalanceDeltas) ??
     inferParsedTransactionType(parsedInstructions);
   const baseDescription =
@@ -5247,7 +5284,7 @@ async function getWalletTransactions(
   const useCache = request.useCache ?? true;
   const cacheKey = createNetworkCacheKey(
     request.network,
-    'wallet-transactions-v10-multi-asset-rpc',
+    'wallet-transactions-v11-rwa-history',
     [request.address, normalizedCursor ?? 'first-page', normalizedLimit],
   );
 
@@ -5265,7 +5302,7 @@ async function getWalletTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-transactions-v10-multi-asset-rpc',
+          namespace: 'wallet-transactions-v11-rwa-history',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           staleTtlMs: WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS,
@@ -5289,7 +5326,7 @@ async function getWalletTokenTransactions(
   const useCache = request.useCache ?? true;
   const cacheKey = createNetworkCacheKey(
     request.network,
-    'wallet-token-transactions-v7-multi-asset-rpc',
+    'wallet-token-transactions-v8-rwa-history',
     [request.address, normalizedMint, normalizedCursor ?? 'first-page', normalizedLimit],
   );
 
@@ -5308,7 +5345,7 @@ async function getWalletTokenTransactions(
     ? memoryCache.getOrSet(cacheKey, WALLET_TRANSACTIONS_CACHE_TTL_MS, () =>
         getOrSetSharedJsonCache({
           bindings,
-          namespace: 'wallet-token-transactions-v7-multi-asset-rpc',
+          namespace: 'wallet-token-transactions-v8-rwa-history',
           key: cacheKey,
           ttlMs: WALLET_TRANSACTIONS_CACHE_TTL_MS,
           staleTtlMs: WALLET_TRANSACTIONS_CACHE_STALE_TTL_MS,

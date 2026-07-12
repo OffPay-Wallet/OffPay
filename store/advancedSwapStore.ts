@@ -6,6 +6,7 @@ import type { OffpayNetwork } from '@/types/offpay-api';
 
 export type AdvancedSwapMode = 'trigger' | 'recurring' | 'privacy';
 export type SwapReceiptMode = AdvancedSwapMode | 'normal';
+export type SwapReceiptActivity = 'swap' | 'rwa_buy' | 'rwa_sell';
 
 export interface SwapReceiptTokenLeg {
   mint?: string | null;
@@ -26,6 +27,8 @@ export interface AdvancedSwapReceipt {
   network: OffpayNetwork;
   createdAt: number;
   walletAddress?: string | null;
+  activity?: SwapReceiptActivity;
+  hiddenSignatures?: string[];
   input?: SwapReceiptTokenLeg | null;
   output?: SwapReceiptTokenLeg | null;
 }

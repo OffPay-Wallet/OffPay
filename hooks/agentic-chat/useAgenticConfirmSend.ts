@@ -39,6 +39,7 @@ import {
 } from '@/lib/notifications/local-notifications';
 import { yieldToUi } from '@/lib/perf/ui-work-scheduler';
 import { formatAtomicAmount } from '@/lib/policy/token-amounts';
+import { buildRwaHistoryReceipt } from '@/lib/rwa/rwa-history-receipt';
 import { resolveSwapExecutionAmounts } from '@/lib/swap/normal-swap-execution';
 import { isRnZkProverNativeModuleAvailable } from '@/lib/umbra/umbra-rn-zk-prover';
 import { isUmbraNetworkSupported } from '@/lib/umbra/umbra-supported-tokens';
@@ -63,6 +64,7 @@ import {
   type AgenticUmbraVaultAction,
 } from '@/store/agenticChatStore';
 import { useContactsStore } from '@/store/contactsStore';
+import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
 import { useWalletStore } from '@/store/walletStore';
@@ -1565,6 +1567,18 @@ async function confirmRwaTradeAction(params: {
       action.side === 'buy'
         ? (quote.quantity ?? action.receiveAmount)
         : (quote.cashAmount ?? action.receiveAmount);
+    useAdvancedSwapStore.getState().addReceipt(
+      buildRwaHistoryReceipt({
+        asset: action.asset,
+        side: action.side,
+        payAmount,
+        paySymbol: action.paySymbol,
+        receiveAmount,
+        receiveSymbol: action.receiveSymbol,
+        walletAddress: action.walletAddress,
+        execution: execution.execution,
+      }),
+    );
 
     void presentWalletTransactionEventNotification({
       identifier: `wallet-transaction-${action.network}-${execution.execution.signature}`,

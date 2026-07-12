@@ -19,6 +19,7 @@ const OTHER_TOKEN_MINT = 'DezXAZ8z7PnrnRJjz3mP8cB1sMiBw1ZbrGdNd4T5wwf';
 const RWA_ASSET_MINT = '5yeucZisKb3uKCywapDwkZZr3YDeaQ71tu9YoTrD5WNC';
 const RWA_SETTLEMENT_MINT = 'GN2nuuhUG2PnG6RsdGEcucuu1Ev2HRaacmrprVWBmKdE';
 const RWA_PRICE_REFERENCE_MINT = 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W';
+const RWA_PROGRAM_ID = '4gFd61LGkcfMzK6i7dB96EfxHPgWRZRw8Q3q1rWCiqu7';
 const DEVNET_UMBRA_PROGRAM = 'DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ';
 const UMBRA_POOL = '9B5mqKTY4N6mNLLbnVMXg67thA6Z6hVSY8FzN4JNYqgd';
 
@@ -53,6 +54,7 @@ function withAlchemyRpc(
 function withDevnetRwaCatalog(overrides: Partial<Bindings> = {}): Bindings {
   return {
     ...bindings,
+    OFFPAY_RWA_DELEGATE_PROGRAM_ID: RWA_PROGRAM_ID,
     OFFPAY_RWA_DEVNET_SETTLEMENT_MINT: RWA_SETTLEMENT_MINT,
     OFFPAY_RWA_DEVNET_ASSETS_JSON: JSON.stringify([
       {
@@ -949,11 +951,18 @@ describe('wallet transaction history (standard Solana RPC)', () => {
     expect(assetBatchIds).not.toContain(RWA_ASSET_MINT);
   });
 
-  it('labels devnet RWA swap history from the configured catalog', async () => {
-    const swapSignature = `${SIGNATURE}rwa-swap`;
+  it('labels RWA buys and sells while hiding operational SOL rent', async () => {
+    const buySignature = `${SIGNATURE}rwa-buy`;
+    const sellSignature = `${SIGNATURE}rwa-sell`;
+    const setupSignature = `${SIGNATURE}rwa-setup`;
+    const setupTransaction = rawRpcSolTransferItem(setupSignature, 1781800498, 2_039_000);
+    const setupMessage = (
+      (setupTransaction.transaction as Record<string, unknown>).message as Record<string, unknown>
+    );
+    (setupMessage.accountKeys as unknown[]).push({ pubkey: RWA_PROGRAM_ID });
     const fetchMock = createGetTransactionsForAddressMock([
       rawRpcTokenToTokenSwapItem({
-        signature: swapSignature,
+        signature: buySignature,
         blockTime: 1781800500,
         debitMint: RWA_SETTLEMENT_MINT,
         debitRawAmount: '1000000',
@@ -962,6 +971,17 @@ describe('wallet transaction history (standard Solana RPC)', () => {
         creditRawAmount: '1340',
         creditDecimals: 6,
       }),
+      rawRpcTokenToTokenSwapItem({
+        signature: sellSignature,
+        blockTime: 1781800499,
+        debitMint: RWA_ASSET_MINT,
+        debitRawAmount: '1340',
+        debitDecimals: 6,
+        creditMint: RWA_SETTLEMENT_MINT,
+        creditRawAmount: '1000000',
+        creditDecimals: 6,
+      }),
+      setupTransaction,
     ]);
 
     setHeliusFetchImplementation(fetchMock);
@@ -973,10 +993,10 @@ describe('wallet transaction history (standard Solana RPC)', () => {
       useCache: false,
     });
 
-    expect(response.transactions).toHaveLength(1);
+    expect(response.transactions).toHaveLength(2);
     expect(response.transactions[0]).toMatchObject({
-      signature: swapSignature,
-      type: 'SWAP',
+      signature: buySignature,
+      type: 'RWA_BUY',
       description: 'Swapped 1 RWAUSDC to 0.00134 SPYd',
       amount: '0.00134',
       rawAmount: '1340',
@@ -986,11 +1006,28 @@ describe('wallet transaction history (standard Solana RPC)', () => {
       tokenDecimals: 6,
       direction: null,
     });
+    expect(response.transactions[1]).toMatchObject({
+      signature: sellSignature,
+      type: 'RWA_SELL',
+      description: 'Swapped 0.00134 SPYd to 1 RWAUSDC',
+      tokenMint: RWA_SETTLEMENT_MINT,
+      tokenSymbol: 'RWAUSDC',
+      direction: null,
+    });
     expect(response.displayTransactions[0]).toMatchObject({
-      detailSignature: swapSignature,
+      detailSignature: buySignature,
+      title: 'Bought',
       tokenSymbol: 'SPYd',
       tokenName: 'SP500',
     });
+    expect(response.displayTransactions[1]).toMatchObject({
+      detailSignature: sellSignature,
+      title: 'Sold',
+      tokenSymbol: 'RWAUSDC',
+    });
+    expect(response.transactions.some((transaction) => transaction.signature === setupSignature)).toBe(
+      false,
+    );
   });
 
   it('recovers native SOL amount and recipient from sparse parsed transfer records', async () => {

@@ -142,7 +142,7 @@ function normalizeSwapLeg(
   leg: SwapReceiptTokenLeg | null | undefined,
 ): Required<SwapReceiptTokenLeg> {
   const mint = leg?.mint?.trim() || null;
-  const symbol = normalizeSymbol(leg?.symbol, mint);
+  const symbol = leg?.symbol?.trim() || (isNativeSolMint(mint) ? 'SOL' : null);
   const decimals =
     typeof leg?.decimals === 'number' && Number.isFinite(leg.decimals)
       ? Math.trunc(leg.decimals)
@@ -201,16 +201,30 @@ export function mapSwapReceiptToLocalHistoryInput(
     signature: receipt.signature,
     sender: receipt.walletAddress ?? null,
     network: receipt.network,
-    routeLabel: receipt.mode === 'privacy' ? 'Private swap' : 'Swap',
+    routeLabel:
+      receipt.activity === 'rwa_buy' || receipt.activity === 'rwa_sell'
+        ? 'RWA Trade'
+        : receipt.mode === 'privacy'
+          ? 'Private swap'
+          : 'Swap',
     privacyLabel: receipt.mode === 'privacy' ? 'Private route' : 'Public route',
     programLabel:
-      receipt.mode === 'trigger'
-        ? 'Trigger order'
-        : receipt.mode === 'recurring'
-          ? 'Recurring swap'
-          : receipt.mode === 'privacy'
-            ? 'Private swap'
-            : 'Swap',
+      receipt.activity === 'rwa_buy' || receipt.activity === 'rwa_sell'
+        ? 'RWA Trade'
+        : receipt.mode === 'trigger'
+          ? 'Trigger order'
+          : receipt.mode === 'recurring'
+            ? 'Recurring swap'
+            : receipt.mode === 'privacy'
+              ? 'Private swap'
+              : 'Swap',
+    activityTitle:
+      receipt.activity === 'rwa_buy'
+        ? 'Bought'
+        : receipt.activity === 'rwa_sell'
+          ? 'Sold'
+          : null,
+    hiddenSignatures: receipt.hiddenSignatures ?? [],
   };
 }
 

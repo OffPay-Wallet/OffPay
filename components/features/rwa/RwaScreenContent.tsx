@@ -65,7 +65,9 @@ import { formatTokenBalance } from '@/lib/api/offpay-wallet-data';
 import { createRwaQuote } from '@/lib/api/offpay-api-client';
 import { presentWalletTransactionNotification } from '@/lib/notifications/local-notifications';
 import { buildRwaExecutionSignatureLinks } from '@/lib/rwa/rwa-execution-signatures';
+import { buildRwaHistoryReceipt } from '@/lib/rwa/rwa-history-receipt';
 import { executeRwaTradeReview } from '@/lib/rwa/rwa-trade-execution';
+import { useAdvancedSwapStore } from '@/store/advancedSwapStore';
 import { TAB_ROUTE_HREFS } from '@/store/tabHistoryStore';
 import { useWalletStore } from '@/store/walletStore';
 
@@ -249,6 +251,7 @@ export function RwaScreenContent(): React.JSX.Element {
     onSuccess: async ({ review, execution }) => {
       const { asset, side, inputAmount, quote } = review;
       const executionSignatureLinks = buildRwaExecutionSignatureLinks(execution);
+      const historyLegs = buildRwaReviewTokenLegs(review);
       const summaryAmount =
         side === 'buy' ? (quote.cashAmount ?? inputAmount) : (quote.quantity ?? inputAmount);
       const summarySymbol = side === 'buy' ? getRwaSettlementDisplaySymbol(asset) : asset.symbol;
@@ -264,6 +267,18 @@ export function RwaScreenContent(): React.JSX.Element {
             signature: item.signature,
             network: item.network,
           })),
+        }),
+      );
+      useAdvancedSwapStore.getState().addReceipt(
+        buildRwaHistoryReceipt({
+          asset,
+          side,
+          payAmount: historyLegs.payLeg.amount,
+          paySymbol: historyLegs.payLeg.symbol,
+          receiveAmount: historyLegs.receiveLeg.amount,
+          receiveSymbol: historyLegs.receiveLeg.symbol,
+          walletAddress: review.walletAddress,
+          execution,
         }),
       );
       showToast({

@@ -179,22 +179,28 @@ async function fetchAlchemyHistoricalTokenUsdPrices(
     withMarketData?: boolean;
   },
 ): Promise<AlchemyHistoricalUsdPricePoint[]> {
-  const payload = await fetchAlchemyJson(bindings, '/tokens/historical', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      ...(identifier.type === 'symbol'
-        ? { symbol: identifier.symbol }
-        : { network: identifier.network, address: identifier.address }),
-      startTime: params.startTime,
-      endTime: params.endTime,
-      interval: params.interval,
-      withMarketData: params.withMarketData ?? false,
-    }),
-  });
+  let payload: unknown;
+  try {
+    payload = await fetchAlchemyJson(bindings, '/tokens/historical', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...(identifier.type === 'symbol'
+          ? { symbol: identifier.symbol }
+          : { network: identifier.network, address: identifier.address }),
+        startTime: params.startTime,
+        endTime: params.endTime,
+        interval: params.interval,
+        withMarketData: params.withMarketData ?? false,
+      }),
+    });
+  } catch (error) {
+    if (error instanceof AppError && error.status === 404) return [];
+    throw error;
+  }
 
   return readHistoricalPricePoints(payload);
 }

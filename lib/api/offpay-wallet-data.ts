@@ -109,6 +109,8 @@ export interface OffpayLocalReceiptViewInput {
   privacyLabel?: string | null;
   programLabel?: string | null;
   errorMessage?: string | null;
+  activityTitle?: 'Bought' | 'Sold' | null;
+  hiddenSignatures?: readonly string[];
 }
 
 export function isOffpayOfflineP2pReceipt(
@@ -1330,13 +1332,22 @@ function mergeLocalReceiptData<T extends OffpayRecentActivityView | OffpayHistor
     !privateRouteReceipt && view.amountLabel == null && isGenericTransactionSubtitle(view.subtitle);
   const receiptSourceLabel =
     receipt.routeLabel?.trim() || (isOffpayOfflineP2pReceipt(receipt) ? 'Offline P2P' : null);
+  const authoritativeActivityReceipt = receipt.activityTitle != null;
 
   return {
     ...view,
-    subtitle: shouldUseReceiptSubtitle ? receipt.subtitle : view.subtitle,
-    sourceLabel: view.sourceLabel ?? receiptSourceLabel,
-    amountLabel: view.amountLabel ?? receiptAmountLabel,
-    secondaryAmountLabel: view.secondaryAmountLabel ?? receiptSecondaryAmountLabel,
+    title: receipt.activityTitle ?? view.title,
+    subtitle:
+      authoritativeActivityReceipt || shouldUseReceiptSubtitle ? receipt.subtitle : view.subtitle,
+    sourceLabel: authoritativeActivityReceipt
+      ? receiptSourceLabel
+      : (view.sourceLabel ?? receiptSourceLabel),
+    amountLabel: authoritativeActivityReceipt
+      ? receiptAmountLabel
+      : (view.amountLabel ?? receiptAmountLabel),
+    secondaryAmountLabel: authoritativeActivityReceipt
+      ? receiptSecondaryAmountLabel
+      : (view.secondaryAmountLabel ?? receiptSecondaryAmountLabel),
     amountTone: shouldUseReceiptTone
       ? receiptDisplayType === 'swap'
         ? 'positive'
@@ -1344,10 +1355,18 @@ function mergeLocalReceiptData<T extends OffpayRecentActivityView | OffpayHistor
           ? 'positive'
           : 'negative'
       : view.amountTone,
-    tokenMint: view.tokenMint ?? receiptToken.mint,
-    tokenSymbol: view.tokenSymbol ?? receiptToken.symbol,
-    tokenName: view.tokenName ?? receiptToken.name,
-    tokenLogo: view.tokenLogo ?? receiptToken.logo,
+    tokenMint: authoritativeActivityReceipt
+      ? receiptToken.mint
+      : (view.tokenMint ?? receiptToken.mint),
+    tokenSymbol: authoritativeActivityReceipt
+      ? receiptToken.symbol
+      : (view.tokenSymbol ?? receiptToken.symbol),
+    tokenName: authoritativeActivityReceipt
+      ? receiptToken.name
+      : (view.tokenName ?? receiptToken.name),
+    tokenLogo: authoritativeActivityReceipt
+      ? receiptToken.logo
+      : (view.tokenLogo ?? receiptToken.logo),
     detailTimestampMs: view.detailTimestampMs ?? receipt.createdAt,
     detailNetwork: view.detailNetwork ?? receipt.network ?? null,
     detailSignature: view.detailSignature ?? receipt.signature?.trim() ?? null,
@@ -1575,7 +1594,13 @@ export function mapLocalReceiptForRecentActivity(
   return {
     id: receipt.id,
     type,
-    title: failed ? 'Failed' : type === 'swap' ? 'Swapped' : type === 'send' ? 'Sent' : 'Received',
+    title: failed
+      ? 'Failed'
+      : type === 'swap'
+        ? (receipt.activityTitle ?? 'Swapped')
+        : type === 'send'
+          ? 'Sent'
+          : 'Received',
     subtitle: receipt.subtitle,
     sourceLabel:
       receipt.routeLabel?.trim() || (isOffpayOfflineP2pReceipt(receipt) ? 'Offline P2P' : null),
@@ -1695,6 +1720,19 @@ function buildReceiptsBySignature(
   }
 
   return receiptsBySignature;
+}
+
+function buildHiddenReceiptSignatureSet(
+  receipts: readonly OffpayLocalReceiptViewInput[],
+): Set<string> {
+  const signatures = new Set<string>();
+  for (const receipt of receipts) {
+    for (const signature of receipt.hiddenSignatures ?? []) {
+      const normalized = signature.trim();
+      if (normalized.length > 0) signatures.add(normalized);
+    }
+  }
+  return signatures;
 }
 
 export function selectOffpayLocalReceiptForWalletTransaction<
@@ -1824,16 +1862,21 @@ export function buildWalletRecentActivityItems(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
+  const hiddenSignatures = buildHiddenReceiptSignatureSet(localReceipts);
   const backendViews = sortTransactionViewsMostRecent(
     (params.transactionViews ?? []).map((view) =>
       applyKnownTokenMetadataToDisplayView(view, params.network),
-    ),
+    ).filter((view) => !hiddenSignatures.has(getTransactionViewSignature(view))),
   );
   const backendViewSignatures = buildBackendViewSignatureSet(backendViews);
   const displayableTransactions = getDisplayableWalletTransactions(
     params.transactions,
     receiptsBySignature,
-  ).filter((transaction) => !backendViewSignatures.has(transaction.signature));
+  ).filter(
+    (transaction) =>
+      !hiddenSignatures.has(transaction.signature) &&
+      !backendViewSignatures.has(transaction.signature),
+  );
   const displayableSignatures = new Set([
     ...backendViewSignatures,
     ...displayableTransactions.map((transaction) => transaction.signature),
@@ -1896,16 +1939,21 @@ export function buildWalletHistoryGroups(params: {
   const localReceipts = (params.localReceipts ?? []).filter(isOffpayLocalHistoryReceipt);
   const includeUnmatchedLocalReceipts = params.includeUnmatchedLocalReceipts ?? true;
   const receiptsBySignature = buildReceiptsBySignature(localReceipts);
+  const hiddenSignatures = buildHiddenReceiptSignatureSet(localReceipts);
   const backendViews = sortTransactionViewsMostRecent(
     (params.transactionViews ?? []).map((view) =>
       applyKnownTokenMetadataToDisplayView(view, params.network),
-    ),
+    ).filter((view) => !hiddenSignatures.has(getTransactionViewSignature(view))),
   );
   const backendViewSignatures = buildBackendViewSignatureSet(backendViews);
   const displayableTransactions = getDisplayableWalletTransactions(
     params.transactions,
     receiptsBySignature,
-  ).filter((transaction) => !backendViewSignatures.has(transaction.signature));
+  ).filter(
+    (transaction) =>
+      !hiddenSignatures.has(transaction.signature) &&
+      !backendViewSignatures.has(transaction.signature),
+  );
   const displayableSignatures = new Set([
     ...backendViewSignatures,
     ...displayableTransactions.map((transaction) => transaction.signature),
