@@ -45,7 +45,11 @@ import { PuffyNetworkIcon } from '@/components/ui/icons/PuffyNetworkIcon';
 import { PuffyPaymentsIcon } from '@/components/ui/icons/PuffyPaymentsIcon';
 import { PuffyWifiIcon } from '@/components/ui/icons/PuffyWifiIcon';
 import { colors } from '@/constants/colors';
-import { SOLANA_NETWORKS, isSolanaNetworkSelectable } from '@/constants/networks';
+import {
+  SOLANA_NETWORKS,
+  isSolanaNetworkSelectable,
+  resolveSelectableSolanaNetwork,
+} from '@/constants/networks';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { useOffpayNetworkTransitionStore } from '@/store/offpayNetworkTransitionStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
@@ -108,7 +112,8 @@ export function PreferencesModal({
   const walletMode = usePreferencesStore((s) => s.walletMode);
   const offlinePaymentsEnabled = usePreferencesStore((s) => s.offlinePaymentsEnabled);
   const offlinePaymentPoolSize = usePreferencesStore((s) => s.offlinePaymentPoolSize);
-  const network = usePreferencesStore((s) => s.network);
+  const storedNetwork = usePreferencesStore((s) => s.network);
+  const network = useMemo(() => resolveSelectableSolanaNetwork(storedNetwork), [storedNetwork]);
 
   const setWalletMode = usePreferencesStore((s) => s.setWalletMode);
   const setOfflinePaymentsEnabled = usePreferencesStore((s) => s.setOfflinePaymentsEnabled);
@@ -139,7 +144,7 @@ export function PreferencesModal({
 
   const networkLabel = useMemo(() => {
     const found = SOLANA_NETWORKS.find((n) => n.id === network);
-    return found?.label ?? 'Mainnet';
+    return found?.label ?? 'Devnet';
   }, [network]);
 
   // ---------------------------------------------------------------------------

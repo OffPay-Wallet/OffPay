@@ -37,7 +37,7 @@ describe('server-issued OffPay AI sessions', () => {
     apiMock.createAiSession.mockResolvedValue({
       token: 'v2.payload.signature',
       walletAddress: WALLET,
-      network: 'mainnet',
+      network: 'devnet',
       issuedAt,
       expiresAt: issuedAt + 5 * 60_000,
     });
@@ -47,7 +47,7 @@ describe('server-issued OffPay AI sessions', () => {
 
     expect(first).toEqual(second);
     expect(apiMock.createAiSession).toHaveBeenCalledTimes(1);
-    expect(apiMock.createAiSession).toHaveBeenCalledWith('mainnet', { walletId: 'wallet-1' });
+    expect(apiMock.createAiSession).toHaveBeenCalledWith('devnet', { walletId: 'wallet-1' });
   });
 
   it('coalesces concurrent refreshes to one API request', async () => {
@@ -55,7 +55,7 @@ describe('server-issued OffPay AI sessions', () => {
     apiMock.createAiSession.mockResolvedValue({
       token: 'v2.payload.signature',
       walletAddress: WALLET,
-      network: 'mainnet',
+      network: 'devnet',
       issuedAt,
       expiresAt: issuedAt + 5 * 60_000,
     });
@@ -72,7 +72,7 @@ describe('server-issued OffPay AI sessions', () => {
     apiMock.createAiSession.mockResolvedValue({
       token: 'v2.payload.signature',
       walletAddress: '86xCnPeV69n6t3DnyGvkKobf9FdN2H9oiVDdaMpo2MMY',
-      network: 'devnet',
+      network: 'mainnet',
       issuedAt,
       expiresAt: issuedAt + 5 * 60_000,
     });

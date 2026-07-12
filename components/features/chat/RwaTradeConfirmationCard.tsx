@@ -1,8 +1,13 @@
 import React from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import {
+  formatRwaAssetDisplayName,
+  getRwaAssetLogoUri,
+} from '@/components/features/rwa/rwa-trade-utils';
 import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
+import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { buildRwaExecutionSignatureLinks } from '@/lib/rwa/rwa-execution-signatures';
 import type { AgenticRwaTradeAction } from '@/store/agenticChatStore';
@@ -32,8 +37,10 @@ export function RwaTradeConfirmationCard({
   const submitting = action.status === 'submitting';
   const failed = action.status === 'failed';
   const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
-  const title = `${action.side === 'buy' ? 'Buy' : 'Sell'} ${action.asset.symbol}`;
+  const assetName = formatRwaAssetDisplayName(action.asset);
+  const title = `${action.side === 'buy' ? 'Buy' : 'Sell'} ${assetName}`;
   const statusLabel = formatPrivateSendStatus(action.status);
+  const assetMeta = [action.asset.symbol, statusLabel].filter(Boolean).join(' · ');
   const signatureLinks =
     action.signatures != null && action.signatures.length > 0
       ? buildRwaExecutionSignatureLinks({
@@ -52,13 +59,33 @@ export function RwaTradeConfirmationCard({
   return (
     <ConfirmationCardSurface>
       <View style={styles.confirmationHeader}>
+        <View style={localStyles.assetLogo}>
+          <TokenIcon
+            symbol={action.asset.underlyingSymbol ?? action.asset.symbol}
+            name={action.asset.name}
+            logoUri={getRwaAssetLogoUri(action.asset)}
+            size={40}
+            recyclingKey={action.asset.mint}
+          />
+        </View>
         <View style={styles.confirmationTitleStack}>
-          <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
+          <Text
+            variant="bodyBold"
+            color={colors.text.primary}
+            style={styles.confirmationTitle}
+            numberOfLines={2}
+            maxFontSizeMultiplier={1.15}
+          >
             {title}
           </Text>
-          {statusLabel != null ? (
-            <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
-              {statusLabel}
+          {assetMeta.length > 0 ? (
+            <Text
+              variant="small"
+              color={colors.text.secondary}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+            >
+              {assetMeta}
             </Text>
           ) : null}
         </View>
@@ -131,3 +158,13 @@ export function RwaTradeConfirmationCard({
     </ConfirmationCardSurface>
   );
 }
+
+const localStyles = StyleSheet.create({
+  assetLogo: {
+    width: 44,
+    height: 44,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

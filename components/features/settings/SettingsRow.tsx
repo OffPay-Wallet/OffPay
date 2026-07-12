@@ -7,6 +7,7 @@ import { PuffyExternalLinkIcon } from '@/components/ui/icons/PuffyExternalLinkIc
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useCancelSafePress } from '@/hooks/useCancelSafePress';
 import type { ReactNode } from 'react';
 
 interface SettingsRowProps {
@@ -43,17 +44,22 @@ export function SettingsRow({
   const showAccessory = onPress != null && !disabled;
   const labelColor = destructive ? colors.semantic.error : colors.text.primary;
   const accessoryColor = destructive ? colors.semantic.error : colors.text.tertiary;
+  const press = useCancelSafePress({ disabled, onPress });
 
   return (
     <Pressable
-      style={({ pressed }) => [
+      style={[
         styles.row,
         compact && styles.rowCompact,
         dense && styles.rowDense,
-        pressed && !disabled && styles.pressed,
+        press.pressed && styles.pressed,
         disabled && styles.disabled,
       ]}
-      onPress={disabled ? undefined : onPress}
+      onPress={press.onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
+      onResponderTerminate={press.onResponderTerminate}
+      onResponderTerminationRequest={press.onResponderTerminationRequest}
       disabled={disabled || onPress == null}
       accessibilityRole={onPress == null ? undefined : 'button'}
       accessibilityLabel={label}

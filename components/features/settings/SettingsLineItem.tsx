@@ -10,6 +10,7 @@ import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useCancelSafePress } from '@/hooks/useCancelSafePress';
 
 import type { ReactNode } from 'react';
 
@@ -37,19 +38,26 @@ export function SettingsLineItem({
   dense = false,
 }: SettingsLineItemProps): React.JSX.Element {
   const iconSize = dense ? 32 : compact ? 36 : 40;
+  const press = useCancelSafePress({ disabled, onPress });
 
   return (
     <Pressable
-      style={({ pressed }) => [
+      style={[
         styles.row,
         compact && styles.rowCompact,
         dense && styles.rowDense,
-        pressed && !disabled ? styles.pressed : undefined,
+        press.pressed ? styles.pressed : undefined,
         disabled && styles.disabled,
       ]}
-      onPress={disabled ? undefined : onPress}
-      accessibilityRole="button"
+      onPress={press.onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
+      onResponderTerminate={press.onResponderTerminate}
+      onResponderTerminationRequest={press.onResponderTerminationRequest}
+      disabled={disabled || onPress == null}
+      accessibilityRole={onPress == null ? undefined : 'button'}
       accessibilityLabel={title}
+      accessibilityState={disabled ? { disabled: true } : undefined}
     >
       <View style={styles.left}>
         <View

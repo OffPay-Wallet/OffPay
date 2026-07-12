@@ -200,7 +200,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       name: 'offpay-preferences',
       storage: createJSONStorage(() => mmkvStorage),
       skipHydration: true,
-      version: 6,
+      version: 7,
       migrate: (persistedState, version) => {
         if (typeof persistedState !== 'object' || persistedState === null) {
           return persistedState;
@@ -224,12 +224,13 @@ export const usePreferencesStore = create<PreferencesState>()(
 /**
  * Recover critical preferences that must be stable before app providers
  * mount. MMKV remains the normal persistence layer; SecureStore keeps a
- * tiny timestamped mirror so a killed-process launch cannot leak the
- * default mainnet network if the MMKV blob opens empty or late.
+ * tiny timestamped mirror so a killed-process launch cannot leak a stale or
+ * disabled network if the MMKV blob opens empty or late.
  */
 export async function hydrateCriticalPreferencesFallback(): Promise<void> {
   const state = usePreferencesStore.getState();
   const stateNetwork = normalizePersistedNetwork(state.network);
+  const stateNeedsNormalization = state.network !== stateNetwork;
   const stateUpdatedAt = normalizePreferenceTimestamp(state.networkUpdatedAt);
   const mirror = await readNetworkPreferenceMirror();
 
@@ -261,7 +262,11 @@ export async function hydrateCriticalPreferencesFallback(): Promise<void> {
     return;
   }
 
-  if (stateUpdatedAt > mirror.updatedAt || stateNetwork !== mirror.network) {
+  if (
+    stateNeedsNormalization ||
+    stateUpdatedAt > mirror.updatedAt ||
+    stateNetwork !== mirror.network
+  ) {
     const updatedAt =
       stateUpdatedAt > 0 ? stateUpdatedAt : nextNetworkPreferenceTimestamp(mirror.updatedAt);
 

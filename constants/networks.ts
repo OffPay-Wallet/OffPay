@@ -15,14 +15,10 @@ export interface SolanaNetwork {
   id: SolanaNetworkId;
   /** Human-readable label */
   label: string;
-  /** Short description for the UI */
-  description: string;
   /** True when the public client can select this network. */
   selectable: boolean;
   /** Internal-only networks remain visible but disabled in user-facing UI. */
   adminOnly?: boolean;
-  /** Disabled-state copy shown in the selector. */
-  unavailableDescription?: string;
 }
 
 /** Provider endpoints are loaded from Expo `EXPO_PUBLIC_*` env vars and protected at the provider level. */
@@ -30,19 +26,17 @@ export const SOLANA_NETWORKS: readonly SolanaNetwork[] = [
   {
     id: 'mainnet-beta',
     label: 'Mainnet',
-    description: 'Real SOL and tokens',
-    selectable: true,
+    selectable: false,
   },
   {
     id: 'devnet',
     label: 'Devnet',
-    description: 'Free test SOL',
     selectable: true,
   },
 ] as const;
 
-/** Mainnet is the production default; an existing persisted Devnet choice is preserved. */
-export const DEFAULT_NETWORK: SolanaNetworkId = 'mainnet-beta';
+/** The default must always remain publicly selectable. */
+export const DEFAULT_NETWORK: SolanaNetworkId = 'devnet';
 
 export function isSolanaNetworkSelectable(network: SolanaNetworkId): boolean {
   return SOLANA_NETWORKS.some((entry) => entry.id === network && entry.selectable);

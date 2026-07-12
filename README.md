@@ -80,8 +80,8 @@ flowchart TB
 
 ## Network And Offline Behavior
 
-- `constants/networks.ts` exposes `mainnet-beta` and `devnet`; the client maps those to OffPay API and provider-router networks `mainnet` and `devnet`.
-- The default UI network is `mainnet-beta`.
+- `constants/networks.ts` exposes `mainnet-beta` and `devnet`; the client first normalizes against public selectability, then maps the active choice to the OffPay API network.
+- The default UI network is `devnet`; Mainnet remains visible but disabled until launch.
 - Manual offline mode blocks non-loopback HTTP(S) fetches and marks TanStack Query offline.
 - `useWalletModeState()` falls back to offline mode when NetInfo reports the network is not reachable.
 - Provider endpoint URLs and API keys are Worker secrets or Worker vars. The client keeps only public app config such as `EXPO_PUBLIC_OFFPAY_API_ORIGIN` and `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`.

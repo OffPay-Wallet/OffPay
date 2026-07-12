@@ -39,6 +39,9 @@ export function ConfirmationRow({
       ]}
       numberOfLines={1}
       ellipsizeMode="middle"
+      adjustsFontSizeToFit
+      minimumFontScale={0.76}
+      maxFontSizeMultiplier={1.15}
     >
       {value}
     </Text>
@@ -46,7 +49,13 @@ export function ConfirmationRow({
 
   return (
     <View style={styles.confirmationRow}>
-      <Text variant="small" color={colors.text.tertiary} style={styles.confirmationRowLabel}>
+      <Text
+        variant="small"
+        color={colors.text.tertiary}
+        style={styles.confirmationRowLabel}
+        numberOfLines={2}
+        maxFontSizeMultiplier={1.15}
+      >
         {label}
       </Text>
       {onPress != null ? (

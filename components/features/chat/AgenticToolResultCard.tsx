@@ -1,6 +1,7 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { formatRwaChangeLabel } from '@/components/features/rwa/rwa-trade-utils';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
@@ -38,11 +39,21 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
     <ConfirmationCardSurface>
       <View style={styles.header}>
         <View style={styles.titleStack}>
-          <Text variant="bodyBold" color={colors.text.primary} style={styles.title}>
+          <Text
+            variant="bodyBold"
+            color={colors.text.primary}
+            style={styles.title}
+            maxFontSizeMultiplier={1.15}
+          >
             {card.title}
           </Text>
           {card.subtitle != null ? (
-            <Text variant="small" color={colorForTone(card.tone)} numberOfLines={1}>
+            <Text
+              variant="small"
+              color={colorForTone(card.tone)}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+            >
               {card.subtitle}
             </Text>
           ) : null}
@@ -53,7 +64,12 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
         <View style={styles.rows}>
           {rows.map((row) => (
             <View key={`${row.label}:${row.value}`} style={styles.row}>
-              <Text variant="small" color={colors.text.tertiary} style={styles.rowLabel}>
+              <Text
+                variant="small"
+                color={colors.text.tertiary}
+                style={styles.rowLabel}
+                maxFontSizeMultiplier={1.15}
+              >
                 {row.label}
               </Text>
               <Text
@@ -62,6 +78,9 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
                 style={[styles.rowValue, row.mono === true && styles.mono]}
                 numberOfLines={1}
                 ellipsizeMode="middle"
+                adjustsFontSizeToFit
+                minimumFontScale={0.78}
+                maxFontSizeMultiplier={1.15}
               >
                 {row.value}
               </Text>
@@ -81,6 +100,7 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
                   color={colorForTone(item.tone)}
                   style={styles.itemTitle}
                   numberOfLines={1}
+                  maxFontSizeMultiplier={1.15}
                 >
                   {item.title}
                 </Text>
@@ -90,6 +110,7 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
                     color={colors.text.tertiary}
                     style={styles.itemDetail}
                     numberOfLines={1}
+                    maxFontSizeMultiplier={1.15}
                   >
                     {item.detail}
                   </Text>
@@ -101,7 +122,12 @@ export function AgenticToolResultCard({ card }: AgenticToolResultCardProps): Rea
       ) : null}
 
       {card.footer != null && card.footer.length > 0 ? (
-        <Text variant="small" color={colors.text.tertiary} style={styles.footer}>
+        <Text
+          variant="small"
+          color={colors.text.tertiary}
+          style={styles.footer}
+          maxFontSizeMultiplier={1.15}
+        >
           {card.footer}
         </Text>
       ) : null}
@@ -114,57 +140,109 @@ function RwaAssetPreviewToolCard({
 }: {
   asset: AgenticRwaAssetCardPreview;
 }): React.JSX.Element {
-  const detail = [asset.categoryLabel, asset.underlyingSymbol ?? asset.symbol]
-    .filter((value) => value.length > 0)
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const compact = windowWidth < 390 || fontScale > 1.05;
+  const detail = [
+    asset.categoryLabel,
+    asset.underlyingSymbol ?? asset.symbol,
+    asset.tradable ? null : 'Trading unavailable',
+  ]
+    .filter((value): value is string => value != null && value.length > 0)
     .join(' · ');
+  const changeLabel = formatRwaChangeLabel(asset.change24hPct);
+  const changeColor =
+    asset.change24hPct == null
+      ? colors.text.secondary
+      : asset.change24hPct >= 0
+        ? colors.semantic.receive
+        : colors.semantic.error;
 
   return (
     <ConfirmationCardSurface>
-      <View style={styles.rwaAssetHeader}>
-        <View style={styles.rwaAssetIdentity}>
-          <View style={styles.rwaAssetLogoFrame}>
-            <TokenIcon
-              symbol={asset.underlyingSymbol ?? asset.symbol}
-              name={asset.name}
-              logoUri={asset.logoUri}
-              size={48}
-              recyclingKey={asset.symbol}
-            />
-          </View>
-          <View style={styles.rwaAssetNameBlock}>
-            <Text
-              variant="body"
-              color={colors.text.primary}
-              style={styles.rwaAssetName}
-              numberOfLines={1}
-            >
-              {asset.displayName}
-            </Text>
-            <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
-              {detail}
-            </Text>
-          </View>
+      <View style={[styles.rwaAssetIdentity, compact && styles.rwaAssetIdentityCompact]}>
+        <View style={[styles.rwaAssetLogoFrame, compact && styles.rwaAssetLogoFrameCompact]}>
+          <TokenIcon
+            symbol={asset.underlyingSymbol ?? asset.symbol}
+            name={asset.name}
+            logoUri={asset.logoUri}
+            size={compact ? 44 : 48}
+            recyclingKey={asset.symbol}
+          />
         </View>
-        <Text variant="body" color={colors.text.primary} style={styles.rwaAssetPrice}>
-          {asset.priceLabel}
-        </Text>
+        <View style={styles.rwaAssetNameBlock}>
+          <Text
+            variant="bodyBold"
+            color={colors.text.primary}
+            style={styles.rwaAssetName}
+            numberOfLines={2}
+            maxFontSizeMultiplier={1.15}
+          >
+            {asset.displayName}
+          </Text>
+          <Text
+            variant="small"
+            color={colors.text.tertiary}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.15}
+          >
+            {detail}
+          </Text>
+        </View>
       </View>
 
-      <View style={styles.rwaAssetMetaRow}>
-        <Text variant="small" color={colors.text.tertiary} numberOfLines={1}>
-          Trades with {asset.settlementSymbol}
-        </Text>
-        {asset.holding != null ? (
-          <Text
-            variant="captionBold"
-            color={colors.text.secondary}
-            style={styles.rwaAssetHolding}
-            numberOfLines={1}
-          >
-            {asset.holding} held
+      <View style={styles.rwaAssetMarketRow}>
+        <View style={styles.rwaAssetMetric}>
+          <Text variant="small" color={colors.text.tertiary} maxFontSizeMultiplier={1.15}>
+            Price
           </Text>
+          <Text
+            variant="money"
+            color={colors.text.primary}
+            style={styles.rwaAssetMetricValue}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.78}
+            maxFontSizeMultiplier={1.15}
+          >
+            {asset.priceLabel}
+          </Text>
+        </View>
+        {changeLabel != null ? (
+          <View style={[styles.rwaAssetMetric, styles.rwaAssetMetricEnd]}>
+            <Text variant="small" color={colors.text.tertiary} maxFontSizeMultiplier={1.15}>
+              24h
+            </Text>
+            <Text
+              variant="captionBold"
+              color={changeColor}
+              style={styles.rwaAssetMetricValue}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+            >
+              {changeLabel}
+            </Text>
+          </View>
         ) : null}
       </View>
+
+      {asset.holding != null ? (
+        <View style={styles.rwaAssetHoldingRow}>
+          <Text variant="small" color={colors.text.tertiary} maxFontSizeMultiplier={1.15}>
+            Holding
+          </Text>
+          <Text
+            variant="captionBold"
+            color={colors.text.primary}
+            style={styles.rwaAssetHolding}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
+            maxFontSizeMultiplier={1.15}
+          >
+            {asset.holding} {asset.symbol}
+          </Text>
+        </View>
+      ) : null}
     </ConfirmationCardSurface>
   );
 }
@@ -181,8 +259,8 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: fontFamily.uiSemiBold,
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 17,
+    lineHeight: 22,
   },
   rows: {
     gap: spacing.sm,
@@ -195,11 +273,12 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   rowLabel: {
-    width: 92,
-    flexShrink: 0,
+    flex: 1,
+    minWidth: 0,
   },
   rowValue: {
-    flex: 1,
+    maxWidth: '62%',
+    flexShrink: 1,
     textAlign: 'right',
     fontFamily: fontFamily.uiSemiBold,
   },
@@ -237,24 +316,24 @@ const styles = StyleSheet.create({
   footer: {
     lineHeight: 16,
   },
-  rwaAssetHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
   rwaAssetIdentity: {
-    flex: 1,
-    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
   },
+  rwaAssetIdentityCompact: {
+    gap: spacing.sm,
+  },
   rwaAssetLogoFrame: {
-    width: 58,
+    width: 52,
     height: 48,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+  },
+  rwaAssetLogoFrameCompact: {
+    width: 46,
+    height: 44,
   },
   rwaAssetNameBlock: {
     flex: 1,
@@ -262,22 +341,40 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   rwaAssetName: {
-    fontFamily: fontFamily.medium,
+    fontFamily: fontFamily.uiSemiBold,
   },
-  rwaAssetPrice: {
-    flexShrink: 0,
-    fontFamily: fontFamily.medium,
-    textAlign: 'right',
+  rwaAssetMarketRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
   },
-  rwaAssetMetaRow: {
-    minHeight: 24,
+  rwaAssetMetric: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
+  },
+  rwaAssetMetricEnd: {
+    alignItems: 'flex-end',
+  },
+  rwaAssetMetricValue: {
+    fontVariant: ['tabular-nums'],
+  },
+  rwaAssetHoldingRow: {
+    minHeight: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
+    gap: spacing.lg,
   },
   rwaAssetHolding: {
-    flexShrink: 0,
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
+    textAlign: 'right',
     fontFamily: fontFamily.uiSemiBold,
+    fontVariant: ['tabular-nums'],
   },
 });

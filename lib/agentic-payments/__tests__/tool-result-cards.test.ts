@@ -144,18 +144,20 @@ describe('buildAgenticToolResultCards', () => {
     ]);
 
     expect(cards[0]).toMatchObject({
-      title: 'RWA catalog',
-      items: [expect.objectContaining({ title: 'SPYd $749.12' })],
+      title: 'RWA assets',
+      subtitle: '1 available',
+      items: [expect.objectContaining({ title: 'SP500', detail: 'SPYd · $749.12' })],
     });
     expect(cards[1]).toMatchObject({
       title: 'RWA holdings',
       rows: [expect.objectContaining({ label: 'RWAUSDC', value: '100' })],
-      items: [expect.objectContaining({ title: '0.01 SPYd' })],
+      items: [expect.objectContaining({ title: 'SP500', detail: '0.01 SPYd · $7.49' })],
     });
     expect(cards[2]).toMatchObject({
       title: 'RWA activity',
-      items: [expect.objectContaining({ title: 'Swap 0.01 SPYd' })],
+      items: [expect.objectContaining({ title: 'Swap SPYd', detail: '0.01 · Confirmed' })],
     });
+    expect(cards[2]?.rows).toBeUndefined();
   });
 
   it('builds a single RWA stock preview card for specific asset results', () => {
@@ -174,6 +176,7 @@ describe('buildAgenticToolResultCards', () => {
             devnetSandbox: true,
             logo: null,
             priceUsd: 12.34,
+            change24hPct: -0.23,
             tradable: true,
             settlementSymbol: 'RWAUSDC',
             holding: '0.1',
@@ -194,6 +197,7 @@ describe('buildAgenticToolResultCards', () => {
         categoryLabel: 'Equity',
         underlyingSymbol: 'SPCX',
         priceLabel: '$12.34',
+        change24hPct: -0.23,
         settlementSymbol: 'RWAUSDC',
         holding: '0.1',
       },

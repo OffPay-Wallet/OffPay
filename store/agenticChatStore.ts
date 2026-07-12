@@ -396,6 +396,7 @@ export interface AgenticRwaAssetCardPreview {
   categoryLabel: string;
   underlyingSymbol: string | null;
   priceLabel: string;
+  change24hPct: number | null;
   logoUri: string | null;
   tradable: boolean;
   settlementSymbol: string;

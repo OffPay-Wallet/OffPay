@@ -8,11 +8,7 @@ import {
   type RwaTradeSide,
 } from '@/lib/rwa/rwa-trade-execution';
 
-import type {
-  OffpayNetwork,
-  RwaAsset,
-  RwaQuoteResponse,
-} from '@/types/offpay-api';
+import type { OffpayNetwork, RwaAsset, RwaQuoteResponse } from '@/types/offpay-api';
 
 export const RWA_CASH_AMOUNT_MAX_LENGTH = 48;
 export const RWA_CASH_AMOUNT_DECIMALS = 12;
@@ -74,6 +70,16 @@ export function formatUsd(value: number | null): string {
     currency: 'USD',
     maximumFractionDigits: value >= 10 ? 2 : 4,
   }).format(value);
+}
+
+export function formatRwaChangeLabel(change: number | null | undefined): string | null {
+  if (change == null || !Number.isFinite(change)) return null;
+  const normalized = Object.is(change, -0) ? 0 : change;
+  const sign = normalized > 0 ? '+' : '';
+  return `${sign}${normalized.toLocaleString('en-US', {
+    maximumFractionDigits: Math.abs(normalized) >= 1 ? 2 : 3,
+    minimumFractionDigits: 0,
+  })}%`;
 }
 
 export function formatRwaAssetDisplayName(

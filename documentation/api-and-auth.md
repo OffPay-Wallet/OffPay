@@ -43,8 +43,8 @@ The signed message is `offpay:<wallet>:<timestamp>:<method>:<pathAndQuery>:<body
 
 - UI networks are `mainnet-beta` and `devnet`.
 - OffPay API and provider-router networks are `mainnet` and `devnet`.
-- `toOffpayNetwork()` maps `mainnet-beta` to `mainnet`.
-- `DEFAULT_NETWORK` is `mainnet-beta`.
+- `toOffpayNetwork()` normalizes disabled or unknown UI networks to the selectable default.
+- `DEFAULT_NETWORK` is `devnet`; Mainnet remains visible but disabled until launch.
 
 ## Backend And Client Route Groups Used
 

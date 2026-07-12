@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 're
 
 import {
   formatRwaAssetDisplayName,
+  formatRwaChangeLabel,
   formatUsd,
   getRwaAssetLogoUri,
   RWA_CATEGORY_LABELS,
@@ -16,6 +17,7 @@ import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
 import { layout, radii, spacing } from '@/constants/spacing';
 import { fontFamily } from '@/constants/typography';
+import { useCancelSafePress } from '@/hooks/useCancelSafePress';
 import { useRwaAssets } from '@/hooks/useRwaAssets';
 
 import type { CapabilitiesResponse, OffpayNetwork, RwaAsset } from '@/types/offpay-api';
@@ -28,16 +30,6 @@ function isTradeSideAvailable(asset: RwaAsset, side: RwaTradeSide): boolean {
     asset.tradable &&
     (asset.execution[side] === 'jupiter_swap' || asset.execution[side] === 'devnet_sandbox')
   );
-}
-
-function formatChangeLabel(change: number | null): string | null {
-  if (change == null || !Number.isFinite(change)) return null;
-  const normalized = Object.is(change, -0) ? 0 : change;
-  const sign = normalized > 0 ? '+' : '';
-  return `${sign}${normalized.toLocaleString('en-US', {
-    maximumFractionDigits: Math.abs(normalized) >= 1 ? 2 : 3,
-    minimumFractionDigits: 0,
-  })}%`;
 }
 
 function RwaActionButton({
@@ -54,15 +46,20 @@ function RwaActionButton({
   const buy = side === 'buy';
   const activeStyle = buy ? styles.buyButton : styles.sellButton;
   const pressedStyle = buy ? styles.buyButtonPressed : styles.sellButtonPressed;
+  const press = useCancelSafePress({ disabled, onPress });
 
   return (
     <Pressable
       disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
+      onPress={press.onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
+      onResponderTerminate={press.onResponderTerminate}
+      onResponderTerminationRequest={press.onResponderTerminationRequest}
+      style={[
         styles.actionButton,
         disabled ? styles.actionButtonDisabled : activeStyle,
-        pressed && !disabled ? pressedStyle : null,
+        press.pressed ? pressedStyle : null,
       ]}
       accessibilityRole="button"
       accessibilityState={{ disabled }}
@@ -73,7 +70,7 @@ function RwaActionButton({
         color={disabled ? colors.text.tertiary : colors.text.primary}
         style={styles.actionLabel}
         numberOfLines={1}
-        maxFontSizeMultiplier={1}
+        maxFontSizeMultiplier={1.1}
       >
         {label}
       </Text>
@@ -84,17 +81,19 @@ function RwaActionButton({
 const HomeRwaAssetCard = memo(function HomeRwaAssetCard({
   asset,
   cardWidth,
+  dense,
   onBuy,
   onSell,
 }: {
   asset: RwaAsset;
   cardWidth: number;
+  dense: boolean;
   onBuy: (asset: RwaAsset) => void;
   onSell: (asset: RwaAsset) => void;
 }): React.JSX.Element {
   const displayName = formatRwaAssetDisplayName(asset);
   const displaySymbol = asset.underlyingSymbol ?? asset.symbol;
-  const changeLabel = formatChangeLabel(asset.change24hPct);
+  const changeLabel = formatRwaChangeLabel(asset.change24hPct);
   const changeTone =
     asset.change24hPct == null
       ? colors.text.tertiary
@@ -106,66 +105,75 @@ const HomeRwaAssetCard = memo(function HomeRwaAssetCard({
 
   return (
     <View style={[styles.assetCard, { width: cardWidth }]}>
-      <View style={styles.assetTopRow}>
+      <View style={styles.assetIdentityRow}>
         <TokenIcon
           symbol={displaySymbol}
           name={displayName}
           logoUri={getRwaAssetLogoUri(asset)}
-          size={48}
+          size={dense ? 40 : 44}
           recyclingKey={asset.mint}
         />
-        <View style={styles.priceBlock}>
+        <View style={styles.assetCopy}>
           <Text
-            variant="bodyBold"
+            variant="captionBold"
+            color={colors.text.primary}
+            style={styles.assetName}
+            numberOfLines={2}
+            maxFontSizeMultiplier={1.15}
+          >
+            {displayName}
+          </Text>
+          <Text
+            variant="small"
+            color={colors.text.tertiary}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.15}
+          >
+            {RWA_CATEGORY_LABELS[asset.category]} · {displaySymbol}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.assetMarketRow}>
+        <View style={styles.marketMetric}>
+          <Text variant="small" color={colors.text.tertiary} maxFontSizeMultiplier={1.15}>
+            Price
+          </Text>
+          <Text
+            variant="money"
             color={colors.text.primary}
             style={styles.priceText}
             numberOfLines={1}
             adjustsFontSizeToFit
             minimumFontScale={0.78}
-            maxFontSizeMultiplier={1}
+            maxFontSizeMultiplier={1.15}
           >
             {formatUsd(asset.priceUsd)}
           </Text>
-          {changeLabel != null ? (
-            <Text
-              variant="small"
-              color={changeTone}
-              style={styles.changeText}
-              numberOfLines={1}
-              maxFontSizeMultiplier={1}
-            >
-              {changeLabel}
-            </Text>
-          ) : null}
+        </View>
+        <View style={[styles.marketMetric, styles.marketMetricEnd]}>
+          <Text variant="small" color={colors.text.tertiary} maxFontSizeMultiplier={1.15}>
+            24h
+          </Text>
+          <Text
+            variant="captionBold"
+            color={changeLabel == null ? colors.text.tertiary : changeTone}
+            style={styles.changeText}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.15}
+          >
+            {changeLabel ?? '—'}
+          </Text>
         </View>
       </View>
 
-      <View style={styles.assetCopy}>
-        <Text
-          variant="bodyBold"
-          color={colors.text.primary}
-          style={styles.assetName}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.78}
-          maxFontSizeMultiplier={1}
-        >
-          {displayName}
-        </Text>
-        <Text
-          variant="caption"
-          color={colors.text.tertiary}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.78}
-          maxFontSizeMultiplier={1}
-        >
-          {RWA_CATEGORY_LABELS[asset.category]} · {displaySymbol}
-        </Text>
-      </View>
-
       <View style={styles.actionsRow}>
-        <RwaActionButton label="Buy" side="buy" disabled={buyDisabled} onPress={() => onBuy(asset)} />
+        <RwaActionButton
+          label="Buy"
+          side="buy"
+          disabled={buyDisabled}
+          onPress={() => onBuy(asset)}
+        />
         <RwaActionButton
           label="Sell"
           side="sell"
@@ -177,23 +185,35 @@ const HomeRwaAssetCard = memo(function HomeRwaAssetCard({
   );
 });
 
-function HomeRwaSkeletonCard({ cardWidth }: { cardWidth: number }): React.JSX.Element {
+function HomeRwaSkeletonCard({
+  cardWidth,
+  dense,
+}: {
+  cardWidth: number;
+  dense: boolean;
+}): React.JSX.Element {
   return (
     <View style={[styles.assetCard, { width: cardWidth }]}>
-      <View style={styles.assetTopRow}>
-        <SkeletonBlock width={48} height={48} radius={radii.full} />
-        <View style={styles.skeletonPriceBlock}>
-          <SkeletonBlock width={72} height={16} radius={radii.full} />
-          <SkeletonBlock width={44} height={11} radius={radii.full} />
+      <View style={styles.assetIdentityRow}>
+        <SkeletonBlock width={dense ? 40 : 44} height={dense ? 40 : 44} radius={radii.full} />
+        <View style={styles.skeletonIdentityCopy}>
+          <SkeletonBlock width="78%" height={16} radius={radii.full} />
+          <SkeletonBlock width="58%" height={11} radius={radii.full} />
         </View>
       </View>
-      <View style={styles.assetCopy}>
-        <SkeletonBlock width="74%" height={18} radius={radii.full} />
-        <SkeletonBlock width="52%" height={13} radius={radii.full} />
+      <View style={styles.assetMarketRow}>
+        <View style={styles.skeletonPriceBlock}>
+          <SkeletonBlock width={30} height={10} radius={radii.full} />
+          <SkeletonBlock width={72} height={16} radius={radii.full} />
+        </View>
+        <View style={[styles.skeletonPriceBlock, styles.marketMetricEnd]}>
+          <SkeletonBlock width={24} height={10} radius={radii.full} />
+          <SkeletonBlock width={44} height={14} radius={radii.full} />
+        </View>
       </View>
       <View style={styles.actionsRow}>
-        <SkeletonBlock width="48%" height={layout.buttonHeightSm} radius={radii.md} />
-        <SkeletonBlock width="48%" height={layout.buttonHeightSm} radius={radii.md} />
+        <SkeletonBlock width="48%" height={layout.minTouchTarget} radius={radii.lg} />
+        <SkeletonBlock width="48%" height={layout.minTouchTarget} radius={radii.lg} />
       </View>
     </View>
   );
@@ -206,13 +226,19 @@ function ViewAllRwaCard({
   cardWidth: number;
   onPress: () => void;
 }): React.JSX.Element {
+  const press = useCancelSafePress({ onPress });
+
   return (
     <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
+      onPress={press.onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
+      onResponderTerminate={press.onResponderTerminate}
+      onResponderTerminationRequest={press.onResponderTerminationRequest}
+      style={[
         styles.viewAllCard,
         { width: cardWidth },
-        pressed ? styles.viewAllCardPressed : null,
+        press.pressed ? styles.viewAllCardPressed : null,
       ]}
       accessibilityRole="button"
       accessibilityLabel="View all RWAs"
@@ -249,7 +275,7 @@ export function HomeRwaCarousel({
   const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   const compact = windowWidth < 390 || windowHeight < 760 || fontScale > 1.05;
   const dense = windowWidth < 340 || fontScale > 1.18;
-  const cardWidth = dense ? 176 : compact ? 190 : 206;
+  const cardWidth = dense ? 188 : compact ? 204 : 220;
   const { canLoadAssets, query: assetsQuery } = useRwaAssets({
     network,
     canUseNetwork,
@@ -304,8 +330,8 @@ export function HomeRwaCarousel({
       >
         {loading ? (
           <>
-            <HomeRwaSkeletonCard cardWidth={cardWidth} />
-            <HomeRwaSkeletonCard cardWidth={cardWidth} />
+            <HomeRwaSkeletonCard cardWidth={cardWidth} dense={dense} />
+            <HomeRwaSkeletonCard cardWidth={cardWidth} dense={dense} />
           </>
         ) : assetsQuery.isError ? (
           <View style={[styles.stateCard, { width: cardWidth * 1.42 }]}>
@@ -321,6 +347,7 @@ export function HomeRwaCarousel({
                 key={asset.id}
                 asset={asset}
                 cardWidth={cardWidth}
+                dense={dense}
                 onBuy={onBuy}
                 onSell={onSell}
               />
@@ -370,7 +397,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   assetCard: {
-    minHeight: 176,
+    minHeight: 196,
     justifyContent: 'space-between',
     gap: spacing.md,
     padding: spacing.md,
@@ -384,46 +411,64 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.cardElevated,
     boxShadow: HOME_RWA_CARD_SHADOW,
   },
-  assetTopRow: {
-    minHeight: 52,
+  assetIdentityRow: {
+    minHeight: 48,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: spacing.md,
   },
-  priceBlock: {
+  assetCopy: {
     flex: 1,
     minWidth: 0,
-    alignItems: 'flex-end',
     gap: 2,
   },
-  skeletonPriceBlock: {
+  assetName: {
+    fontFamily: fontFamily.uiSemiBold,
+  },
+  assetMarketRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glass.rimSubtle,
+  },
+  marketMetric: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
+  },
+  marketMetricEnd: {
     alignItems: 'flex-end',
+  },
+  skeletonIdentityCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
+  },
+  skeletonPriceBlock: {
+    flex: 1,
+    minWidth: 0,
     gap: spacing.xs,
   },
   priceText: {
-    fontFamily: fontFamily.medium,
+    fontFamily: fontFamily.moneyBold,
+    fontVariant: ['tabular-nums'],
   },
   changeText: {
     fontFamily: fontFamily.uiSemiBold,
     fontVariant: ['tabular-nums'],
-  },
-  assetCopy: {
-    gap: 2,
-  },
-  assetName: {
-    fontFamily: fontFamily.medium,
   },
   actionsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
   },
   actionButton: {
-    minHeight: layout.buttonHeightSm,
+    minHeight: layout.minTouchTarget,
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
   buyButton: {
@@ -448,7 +493,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.medium,
   },
   viewAllCard: {
-    minHeight: 176,
+    minHeight: 196,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
@@ -473,7 +518,7 @@ const styles = StyleSheet.create({
     borderColor: colors.glass.rimSubtle,
   },
   stateCard: {
-    minHeight: 176,
+    minHeight: 196,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,

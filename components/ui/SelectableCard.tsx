@@ -12,7 +12,7 @@ import { fontFamily } from '@/constants/typography';
 
 interface SelectableCardProps {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   selected: boolean;
   onPress: () => void;
   badge?: string;
@@ -40,6 +40,7 @@ export function SelectableCard({
         disabled ? styles.disabled : undefined,
       ]}
       onPress={pressDisabled ? undefined : onPress}
+      disabled={disabled}
       accessibilityRole="radio"
       accessibilityState={{ selected, disabled }}
       accessibilityLabel={title}
@@ -64,9 +65,11 @@ export function SelectableCard({
               </View>
             ) : null}
           </View>
-          <Text variant="small" color={subtitleColor} numberOfLines={2}>
-            {subtitle}
-          </Text>
+          {subtitle != null && subtitle.length > 0 ? (
+            <Text variant="small" color={subtitleColor} numberOfLines={2}>
+              {subtitle}
+            </Text>
+          ) : null}
         </View>
         <View
           style={[

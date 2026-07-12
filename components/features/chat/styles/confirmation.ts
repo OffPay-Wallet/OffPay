@@ -8,12 +8,18 @@ export const confirmationStyles = StyleSheet.create({
   confirmationCard: {
     borderRadius: radii['2xl'],
     borderCurve: 'continuous',
+    overflow: 'hidden',
+    minWidth: 0,
     backgroundColor: colors.surface.solidCardElevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rim,
     padding: spacing.xl,
     gap: spacing.xl,
     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+  },
+  confirmationCardCompact: {
+    padding: spacing.lg,
+    gap: spacing.lg,
   },
   confirmationHeader: {
     flexDirection: 'row',
@@ -26,18 +32,18 @@ export const confirmationStyles = StyleSheet.create({
   },
   confirmationTitle: {
     fontFamily: fontFamily.uiSemiBold,
-    fontSize: 20,
-    lineHeight: 25,
+    fontSize: 18,
+    lineHeight: 23,
   },
   confirmationRows: {
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   confirmationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.lg,
-    minHeight: 32,
+    minHeight: 30,
   },
   confirmationRowLabel: {
     width: 82,

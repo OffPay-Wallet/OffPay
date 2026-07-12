@@ -22,10 +22,9 @@ export function NetworkStep({ selectedNetwork, onSelect }: NetworkStepProps): Re
         <SelectableCard
           key={n.id}
           title={n.label}
-          subtitle={n.selectable ? n.description : (n.unavailableDescription ?? n.description)}
           selected={n.id === selectedNetwork}
           disabled={!n.selectable}
-          badge={!n.selectable ? 'Unavailable' : undefined}
+          badge={!n.selectable ? 'Coming soon' : undefined}
           onPress={() => onSelect(n.id)}
         />
       ))}

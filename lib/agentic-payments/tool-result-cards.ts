@@ -40,7 +40,7 @@ const TOOL_TITLES: Record<string, string> = {
   get_normal_transfer_fee: 'Transfer fee',
   get_swap_tokens: 'Swap tokens',
   get_swap_price: 'Token price',
-  get_rwa_assets: 'RWA catalog',
+  get_rwa_assets: 'RWA assets',
   get_rwa_holdings: 'RWA holdings',
   get_rwa_history: 'RWA activity',
   scan_umbra_claims: 'Umbra claims',
@@ -387,18 +387,30 @@ function buildRwaAssetsCard(
   }
 
   const assets = arrayOfRecords(result.assets);
+  const assetCount = readNumber(result.count) ?? assets.length;
   return {
     id: `${toolResult.toolCallId}:rwa-assets`,
     toolName: toolResult.name,
-    title: 'RWA catalog',
-    subtitle: assets.length === 0 ? 'No RWAs available' : `${assets.length} shown`,
+    title: 'RWA assets',
+    subtitle: assets.length === 0 ? 'No assets available' : `${assetCount} available`,
     tone: assets.length === 0 ? 'default' : 'success',
-    items: assets.slice(0, MAX_ITEMS_PER_CARD).map((asset) => ({
-      title: `${formatUnknown(asset.symbol)} ${formatMoney(asset.priceUsd)}`,
-      detail: readString(asset.name),
-      tone: asset.tradable === false ? 'warning' : 'default',
-    })),
-    footer: result.truncated === true ? 'More RWAs are available.' : null,
+    items: assets.slice(0, MAX_ITEMS_PER_CARD).map((asset) => {
+      const symbol = readString(asset.symbol) ?? 'RWA';
+      const name = readString(asset.name) ?? symbol;
+      return {
+        title: formatRwaDisplayName({
+          devnetSandbox: asset.devnetSandbox === true,
+          name,
+          symbol,
+        }),
+        detail: `${symbol} · ${formatMoney(asset.priceUsd)}`,
+        tone: asset.tradable === false ? ('warning' as const) : ('default' as const),
+      };
+    }),
+    footer:
+      result.truncated === true
+        ? `Showing ${Math.min(assets.length, MAX_ITEMS_PER_CARD)} of ${assetCount}`
+        : null,
   };
 }
 
@@ -431,6 +443,7 @@ function buildRwaAssetPreview(asset: Record<string, unknown>): AgenticRwaAssetCa
     categoryLabel: formatRwaCategory(readString(asset.category)),
     underlyingSymbol,
     priceLabel: formatMoney(asset.priceUsd),
+    change24hPct: readNumber(asset.change24hPct),
     logoUri: explicitLogo ?? getXStocksLogoUri(underlyingSymbol ?? symbol),
     tradable: asset.tradable !== false,
     settlementSymbol: readString(asset.settlementSymbol) ?? 'USDC',
@@ -448,20 +461,27 @@ function buildRwaHoldingsCard(
     id: `${toolResult.toolCallId}:rwa-holdings`,
     toolName: toolResult.name,
     title: 'RWA holdings',
-    subtitle: holdings.length === 0 ? 'No RWA holdings' : `${holdings.length} position(s)`,
+    subtitle: holdings.length === 0 ? 'No holdings' : `${holdings.length} held`,
     tone: holdings.length === 0 ? 'default' : 'success',
     rows: settlement
       .slice(0, 2)
       .map((token) =>
         row(readString(token.symbol) ?? 'Settlement', readString(token.balance) ?? '0', 'default'),
       ),
-    items: holdings.slice(0, MAX_ITEMS_PER_CARD).map((holding) => ({
-      title: `${formatUnknown(holding.balance)} ${formatUnknown(holding.symbol)}`,
-      detail:
-        readNumber(holding.valueUsd) == null
-          ? readString(holding.name)
-          : `${readString(holding.name) ?? 'RWA'} | ${formatMoney(holding.valueUsd)}`,
-    })),
+    items: holdings.slice(0, MAX_ITEMS_PER_CARD).map((holding) => {
+      const symbol = formatUnknown(holding.symbol);
+      const amount = `${formatUnknown(holding.balance)} ${symbol}`;
+      const value = readNumber(holding.valueUsd);
+      const name = readString(holding.name) ?? symbol;
+      return {
+        title: formatRwaDisplayName({
+          devnetSandbox: /\s+Sandbox(?:\s+RWA)?$/i.test(name),
+          name,
+          symbol,
+        }),
+        detail: value == null ? amount : `${amount} · ${formatMoney(value)}`,
+      };
+    }),
   };
 }
 
@@ -480,12 +500,11 @@ function buildRwaHistoryCard(
         : `${transactions.length} recent ${transactions.length === 1 ? 'item' : 'items'}`,
     tone: transactions.length === 0 ? 'default' : 'success',
     items: transactions.slice(0, MAX_ITEMS_PER_CARD).map((transaction) => ({
-      title: `${humanize(readString(transaction.type) ?? 'transaction')} ${formatUnknown(transaction.amount)} ${formatUnknown(transaction.tokenSymbol)}`,
-      detail: humanize(readString(transaction.status) ?? 'unknown'),
+      title: `${humanize(readString(transaction.type) ?? 'transaction')} ${formatUnknown(transaction.tokenSymbol)}`,
+      detail: `${formatUnknown(transaction.amount)} · ${humanize(readString(transaction.status) ?? 'unknown')}`,
       tone: readString(transaction.status) === 'failed' ? 'danger' : 'default',
     })),
-    rows: [row('Source', humanize(readString(result.source) ?? 'local'))],
-    footer: result.hasMore === true ? 'More RWA activity is available in History.' : null,
+    footer: result.hasMore === true ? 'More in History' : null,
   };
 }
 

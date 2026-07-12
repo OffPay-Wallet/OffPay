@@ -10,6 +10,7 @@ import Animated, {
 
 import {
   formatRwaAssetDisplayName,
+  formatRwaChangeLabel,
   formatUsd,
   getRwaAssetLogoUri,
   RWA_CATEGORY_LABELS,
@@ -131,7 +132,12 @@ function RwaTradeActionButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
     >
-      <Text variant="caption" color={foregroundColor} style={styles.actionLabel}>
+      <Text
+        variant="captionBold"
+        color={foregroundColor}
+        style={styles.actionLabel}
+        maxFontSizeMultiplier={1.1}
+      >
         {label}
       </Text>
     </AnimatedPressable>
@@ -155,12 +161,19 @@ export function RwaAssetRow({
 }): React.JSX.Element {
   const canBuy = buyDisabledReason == null;
   const canSell = sellDisabledReason == null;
+  const changeLabel = formatRwaChangeLabel(asset.change24hPct);
+  const changeColor =
+    asset.change24hPct == null
+      ? colors.text.tertiary
+      : asset.change24hPct >= 0
+        ? colors.semantic.receive
+        : colors.semantic.error;
 
   return (
     <View style={[styles.assetCard, dense && styles.assetCardDense]}>
-      <View style={styles.assetHeader}>
+      <View style={[styles.assetHeader, dense && styles.assetHeaderDense]}>
         <View style={styles.assetIdentity}>
-          <View style={styles.assetLogoFrame}>
+          <View style={[styles.assetLogoFrame, dense && styles.assetLogoFrameDense]}>
             <TokenIcon
               symbol={asset.underlyingSymbol ?? asset.symbol}
               name={asset.name}
@@ -171,22 +184,47 @@ export function RwaAssetRow({
           </View>
           <View style={styles.assetNameBlock}>
             <Text
-              variant="body"
+              variant="bodyBold"
               color={colors.text.primary}
               style={styles.assetName}
-              numberOfLines={1}
+              numberOfLines={2}
+              maxFontSizeMultiplier={1.15}
             >
               {formatRwaAssetDisplayName(asset)}
             </Text>
-            <Text variant="caption" color={colors.text.tertiary} numberOfLines={1}>
+            <Text
+              variant="small"
+              color={colors.text.tertiary}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+            >
               {RWA_CATEGORY_LABELS[asset.category]} · {asset.underlyingSymbol ?? asset.symbol}
             </Text>
           </View>
         </View>
-        <View style={styles.priceBlock}>
-          <Text variant="body" color={colors.text.primary} style={styles.priceText}>
+        <View style={[styles.priceBlock, dense && styles.priceBlockDense]}>
+          <Text
+            variant="money"
+            color={colors.text.primary}
+            style={styles.priceText}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.78}
+            maxFontSizeMultiplier={1.15}
+          >
             {formatUsd(asset.priceUsd)}
           </Text>
+          {changeLabel != null ? (
+            <Text
+              variant="small"
+              color={changeColor}
+              style={styles.changeText}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+            >
+              {changeLabel} 24h
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -218,7 +256,8 @@ const styles = StyleSheet.create({
   assetCard: {
     gap: spacing.md,
     padding: spacing.lg,
-    borderRadius: radii.lg,
+    borderRadius: radii.xl,
+    borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glass.rimSubtle,
     backgroundColor: colors.glass.clearFill,
@@ -232,6 +271,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
   },
+  assetHeaderDense: {
+    alignItems: 'stretch',
+    flexDirection: 'column',
+    gap: spacing.sm,
+  },
   assetIdentity: {
     flex: 1,
     minWidth: 0,
@@ -240,10 +284,14 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   assetLogoFrame: {
-    width: 58,
+    width: 52,
     height: 48,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  assetLogoFrameDense: {
+    width: 44,
+    height: 42,
   },
   assetNameBlock: {
     flex: 1,
@@ -251,27 +299,40 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   assetName: {
-    fontFamily: fontFamily.medium,
+    fontFamily: fontFamily.uiSemiBold,
   },
   priceBlock: {
     alignItems: 'flex-end',
     gap: 2,
+    flexShrink: 0,
+  },
+  priceBlockDense: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.md,
   },
   priceText: {
-    fontFamily: fontFamily.medium,
+    fontFamily: fontFamily.moneyBold,
+    fontVariant: ['tabular-nums'],
+  },
+  changeText: {
+    fontFamily: fontFamily.uiSemiBold,
+    fontVariant: ['tabular-nums'],
   },
   actionRow: {
     flexDirection: 'row',
     gap: spacing.sm,
   },
   actionButton: {
-    minHeight: layout.buttonHeightSm,
+    minHeight: layout.minTouchTarget,
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
   actionButtonDisabled: {
