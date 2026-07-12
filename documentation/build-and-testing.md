@@ -59,9 +59,8 @@ Instead of Expo Go, use:
 `app.config.ts` defines:
 
 - app name `OffPay`, slug `offpay`, scheme `offpay`
-- iOS bundle identifier `com.offpay.app`
+- Android-only platform targeting
 - Android package `com.offpay.app`
-- Expo new architecture enabled
 - Bluetooth permissions for offline payment receipt transport
 - EAS project `@offpay_app/offpay` with id `56dc74fa-f0b3-4927-86a5-00e2c7c8f417`
 
@@ -69,9 +68,18 @@ Instead of Expo Go, use:
 
 - `development`: internal development client using the EAS `development` environment
 - `preview`: internal Android APK using the EAS `preview` environment
-- `production`: Android app bundle for store distribution using the EAS `production` environment
+- `production`: internally distributed Android release APK using the EAS `production` environment
 
-Public client environment values should be configured in EAS environments instead of hardcoded in `eas.json`. Required client build variables are `EXPO_PUBLIC_OFFPAY_API_ORIGIN`, `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_URL`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE`, `EXPO_PUBLIC_PRIVY_APP_ID`, and `EXPO_PUBLIC_PRIVY_CLIENT_ID`.
+Public client environment values should be configured in EAS environments instead of hardcoded in `eas.json`. Required client build variables are `EXPO_PUBLIC_OFFPAY_API_ORIGIN`, `EXPO_PUBLIC_OFFPAY_API_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_URL`, `EXPO_PUBLIC_OFFPAY_AI_PROXY_ALLOWED_ORIGINS`, `EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE`, `EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER`, `EXPO_PUBLIC_PRIVY_APP_ID`, and `EXPO_PUBLIC_PRIVY_CLIENT_ID`.
+
+Production APKs distributed without Google Play Console use Play Integrity in
+certificate-pinned sideload mode. The API Worker must set
+`OFFPAY_ANDROID_DISTRIBUTION_MODE=sideload` and
+`OFFPAY_ANDROID_CERTIFICATE_SHA256_DIGESTS` to the exact EAS Android signing
+certificate SHA-256 fingerprint. This mode still requires Google Cloud Play
+Integrity credentials, exact package/request binding, and
+`MEETS_DEVICE_INTEGRITY`; `OFFPAY_ANDROID_MIN_VERSION_CODE` prevents older
+signed APKs from bootstrapping. It never uses the prototype bypass.
 
 ## Build Profiles
 

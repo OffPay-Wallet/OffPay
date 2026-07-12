@@ -47,6 +47,11 @@ const ANDROID_PLAY_INTEGRITY_BINDINGS: BindingKey[] = [
   'GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL',
   'GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY',
   'OFFPAY_ANDROID_PACKAGE_NAME',
+  'OFFPAY_ANDROID_MIN_VERSION_CODE',
+];
+
+const ANDROID_SIDELOAD_BINDINGS: BindingKey[] = [
+  'OFFPAY_ANDROID_CERTIFICATE_SHA256_DIGESTS',
 ];
 
 const IOS_APP_ATTEST_BINDINGS: BindingKey[] = ['OFFPAY_IOS_BUNDLE_ID', 'OFFPAY_IOS_TEAM_ID'];
@@ -228,7 +233,20 @@ function getAndroidAttestationStatus(bindings: Bindings): FeatureConfigStatus {
     );
   }
 
-  return withConfiguredState(missingStringBindings(bindings, ANDROID_PLAY_INTEGRITY_BINDINGS));
+  const distributionMode =
+    bindings.OFFPAY_ANDROID_DISTRIBUTION_MODE?.trim().toLowerCase() || 'google_play';
+  if (distributionMode !== 'google_play' && distributionMode !== 'sideload') {
+    return withConfiguredState(['OFFPAY_ANDROID_DISTRIBUTION_MODE_VALID']);
+  }
+
+  return withConfiguredState(
+    mergeMissing(
+      missingStringBindings(bindings, ANDROID_PLAY_INTEGRITY_BINDINGS),
+      distributionMode === 'sideload'
+        ? missingStringBindings(bindings, ANDROID_SIDELOAD_BINDINGS)
+        : [],
+    ),
+  );
 }
 
 function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
@@ -244,9 +262,10 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
   const iosAttestation = withConfiguredState(
     missingStringBindings(bindings, IOS_APP_ATTEST_BINDINGS),
   );
-  const platformAttestationReady =
-    androidAttestation.configured &&
-    (iosAttestation.configured || isAndroidPrototypeBypassEnabled(bindings));
+  // OffPay's production client is Android-only. Keep iOS status visible for a
+  // future launch, but do not make an intentionally unsupported platform a
+  // prerequisite for Android bootstrap readiness.
+  const platformAttestationReady = androidAttestation.configured;
   const rpc = withConfiguredState(missingRpcNetworkBindings(bindings));
   const wallet = withConfiguredState(
     mergeMissing(rpc.missing, missingStringBindings(bindings, HELIUS_API_KEY_BINDINGS)),
@@ -283,8 +302,7 @@ function getWorkerConfigStatus(bindings: Bindings): WorkerConfigStatus {
     ready,
     degraded:
       ready &&
-      ((!iosAttestation.configured && isAndroidPrototypeBypassEnabled(bindings)) ||
-        !marketPrices.configured ||
+      (!marketPrices.configured ||
         !privatePayment.configured ||
         !privateSwap.configured ||
         !offline.configured ||

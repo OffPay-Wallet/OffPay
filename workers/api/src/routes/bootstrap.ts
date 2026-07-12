@@ -43,7 +43,7 @@ const bootstrapPostBodySchema = z.object({
   nonce: z.string().uuid(),
   attestationToken: z.string().max(MAX_ATTESTATION_TOKEN_LENGTH).optional().default(''),
   walletSignature: z.string().min(1).max(MAX_SIGNATURE_LENGTH).optional(),
-  platform: z.enum(['ios', 'android']),
+  platform: z.literal('android'),
   appVersion: z.string().min(1).max(MAX_APP_VERSION_LENGTH),
   deviceId: z.string().min(1).max(MAX_DEVICE_ID_LENGTH),
   attestationKeyId: z.string().min(1).max(MAX_ATTESTATION_KEY_ID_LENGTH).optional(),

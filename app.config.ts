@@ -4,7 +4,6 @@ const APP_NAME = 'OffPay';
 const APP_SLUG = 'offpay';
 const APP_VERSION = '1.0.0';
 const APP_SCHEME = 'offpay';
-const IOS_BUNDLE_IDENTIFIER = 'com.offpay.app';
 const ANDROID_PACKAGE = 'com.offpay.app';
 const APP_ICON_PATH = './assets/AppIcons/appstore.png';
 const ANDROID_ICON_PATH = './assets/AppIcons/playstore.png';
@@ -16,12 +15,6 @@ const ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR = '#000000';
 const ANDROID_NOTIFICATION_COLOR = '#F7F7F2';
 const ANDROID_PHONE_BUILD_ARCHS = ['armeabi-v7a', 'arm64-v8a'];
 
-function getAppAttestEnvironment(): 'development' | 'production' {
-  return process.env.OFFPAY_APP_ATTEST_ENVIRONMENT?.trim().toLowerCase() === 'development'
-    ? 'development'
-    : 'production';
-}
-
 function readOptionalEnvironmentValue(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value == null || value.length === 0 ? undefined : value;
@@ -32,6 +25,14 @@ function assertProductionAttestationBuildConfig(): void {
 
   const platform = process.env.EAS_BUILD_PLATFORM;
   if (platform === 'android') {
+    const attestationMode = readOptionalEnvironmentValue(
+      'EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE',
+    );
+    if (attestationMode !== 'play_integrity') {
+      throw new Error(
+        'Production Android builds require EXPO_PUBLIC_OFFPAY_ATTESTATION_MODE=play_integrity.',
+      );
+    }
     const projectNumber = readOptionalEnvironmentValue(
       'EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER',
     );
@@ -41,18 +42,10 @@ function assertProductionAttestationBuildConfig(): void {
       );
     }
   }
-
-  if (platform === 'ios') {
-    const teamId = readOptionalEnvironmentValue('OFFPAY_IOS_TEAM_ID');
-    if (teamId == null || !/^[A-Z0-9]{10}$/.test(teamId)) {
-      throw new Error('Production iOS builds require OFFPAY_IOS_TEAM_ID for App Attest.');
-    }
-  }
 }
 
 export default function appConfig(_context: ConfigContext): ExpoConfig {
   assertProductionAttestationBuildConfig();
-  const appleTeamId = readOptionalEnvironmentValue('OFFPAY_IOS_TEAM_ID');
 
   return {
     name: APP_NAME,
@@ -62,28 +55,13 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
     orientation: 'portrait',
     icon: APP_ICON_PATH,
     scheme: APP_SCHEME,
+    platforms: ['android'],
     userInterfaceStyle: 'automatic',
     // newArchEnabled is configured via gradle.properties for compatibility
     backgroundColor: BRAND_BACKGROUND_COLOR,
-    ios: {
-      supportsTablet: true,
-      icon: APP_ICON_PATH,
-      bundleIdentifier: IOS_BUNDLE_IDENTIFIER,
-      ...(appleTeamId == null ? {} : { appleTeamId }),
-      entitlements: {
-        'com.apple.developer.devicecheck.appattest-environment': getAppAttestEnvironment(),
-      },
-      infoPlist: {
-        NSBluetoothAlwaysUsageDescription:
-          'OffPay uses Bluetooth to deliver offline payment receipts between nearby devices.',
-        NSBluetoothPeripheralUsageDescription:
-          'OffPay uses Bluetooth to receive offline payment receipts from nearby devices.',
-        NSMicrophoneUsageDescription:
-          'OffPay uses the microphone to let you speak commands to the Yuga assistant.',
-      },
-    },
     android: {
       package: ANDROID_PACKAGE,
+      versionCode: 1,
       icon: ANDROID_ICON_PATH,
       adaptiveIcon: {
         backgroundColor: ANDROID_ADAPTIVE_ICON_BACKGROUND_COLOR,
@@ -184,9 +162,8 @@ export default function appConfig(_context: ConfigContext): ExpoConfig {
       [
         'expo-notifications',
         {
-          // Local notifications only — no remote push tokens. The
-          // plugin still needs to be present for the Android
-          // notification channel and iOS entitlements to be wired.
+          // Local notifications only — no remote push tokens. The plugin is
+          // still required to wire the Android notification channel.
           color: ANDROID_NOTIFICATION_COLOR,
         },
       ],

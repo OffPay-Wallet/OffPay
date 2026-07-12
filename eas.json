@@ -34,12 +34,13 @@
       }
     },
     "production": {
+      "distribution": "internal",
       "environment": "production",
       "env": {
         "EXPO_ROUTER_DISABLE_NATIVE_TABS_MD": "1"
       },
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "apk"
       }
     }
   },

@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { decode as decodeCbor } from 'cbor-x';
 import { X509Certificate, X509ChainBuilder } from '@peculiar/x509';
+import { hasValidAndroidAppIntegrity } from './android-app-integrity.js';
 import { hasValidAndroidRequestBinding } from './android-attestation-binding.js';
 import { AppError } from './errors.js';
 import type { Bindings } from './types.js';
@@ -36,6 +37,8 @@ interface GooglePlayIntegrityPayload {
   appIntegrity?: {
     appRecognitionVerdict?: string;
     packageName?: string;
+    certificateSha256Digest?: string[];
+    versionCode?: string;
   };
   deviceIntegrity?: {
     deviceRecognitionVerdict?: string[];
@@ -404,10 +407,7 @@ async function verifyAndroidIntegrity(
   const appVerdict = appIntegrity?.appRecognitionVerdict ?? '';
   const allowDevelopmentVerdict =
     !isProductionEnvironment(bindings) && appVerdict === 'UNRECOGNIZED_VERSION';
-  if (
-    (appVerdict !== 'PLAY_RECOGNIZED' && !allowDevelopmentVerdict) ||
-    (appIntegrity?.packageName && appIntegrity.packageName !== packageName)
-  ) {
+  if (!hasValidAndroidAppIntegrity(bindings, packageName, appIntegrity)) {
     throwAttestationFailed();
   }
 
