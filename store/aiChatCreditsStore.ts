@@ -58,7 +58,7 @@ export const useAiChatCreditsStore = create<AiChatCreditsState>()((set) => ({
 }));
 
 function normalizeCredits(credits: AiChatCreditStatus): AiChatCreditStatus {
-  const limit = positiveInt(credits.limit, 5);
+  const limit = positiveInt(credits.limit, 10);
   const used = Math.max(0, Math.min(positiveInt(credits.used, 0), limit));
   const remaining = Math.max(0, Math.min(positiveInt(credits.remaining, limit - used), limit));
   const windowMs = positiveInt(credits.windowMs, 60 * 60 * 1000);

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, View } from 'react-native';
+import Animated, { FadeOut, useReducedMotion } from 'react-native-reanimated';
 
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import type { AgenticSwapAction } from '@/store/agenticChatStore';
@@ -10,7 +10,8 @@ import { formatAtomicAmount } from '@/lib/policy/token-amounts';
 import { ConfirmationRow } from './ConfirmationRow';
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 import { TransactionHashLinkRow } from './TransactionHashLinkRow';
-import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { TransactionTimeline, hasTransactionStarted } from './TransactionTimeline';
+import { formatPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface SwapConfirmationCardProps {
@@ -25,10 +26,20 @@ export function SwapConfirmationCard({
   onCancel,
 }: SwapConfirmationCardProps): React.JSX.Element {
   const canAct = action.status === 'needs_confirmation';
-  const submitting = action.status === 'submitting';
-  const failed = action.status === 'failed';
-  const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const started = hasTransactionStarted(action.status);
+  const reduceMotion = useReducedMotion();
   const statusLabel = formatPrivateSendStatus(action.status);
+
+  const resultContent =
+    action.signature != null ? (
+      <View style={styles.confirmationRows}>
+        <TransactionHashLinkRow
+          signature={action.signature}
+          network={action.network}
+          accessibilityLabel="View swap transaction on Solscan"
+        />
+      </View>
+    ) : null;
 
   return (
     <ConfirmationCardSurface>
@@ -37,7 +48,7 @@ export function SwapConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             Swap
           </Text>
-          {statusLabel != null ? (
+          {!started && statusLabel != null ? (
             <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
               {statusLabel}
             </Text>
@@ -59,31 +70,33 @@ export function SwapConfirmationCard({
         <ConfirmationRow label="Route" value="Normal swap" />
         <ConfirmationRow label="Price impact" value={`${action.priceImpactPct}%`} />
         <ConfirmationRow label="Quote fee" value={action.fee} />
-        {action.signature != null ? (
-          <TransactionHashLinkRow
-            signature={action.signature}
-            network={action.network}
-            accessibilityLabel="View swap transaction on Solscan"
-          />
-        ) : null}
       </View>
 
-      {failed && action.errorMessage != null ? (
+      {started ? (
+        <TransactionTimeline
+          status={action.status}
+          noun="swap"
+          signature={action.signature ?? null}
+          errorMessage={action.errorMessage}
+          resultContent={resultContent}
+        />
+      ) : action.errorMessage != null ? (
         <Text variant="small" color={colors.semantic.error} style={styles.confirmationError}>
           {action.errorMessage}
         </Text>
       ) : null}
 
-      {showActions ? (
-        <View style={styles.confirmationActions}>
+      {canAct ? (
+        <Animated.View
+          exiting={reduceMotion ? undefined : FadeOut.duration(160)}
+          style={styles.confirmationActions}
+        >
           <Pressable
             style={({ pressed }) => [
               styles.secondaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onCancel(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Cancel Yuga swap"
           >
@@ -94,23 +107,17 @@ export function SwapConfirmationCard({
           <Pressable
             style={({ pressed }) => [
               styles.primaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onConfirm(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Confirm Yuga swap"
           >
-            {submitting ? (
-              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
-            ) : (
-              <Text variant="buttonSmall" color={colors.text.onAccent}>
-                Confirm
-              </Text>
-            )}
+            <Text variant="buttonSmall" color={colors.text.onAccent}>
+              Confirm
+            </Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
     </ConfirmationCardSurface>
   );

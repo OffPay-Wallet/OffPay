@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, View } from 'react-native';
+import Animated, { FadeOut, useReducedMotion } from 'react-native-reanimated';
 
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import type { AgenticUmbraClaimAction } from '@/store/agenticChatStore';
@@ -9,7 +9,8 @@ import type { AgenticUmbraClaimAction } from '@/store/agenticChatStore';
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 import { ConfirmationRow } from './ConfirmationRow';
 import { TransactionHashLinkRow } from './TransactionHashLinkRow';
-import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { TransactionTimeline, hasTransactionStarted } from './TransactionTimeline';
+import { formatPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface UmbraClaimConfirmationCardProps {
@@ -24,10 +25,20 @@ export function UmbraClaimConfirmationCard({
   onCancel,
 }: UmbraClaimConfirmationCardProps): React.JSX.Element {
   const canAct = action.status === 'needs_confirmation';
-  const submitting = action.status === 'submitting';
-  const failed = action.status === 'failed';
-  const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const started = hasTransactionStarted(action.status);
+  const reduceMotion = useReducedMotion();
   const statusLabel = formatPrivateSendStatus(action.status);
+
+  const resultContent =
+    action.signature != null ? (
+      <View style={styles.confirmationRows}>
+        <TransactionHashLinkRow
+          signature={action.signature}
+          network={action.network}
+          accessibilityLabel="View Umbra claim transaction on Solscan"
+        />
+      </View>
+    ) : null;
 
   return (
     <ConfirmationCardSurface>
@@ -36,7 +47,7 @@ export function UmbraClaimConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             Claim Umbra funds
           </Text>
-          {statusLabel != null ? (
+          {!started && statusLabel != null ? (
             <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
               {statusLabel}
             </Text>
@@ -57,31 +68,33 @@ export function UmbraClaimConfirmationCard({
         {action.remainingClaimCount != null && action.remainingClaimCount > 0 ? (
           <ConfirmationRow label="Still pending" value={String(action.remainingClaimCount)} />
         ) : null}
-        {action.signature != null ? (
-          <TransactionHashLinkRow
-            signature={action.signature}
-            network={action.network}
-            accessibilityLabel="View Umbra claim transaction on Solscan"
-          />
-        ) : null}
       </View>
 
-      {action.errorMessage != null ? (
+      {started ? (
+        <TransactionTimeline
+          status={action.status}
+          noun="claim"
+          signature={action.signature ?? null}
+          errorMessage={action.errorMessage}
+          resultContent={resultContent}
+        />
+      ) : action.errorMessage != null ? (
         <Text variant="small" color={colors.semantic.error} style={styles.confirmationError}>
           {action.errorMessage}
         </Text>
       ) : null}
 
-      {showActions ? (
-        <View style={styles.confirmationActions}>
+      {canAct ? (
+        <Animated.View
+          exiting={reduceMotion ? undefined : FadeOut.duration(160)}
+          style={styles.confirmationActions}
+        >
           <Pressable
             style={({ pressed }) => [
               styles.secondaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onCancel(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Cancel Umbra claim"
           >
@@ -92,23 +105,17 @@ export function UmbraClaimConfirmationCard({
           <Pressable
             style={({ pressed }) => [
               styles.primaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onConfirm(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Confirm Umbra claim"
           >
-            {submitting ? (
-              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
-            ) : (
-              <Text variant="buttonSmall" color={colors.text.onAccent}>
-                Confirm claim
-              </Text>
-            )}
+            <Text variant="buttonSmall" color={colors.text.onAccent}>
+              Confirm claim
+            </Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
     </ConfirmationCardSurface>
   );

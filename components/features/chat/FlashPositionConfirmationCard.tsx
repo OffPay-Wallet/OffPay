@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { Pressable, View } from 'react-native';
+import Animated, { FadeOut, useReducedMotion } from 'react-native-reanimated';
 
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
@@ -15,7 +15,8 @@ import type {
 import { ConfirmationRow } from './ConfirmationRow';
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 import { TransactionHashLinkRow } from './TransactionHashLinkRow';
-import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { TransactionTimeline, hasTransactionStarted } from './TransactionTimeline';
+import { formatPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface FlashPositionConfirmationCardProps {
@@ -88,9 +89,8 @@ export function FlashPositionConfirmationCard({
   onCancel,
 }: FlashPositionConfirmationCardProps): React.JSX.Element {
   const canAct = action.status === 'needs_confirmation';
-  const submitting = action.status === 'submitting';
-  const failed = action.status === 'failed';
-  const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const started = hasTransactionStarted(action.status);
+  const reduceMotion = useReducedMotion();
   const statusLabel = formatPrivateSendStatus(action.status);
   const handleConfirm = useCallback(() => {
     onConfirm(action);
@@ -124,7 +124,7 @@ export function FlashPositionConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             {action.actionLabel}
           </Text>
-          {statusLabel != null ? (
+          {!started && statusLabel != null ? (
             <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
               {statusLabel}
             </Text>
@@ -343,17 +343,9 @@ export function FlashPositionConfirmationCard({
         ) : null}
 
         <ConfirmationRow label="Network" value="Solana Mainnet" />
-
-        {action.signature != null ? (
-          <TransactionHashLinkRow
-            signature={action.signature}
-            network={action.network}
-            accessibilityLabel="View Flash Trade transaction on Solscan"
-          />
-        ) : null}
       </View>
 
-      {warnings.length > 0 ? (
+      {!started && warnings.length > 0 ? (
         <View style={styles.confirmationWarnings}>
           {warnings.map((warning) => (
             <Text key={warning} variant="small" color={colors.semantic.warning}>
@@ -363,25 +355,43 @@ export function FlashPositionConfirmationCard({
         </View>
       ) : null}
 
-      {failed && action.errorMessage != null ? (
+      {started ? (
+        <TransactionTimeline
+          status={action.status}
+          noun="trade"
+          signature={action.signature ?? null}
+          errorMessage={action.errorMessage}
+          resultContent={
+            action.signature != null ? (
+              <View style={styles.confirmationRows}>
+                <TransactionHashLinkRow
+                  signature={action.signature}
+                  network={action.network}
+                  accessibilityLabel="View Flash Trade transaction on Solscan"
+                />
+              </View>
+            ) : null
+          }
+        />
+      ) : action.errorMessage != null ? (
         <Text variant="small" color={colors.semantic.error} style={styles.confirmationError}>
           {action.errorMessage}
         </Text>
       ) : null}
 
-      {showActions ? (
-        <View style={styles.confirmationActions}>
+      {canAct ? (
+        <Animated.View
+          exiting={reduceMotion ? undefined : FadeOut.duration(160)}
+          style={styles.confirmationActions}
+        >
           <Pressable
             style={({ pressed }) => [
               styles.secondaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={handleCancel}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Cancel Flash Trade action"
-            accessibilityState={{ disabled: !canAct || submitting }}
           >
             <Text variant="buttonSmall" color={colors.text.secondary}>
               Cancel
@@ -390,26 +400,22 @@ export function FlashPositionConfirmationCard({
           <Pressable
             style={({ pressed }) => [
               styles.primaryActionButton,
-              (!canAct || submitting || isExpired) && styles.actionButtonDisabled,
-              pressed && canAct && !isExpired && styles.actionButtonPressed,
+              isExpired && styles.actionButtonDisabled,
+              pressed && !isExpired && styles.actionButtonPressed,
             ]}
             onPress={handleConfirm}
-            disabled={!canAct || submitting || isExpired}
+            disabled={isExpired}
             accessibilityRole="button"
             accessibilityLabel={
               isExpired ? 'Flash Trade quote expired' : 'Confirm Flash Trade action'
             }
-            accessibilityState={{ disabled: !canAct || submitting || isExpired }}
+            accessibilityState={{ disabled: isExpired }}
           >
-            {submitting ? (
-              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
-            ) : (
-              <Text variant="buttonSmall" color={colors.text.onAccent}>
-                {isExpired ? 'Expired' : 'Confirm'}
-              </Text>
-            )}
+            <Text variant="buttonSmall" color={colors.text.onAccent}>
+              {isExpired ? 'Expired' : 'Confirm'}
+            </Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
     </ConfirmationCardSurface>
   );

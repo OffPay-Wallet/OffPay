@@ -11,8 +11,8 @@ const ONE_HOUR_MS = 60 * 60 * 1000;
 function credits(overrides: Partial<AiChatCreditStatus> = {}): AiChatCreditStatus {
   return {
     kind: 'ai_chat_credits',
-    limit: 5,
-    used: 5,
+    limit: 10,
+    used: 10,
     remaining: 0,
     resetAtMs: 1_000_000 + ONE_HOUR_MS,
     windowMs: ONE_HOUR_MS,
@@ -47,7 +47,7 @@ describe('chat credit reset labels', () => {
     );
 
     expect(indicator).toMatchObject({
-      label: '0/5',
+      label: '0/10',
       tone: 'empty',
       resetLabel: 'resets 1h',
     });

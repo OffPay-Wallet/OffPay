@@ -1,11 +1,11 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import Animated, { FadeOut, useReducedMotion } from 'react-native-reanimated';
 
 import {
   formatRwaAssetDisplayName,
   getRwaAssetLogoUri,
 } from '@/components/features/rwa/rwa-trade-utils';
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { TokenIcon } from '@/components/ui/TokenIcon';
 import { colors } from '@/constants/colors';
@@ -15,7 +15,8 @@ import type { AgenticRwaTradeAction } from '@/store/agenticChatStore';
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 import { ConfirmationRow } from './ConfirmationRow';
 import { TransactionHashLinkRow } from './TransactionHashLinkRow';
-import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { TransactionTimeline, hasTransactionStarted } from './TransactionTimeline';
+import { formatPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface RwaTradeConfirmationCardProps {
@@ -34,13 +35,14 @@ export function RwaTradeConfirmationCard({
   onCancel,
 }: RwaTradeConfirmationCardProps): React.JSX.Element {
   const canAct = action.status === 'needs_confirmation';
-  const submitting = action.status === 'submitting';
-  const failed = action.status === 'failed';
-  const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const started = hasTransactionStarted(action.status);
+  const reduceMotion = useReducedMotion();
   const assetName = formatRwaAssetDisplayName(action.asset);
   const title = `${action.side === 'buy' ? 'Buy' : 'Sell'} ${assetName}`;
   const statusLabel = formatPrivateSendStatus(action.status);
-  const assetMeta = [action.asset.symbol, statusLabel].filter(Boolean).join(' · ');
+  const assetMeta = [action.asset.symbol, started ? null : statusLabel]
+    .filter(Boolean)
+    .join(' · ');
   const signatureLinks =
     action.signatures != null && action.signatures.length > 0
       ? buildRwaExecutionSignatureLinks({
@@ -100,33 +102,46 @@ export function RwaTradeConfirmationCard({
         <ConfirmationRow label="Network" value={formatNetwork(action.network)} />
         <ConfirmationRow label="Price impact" value={`${action.priceImpactPct}%`} />
         <ConfirmationRow label="Quote fee" value={action.fee} />
-        {signatureLinks.map((item) => (
-          <TransactionHashLinkRow
-            key={`${item.label}-${item.signature}`}
-            label={item.label}
-            signature={item.signature}
-            network={item.network}
-            accessibilityLabel="View RWA transaction on Solscan"
-          />
-        ))}
       </View>
 
-      {failed && action.errorMessage != null ? (
+      {started ? (
+        <TransactionTimeline
+          status={action.status}
+          noun="trade"
+          errorMessage={action.errorMessage}
+          resultContent={
+            signatureLinks.length > 0 ? (
+              <View style={styles.confirmationRows}>
+                {signatureLinks.map((item) => (
+                  <TransactionHashLinkRow
+                    key={`${item.label}-${item.signature}`}
+                    label={item.label}
+                    signature={item.signature}
+                    network={item.network}
+                    accessibilityLabel="View RWA transaction on Solscan"
+                  />
+                ))}
+              </View>
+            ) : null
+          }
+        />
+      ) : action.errorMessage != null ? (
         <Text variant="small" color={colors.semantic.error} style={styles.confirmationError}>
           {action.errorMessage}
         </Text>
       ) : null}
 
-      {showActions ? (
-        <View style={styles.confirmationActions}>
+      {canAct ? (
+        <Animated.View
+          exiting={reduceMotion ? undefined : FadeOut.duration(160)}
+          style={styles.confirmationActions}
+        >
           <Pressable
             style={({ pressed }) => [
               styles.secondaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onCancel(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Cancel RWA trade"
           >
@@ -137,23 +152,17 @@ export function RwaTradeConfirmationCard({
           <Pressable
             style={({ pressed }) => [
               styles.primaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onConfirm(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Confirm RWA trade"
           >
-            {submitting ? (
-              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
-            ) : (
-              <Text variant="buttonSmall" color={colors.text.onAccent}>
-                Confirm
-              </Text>
-            )}
+            <Text variant="buttonSmall" color={colors.text.onAccent}>
+              Confirm
+            </Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
     </ConfirmationCardSurface>
   );

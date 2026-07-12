@@ -79,7 +79,7 @@ export interface AiChatCreditResetSummary {
 type DatabaseRunner = <T>(config: AiChatCreditConfig, run: (db: Db) => Promise<T>) => Promise<T>;
 
 const AI_CHAT_USAGE_COLLECTION = 'ai_chat_usage';
-const DEFAULT_AI_CHAT_CREDIT_LIMIT = 5;
+const DEFAULT_AI_CHAT_CREDIT_LIMIT = 10;
 const DEFAULT_AI_CHAT_CREDIT_WINDOW_MS = 60 * 60 * 1000;
 const MAX_TURN_ID_LENGTH = 96;
 const FALLBACK_SUBJECT_KEY_PATTERN = /^[a-f0-9]{64}$/i;

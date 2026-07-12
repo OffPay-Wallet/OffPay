@@ -6,13 +6,13 @@
 
 import React, { useCallback } from 'react';
 import { Pressable, View } from 'react-native';
+import Animated, { FadeOut, useReducedMotion } from 'react-native-reanimated';
 import * as Clipboard from 'expo-clipboard';
 
 import {
   AnimatedSegmentedControl,
   type AnimatedSegmentedOption,
 } from '@/components/ui/AnimatedSegmentedControl';
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import { shortenWalletAddress } from '@/lib/api/offpay-wallet-data';
@@ -23,7 +23,8 @@ import type { AgenticPrivateSendAction } from '@/store/agenticChatStore';
 import { ConfirmationRow } from './ConfirmationRow';
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 import { TransactionHashLinkRow } from './TransactionHashLinkRow';
-import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { TransactionTimeline, hasTransactionStarted } from './TransactionTimeline';
+import { formatPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 
 interface PrivateSendConfirmationCardProps {
@@ -55,9 +56,8 @@ export function PrivateSendConfirmationCard({
   onRouteChange,
 }: PrivateSendConfirmationCardProps): React.JSX.Element {
   const canAct = action.status === 'needs_confirmation';
-  const submitting = action.status === 'submitting';
-  const failed = action.status === 'failed';
-  const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const started = hasTransactionStarted(action.status);
+  const reduceMotion = useReducedMotion();
   const { showToast } = useAppToast();
   const statusLabel = formatPrivateSendStatus(action.status);
   const copyHash = useCallback(
@@ -68,6 +68,31 @@ export function PrivateSendConfirmationCard({
     [showToast],
   );
 
+  const resultContent =
+    action.signature != null || action.txId != null ? (
+      <View style={styles.confirmationRows}>
+        {action.signature != null ? (
+          <TransactionHashLinkRow
+            signature={action.signature}
+            network={action.network}
+            accessibilityLabel="View transfer transaction on Solscan"
+          />
+        ) : null}
+        {action.txId != null ? (
+          <ConfirmationRow
+            label="Queue"
+            value={shortenWalletAddress(action.txId, 5)}
+            mono
+            onPress={() => {
+              if (action.txId == null) return;
+              void copyHash(action.txId, 'Queue id');
+            }}
+            accessibilityLabel="Copy queued transaction id"
+          />
+        ) : null}
+      </View>
+    ) : null;
+
   return (
     <ConfirmationCardSurface>
       <View style={styles.confirmationHeader}>
@@ -75,7 +100,7 @@ export function PrivateSendConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             Transfer
           </Text>
-          {statusLabel != null ? (
+          {!started && statusLabel != null ? (
             <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
               {statusLabel}
             </Text>
@@ -99,49 +124,38 @@ export function PrivateSendConfirmationCard({
               options={ROUTE_OPTIONS}
               value={action.route}
               onChange={(route) => onRouteChange(action, route)}
-              disabled={submitting}
             />
           </View>
         ) : (
           <ConfirmationRow label="Route" value={routeLabel(action.route)} />
         )}
-        {action.signature != null ? (
-          <TransactionHashLinkRow
-            signature={action.signature}
-            network={action.network}
-            accessibilityLabel="View transfer transaction on Solscan"
-          />
-        ) : null}
-        {action.txId != null ? (
-          <ConfirmationRow
-            label="Queue"
-            value={shortenWalletAddress(action.txId, 5)}
-            mono
-            onPress={() => {
-              if (action.txId == null) return;
-              void copyHash(action.txId, 'Queue id');
-            }}
-            accessibilityLabel="Copy queued transaction id"
-          />
-        ) : null}
       </View>
 
-      {action.errorMessage != null ? (
+      {started ? (
+        <TransactionTimeline
+          status={action.status}
+          noun="transfer"
+          signature={action.signature ?? null}
+          errorMessage={action.errorMessage}
+          resultContent={resultContent}
+        />
+      ) : action.errorMessage != null ? (
         <Text variant="small" color={colors.semantic.error} style={styles.confirmationError}>
           {action.errorMessage}
         </Text>
       ) : null}
 
-      {showActions ? (
-        <View style={styles.confirmationActions}>
+      {canAct ? (
+        <Animated.View
+          exiting={reduceMotion ? undefined : FadeOut.duration(160)}
+          style={styles.confirmationActions}
+        >
           <Pressable
             style={({ pressed }) => [
               styles.secondaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onCancel(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Cancel Yuga transfer"
           >
@@ -152,23 +166,17 @@ export function PrivateSendConfirmationCard({
           <Pressable
             style={({ pressed }) => [
               styles.primaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={() => onConfirm(action)}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Confirm Yuga transfer"
           >
-            {submitting ? (
-              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
-            ) : (
-              <Text variant="buttonSmall" color={colors.text.onAccent}>
-                Confirm
-              </Text>
-            )}
+            <Text variant="buttonSmall" color={colors.text.onAccent}>
+              Confirm
+            </Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
     </ConfirmationCardSurface>
   );

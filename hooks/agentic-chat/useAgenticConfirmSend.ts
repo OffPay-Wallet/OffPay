@@ -19,6 +19,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { useAppToast } from '@/components/ui/AppToast';
 import { useUmbraCacheInvalidator } from '@/hooks/useUmbraCacheInvalidator';
+import { getRpcSignatureStatuses } from '@/lib/api/offpay-api-client';
 import { isOffpayFeatureAvailable } from '@/lib/api/offpay-capabilities';
 import { tryAcquireAgenticActionExecution } from '@/lib/agentic-payments/action-execution-lock';
 import { executeAgenticUmbraClaimAction } from '@/lib/agentic-payments/umbra-claim-action';
@@ -69,7 +70,7 @@ import { usePrivatePaymentStore } from '@/store/privatePaymentStore';
 import { useUmbraPrivacyStore } from '@/store/umbraPrivacyStore';
 import { useWalletStore } from '@/store/walletStore';
 import type { WalletImportMethod } from '@/lib/wallet/secure-wallet-store';
-import type { CapabilitiesResponse, WalletBalanceResponse } from '@/types/offpay-api';
+import type { CapabilitiesResponse, OffpayNetwork, WalletBalanceResponse } from '@/types/offpay-api';
 
 interface UseAgenticConfirmSendParams {
   scope: AgenticChatScope;
@@ -421,19 +422,61 @@ export function useAgenticConfirmSend({
             includeUmbraInvalidation: action.route === 'umbra',
           });
 
-          updateAction(action.id, {
-            status: result.status,
-            signature: result.signature,
-            txId: result.txId,
-            errorMessage: null,
-          });
-          showToast({
-            title:
-              result.status === 'submitted' ? 'Yuga transfer succeeded' : 'Yuga transfer queued',
-            message: `${validation.draft.amount} ${validation.draft.tokenSymbol}`,
-            variant: 'success',
-          });
-          onSpeakOutcome?.(agenticSendOutcomeSpeech(result.status, action.route));
+          if (result.status === 'submitted' && result.signature != null) {
+            // Surface the signature but keep the action in `submitting` so the
+            // timeline advances to the final stage and shows a loading state
+            // there while we wait for the network to confirm the transaction.
+            updateAction(action.id, {
+              signature: result.signature,
+              txId: result.txId,
+              errorMessage: null,
+            });
+
+            const confirmation = await waitForAgenticOnChainConfirmation({
+              signature: result.signature,
+              network: validation.draft.network,
+            });
+
+            if (confirmation === 'failed') {
+              updateAction(action.id, {
+                status: 'failed',
+                errorMessage: 'The network rejected the transaction.',
+              });
+              showToast({
+                title: 'Yuga transfer failed',
+                message: 'The network rejected the transaction.',
+                variant: 'error',
+              });
+              onSpeakOutcome?.(agenticSendOutcomeSpeech('failed', action.route));
+            } else {
+              // Confirmed on-chain, or confirmation timed out after a
+              // successful broadcast — either way the transfer is submitted.
+              updateAction(action.id, { status: 'submitted', errorMessage: null });
+              showToast({
+                title:
+                  confirmation === 'confirmed'
+                    ? 'Yuga transfer confirmed'
+                    : 'Yuga transfer submitted',
+                message: `${validation.draft.amount} ${validation.draft.tokenSymbol}`,
+                variant: 'success',
+              });
+              onSpeakOutcome?.(agenticSendOutcomeSpeech('submitted', action.route));
+            }
+          } else {
+            updateAction(action.id, {
+              status: result.status,
+              signature: result.signature,
+              txId: result.txId,
+              errorMessage: null,
+            });
+            showToast({
+              title:
+                result.status === 'submitted' ? 'Yuga transfer succeeded' : 'Yuga transfer queued',
+              message: `${validation.draft.amount} ${validation.draft.tokenSymbol}`,
+              variant: 'success',
+            });
+            onSpeakOutcome?.(agenticSendOutcomeSpeech(result.status, action.route));
+          }
         } catch (error) {
           const message =
             error instanceof Error
@@ -479,6 +522,46 @@ export function useAgenticConfirmSend({
 
 function isTransferAction(action: AgenticChatAction): action is AgenticPrivateSendAction {
   return action.kind === 'private_send' || action.kind === 'normal_send';
+}
+
+const ONCHAIN_CONFIRMATION_TIMEOUT_MS = 20_000;
+const ONCHAIN_CONFIRMATION_POLL_MS = 1_300;
+
+/**
+ * Polls the RPC signature status until the transaction confirms (or finalizes)
+ * on-chain, fails, or the bounded timeout elapses. Transient RPC errors are
+ * ignored so a flaky poll does not abort the wait. A timeout after a successful
+ * broadcast is treated as "submitted" rather than failed.
+ */
+async function waitForAgenticOnChainConfirmation(params: {
+  signature: string;
+  network: OffpayNetwork;
+}): Promise<'confirmed' | 'failed' | 'timeout'> {
+  const deadline = Date.now() + ONCHAIN_CONFIRMATION_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await getRpcSignatureStatuses({
+        signatures: [params.signature],
+        network: params.network,
+      });
+      const status = response.statuses[0];
+      if (status != null) {
+        if (status.err != null) return 'failed';
+        if (
+          status.confirmationStatus === 'confirmed' ||
+          status.confirmationStatus === 'finalized'
+        ) {
+          return 'confirmed';
+        }
+      }
+    } catch {
+      // Ignore transient RPC errors and keep polling until the deadline.
+    }
+    await new Promise((resolve) => setTimeout(resolve, ONCHAIN_CONFIRMATION_POLL_MS));
+  }
+
+  return 'timeout';
 }
 
 type SubmittableDraft = Omit<

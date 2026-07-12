@@ -36,7 +36,7 @@ interface FakeUsageDocument {
 const env: Bindings = {
   MONGODB_URI: 'mongodb://unit-test',
   MONGODB_DATABASE: 'offpay-test',
-  OFFPAY_AI_CHAT_CREDIT_LIMIT: '5',
+  OFFPAY_AI_CHAT_CREDIT_LIMIT: '10',
   OFFPAY_AI_CHAT_CREDIT_WINDOW_MS: String(60 * 60 * 1000),
   JUPITER_API_KEY: 'test-jupiter',
   OFFPAY_BOOTSTRAP_SECRET: 'test-bootstrap',
@@ -74,16 +74,16 @@ describe('API Worker AI chat Mongo credits', () => {
     });
 
     expect(status).toMatchObject({
-      limit: 5,
+      limit: 10,
       used: 0,
-      remaining: 5,
+      remaining: 10,
       subjectType: 'wallet',
     });
     expect(collection.snapshot()).toHaveLength(1);
     expect(collection.snapshot()[0]).toMatchObject({
       subject_type: 'wallet',
       subject_key: 'WalletStatus111',
-      limit: 5,
+      limit: 10,
       window_ms: 60 * 60 * 1000,
       used: 0,
       consumed_turn_ids: [],
@@ -92,7 +92,7 @@ describe('API Worker AI chat Mongo credits', () => {
     });
   });
 
-  it('counts one visible user turn once and blocks the sixth turn', async () => {
+  it('counts one visible user turn once and blocks the eleventh turn', async () => {
     const first = await consumeAiChatCredit(env, {
       walletSubject: 'Wallet111',
       fallbackSubjectKey: fallbackKey('device-1'),
@@ -101,7 +101,7 @@ describe('API Worker AI chat Mongo credits', () => {
     expect(first).toMatchObject({
       allowed: true,
       charged: true,
-      status: { limit: 5, used: 1, remaining: 4, subjectType: 'wallet' },
+      status: { limit: 10, used: 1, remaining: 9, subjectType: 'wallet' },
     });
     expect(collection.snapshot()[0]).toMatchObject({
       last_consumed_at: new Date('2026-06-29T10:00:00.000Z'),
@@ -116,32 +116,32 @@ describe('API Worker AI chat Mongo credits', () => {
     expect(retry).toMatchObject({
       allowed: true,
       charged: false,
-      status: { used: 1, remaining: 4 },
+      status: { used: 1, remaining: 9 },
     });
 
-    for (const turnId of ['turn-2', 'turn-3', 'turn-4', 'turn-5']) {
+    for (let turn = 2; turn <= 10; turn += 1) {
       const result = await consumeAiChatCredit(env, {
         walletSubject: 'Wallet111',
         fallbackSubjectKey: fallbackKey('device-1'),
-        turnId,
+        turnId: `turn-${turn}`,
       });
       expect(result.allowed).toBe(true);
     }
 
-    const fifthStatus = await getAiChatCreditStatus(env, {
+    const tenthStatus = await getAiChatCreditStatus(env, {
       walletSubject: 'Wallet111',
       fallbackSubjectKey: fallbackKey('device-1'),
     });
-    expect(fifthStatus).toMatchObject({ used: 5, remaining: 0 });
+    expect(tenthStatus).toMatchObject({ used: 10, remaining: 0 });
 
     const blocked = await consumeAiChatCredit(env, {
       walletSubject: 'Wallet111',
       fallbackSubjectKey: fallbackKey('device-1'),
-      turnId: 'turn-6',
+      turnId: 'turn-11',
     });
     expect(blocked.allowed).toBe(false);
     expect(blocked.charged).toBe(false);
-    expect(blocked.status).toMatchObject({ used: 5, remaining: 0 });
+    expect(blocked.status).toMatchObject({ used: 10, remaining: 0 });
     expect(blocked.status.retryAfterMs).toBeGreaterThan(0);
   });
 
@@ -155,7 +155,7 @@ describe('API Worker AI chat Mongo credits', () => {
     expect(charged).toMatchObject({
       allowed: true,
       charged: true,
-      status: { used: 1, remaining: 4 },
+      status: { used: 1, remaining: 9 },
     });
 
     const released = await releaseAiChatCredit(
@@ -168,7 +168,7 @@ describe('API Worker AI chat Mongo credits', () => {
       'provider_timeout',
     );
 
-    expect(released).toMatchObject({ used: 0, remaining: 5 });
+    expect(released).toMatchObject({ used: 0, remaining: 10 });
     expect(collection.snapshot()[0]).toMatchObject({
       used: 0,
       consumed_turn_ids: [],
@@ -206,7 +206,7 @@ describe('API Worker AI chat Mongo credits', () => {
     expect(consumed).toMatchObject({
       allowed: true,
       charged: true,
-      status: { used: 1, remaining: 4, subjectType: 'wallet' },
+      status: { used: 1, remaining: 9, subjectType: 'wallet' },
     });
 
     const released = await releaseAiChatCredit(
@@ -218,17 +218,17 @@ describe('API Worker AI chat Mongo credits', () => {
       },
       'provider_timeout',
     );
-    expect(released).toMatchObject({ used: 0, remaining: 5 });
+    expect(released).toMatchObject({ used: 0, remaining: 10 });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(collection.snapshot()).toHaveLength(0);
   });
 
   it('resets credits after the configured window ends', async () => {
-    for (const turnId of ['turn-1', 'turn-2', 'turn-3', 'turn-4', 'turn-5']) {
+    for (let turn = 1; turn <= 10; turn += 1) {
       await consumeAiChatCredit(env, {
         walletSubject: 'Wallet222',
         fallbackSubjectKey: fallbackKey('device-1'),
-        turnId,
+        turnId: `turn-${turn}`,
       });
     }
 
@@ -238,7 +238,7 @@ describe('API Worker AI chat Mongo credits', () => {
       fallbackSubjectKey: fallbackKey('device-1'),
     });
 
-    expect(status).toMatchObject({ limit: 5, used: 0, remaining: 5 });
+    expect(status).toMatchObject({ limit: 10, used: 0, remaining: 10 });
     expect(collection.snapshot()[0]).toMatchObject({
       reset_count: 1,
       last_reset_at: new Date('2026-06-29T11:00:01.000Z'),

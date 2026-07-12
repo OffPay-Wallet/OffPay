@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { Pressable, View } from 'react-native';
+import Animated, { FadeOut, useReducedMotion } from 'react-native-reanimated';
 
-import { LazyLoadingSpinner } from '@/components/ui/lazy-loading-spinner';
 import { Text } from '@/components/ui/Text';
 import { colors } from '@/constants/colors';
 import type {
@@ -11,7 +11,8 @@ import type {
 
 import { ConfirmationCardSurface } from './ConfirmationCardSurface';
 import { ConfirmationRow } from './ConfirmationRow';
-import { formatPrivateSendStatus, isFinalPrivateSendStatus } from './helpers';
+import { TransactionTimeline, hasTransactionStarted } from './TransactionTimeline';
+import { formatPrivateSendStatus } from './helpers';
 import { confirmationStyles as styles } from './styles/confirmation';
 import { TransactionHashLinkRow } from './TransactionHashLinkRow';
 
@@ -39,9 +40,9 @@ export function AdvancedSwapConfirmationCard({
   onCancel,
 }: AdvancedSwapConfirmationCardProps): React.JSX.Element {
   const canAct = action.status === 'needs_confirmation';
-  const submitting = action.status === 'submitting';
-  const failed = action.status === 'failed';
-  const showActions = !isFinalPrivateSendStatus(action.status) && !failed;
+  const started = hasTransactionStarted(action.status);
+  const reduceMotion = useReducedMotion();
+  const noun = isCancellation(action) ? 'cancellation' : 'order';
   const handleConfirm = useCallback(() => onConfirm(action), [action, onConfirm]);
   const handleCancel = useCallback(() => onCancel(action), [action, onCancel]);
 
@@ -52,9 +53,11 @@ export function AdvancedSwapConfirmationCard({
           <Text variant="bodyBold" color={colors.text.primary} style={styles.confirmationTitle}>
             {title(action)}
           </Text>
-          <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
-            {formatPrivateSendStatus(action.status) ?? 'Review real mainnet automation'}
-          </Text>
+          {!started ? (
+            <Text variant="small" color={colors.text.secondary} numberOfLines={1}>
+              {formatPrivateSendStatus(action.status) ?? 'Review real mainnet automation'}
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -100,42 +103,55 @@ export function AdvancedSwapConfirmationCard({
           </>
         ) : null}
         <ConfirmationRow label="Network" value="Solana Mainnet" />
-        {action.signature != null ? (
-          <TransactionHashLinkRow
-            signature={action.signature}
-            network={action.network}
-            accessibilityLabel="View Jupiter advanced swap transaction on Solscan"
-          />
-        ) : null}
       </View>
 
-      <View style={styles.confirmationWarnings}>
-        {action.warnings.map((warning) => (
-          <Text key={warning} variant="small" color={colors.semantic.warning}>
-            {warning}
-          </Text>
-        ))}
-      </View>
+      {!started && action.warnings.length > 0 ? (
+        <View style={styles.confirmationWarnings}>
+          {action.warnings.map((warning) => (
+            <Text key={warning} variant="small" color={colors.semantic.warning}>
+              {warning}
+            </Text>
+          ))}
+        </View>
+      ) : null}
 
-      {failed && action.errorMessage != null ? (
+      {started ? (
+        <TransactionTimeline
+          status={action.status}
+          noun={noun}
+          signature={action.signature ?? null}
+          errorMessage={action.errorMessage}
+          resultContent={
+            action.signature != null ? (
+              <View style={styles.confirmationRows}>
+                <TransactionHashLinkRow
+                  signature={action.signature}
+                  network={action.network}
+                  accessibilityLabel="View Jupiter advanced swap transaction on Solscan"
+                />
+              </View>
+            ) : null
+          }
+        />
+      ) : action.errorMessage != null ? (
         <Text variant="small" color={colors.semantic.error} style={styles.confirmationError}>
           {action.errorMessage}
         </Text>
       ) : null}
 
-      {showActions ? (
-        <View style={styles.confirmationActions}>
+      {canAct ? (
+        <Animated.View
+          exiting={reduceMotion ? undefined : FadeOut.duration(160)}
+          style={styles.confirmationActions}
+        >
           <Pressable
             style={({ pressed }) => [
               styles.secondaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={handleCancel}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Cancel advanced swap"
-            accessibilityState={{ disabled: !canAct || submitting }}
           >
             <Text variant="buttonSmall" color={colors.text.secondary}>
               {isCancellation(action) ? 'Dismiss' : 'Cancel'}
@@ -144,24 +160,17 @@ export function AdvancedSwapConfirmationCard({
           <Pressable
             style={({ pressed }) => [
               styles.primaryActionButton,
-              (!canAct || submitting) && styles.actionButtonDisabled,
-              pressed && canAct && styles.actionButtonPressed,
+              pressed && styles.actionButtonPressed,
             ]}
             onPress={handleConfirm}
-            disabled={!canAct || submitting}
             accessibilityRole="button"
             accessibilityLabel="Confirm advanced swap"
-            accessibilityState={{ disabled: !canAct || submitting }}
           >
-            {submitting ? (
-              <LazyLoadingSpinner size={18} color={colors.brand.deepShadow} />
-            ) : (
-              <Text variant="buttonSmall" color={colors.text.onAccent}>
-                {isCancellation(action) ? 'Sign & cancel' : 'Sign & create'}
-              </Text>
-            )}
+            <Text variant="buttonSmall" color={colors.text.onAccent}>
+              {isCancellation(action) ? 'Sign & cancel' : 'Sign & create'}
+            </Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
     </ConfirmationCardSurface>
   );
